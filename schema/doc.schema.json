@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "paper-tour/doc@0.1",
+  "title": "Paper Tour document model",
+  "description": "Output of ingest/ingest.py. Every element the tour can point at has a stable ID and exact PDF coordinates. Coordinates are PDF points, origin at the top-left of the page, y growing downward (PyMuPDF convention). A bbox is [x0, y0, x1, y1].",
+  "type": "object",
+  "required": ["schema", "source", "pages", "sections", "blocks", "sentences", "figures", "equations"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "paper-tour/doc@0.1" },
+    "source": {
+      "type": "object",
+      "required": ["file", "sha256", "num_pages", "generator"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "description": "PDF file name, relative to the doc.json folder." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "num_pages": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string" },
+        "generator": { "type": "string", "description": "Tool and version that produced this file." }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["n", "width", "height"],
+        "additionalProperties": false,
+        "properties": {
+          "n": { "type": "integer", "minimum": 1 },
+          "width": { "type": "number", "exclusiveMinimum": 0 },
+          "height": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "description": "Document outline in reading order. Targeting a section points at its heading block.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "level", "page", "block"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/sectionId" },
+          "number": { "type": "string", "description": "Printed number such as \"3.2\"; absent for Abstract, References, etc." },
+          "title": { "type": "string" },
+          "level": { "type": "integer", "minimum": 1 },
+          "page": { "type": "integer", "minimum": 1 },
+          "block": { "$ref": "#/$defs/blockId" }
+        }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "description": "Text blocks in reading order.",
+      "items": {
+        "type": "object",
+        "required": ["id", "page", "type", "bbox", "text", "sentences"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/blockId" },
+          "page": { "type": "integer", "minimum": 1 },
+          "type": {
+            "enum": ["title", "authors", "heading", "paragraph", "caption", "equation", "footnote", "reference", "figure_text", "table_text", "header_footer", "other"],
+            "description": "figure_text and table_text are text inside a figure or table region; they carry no sentences."
+          },
+          "bbox": { "$ref": "#/$defs/bbox" },
+          "text": { "type": "string" },
+          "section": { "$ref": "#/$defs/sectionId" },
+          "sentences": { "type": "array", "items": { "$ref": "#/$defs/sentenceId" } }
+        }
+      }
+    },
+    "sentences": {
+      "type": "array",
+      "description": "Sentences in reading order. A sentence never spans blocks; one that continues across a column or page break is split into two entries.",
+      "items": {
+        "type": "object",
+        "required": ["id", "page", "block", "text", "rects"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/sentenceId" },
+          "page": { "type": "integer", "minimum": 1 },
+          "block": { "$ref": "#/$defs/blockId" },
+          "text": { "type": "string" },
+          "rects": {
+            "type": "array",
+            "minItems": 1,
+            "description": "One rect per line fragment, so a highlight hugs the text instead of covering the whole block.",
+            "items": { "$ref": "#/$defs/bbox" }
+          }
+        }
+      }
+    },
+    "figures": {
+      "type": "array",
+      "description": "Figures and tables, identified by their printed number.",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "number", "page", "bbox", "caption", "image", "panels", "referenced_by"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/figureId" },
+          "kind": { "enum": ["figure", "table"] },
+          "number": { "type": "string" },
+          "page": { "type": "integer", "minimum": 1 },
+          "bbox": { "$ref": "#/$defs/bbox", "description": "The graphic or table body, excluding the caption." },
+          "caption": { "type": "string" },
+          "caption_block": { "$ref": "#/$defs/blockId" },
+          "image": { "type": "string", "description": "PNG crop of bbox, relative to the doc.json folder." },
+          "panels": {
+            "type": "array",
+            "description": "Sub-figures in reading order (left to right, top to bottom). May be empty.",
+            "items": {
+              "type": "object",
+              "required": ["id", "bbox"],
+              "additionalProperties": false,
+              "properties": {
+                "id": { "$ref": "#/$defs/panelId" },
+                "bbox": { "$ref": "#/$defs/bbox", "description": "Page coordinates, inside the parent figure's bbox." },
+                "label": { "type": "string", "description": "Printed label such as \"(a)\" if one was found." }
+              }
+            }
+          },
+          "referenced_by": {
+            "type": "array",
+            "description": "Sentences that cite this figure or table, e.g. \"as shown in Figure 2\".",
+            "items": { "$ref": "#/$defs/sentenceId" }
+          }
+        }
+      }
+    },
+    "equations": {
+      "type": "array",
+      "description": "Numbered display equations. Best effort; may be empty.",
+      "items": {
+        "type": "object",
+        "required": ["id", "number", "page", "bbox", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/equationId" },
+          "number": { "type": "string" },
+          "page": { "type": "integer", "minimum": 1 },
+          "bbox": { "$ref": "#/$defs/bbox" },
+          "block": { "$ref": "#/$defs/blockId" },
+          "text": { "type": "string", "description": "Extracted text; math is usually garbled, so treat it as a hint only." }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bbox": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "blockId": { "type": "string", "pattern": "^p[1-9][0-9]*\\.b[1-9][0-9]*$" },
+    "sentenceId": { "type": "string", "pattern": "^p[1-9][0-9]*\\.s[1-9][0-9]*$" },
+    "sectionId": { "type": "string", "pattern": "^sec-[a-z0-9][a-z0-9.-]*$" },
+    "figureId": { "type": "string", "pattern": "^(fig|tab)[0-9A-Za-z]+$" },
+    "panelId": { "type": "string", "pattern": "^(fig|tab)[0-9A-Za-z]+\\.[a-z]$" },
+    "equationId": { "type": "string", "pattern": "^eq[0-9A-Za-z]+$" }
+  }
+}

@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.pyc
+ingest/.venv/
+player/node_modules/
+player/dist/
+demo/*/_debug/
+demo/_fixture/
+.claude/
+
+# Papers are downloaded and their doc.json and figures are generated, so only tours are committed.
+demo/*/paper.pdf
+demo/*/doc.json
+demo/*/figures/
