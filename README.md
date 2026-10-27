@@ -40,7 +40,7 @@ ingest/.venv/bin/python ingest/validate.py demo/attention
 cd player && npm install && npm run dev
 ```
 
-Then open http://localhost:5173/?paper=attention.
+Then open http://localhost:5174/?paper=attention (the static demo needs no Supabase).
 
 - `ingest.py <pdf> [--out DIR] [--debug]` writes `doc.json` and `figures/` next to the PDF (or into
   `--out`). `--debug` also renders every page with all detected elements and their IDs drawn on
@@ -49,9 +49,16 @@ Then open http://localhost:5173/?paper=attention.
   that every ID the tour uses exists in `doc.json`.
 - `outline.py <paper-folder>` prints sections, figures and every sentence with its ID. Use it when
   writing a tour by hand; it is also the text an LLM tour writer will get.
+- `check_tour.py <paper-folder>/tour.json <out-dir>` renders every step's targets the way the player
+  frames them, one PNG per camera move, and prints the word each timed action fires on.
+- `demo/attention/build_tour.py` is the source of the demo tour. Edit the narration and actions there,
+  then run it to regenerate `tour.json`; it turns anchor words into `at_word` indexes.
 
 Player keys: `Space` play/pause, `←`/`→` previous/next step, `D` toggles the ID overlay (click any
-element in that mode to copy its ID).
+element in that mode to copy its ID). URL options: `?paper=<folder>`, `?silent=1` for timed narration
+without speech, `?rate=4` to run faster while testing. `npm test` in `player/` runs the engine tests.
+
+The plan, the current status and the open review findings are in `notes/`.
 
 ## The contracts
 
