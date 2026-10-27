@@ -1,0 +1,362 @@
+import { randomUUID } from 'node:crypto';
+import type { QueryResultRow } from 'pg';
+import type {
+  AnalysisSummary,
+  DocumentManifest,
+  DocumentSummary,
+  FigureContext,
+  IndexedElement,
+  ReaderState,
+  SearchHit,
+  UploadReservation,
+} from '../../shared/contracts';
+import type { Doc, Tour } from '../../shared/paper';
+import { Database, type Db } from './db';
+import { HttpError, missing } from './errors';
+import { BUCKET, type FileStorage } from './storage';
+
+export type Enqueue = (
+  kind: 'analyze' | 'delete',
+  data: { documentId: string; analysisId?: string },
+  db?: Db,
+) => Promise<void>;
+type Row = QueryResultRow;
+const iso = (date: Date | string) => new Date(date).toISOString();
+const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
+export interface Library {
+  list(owner: string): Promise<DocumentSummary[]>;
+  reserve(owner: string, filename: string, size: number): Promise<UploadReservation>;
+  complete(owner: string, id: string): Promise<{ analysisId: string }>;
+  analyze(owner: string, id: string): Promise<{ analysisId: string }>;
+  manifest(owner: string, id: string, tourId?: string): Promise<DocumentManifest>;
+  rename(owner: string, id: string, title: string): Promise<DocumentSummary>;
+  remove(owner: string, id: string): Promise<void>;
+  saveState(owner: string, id: string, state: ReaderState): Promise<void>;
+  search(owner: string, id: string, analysisId: string | undefined, q: string): Promise<SearchHit[]>;
+  outline(
+    owner: string,
+    id: string,
+    analysisId?: string,
+  ): Promise<{
+    analysisId: string;
+    sections: IndexedElement[];
+    figures: IndexedElement[];
+  }>;
+  elements(owner: string, id: string, analysisId: string | undefined, ids: string[]): Promise<IndexedElement[]>;
+  figure(owner: string, id: string, analysisId: string | undefined, elementId: string): Promise<FigureContext>;
+}
+
+export class DocumentService implements Library {
+  constructor(
+    readonly db: Database,
+    readonly storage: FileStorage,
+    readonly enqueue: Enqueue,
+    readonly maxBytes = 26214400,
+  ) {}
+  async owned(owner: string, id: string, db: Db = this.db.pool, lock = false): Promise<Row> {
+    const { rows } = await db.query(
+      `select * from documents where id=$1 and owner_id=$2 and deleted_at is null ${lock ? 'for update' : ''}`,
+      [id, owner],
+    );
+    return rows[0] ?? missing();
+  }
+  private async summary(row: Row): Promise<DocumentSummary> {
+    return {
+      id: row.id,
+      title: row.title,
+      originalFilename: row.original_filename,
+      pageCount: row.page_count,
+      fileStatus: row.file_status,
+      analysisStatus: row.analysis_status ?? null,
+      analysisError: row.analysis_error ?? null,
+      thumbnailUrl: row.thumbnail_path ? await this.storage.sign(row.thumbnail_path) : null,
+      tourCount: Number(row.tour_count ?? 0),
+      createdAt: iso(row.created_at),
+      updatedAt: iso(row.updated_at),
+      lastOpenedAt: row.last_opened_at ? iso(row.last_opened_at) : null,
+    };
+  }
+  private selectSummary = `select d.*,a.status as analysis_status,a.error as analysis_error,
+    (select storage_path from assets where document_id=d.id and analysis_id=d.current_analysis_id and kind='thumbnail' limit 1) as thumbnail_path,
+    (select count(*) from tours t where t.document_id=d.id) as tour_count
+    from documents d left join lateral(select status,error from analyses where document_id=d.id order by created_at desc,id desc limit 1) a on true`;
+  async list(owner: string) {
+    const { rows } = await this.db.query(
+      `${this.selectSummary} where d.owner_id=$1 and d.deleted_at is null order by coalesce(d.last_opened_at,d.created_at) desc`,
+      [owner],
+    );
+    return Promise.all(rows.map((row) => this.summary(row)));
+  }
+  async reserve(owner: string, filename: string, size: number) {
+    if (!filename.toLowerCase().endsWith('.pdf') || !Number.isSafeInteger(size) || size < 1 || size > this.maxBytes)
+      throw new HttpError(400, 'invalid_upload', 'Choose a PDF up to 25 MiB.');
+    const id = randomUUID();
+    const safeName = filename
+      .split(/[\\/]/)
+      .pop()!
+      .replace(/[\u0000-\u001f]/g, '')
+      .slice(0, 255);
+    const title = safeName.replace(/\.pdf$/i, '').slice(0, 300) || 'Untitled document';
+    const path = `${owner}/${id}/original.pdf`;
+    await this.db.query(
+      `insert into documents(id,owner_id,title,original_filename,upload_size,upload_path) values($1,$2,$3,$4,$5,$6)`,
+      [id, owner, title, safeName, size, path],
+    );
+    return { documentId: id, bucket: BUCKET, path };
+  }
+  async complete(owner: string, id: string) {
+    const document = await this.owned(owner, id);
+    const file = await this.storage.info(document.upload_path);
+    if (!file)
+      throw new HttpError(409, 'upload_missing', 'The PDF upload has not finished. Retry once it is complete.');
+    if (file.size !== Number(document.upload_size) || file.size > this.maxBytes)
+      throw new HttpError(400, 'invalid_upload', 'The uploaded file size does not match its reservation.');
+    return this.db.transaction(async (tx) => {
+      const d = await this.owned(owner, id, tx, true);
+      if (d.file_status === 'invalid')
+        throw new HttpError(422, 'invalid_pdf', 'This file could not be opened as a supported PDF.');
+      const {
+        rows: [latest],
+      } = await tx.query(
+        `select id,status from analyses where document_id=$1 order by created_at desc,id desc limit 1`,
+        [id],
+      );
+      // Complete is idempotent even after a completed/failed job. Retry uses /analyze.
+      if (latest) return { analysisId: latest.id as string };
+      await tx.query(`update documents set file_status='uploaded',updated_at=now() where id=$1`, [id]);
+      await tx.query(
+        `insert into assets(document_id,kind,logical_path,storage_path,content_type) values($1,'pdf','paper.pdf',$2,'application/pdf') on conflict do nothing`,
+        [id, d.upload_path],
+      );
+      return this.createAnalysis(tx, id);
+    });
+  }
+  private async createAnalysis(tx: Db, documentId: string) {
+    const {
+      rows: [active],
+    } = await tx.query(`select id from analyses where document_id=$1 and status in ('queued','processing')`, [
+      documentId,
+    ]);
+    if (active) return { analysisId: active.id as string };
+    const analysisId = randomUUID();
+    await tx.query(`insert into analyses(id,document_id) values($1,$2)`, [analysisId, documentId]);
+    await this.enqueue('analyze', { documentId, analysisId }, tx);
+    return { analysisId };
+  }
+  async analyze(owner: string, id: string) {
+    return this.db.transaction(async (tx) => {
+      const d = await this.owned(owner, id, tx, true);
+      if (d.file_status !== 'uploaded')
+        throw new HttpError(409, 'pdf_not_ready', 'Complete a valid PDF upload before analyzing it.');
+      return this.createAnalysis(tx, id);
+    });
+  }
+  async rename(owner: string, id: string, title: string) {
+    title = title.trim();
+    if (!title || title.length > 300)
+      throw new HttpError(400, 'invalid_title', 'Use a title between 1 and 300 characters.');
+    await this.owned(owner, id);
+    await this.db.query(
+      'update documents set title=$1,updated_at=now() where id=$2 and owner_id=$3 and deleted_at is null',
+      [title, id, owner],
+    );
+    const {
+      rows: [row],
+    } = await this.db.query(`${this.selectSummary} where d.id=$1 and d.owner_id=$2 and d.deleted_at is null`, [
+      id,
+      owner,
+    ]);
+    if (!row) missing();
+    return this.summary(row);
+  }
+  async remove(owner: string, id: string) {
+    await this.db.transaction(async (tx) => {
+      await this.owned(owner, id, tx, true);
+      await tx.query('update documents set deleted_at=now(),updated_at=now() where id=$1', [id]);
+      await this.enqueue('delete', { documentId: id }, tx);
+    });
+  }
+  async manifest(owner: string, id: string, tourId?: string): Promise<DocumentManifest> {
+    const d = await this.owned(owner, id);
+    const {
+      rows: [row],
+    } = await this.db.query(`${this.selectSummary} where d.id=$1 and d.owner_id=$2 and d.deleted_at is null`, [
+      id,
+      owner,
+    ]);
+    if (!row) missing();
+    const {
+      rows: [latest],
+    } = await this.db.query('select * from analyses where document_id=$1 order by created_at desc,id desc limit 1', [
+      id,
+    ]);
+    const { rows: tours } = await this.db.query(
+      'select id,title,analysis_id,script from tours where document_id=$1 order by created_at desc,id desc',
+      [id],
+    );
+    const {
+      rows: [saved],
+    } = await this.db.query('select state from reader_states where owner_id=$1 and document_id=$2', [owner, id]);
+    const selected = tourId ? tours.find((t) => t.id === tourId) : tours[0];
+    if (tourId && !selected) missing();
+    const aid = selected?.analysis_id ?? d.current_analysis_id;
+    const {
+      rows: [analysis],
+    } = aid
+      ? await this.db.query("select * from analyses where id=$1 and document_id=$2 and status in ('ready','limited')", [
+          aid,
+          id,
+        ])
+      : { rows: [] };
+    const assets: Record<string, string> = {};
+    if (analysis) {
+      const { rows: files } = await this.db.query(
+        'select logical_path,storage_path from assets where document_id=$1 and analysis_id=$2',
+        [id, analysis.id],
+      );
+      await Promise.all(
+        files.map(async (a) => {
+          assets[a.logical_path] = await this.storage.sign(a.storage_path);
+        }),
+      );
+    }
+    const summary: AnalysisSummary | null = latest
+      ? {
+          id: latest.id,
+          status: latest.status,
+          parserVersion: latest.parser_version,
+          warnings: latest.warnings,
+          error: latest.error,
+        }
+      : null;
+    return {
+      document: await this.summary(row),
+      pdfUrl: d.file_status === 'uploaded' ? await this.storage.sign(d.upload_path) : null,
+      analysis: summary,
+      doc: (analysis?.doc as Doc) ?? null,
+      docAnalysisId: analysis?.id ?? null,
+      tours: tours.map((t) => ({
+        id: t.id,
+        title: t.title,
+        analysisId: t.analysis_id,
+      })),
+      selectedTour:
+        selected && analysis
+          ? {
+              id: selected.id,
+              analysisId: analysis.id,
+              doc: analysis.doc as Doc,
+              tour: selected.script as Tour,
+            }
+          : null,
+      assets,
+      readerState: saved?.state ?? null,
+    };
+  }
+  async saveState(owner: string, id: string, state: ReaderState) {
+    const d = await this.owned(owner, id);
+    if (state.page > (d.page_count ?? 100))
+      throw new HttpError(400, 'invalid_position', 'The page is outside this PDF.');
+    if (!state.tourId && state.stepId) throw new HttpError(400, 'invalid_position', 'A tour step needs its tour.');
+    if (state.tourId) {
+      const {
+        rows: [tour],
+      } = await this.db.query('select script from tours where id=$1 and document_id=$2', [state.tourId, id]);
+      if (!tour) missing();
+      if (state.stepId && !(tour.script as Tour).chapters.some((c) => c.steps.some((s) => s.id === state.stepId)))
+        throw new HttpError(400, 'invalid_position', 'Unknown tour step.');
+    }
+    await this.db.transaction(async (tx) => {
+      await this.owned(owner, id, tx, true);
+      await tx.query(
+        `insert into reader_states(owner_id,document_id,state) values($1,$2,$3) on conflict(owner_id,document_id) do update set state=excluded.state,updated_at=now()`,
+        [owner, id, state],
+      );
+      await tx.query('update documents set last_opened_at=now() where id=$1', [id]);
+    });
+  }
+  private async published(owner: string, id: string, analysisId?: string) {
+    const d = await this.owned(owner, id);
+    const aid = analysisId ?? d.current_analysis_id;
+    if (!aid) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
+    const {
+      rows: [a],
+    } = await this.db.query(
+      "select id,doc from analyses where id=$1 and document_id=$2 and status in ('ready','limited')",
+      [aid, id],
+    );
+    return a ?? missing();
+  }
+  async search(owner: string, id: string, analysisId: string | undefined, q: string) {
+    const a = await this.published(owner, id, analysisId);
+    q = q.trim().slice(0, 300);
+    if (q.length < 2) return [];
+    const { rows } = await this.db.query(
+      `select ${ELEMENT_COLUMNS} from elements where analysis_id=$1 and kind in ('sentence','section','figure','table','equation') and search_vector @@ plainto_tsquery('simple',$2)
+      order by ts_rank(search_vector,plainto_tsquery('simple',$2)) desc,page,element_id limit 40`,
+      [a.id, q],
+    );
+    return rows.map((e) => ({
+      ref: { documentId: id, analysisId: a.id, elementId: e.id },
+      kind: e.kind,
+      page: e.page,
+      text: e.text.slice(0, 1500),
+    })) as SearchHit[];
+  }
+  async outline(owner: string, id: string, analysisId?: string) {
+    const a = await this.published(owner, id, analysisId);
+    const { rows } = await this.db.query(
+      `select ${ELEMENT_COLUMNS} from elements where analysis_id=$1 and kind in ('section','figure','table') order by page,element_id`,
+      [a.id],
+    );
+    return {
+      analysisId: a.id as string,
+      sections: rows.filter((e) => e.kind === 'section') as IndexedElement[],
+      figures: rows.filter((e) => e.kind !== 'section') as IndexedElement[],
+    };
+  }
+  async elements(owner: string, id: string, analysisId: string | undefined, ids: string[]) {
+    const a = await this.published(owner, id, analysisId);
+    if (!ids.length || ids.length > 30)
+      throw new HttpError(400, 'invalid_elements', 'Request between 1 and 30 element IDs.');
+    const { rows } = await this.db.query(
+      `select ${ELEMENT_COLUMNS} from elements where analysis_id=$1 and element_id=any($2::text[])`,
+      [a.id, ids],
+    );
+    return ids.flatMap((id) => {
+      const r = rows.find((e) => e.id === id);
+      return r ? [r as IndexedElement] : [];
+    });
+  }
+  async figure(owner: string, id: string, analysisId: string | undefined, elementId: string): Promise<FigureContext> {
+    const a = await this.published(owner, id, analysisId);
+    const {
+      rows: [f],
+    } = await this.db.query(
+      `select ${ELEMENT_COLUMNS} from elements where analysis_id=$1 and element_id=$2 and kind in ('figure','table')`,
+      [a.id, elementId],
+    );
+    if (!f) missing();
+    const ids = [f.data.caption_block, ...(f.data.referenced_by ?? [])].filter(
+      (x): x is string => typeof x === 'string',
+    );
+    const { rows: related } = await this.db.query(
+      `select ${ELEMENT_COLUMNS} from elements where analysis_id=$1 and element_id=any($2::text[])`,
+      [a.id, ids],
+    );
+    const {
+      rows: [asset],
+    } = await this.db.query('select storage_path from assets where analysis_id=$1 and logical_path=$2', [
+      a.id,
+      f.data.image,
+    ]);
+    return {
+      figure: f as IndexedElement,
+      caption: (related.find((e) => e.id === f.data.caption_block) as IndexedElement) ?? null,
+      references: (f.data.referenced_by ?? []).flatMap((rid: string) =>
+        related.filter((e) => e.id === rid),
+      ) as IndexedElement[],
+      imageUrl: asset ? await this.storage.sign(asset.storage_path) : null,
+    };
+  }
+}

@@ -12,3 +12,13 @@ demo/_fixture/
 demo/*/paper.pdf
 demo/*/doc.json
 demo/*/figures/
+
+# Local application configuration and runtime state.
+.env
+.env.*
+!.env.example
+**/node_modules/
+server/dist/
+supabase/.temp/
+supabase/.branches/
+.data/

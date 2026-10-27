@@ -26,7 +26,7 @@ from statistics import median
 import jsonschema
 import pymupdf
 
-VERSION = "0.1"
+VERSION = "0.2"
 SCHEMA_ID = "paper-tour/doc@0.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DOC_SCHEMA = os.path.normpath(os.path.join(HERE, os.pardir, "schema", "doc.schema.json"))
@@ -36,8 +36,9 @@ TEXT_FLAGS = pymupdf.TEXT_MEDIABOX_CLIP
 FIGURE_DPI = 200
 DEBUG_DPI = 110
 
-CAPTION_RE = re.compile(r"^(Figure|Fig\.?|FIGURE|FIG\.?|Table|TABLE|Tab\.)\s*([A-Z]?\d+[a-z]?|[IVX]+)\s*[:.|]")
+CAPTION_RE = re.compile(r"^(Figure|Fig\.?|FIGURE|FIG\.?|Table|TABLE|Tab\.)\s*([A-Z]?\d+[a-z]?|[IVX]+)(?:\s*[:.|]|\s*$|\s+(?=[A-Z]))")
 NUM_HEADING_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+([A-Za-z].*)$")
+ROMAN_HEADING_RE = re.compile(r"^([IVXLCDM]{1,8})\.\s+([A-Z].*)$")
 LETTER_HEADING_RE = re.compile(r"^([A-Z](?:\.\d{1,2}){0,3})\.?\s+([A-Z].*)$")
 EQ_TAG_RE = re.compile(r"^\(([A-Z]?\.?\d{1,3}[a-z]?)\)$")
 FIG_REF_RE = re.compile(
@@ -720,6 +721,11 @@ def is_heading_like(b, body):
     if len(b.rows) > 2 or len(t.split()) > 16:
         return False
     styled = b.bold >= 0.6 or b.size >= 1.1 * body
+    roman = ROMAN_HEADING_RE.match(t)
+    # IEEE main headings use body-size, regular-weight small capitals. The
+    # numbered all-capital title is sufficient evidence even without bold type.
+    if roman and (styled or roman.group(2).isupper()) and not t.endswith("."):
+        return True
     if NUM_HEADING_RE.match(t) and styled and not t.endswith("."):
         return True
     if t.lower().rstrip(".:") in UNNUMBERED_HEADINGS and styled:
@@ -1257,7 +1263,8 @@ def classify(pages, stats):
         # authors: everything between the title and the first real heading (Abstract, 1 ...)
         page = pages[0]
         heads = [b.bbox[1] for b in page.blocks if b.type == "heading" and b.bbox[1] > title.bbox[3]
-                 and (NUM_HEADING_RE.match(b.raw_text) or b.raw_text.lower().strip(" .:") in UNNUMBERED_HEADINGS)]
+                 and (NUM_HEADING_RE.match(b.raw_text) or ROMAN_HEADING_RE.match(b.raw_text)
+                      or b.raw_text.lower().strip(" .:") in UNNUMBERED_HEADINGS)]
         paras = [b.bbox[1] for b in page.blocks if b.type == "paragraph" and b.bbox[1] > title.bbox[3]
                  and is_textlike(b, page, body) and len(b.rows) >= 3]
         limit = min(heads) if heads else (min(paras) if paras else title.bbox[3])
@@ -1339,7 +1346,7 @@ def _norm(text):
 
 
 def split_heading(text, allow_letter):
-    m = NUM_HEADING_RE.match(text)
+    m = NUM_HEADING_RE.match(text) or ROMAN_HEADING_RE.match(text)
     if m:
         return m.group(1), m.group(2).strip()
     if allow_letter:
@@ -1737,7 +1744,7 @@ def analyse(pdf):
     stats.front_y = 0.0
     if pages:
         for r in sorted(pages[0].rows, key=lambda r: r.bbox[1]):
-            if re.fullmatch(r"(abstract|1\.?\s+introduction)[.:]?", r.text.strip().lower()):
+            if re.fullmatch(r"(abstract|(?:1\.?|i\.)\s+introduction)[.:]?", r.text.strip().lower()):
                 stats.front_y = r.bbox[1]
                 break
 

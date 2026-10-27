@@ -1,0 +1,404 @@
+import { useEffect, useMemo, useState } from 'react';
+import type { DocumentSummary } from '../../../shared/contracts';
+import { AuthForm, PaperMark } from './AuthForm';
+import { DocumentDialog } from './DocumentDialog';
+import { UploadPanel } from './UploadPanel';
+import { apiRequest, isLibraryConfigured, signOut } from './client';
+import { useSession } from './useSession';
+import '../library.css';
+
+interface Props {
+  onOpenDocument(documentId: string): void;
+  onOpenDemo(): void;
+}
+
+export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
+  const auth = useSession();
+  if (!isLibraryConfigured())
+    return (
+      <div className="library">
+        <header className="library-header">
+          <PaperMark />
+        </header>
+        <main className="library-setup">
+          <div className="library-setup-icon" aria-hidden="true">
+            ⌁
+          </div>
+          <h1>A home for your papers.</h1>
+          <p>Connect the library to save PDFs, prepare their contents, and keep your reading progress across visits.</p>
+          <section>
+            <h2>Connect your library</h2>
+            <p>
+              Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in{' '}
+              <code>player/.env.local</code>, start the API and worker, then restart the app.
+            </p>
+            <p>The repository README includes the local setup and database migrations.</p>
+          </section>
+          {import.meta.env.DEV && (
+            <button type="button" className="library-button primary" onClick={onOpenDemo}>
+              Open local demo
+            </button>
+          )}
+        </main>
+      </div>
+    );
+  if (auth.loading)
+    return (
+      <div className="library">
+        <header className="library-header">
+          <PaperMark />
+        </header>
+        <main className="library-loading" role="status">
+          Opening your library…
+        </main>
+      </div>
+    );
+  if (!auth.session || auth.recovering)
+    return (
+      <div className="library">
+        <AuthForm
+          key={auth.recovering ? 'recovery' : 'auth'}
+          recovering={auth.recovering}
+          onRecovered={auth.finishRecovery}
+          onOpenDemo={onOpenDemo}
+        />
+        {auth.error && (
+          <p className="library-error library-session-error" role="alert">
+            {auth.error}
+          </p>
+        )}
+      </div>
+    );
+  return (
+    <AuthenticatedLibrary
+      key={auth.session.user.id}
+      email={auth.session.user.email ?? 'Your account'}
+      onOpenDocument={onOpenDocument}
+      onOpenDemo={onOpenDemo}
+    />
+  );
+}
+
+function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { email: string }) {
+  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState('recent');
+  const [signingOut, setSigningOut] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<{ document: DocumentSummary; mode: 'rename' | 'delete' } | null>(null);
+  const refreshDocuments = () => setRefresh((count) => count + 1);
+
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    async function load() {
+      try {
+        const result = await apiRequest<{ documents: DocumentSummary[] }>('/api/documents', {
+          signal: controller.signal,
+        });
+        if (!alive) return;
+        setDocuments(result.documents);
+        setError(null);
+        const processing = result.documents.some(
+          (item) =>
+            item.analysisStatus === 'queued' ||
+            item.analysisStatus === 'processing' ||
+            item.fileStatus === 'uploading',
+        );
+        if (processing) timer = setTimeout(() => void load(), 3000);
+      } catch (cause) {
+        if (!alive) return;
+        setError(cause instanceof Error ? cause.message : 'Could not load your papers. Try again.');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      alive = false;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [refresh]);
+
+  const visible = useMemo(() => {
+    const search = query.trim().toLocaleLowerCase();
+    return documents
+      .filter((item) => `${item.title} ${item.originalFilename}`.toLocaleLowerCase().includes(search))
+      .sort((a, b) =>
+        sort === 'title'
+          ? a.title.localeCompare(b.title)
+          : sort === 'added'
+            ? Date.parse(b.createdAt) - Date.parse(a.createdAt)
+            : Date.parse(b.lastOpenedAt ?? b.createdAt) - Date.parse(a.lastOpenedAt ?? a.createdAt),
+      );
+  }, [documents, query, sort]);
+
+  async function logout() {
+    setSigningOut(true);
+    setError(null);
+    try {
+      await signOut();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not sign out. Try again.');
+      setSigningOut(false);
+    }
+  }
+
+  async function retryAnalysis(item: DocumentSummary) {
+    setBusyId(item.id);
+    setError(null);
+    try {
+      await apiRequest(`/api/documents/${item.id}/analyze`, { method: 'POST' });
+      setNotice(`Preparing “${item.title}” again.`);
+      refreshDocuments();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not restart the analysis. Try again.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="library">
+      <header className="library-header">
+        <PaperMark />
+        <div className="library-account">
+          <span title={email}>{email}</span>
+          <button type="button" className="library-text-button" onClick={() => void logout()} disabled={signingOut}>
+            {signingOut ? 'Signing out…' : 'Sign out'}
+          </button>
+        </div>
+      </header>
+      <main className="library-main">
+        <div className="library-heading">
+          <div>
+            <h1>Your library</h1>
+            <p>Pick up where you left off.</p>
+          </div>
+          {import.meta.env.DEV && (
+            <button className="library-text-button" type="button" onClick={onOpenDemo}>
+              Open local demo
+            </button>
+          )}
+        </div>
+        <UploadPanel
+          onChanged={refreshDocuments}
+          onUploaded={() => {
+            setNotice(
+              'PDF saved. Its contents are being prepared; you can open it while this runs.',
+            );
+            refreshDocuments();
+          }}
+        />
+        {error && (
+          <div className="library-feedback library-error" role="alert">
+            <span>{error}</span>
+            <button className="library-text-button" type="button" onClick={refreshDocuments}>
+              Try again
+            </button>
+          </div>
+        )}
+        {notice && (
+          <div className="library-feedback library-notice" role="status">
+            <span>{notice}</span>
+            <button
+              type="button"
+              className="library-text-button"
+              onClick={() => setNotice(null)}
+              aria-label="Dismiss notice"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        <div className="library-toolbar">
+          <label className="library-search">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <circle cx="7.5" cy="7.5" r="5.25" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M11.5 11.5L16 16" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Find a paper"
+              aria-label="Find a paper by title or filename"
+            />
+          </label>
+          <label className="library-sort">
+            Sort by
+            <select value={sort} onChange={(event) => setSort(event.target.value)}>
+              <option value="recent">Recently opened</option>
+              <option value="added">Date added</option>
+              <option value="title">Title</option>
+            </select>
+          </label>
+        </div>
+        <div className="library-list-heading">
+          <h2>{query.trim() ? 'Search results' : 'Papers'}</h2>
+          <span aria-live="polite">
+            {loading ? 'Loading…' : `${visible.length} ${visible.length === 1 ? 'paper' : 'papers'}`}
+          </span>
+        </div>
+        {loading && (
+          <div className="library-loading" role="status">
+            Loading your papers…
+          </div>
+        )}
+        {!loading && !documents.length && !error && (
+          <div className="library-empty">
+            <svg width="48" height="52" viewBox="0 0 28 30" fill="none" aria-hidden="true">
+              <path d="M6 2H19L25 8V28H6V2Z" stroke="currentColor" />
+              <path d="M19 2V8H25M2 7V26M10 13H21M10 17H21M10 21H17" stroke="currentColor" />
+            </svg>
+            <h3>Your first paper belongs here.</h3>
+            <p>Upload a PDF above. Its pages, sections and figures will stay together in your library.</p>
+          </div>
+        )}
+        {!loading && documents.length > 0 && !visible.length && (
+          <div className="library-empty">
+            <h3>No papers match “{query}”.</h3>
+            <p>Try a different title or filename.</p>
+            <button type="button" className="library-text-button" onClick={() => setQuery('')}>
+              Clear search
+            </button>
+          </div>
+        )}
+        <div className="library-grid">
+          {visible.map((item) => (
+            <DocumentCard
+              key={item.id}
+              document={item}
+              busy={busyId === item.id}
+              onOpen={() => onOpenDocument(item.id)}
+              onRename={() => setDialog({ document: item, mode: 'rename' })}
+              onDelete={() => setDialog({ document: item, mode: 'delete' })}
+              onRetry={() => void retryAnalysis(item)}
+            />
+          ))}
+        </div>
+      </main>
+      {dialog && (
+        <DocumentDialog
+          key={`${dialog.mode}:${dialog.document.id}`}
+          document={dialog.document}
+          mode={dialog.mode}
+          onClose={() => setDialog(null)}
+          onChanged={refreshDocuments}
+        />
+      )}
+    </div>
+  );
+}
+
+function DocumentCard({
+  document: item,
+  busy,
+  onOpen,
+  onRename,
+  onDelete,
+  onRetry,
+}: {
+  document: DocumentSummary;
+  busy: boolean;
+  onOpen(): void;
+  onRename(): void;
+  onDelete(): void;
+  onRetry(): void;
+}) {
+  const status =
+    item.fileStatus === 'invalid'
+      ? { label: 'PDF unavailable', kind: 'failed' }
+      : item.fileStatus === 'uploading'
+        ? { label: 'Upload unfinished', kind: 'pending' }
+        : item.analysisStatus === 'ready'
+          ? { label: 'Ready to explore', kind: 'ready' }
+          : item.analysisStatus === 'limited'
+            ? { label: 'Limited text extraction', kind: 'limited' }
+            : item.analysisStatus === 'processing'
+              ? { label: 'Preparing contents', kind: 'pending' }
+              : item.analysisStatus === 'queued'
+                ? { label: 'Waiting to prepare', kind: 'pending' }
+                : item.analysisStatus === 'failed'
+                  ? { label: 'Analysis interrupted', kind: 'failed' }
+                  : { label: 'PDF saved', kind: 'ready' };
+  const canOpen = item.fileStatus === 'uploaded';
+  return (
+    <article className="library-document">
+      <button
+        type="button"
+        className="library-preview"
+        onClick={onOpen}
+        disabled={!canOpen}
+        aria-label={`Open ${item.title}`}
+      >
+        {item.thumbnailUrl ? (
+          <img src={item.thumbnailUrl} alt="" loading="lazy" />
+        ) : (
+          <div className="library-preview-placeholder" aria-hidden="true">
+            <svg width="36" height="42" viewBox="0 0 28 30" fill="none">
+              <path d="M4 1H18L25 8V29H4V1Z" stroke="currentColor" />
+              <path d="M18 1V8H25M8 14H21M8 18H21M8 22H17" stroke="currentColor" />
+            </svg>
+            <span>PDF</span>
+          </div>
+        )}
+        {item.tourCount > 0 && (
+          <span className="library-tour-badge">
+            {item.tourCount} {item.tourCount === 1 ? 'tour' : 'tours'}
+          </span>
+        )}
+      </button>
+      <div className="library-document-body">
+        <span className={`library-status ${status.kind}`}>{status.label}</span>
+        <h3>
+          <button type="button" onClick={onOpen} disabled={!canOpen}>
+            {item.title}
+          </button>
+        </h3>
+        <p className="library-filename" title={item.originalFilename}>
+          {item.originalFilename}
+        </p>
+        <p className="library-document-meta">
+          {item.pageCount === null
+            ? 'Page count pending'
+            : `${item.pageCount} ${item.pageCount === 1 ? 'page' : 'pages'}`}
+          <span>Added {formatDate(item.createdAt)}</span>
+        </p>
+        {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
+        <div className="library-document-actions">
+          <button type="button" className="library-text-button" disabled={!canOpen} onClick={onOpen}>
+            Open paper
+          </button>
+          {item.analysisStatus === 'failed' && canOpen && (
+            <button type="button" className="library-text-button" disabled={busy} onClick={onRetry}>
+              {busy ? 'Restarting…' : 'Retry analysis'}
+            </button>
+          )}
+          <details className="library-more">
+            <summary aria-label={`Actions for ${item.title}`}>•••</summary>
+            <div>
+              <button type="button" onClick={onRename}>
+                Rename
+              </button>
+              <button type="button" className="delete" onClick={onDelete}>
+                Delete
+              </button>
+            </div>
+          </details>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? '' : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}

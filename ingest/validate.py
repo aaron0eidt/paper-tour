@@ -249,10 +249,10 @@ def kind_of(target):
     return "ID"
 
 
-def check_tour(tour, folder, doc, index, num_pages, report):
+def check_tour(tour, folder, doc, index, num_pages, report, *, check_folder=True):
     f = "tour.json"
     paper = os.path.basename(os.path.normpath(os.path.abspath(folder)))
-    if isinstance(tour.get("paper"), str) and tour["paper"] != paper:
+    if check_folder and isinstance(tour.get("paper"), str) and tour["paper"] != paper:
         report.error(f, "$.paper", f"{tour['paper']!r} does not match the folder name {paper!r}")
     sha = (doc or {}).get("source", {}).get("sha256") if isinstance(doc, dict) else None
     if "doc_sha256" in tour and sha and tour["doc_sha256"] != sha:

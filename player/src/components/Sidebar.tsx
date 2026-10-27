@@ -11,6 +11,8 @@ interface Props {
   onJump(index: number): void;
   /** Rendered above the footer (the problems list). */
   children?: ReactNode;
+  header?: ReactNode;
+  navigation?: ReactNode;
 }
 
 function stepLabel(say: string): string {
@@ -18,7 +20,7 @@ function stepLabel(say: string): string {
   return words.length > 9 ? `${words.slice(0, 9).join(' ')}…` : words.join(' ');
 }
 
-export function Sidebar({ tour, steps, state, docTitle, onJump, children }: Props) {
+export function Sidebar({ tour, steps, state, docTitle, onJump, children, header, navigation }: Props) {
   const started = state.status !== 'idle';
   const done = state.status === 'ended' ? steps.length : started ? state.index : 0;
   const progress = steps.length ? done / steps.length : 0;
@@ -39,6 +41,7 @@ export function Sidebar({ tour, steps, state, docTitle, onJump, children }: Prop
   return (
     <aside className="sidebar">
       <header className="sidebar-head">
+        {header}
         <div className="brand">Paper Tour</div>
         <h1 className="tour-title">{tour?.title ?? docTitle ?? 'Untitled paper'}</h1>
         {tour && (
@@ -53,45 +56,46 @@ export function Sidebar({ tour, steps, state, docTitle, onJump, children }: Prop
         )}
       </header>
 
-      {tour ? (
-        <nav className="chapters" ref={navRef}>
-          {tour.chapters.map((chapter, ci) => (
-            <section key={chapter.id} className="chapter">
-              <h2>
-                <span className="chapter-num">{ci + 1}</span>
-                {chapter.title}
-              </h2>
-              <ol>
-                {steps
-                  .filter((s) => s.chapterIndex === ci)
-                  .map((s) => {
-                    const current = started && s.index === state.index;
-                    const past = s.index < done && !current;
-                    return (
-                      <li key={s.step.id}>
-                        <button
-                          className={`step${current ? ' current' : ''}${past ? ' past' : ''}`}
-                          onClick={() => onJump(s.index)}
-                          title={s.step.say}
-                        >
-                          <span className="step-dot" />
-                          <span className="step-text">{stepLabel(s.step.say)}</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-              </ol>
-            </section>
-          ))}
-        </nav>
-      ) : (
-        <div className="sidebar-empty">
-          <p>No tour loaded for this paper.</p>
-          <p>
-            Press <kbd>D</kbd> or use <b>IDs</b> to see every element ID. Click one to copy it into a tour.
-          </p>
-        </div>
-      )}
+      {navigation ??
+        (tour ? (
+          <nav className="chapters" ref={navRef}>
+            {tour.chapters.map((chapter, ci) => (
+              <section key={chapter.id} className="chapter">
+                <h2>
+                  <span className="chapter-num">{ci + 1}</span>
+                  {chapter.title}
+                </h2>
+                <ol>
+                  {steps
+                    .filter((s) => s.chapterIndex === ci)
+                    .map((s) => {
+                      const current = started && s.index === state.index;
+                      const past = s.index < done && !current;
+                      return (
+                        <li key={s.step.id}>
+                          <button
+                            className={`step${current ? ' current' : ''}${past ? ' past' : ''}`}
+                            onClick={() => onJump(s.index)}
+                            title={s.step.say}
+                          >
+                            <span className="step-dot" />
+                            <span className="step-text">{stepLabel(s.step.say)}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                </ol>
+              </section>
+            ))}
+          </nav>
+        ) : (
+          <div className="sidebar-empty">
+            <p>No tour loaded for this paper.</p>
+            <p>
+              Press <kbd>D</kbd> or use <b>IDs</b> to see every element ID. Click one to copy it into a tour.
+            </p>
+          </div>
+        ))}
 
       {children}
 

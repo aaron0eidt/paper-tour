@@ -1,0 +1,32 @@
+{
+  "name": "paper-tour-server",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "node --watch --import tsx src/main.ts",
+    "start": "node --import tsx src/main.ts",
+    "worker": "node --import tsx src/worker-main.ts",
+    "migrate": "node --import tsx src/migrate.ts",
+    "import-demo": "node --import tsx src/import-demo.ts",
+    "build": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.1.0",
+    "@fastify/static": "^10.1.8",
+    "@supabase/supabase-js": "^2.58.0",
+    "fastify": "^5.6.1",
+    "pg": "^8.16.3",
+    "pg-boss": "^12.3.0",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.15.5",
+    "prettier": "^3.6.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -7,12 +7,14 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "esbuild test/engine.test.ts --bundle --platform=node --format=esm --log-level=warning --outfile=node_modules/.cache/paper-tour/engine.test.mjs && node node_modules/.cache/paper-tour/engine.test.mjs"
+    "test": "esbuild test/engine.test.ts test/readerState.test.ts --bundle --platform=node --format=esm --log-level=warning --outbase=. --outdir=node_modules/.cache/paper-tour && node node_modules/.cache/paper-tour/test/engine.test.js && node node_modules/.cache/paper-tour/test/readerState.test.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "pdfjs-dist": "4.10.38",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "tus-js-client": "^4.3.1"
   },
   "devDependencies": {
     "@types/react": "18.3.31",
