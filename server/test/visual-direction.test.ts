@@ -203,3 +203,32 @@ test('missing or ambiguous speech anchors are returned as repairable errors', ()
   action.at_phrase = 'input is reused';
   assert.equal(validateDraft(d, doc).draft.chapters[0].steps[0].actions[1].at_word, 4);
 });
+
+test('speech anchors distinguish programming and mathematical symbols', () => {
+  const d = draft();
+  const step = d.chapters[0].steps[0];
+  step.say = 'Compare C with C++, then x with -x.';
+  const action = step.actions[1];
+  for (const [phrase, index] of [
+    ['C++', 3],
+    ['C', 1],
+    ['-x', 7],
+    ['x', 5],
+  ] as const) {
+    action.at_phrase = phrase;
+    assert.equal(validateDraft(d, doc).draft.chapters[0].steps[0].actions[1].at_word, index);
+  }
+});
+
+test('speech anchors tolerate sentence punctuation but keep repeated words ambiguous', () => {
+  const d = draft();
+  const step = d.chapters[0].steps[0];
+  step.say = 'First inspect “input,” then inspect input.';
+  step.actions[1].at_phrase = 'input';
+  assert.throws(
+    () => validateDraft(d, doc),
+    (e) => JSON.stringify((e as any).problems).includes('exactly once'),
+  );
+  step.actions[1].at_phrase = 'then inspect input';
+  assert.equal(validateDraft(d, doc).draft.chapters[0].steps[0].actions[1].at_word, 3);
+});

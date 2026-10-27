@@ -142,6 +142,22 @@ export class Camera {
     return () => this.listeners.delete(fn);
   };
 
+  /** A cancelled narration must not remain subscribed to a camera flight. */
+  whenSettled(signal: AbortSignal): Promise<void> {
+    if (signal.aborted || !this.moving) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        unsubscribe();
+        signal.removeEventListener('abort', done);
+        resolve();
+      };
+      const unsubscribe = this.subscribe((_view, moving) => {
+        if (!moving) done();
+      });
+      signal.addEventListener('abort', done, { once: true });
+    });
+  }
+
   setLayout(layout: Layout): void {
     this.layout = layout;
   }
@@ -159,7 +175,11 @@ export class Camera {
   animateTo(view: View, duration = DURATION_MS): void {
     this.userMoved = false;
     const to = clampView(view, this.layout, this.vp);
-    if (duration <= 0 || prefersReducedMotion()) return this.jumpTo(to);
+    const alreadyFramed =
+      Math.abs(to.cx - this.view.cx) * to.s < 0.5 &&
+      Math.abs(to.cy - this.view.cy) * to.s < 0.5 &&
+      Math.abs(to.s / this.view.s - 1) < 0.001;
+    if (alreadyFramed || duration <= 0 || prefersReducedMotion()) return this.jumpTo(to);
     this.stop();
     this.anim = { from: this.view, to, start: performance.now(), duration };
     this.raf = requestAnimationFrame(this.frame);

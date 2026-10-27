@@ -159,6 +159,58 @@ await test('flattenTour sorts actions by at_word, stable within ties', () => {
   eq([steps[2].chapterIndex, steps[2].indexInChapter], [1, 0], 'chapter position');
 });
 
+await test('the first camera move starts before narration even in an older delayed tour', () => {
+  const delayed = structuredClone(tour);
+  delayed.chapters[0].steps[0].actions = [
+    { type: 'focus', target: 'p1.b1', at_word: 4 },
+    { type: 'box', target: 'fig1', at_word: 2 },
+    { type: 'zoom', target: 'fig1', at_word: 3 },
+  ];
+  const schedule = flattenTour(delayed)[0].schedule;
+  eq(schedule.map((s) => [s.action.type, s.at]), [['focus', 0], ['box', 2], ['zoom', 3]]);
+  eq(delayed.chapters[0].steps[0].actions[0].at_word, 4, 'saved tour stays unchanged');
+});
+
+await test('narration waits for the initial camera and pause cancels that wait', async () => {
+  const narrator = new FakeNarrator();
+  let ready!: () => void;
+  let signal!: AbortSignal;
+  const engine = new TourEngine(tour, {
+    narrator,
+    beforeNarration: (s) => { signal = s; return new Promise<void>((resolve) => { ready = resolve; }); },
+  });
+  engine.play();
+  eq(engine.getState().camera.key, '0:1', 'camera requested before speech');
+  eq(narrator.calls.length, 0);
+  engine.pause();
+  eq(signal.aborted, true);
+  ready();
+  await Promise.resolve();
+  eq(narrator.calls.length, 0, 'cancelled step never starts speaking');
+  engine.play();
+  ready();
+  await Promise.resolve();
+  eq(narrator.calls.length, 1, 'speech starts after camera settles');
+  engine.destroy();
+});
+
+await test('seeking during camera preparation starts only the latest step', async () => {
+  const narrator = new FakeNarrator();
+  const preparations: { signal: AbortSignal; ready: () => void }[] = [];
+  const engine = new TourEngine(tour, {
+    narrator,
+    beforeNarration: (signal) => new Promise<void>((ready) => preparations.push({ signal, ready })),
+  });
+  engine.play();
+  engine.next();
+  eq(preparations[0].signal.aborted, true);
+  preparations[0].ready();
+  preparations[1].ready();
+  await Promise.resolve();
+  eq(narrator.calls.map((call) => call.req.text), ['six seven eight']);
+  engine.destroy();
+});
+
 await test('at_word 0 actions fire at step start, before narration', () => {
   const { engine, narrator } = setup();
   eq(engine.getState().status, 'idle');
@@ -339,6 +391,42 @@ await test('a throwing narrator falls back, and without a fallback the tour stil
   b.engine.play();
   for (let i = 0; i < 4; i++) b.timers.tick(1000);
   eq(b.engine.getState().status, 'ended', 'never stalls');
+});
+
+await test('callbacks from a failed narrator cannot advance its active fallback', () => {
+  let abandoned!: SpeakCallbacks;
+  const broken: Narrator = { name: 'partial failure', speak(_req, cb) { abandoned = cb; throw new Error('failed after starting'); } };
+  const fallback = new FakeNarrator();
+  const { engine, timers } = setup(broken, fallback);
+  engine.play();
+  abandoned.onWord(4);
+  abandoned.onEnd();
+  timers.tick(1000);
+  eq([engine.getState().index, engine.getState().word], [0, -1]);
+  fallback.last.cb.onWord(2);
+  eq(engine.getState().word, 2);
+  engine.destroy();
+});
+
+await test('pausing from the first state notification prevents speech from starting', () => {
+  const { engine, narrator } = setup();
+  engine.subscribe(() => { if (engine.getState().status === 'playing') engine.pause(); });
+  engine.play();
+  eq(engine.getState().status, 'paused');
+  eq(narrator.calls.length, 0);
+});
+
+await test('pausing during synchronous narration startup cancels the returned handle', () => {
+  let cancelled = false;
+  const narrator: Narrator = {
+    name: 'synchronous word',
+    speak(_req, cb) { cb.onWord(0); return { cancel() { cancelled = true; } }; },
+  };
+  const { engine } = setup(narrator);
+  engine.subscribe(() => { if (engine.getState().word === 0 && engine.getState().status === 'playing') engine.pause(); });
+  engine.play();
+  eq(engine.getState().status, 'paused');
+  eq(cancelled, true);
 });
 
 await test('resolver: IDs to rects, regions, unknown IDs', () => {

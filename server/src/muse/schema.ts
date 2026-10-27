@@ -191,7 +191,9 @@ export class TourValidationError extends ProcessingError {
 }
 /** Match narration tokens rather than asking the model to count word offsets. */
 export function resolveSpeechAnchors(value: TourDraft): TourDraft {
-  const token = (word: string) => word.toLowerCase().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '');
+  // Ignore sentence delimiters, but retain meaningful symbols such as C++ and -x.
+  const token = (word: string) =>
+    word.toLowerCase().replace(/^[\p{Ps}\p{Pe}\p{Pi}\p{Pf}"'.,;:!?]+|[\p{Ps}\p{Pe}\p{Pi}\p{Pf}"'.,;:!?]+$/gu, '');
   return {
     ...value,
     chapters: value.chapters.map((chapter) => ({

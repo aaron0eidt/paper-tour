@@ -38,8 +38,29 @@ export function visualFrame(doc: Doc, id: string) {
   };
 }
 export function checkComponents(components: VisualComponent[] | undefined) {
+  if (components && (components.length > 24 || components.some((c) => !c.label.trim())))
+    throw new Error('Use at most 24 components with nonempty labels.');
   if (components?.some((c) => c.region[0] >= c.region[2] || c.region[1] >= c.region[3] || area(c.region) > 0.95))
     throw new Error('Component regions must have positive area and identify a specific part, not the whole image.');
+}
+
+/** A correction to one part must not silently erase the other inspected parts. */
+export function updateVisualComponents(
+  previous: VisualComponent[] | undefined,
+  incoming: VisualComponent[] | undefined,
+  replace = false,
+): VisualComponent[] | undefined {
+  if (replace && incoming === undefined) throw new Error('Provide components when replacing the component list.');
+  if (incoming === undefined) return previous;
+  const byLabel = new Map(
+    [...(replace ? [] : (previous ?? [])), ...incoming].map((component) => [
+      component.label.trim().toLowerCase(),
+      component,
+    ]),
+  );
+  const components = [...byLabel.values()];
+  checkComponents(components);
+  return components;
 }
 
 function overlaps(a: Region, b: Region) {

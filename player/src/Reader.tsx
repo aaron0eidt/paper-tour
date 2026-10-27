@@ -260,19 +260,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     [loaded, params.silent, browserVoices.selectedVoiceId],
   );
 
-  // One engine per loaded tour; narrator (mute) and speed are pushed into it without recreating it.
-  useEffect(() => {
-    if (!prepared) return;
-    const e = new TourEngine(prepared.tour, { narrator: new SilentNarrator(), fallbackNarrator: new SilentNarrator() });
-    setEngine(e);
-    return () => {
-      e.destroy();
-      setEngine(null);
-    };
-  }, [prepared]);
-  useEffect(() => engine?.setNarrator(narrator(muted)), [engine, narrator, muted]);
-  useEffect(() => engine?.setRate(speed * params.rate), [engine, speed, params.rate]);
-
   const state = useSyncExternalStore(engine?.subscribe ?? noSubscribe, engine?.getState ?? (() => IDLE));
 
   const scene = useMemo(
@@ -297,9 +284,31 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     },
     [camera, layout, resolver],
   );
+  // Dispatch camera commands synchronously, before narration waits for the flight.
+  // A React effect would start the animation only after speech has already begun.
   useEffect(() => {
-    if (state.camera.seq > 0) frame(state.camera, false);
-  }, [state.camera, frame]);
+    if (!prepared) return;
+    const e = new TourEngine(prepared.tour, {
+      narrator: new SilentNarrator(),
+      fallbackNarrator: new SilentNarrator(),
+      beforeNarration: (signal) => camera.whenSettled(signal),
+    });
+    let lastCamera = 0;
+    const unsubscribe = e.subscribe(() => {
+      const command = e.getState().camera;
+      if (command.seq === lastCamera) return;
+      lastCamera = command.seq;
+      frame(command, false);
+    });
+    setEngine(e);
+    return () => {
+      unsubscribe();
+      e.destroy();
+      setEngine(null);
+    };
+  }, [prepared, camera, frame]);
+  useEffect(() => engine?.setNarrator(narrator(muted)), [engine, narrator, muted]);
+  useEffect(() => engine?.setRate(speed * params.rate), [engine, speed, params.rate]);
 
   const onViewportChange = useCallback(() => {
     if (!layout) return;

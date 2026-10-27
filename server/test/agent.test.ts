@@ -594,3 +594,48 @@ test('omitted uncertainty notes do not discard a 22-image observation batch or a
     /description/,
   );
 });
+
+test('visual component corrections preserve other inspected parts and can explicitly replace them', async () => {
+  const state: RunState = { plan: [], chapters: {}, observations: {}, presented: { fig1: 'hash' } };
+  const scope = {
+    owner: 'owner',
+    documentId: 'doc',
+    analysisId: 'analysis',
+    doc,
+    language: 'en',
+    availableSources: ['fig1'],
+    service: {} as DocumentService,
+    visuals: [
+      { targetId: 'fig1', kind: 'figure' as const, page: 1, label: 'Bars', sha256: 'hash', storagePath: 'fig1' },
+    ],
+  };
+  const observe = (state: RunState, values: Record<string, unknown>) =>
+    executeTool(scope, state, 'record_visual_observations', {
+      observations: [{ sourceId: 'fig1', description: 'Two bars.', readable: true, uncertainties: [], ...values }],
+    });
+  const blue = { label: 'Blue bar', region: [0, 0, 0.3, 0.8] },
+    red = { label: 'Red bar', region: [0.6, 0, 0.9, 0.4] };
+  const first = await observe(state, { components: [blue, red] });
+  const correction = { ...blue, region: [0.1, 0, 0.3, 0.8] };
+  const updated = await observe(first.state, { components: [correction] });
+  assert.deepEqual((updated.state.observations.fig1 as any).components, [correction, red]);
+  assert.deepEqual((first.state.observations.fig1 as any).components, [blue, red], 'input checkpoint stays immutable');
+  const repeated = await observe(updated.state, { components: [correction] });
+  assert.deepEqual(repeated.state, updated.state, 'repeated corrections do not duplicate components');
+  const empty = await observe(updated.state, { components: [] });
+  assert.deepEqual((empty.state.observations.fig1 as any).components, [correction, red]);
+  const replaced = await observe(updated.state, { components: [red], replaceComponents: true });
+  assert.deepEqual((replaced.state.observations.fig1 as any).components, [red]);
+  assert.equal(Object.hasOwn(replaced.state.observations.fig1 as object, 'replaceComponents'), false);
+  await assert.rejects(() => observe(updated.state, { replaceComponents: true }), /components/);
+  const full = await observe(updated.state, {
+    replaceComponents: true,
+    components: Array.from({ length: 24 }, (_, i) => ({ ...blue, label: `Part ${i}` })),
+  });
+  await assert.rejects(() => observe(full.state, { components: [red] }), /at most 24/);
+  assert.equal(
+    (full.state.observations.fig1 as any).components.length,
+    24,
+    'failed correction leaves checkpoint intact',
+  );
+});

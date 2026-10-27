@@ -20,7 +20,7 @@ export interface FlatStep {
   indexInChapter: number;
   step: Step;
   words: string[];
-  /** The step's actions sorted by at_word; ties keep their order in the tour. */
+  /** Initial camera at zero, then actions sorted by at_word; ties keep tour order. */
   schedule: ScheduledAction[];
 }
 
@@ -59,6 +59,8 @@ export interface EngineOptions {
   fallbackNarrator?: Narrator;
   rate?: number;
   timers?: Timers;
+  /** Wait for the initial camera move; later word-synchronized moves do not delay speech. */
+  beforeNarration?: (signal: AbortSignal) => Promise<void>;
 }
 
 const realTimers: Timers = {
@@ -75,8 +77,14 @@ export function flattenTour(tour: Tour): FlatStep[] {
   tour.chapters.forEach((chapter, chapterIndex) => {
     chapter.steps.forEach((step, indexInChapter) => {
       const index = out.length;
+      const firstCamera = step.actions.findIndex(isCamera);
       const schedule = step.actions
-        .map((action, i) => ({ key: `${index}:${i}`, at: Math.max(0, Math.floor(action.at_word ?? 0)), action, i }))
+        .map((action, i) => ({
+          key: `${index}:${i}`,
+          at: i === firstCamera ? 0 : Math.max(0, Math.floor(action.at_word ?? 0)),
+          action,
+          i,
+        }))
         .sort((a, b) => a.at - b.at || a.i - b.i)
         .map(({ key, at, action }) => ({ key, at, action }));
       out.push({ index, chapterIndex, indexInChapter, step, words: splitWords(step.say), schedule });
@@ -93,6 +101,8 @@ export class TourEngine {
   private fallback?: Narrator;
   private rate: number;
   private timers: Timers;
+  private beforeNarration?: EngineOptions['beforeNarration'];
+  private preparation: AbortController | null = null;
   private listeners = new Set<() => void>();
 
   private status: Status = 'idle';
@@ -116,6 +126,7 @@ export class TourEngine {
     this.fallback = opts.fallbackNarrator;
     this.rate = opts.rate ?? 1;
     this.timers = opts.timers ?? realTimers;
+    this.beforeNarration = opts.beforeNarration;
     this.state = this.snapshot();
   }
 
@@ -201,6 +212,8 @@ export class TourEngine {
 
   private stopRun(): void {
     this.token++;
+    this.preparation?.abort();
+    this.preparation = null;
     const handle = this.handle;
     this.handle = null;
     if (handle) {
@@ -284,6 +297,24 @@ export class TourEngine {
     this.narrationDone = false;
     this.fireUpTo(0);
     this.emit();
+    if (token !== this.token) return;
+
+    void this.speakStep(fs, token);
+  }
+
+  private async speakStep(fs: FlatStep, token: number): Promise<void> {
+    if (this.beforeNarration) {
+      const preparation = new AbortController();
+      this.preparation = preparation;
+      try {
+        await this.beforeNarration(preparation.signal);
+      } catch (error) {
+        if (!preparation.signal.aborted) console.warn('[engine] camera preparation failed', error);
+      } finally {
+        if (this.preparation === preparation) this.preparation = null;
+      }
+    }
+    if (token !== this.token) return;
 
     const speaker = fs.step.speaker ?? DEFAULT_SPEAKER;
     const req: SpeakRequest = {
@@ -294,28 +325,33 @@ export class TourEngine {
       rate: this.rate,
       audio: fs.step.audio,
     };
-    const cb: SpeakCallbacks = {
-      onWord: (w) => {
-        if (token === this.token) this.onWord(w);
-      },
-      onEnd: () => {
-        if (token === this.token) this.onNarrationEnd(token);
-      },
-    };
-
     for (const narrator of [this.narrator, this.fallback]) {
+      if (token !== this.token || this.narrationDone) return;
       if (!narrator) continue;
+      // A failed speak() may still have scheduled callbacks. Isolate each attempt,
+      // including the fallback, without changing the current step's identity.
+      let active = true;
+      const cb: SpeakCallbacks = {
+        onWord: (w) => {
+          if (active && token === this.token) this.onWord(w);
+        },
+        onEnd: () => {
+          if (active && token === this.token) this.onNarrationEnd(token);
+        },
+      };
       try {
         const handle = narrator.speak(req, cb);
         // speak() may have finished (or the engine moved on) synchronously.
-        if (token === this.token && !this.narrationDone) this.handle = handle;
+        if (token !== this.token) handle.cancel();
+        else if (!this.narrationDone) this.handle = handle;
         return;
       } catch (err) {
+        active = false;
         console.warn(`[engine] ${narrator.name} narrator failed`, err);
       }
     }
     // No narrator could speak: never stall, just finish the step.
-    this.onNarrationEnd(token);
+    if (token === this.token) this.onNarrationEnd(token);
   }
 
   private onWord(w: number): void {
@@ -335,6 +371,7 @@ export class TourEngine {
     this.fireUpTo(Infinity);
     this.word = fs.words.length - 1;
     this.emit();
+    if (token !== this.token) return;
     this.holdTimer = this.timers.setTimeout(() => {
       if (token !== this.token) return;
       this.holdTimer = null;
