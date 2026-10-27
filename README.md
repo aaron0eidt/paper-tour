@@ -97,3 +97,36 @@ optional per-word timings), so the scaffold runs without API keys.
 2. TTS with word timestamps → `audio` per step.
 3. Voice Q&A: pause, answer with the current step as context, emit the same actions, resume.
 4. Draw a box on a figure and ask about it.
+
+## Local library setup
+
+For private PDF uploads and automatic Muse tours, use Node.js 22.12+ and Python 3.12:
+
+```sh
+npm ci
+npm --prefix server ci
+npm --prefix player ci
+python3.12 -m venv ingest/.venv
+ingest/.venv/bin/pip install -r ingest/requirements.txt
+npm run supabase:start
+npm run setup:local
+```
+
+Add `MODEL_API_KEY` to the root `.env` (server-only), then start the app:
+
+```sh
+npm run db:migrate
+npm run dev
+```
+
+Open http://localhost:5174/. Model selection and API prices are available in the library and reader.
+Automatic tours send paper text and rendered page/figure images to Meta.
+
+```sh
+npm run build
+npm test
+npm run test:integration
+```
+
+Integration tests require the local Supabase stack. `Dockerfile` and `compose.yaml` provide an
+optional deployment setup; environment variables are listed in `.env.example`.

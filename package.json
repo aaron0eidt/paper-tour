@@ -9,6 +9,10 @@
     "test": "npm --prefix player test && npm --prefix server test && ingest/.venv/bin/python -m unittest discover -s ingest -p 'test_*.py'",
     "db:migrate": "npm --prefix server run migrate",
     "import:demo": "npm --prefix server run import-demo --",
+    "supabase:start": "node scripts/supabase-local.mjs start",
+    "supabase:stop": "node scripts/supabase-local.mjs stop",
+    "supabase:status": "node scripts/supabase-local.mjs status",
+    "setup:local": "node scripts/setup-local.mjs",
     "test:smoke": "node scripts/smoke-local.mjs",
     "test:smoke:muse": "node scripts/smoke-muse.mjs",
     "test:integration": "node scripts/test-integration.mjs"
