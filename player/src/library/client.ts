@@ -75,3 +75,11 @@ export function storageUploadEndpoint(): string {
     url.hostname = url.hostname.replace(/\.supabase\.co$/, '.storage.supabase.co');
   return `${url.origin}/storage/v1/upload/resumable`;
 }
+
+/** Fetch-based SSE keeps the bearer token in a header, never in the URL. */
+export async function activityStream(path: string, signal: AbortSignal): Promise<Response> {
+  const token = await getAccessToken();
+  const response = await fetch(`${apiBase}${path}`, { signal, headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' }, cache: 'no-store' });
+  if (!response.ok || !response.body) throw new ApiRequestError('Could not load activity.', response.status, 'activity_unavailable');
+  return response;
+}

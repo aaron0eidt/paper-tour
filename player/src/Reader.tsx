@@ -68,9 +68,9 @@ function debugIndex(doc: Doc): Map<number, DebugPage> {
   return pages;
 }
 
-function isTyping(target: EventTarget | null): boolean {
+function isInteractive(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
-  return !!el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+  return !!el && (el.isContentEditable || !!el.closest('input, textarea, select, button, a, summary, dialog'));
 }
 
 async function copyText(text: string): Promise<void> {
@@ -105,6 +105,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selection, setSelection] = useState<OverlayEntry[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [zoomPercent, setZoomPercent] = useState(100);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [manifestRefresh, setManifestRefresh] = useState(0);
   const restoredView = useRef(false);
@@ -240,7 +241,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   const narrator = useCallback(
     (isMuted: boolean) =>
-      createNarrator({ baseUrl: loaded?.baseUrl ?? '/', muted: isMuted, forceSilent: params.silent, voiceId: browserVoices.selectedVoiceId }),
+      createNarrator({
+        baseUrl: loaded?.baseUrl ?? '/',
+        muted: isMuted,
+        forceSilent: params.silent,
+        voiceId: browserVoices.selectedVoiceId,
+      }),
     [loaded, params.silent, browserVoices.selectedVoiceId],
   );
 
@@ -348,6 +354,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   useEffect(() => {
     if (!layout) return;
     const update = () => {
+      setZoomPercent(Math.round(camera.getView().s * 100));
       const position = positionFromView(layout, camera.getView());
       setCurrentPage(position.page);
       checkpointRef.current = { ...position, ...tourCheckpoint.current };
@@ -464,7 +471,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // Keyboard: Space play/pause, arrows step, D toggles the ID overlay.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (isInteractive(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === ' ') {
         e.preventDefault();
         engine?.toggle();
@@ -575,6 +582,57 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   return (
     <div className="app reader-app">
+      <header className="reader-app-toolbar">
+        <button className="reader-library-button" onClick={back}>
+          ‹ <span>Library</span>
+        </button>
+        <div className="reader-tour-actions">
+          {' '}
+          {documentId && manifest && (manifest.tourGeneration || !manifest.tours.length) && (
+            <TourGeneration
+              documentId={documentId}
+              generation={manifest.tourGeneration}
+              canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
+              onChanged={() => setManifestRefresh((value) => value + 1)}
+              onOpenTour={
+                tab === 'document'
+                  ? (tourId) => {
+                      engine?.pause();
+                      setSelection([]);
+                      setActiveTour(tourId);
+                      setTab('tour');
+                    }
+                  : undefined
+              }
+              compact
+              toolbar
+            />
+          )}
+        </div>
+        {documentId && (
+          <a
+            className="reader-settings-button"
+            href={`${import.meta.env.BASE_URL}?settings=profile`}
+            aria-label="Profile & Settings"
+            title="Profile & Settings"
+          >
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m9.5 3-.6 2.2-2 .9-2-.6-2.4 4.1L4.1 11v2l-1.6 1.4 2.4 4.1 2-.6 2 .9.6 2.2h5l.6-2.2 2-.9 2 .6 2.4-4.1L19.9 13v-2l1.6-1.4-2.4-4.1-2 .6-2-.9L14.5 3z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </a>
+        )}
+      </header>
       <Sidebar
         tour={tab === 'tour' ? (prepared?.tour ?? null) : null}
         steps={steps}
@@ -586,10 +644,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         }}
         header={
           <>
-            <div className="reader-header-nav"><button className="reader-back" onClick={back}>
-              ‹ Library
-            </button>
-            {documentId && <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>Settings</a>}</div>
             <div className="reader-tabs">
               <button className={tab === 'document' ? 'active' : ''} onClick={() => setTab('document')}>
                 Document
@@ -602,26 +656,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 Tour
               </button>
             </div>
-            {documentId && manifest && (manifest.tourGeneration || !manifest.tours.length) && (
-              <TourGeneration
-                documentId={documentId}
-                generation={manifest.tourGeneration}
-                canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
-                onChanged={() => setManifestRefresh((value) => value + 1)}
-                onOpenTour={tab === 'document' ? (tourId) => {
-                  engine?.pause();
-                  setSelection([]);
-                  setActiveTour(tourId);
-                  setTab('tour');
-                } : undefined}
-                compact
-              />
-            )}
             {(manifest?.tours.length ?? 0) > 1 && manifest && (
               <label className="reader-tour-picker">
                 Saved tour
                 <select
-                  value={manifest.selectedTour?.id ?? ''}
+                  title={manifest.tours.find((tour) => tour.id === manifest.selectedTour?.id)?.title}
+                value={manifest.selectedTour?.id ?? ''}
                   onChange={(event) => {
                     engine?.pause();
                     setSelection([]);
@@ -635,7 +675,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                   </option>
                   {manifest.tours.map((tour, index) => (
                     <option key={tour.id} value={tour.id}>
-                      {manifest.tours.length > 1 ? `v${manifest.tours.length - index} · ` : ''}{tour.title}
+                      {manifest.tours.length > 1 ? `v${manifest.tours.length - index} · ` : ''}
+                      {tour.title}
                     </option>
                   ))}
                 </select>
@@ -650,9 +691,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
       <main className="main">
         <div className="reader-toolbar">
-          <button onClick={back} className="reader-mobile-back">
-            ‹ Library
-          </button>
           <button
             disabled={!layout || currentPage <= 1}
             onClick={() => goPage(currentPage - 1)}
@@ -686,6 +724,55 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           >
             ›
           </button>
+          <div className="reader-zoom-controls" role="group" aria-label="PDF zoom">
+            <button
+              disabled={!layout || zoomPercent <= 10}
+              aria-label="Zoom out"
+              title="Zoom out"
+              onClick={() => {
+                engine?.pause();
+                camera.zoomAt(1 / 1.2, camera.viewport.width / 2, camera.viewport.height / 2);
+              }}
+            >
+              −
+            </button>
+            <input
+              aria-label="Zoom percentage"
+              title="Zoom percentage"
+              type="number"
+              key={`zoom-${zoomPercent}`}
+              defaultValue={zoomPercent}
+              min={10}
+              max={600}
+              disabled={!layout}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+              onBlur={(event) => {
+                const value = Number(event.currentTarget.value);
+                if (Number.isFinite(value) && value >= 10 && value <= 600) {
+                  engine?.pause();
+                  camera.zoomAt(
+                    value / 100 / camera.getView().s,
+                    camera.viewport.width / 2,
+                    camera.viewport.height / 2,
+                  );
+                } else event.currentTarget.value = String(zoomPercent);
+              }}
+            />
+            <span>%</span>
+            <button
+              disabled={!layout || zoomPercent >= 600}
+              aria-label="Zoom in"
+              title="Zoom in"
+              onClick={() => {
+                engine?.pause();
+                camera.zoomAt(1.2, camera.viewport.width / 2, camera.viewport.height / 2);
+              }}
+            >
+              +
+            </button>
+          </div>
           <button
             disabled={!layout}
             onClick={() => {
@@ -703,18 +790,26 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           </button>
           {!!selection.length && <button onClick={() => setSelection([])}>Clear selection</button>}
           {manifest?.analysis && (
-            <span className="reader-status" role="status">
+            <span className="reader-status" role="status" title={manifest.analysis.warnings.join('\n')}>
               {manifest.analysis.status === 'processing'
                 ? 'Analyzing…'
                 : manifest.analysis.status === 'queued'
                   ? 'Analysis queued'
                   : manifest.analysis.status === 'limited'
-                    ? 'Some pages need OCR'
+                    ? 'Analysis notes'
                     : manifest.analysis.status === 'failed'
                       ? 'Analysis failed'
                       : 'Ready'}
             </span>
           )}
+          <button
+            className={`reader-ids-button${debug ? ' active' : ''}`}
+            onClick={() => setDebug(!debug)}
+            aria-pressed={debug}
+            title="Show element IDs (D)"
+          >
+            IDs
+          </button>
         </div>
         {layout ? (
           <Stage
@@ -729,19 +824,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         ) : (
           <div className="viewport loading">{fatal ? `Could not load the paper: ${fatal}` : 'Loading paper…'}</div>
         )}
-
-        <div className="top-right reader-debug-controls">
-          {/* The sidebar shows problems; this badge is for narrow screens without a sidebar. */}
-          <div className="narrow-only">{loaded && <Problems problems={problems} />}</div>
-          <button
-            className={`chip${debug ? ' on' : ''}`}
-            onClick={() => setDebug(!debug)}
-            aria-pressed={debug}
-            title="Show element IDs (D)"
-          >
-            IDs
-          </button>
-        </div>
 
         {(errors.length > 0 || fatal || saveError || manifest?.analysis?.error) && (
           <div className="banner" role="alert">

@@ -8,15 +8,12 @@ export interface ModelPickerProps {
   catalog: ModelCatalog | null;
   model: string;
   onModelChange(model: string): void;
-  allowTraining: boolean;
-  onAllowTrainingChange(allowed: boolean): void;
   disabled?: boolean;
   compact?: boolean;
   label?: string;
-  requestTrainingConsent?: boolean;
 }
 
-export function ModelPicker({ catalog, model, onModelChange, allowTraining, onAllowTrainingChange, disabled = false, compact = false, label = 'Tour model', requestTrainingConsent = true }: ModelPickerProps) {
+export function ModelPicker({ catalog, model, onModelChange, disabled = false, compact = false, label = 'Tour model' }: ModelPickerProps) {
   const id = useId();
   const selected = selectedApiModel(catalog, model);
   const selectedAbsent = !!model && !selected;
@@ -37,7 +34,6 @@ export function ModelPicker({ catalog, model, onModelChange, allowTraining, onAl
     </div>
     {selected?.contributor && <div className="model-training" id={`${id}-training`}>
       <p>Contributor mode: your paper text, images, prompts and model responses may be used by Meta to train models.</p>
-      {requestTrainingConsent ? <label><input type="checkbox" checked={allowTraining} onChange={(event) => onAllowTrainingChange(event.target.checked)} disabled={disabled} /> <span>I agree to this use for this paper and this tour request.</span></label> : <p>Each upload or new tour will ask for separate training consent.</p>}
     </div>}
     {catalog && <ModelPricingTable catalog={catalog} modal={compact} />}
   </div>;

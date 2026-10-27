@@ -25,6 +25,4 @@
 .profile-card .model-settings { margin-bottom: 20px; padding: 0; border: 0; background: none; }
 .profile-card .model-price-details { width: 100%; }
 .profile-card .model-price-scroll { max-height: 450px; }
-.training-consent { display: flex; align-items: start; gap: 8px; color: var(--muted); font-size: 11px; line-height: 1.6; margin: 12px 0; }
-.training-consent input { margin-top: 3px; accent-color: var(--accent); }
 @media (max-width: 900px) { .profile-grid { grid-template-columns: 1fr; } }

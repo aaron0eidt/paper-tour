@@ -10,7 +10,6 @@ import { TourGeneration } from '../components/TourGeneration';
 import { useModelCatalog } from './useModelCatalog';
 import { useSettings } from './useSettings';
 import { ProfileSettings } from './ProfileSettings';
-import { TrainingConsent } from '../components/TrainingConsent';
 import { canUseModel } from './modelChoices';
 import '../library.css';
 
@@ -43,7 +42,7 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
           </section>
           {import.meta.env.DEV && (
             <button type="button" className="library-button primary" onClick={onOpenDemo}>
-              Open local demo
+              Open local demo (deprecated)
             </button>
           )}
         </main>
@@ -99,13 +98,11 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
   const [signingOut, setSigningOut] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ document: DocumentSummary; mode: 'rename' | 'delete' } | null>(null);
-  const [uploadBusy, setUploadBusy] = useState(false);
   const models = useModelCatalog();
   const profile = useSettings();
   const model = profile.data?.defaultModel ?? '';
-  const [allowTraining, setAllowTraining] = useState(false);
-  useEffect(() => setAllowTraining(false), [model]);
   const selectedModel = models.catalog?.models.find((candidate) => candidate.id === model);
+  const allowTraining = selectedModel?.contributor === true;
   const refreshDocuments = () => setRefresh((count) => count + 1);
 
   useEffect(() => {
@@ -207,19 +204,16 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
           </div>
           {import.meta.env.DEV && (
             <button className="library-text-button" type="button" onClick={onOpenDemo}>
-              Open local demo
+              Open local demo (deprecated)
             </button>
           )}
         </div>
         {models.error && <div className="model-catalog-error" role="alert"><p>{models.error}</p><button className="library-text-button" type="button" onClick={models.refresh}>Try again</button></div>}
         {profile.error && <p className="library-error" role="alert">{profile.error} <button className="library-text-button" onClick={profile.refresh}>Retry settings</button></p>}
-        {selectedModel?.contributor && <TrainingConsent checked={allowTraining} onChange={setAllowTraining} disabled={uploadBusy} />}
         <UploadPanel
           model={model}
           allowTraining={allowTraining}
           canUpload={!!profile.data && canUseModel(models.catalog, model, allowTraining) && !models.loading}
-          onResetConsent={() => setAllowTraining(false)}
-          onBusyChange={setUploadBusy}
           onChanged={refreshDocuments}
           onUploaded={() => {
             setNotice(

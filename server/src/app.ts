@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
@@ -100,6 +101,40 @@ export async function createApp(options: Options) {
         api.delete('/settings/meta-key', async (req) => settings.removeKey(owner(req)));
         api.post('/settings/test', async (req) => settings.test(owner(req)));
       }
+      api.get<{ Params: { id: string; generationId: string }; Querystring: { after?: string } }>(
+        '/documents/:id/generations/:generationId/events',
+        { schema: { params: { type: 'object', required: ['id', 'generationId'], properties: { id: uuid, generationId: uuid } },
+          querystring: { type: 'object', additionalProperties: false, properties: { after: { type: 'string', pattern: '^[0-9]{1,18}$' } } } } },
+        async (req, reply) => {
+          if (!service.activity) throw new HttpError(503, 'activity_unavailable', 'Activity is unavailable.');
+          let cursor = req.query.after ?? '0';
+          let batch = await service.activity(owner(req), req.params.id, req.params.generationId, cursor);
+          reply.header('Content-Type', 'text/event-stream').header('Cache-Control', 'no-store').header('X-Accel-Buffering', 'no');
+          // Fastify applies CORS headers before we take ownership of the stream.
+          reply.hijack();
+          reply.raw.writeHead(200, Object.fromEntries(Object.entries(reply.getHeaders()).filter(([, value]) => value !== undefined).map(([key, value]) => [key, Array.isArray(value) ? value : String(value)])));
+          const controller = new AbortController();
+          const close = () => controller.abort();
+          reply.raw.on('close', close);
+          const send = async (value: unknown) => {
+            if (controller.signal.aborted) return;
+            if (!reply.raw.write(`data: ${JSON.stringify(value)}\n\n`)) {
+              await new Promise<void>((resolve) => { const done = () => { reply.raw.off('drain', done); controller.signal.removeEventListener('abort', done); resolve(); }; reply.raw.once('drain', done); controller.signal.addEventListener('abort', done, { once: true }); });
+            }
+          };
+          try {
+            const end = Date.now() + 20_000;
+            while (!controller.signal.aborted) {
+              for (const event of batch.events) { await send({ event }); cursor = event.id; }
+              await send({ status: batch.status });
+              if ((!['queued', 'generating'].includes(batch.status) && batch.events.length < 100) || Date.now() >= end) break;
+              if (batch.events.length < 100) await delay(700, undefined, { signal: controller.signal });
+              batch = await service.activity(owner(req), req.params.id, req.params.generationId, cursor);
+            }
+          } catch { if (!controller.signal.aborted) await send({ error: 'Activity interrupted. Reconnecting…' }); }
+          finally { reply.raw.off('close', close); reply.raw.end(); }
+        },
+      );
       api.get('/documents', async (req) => ({
         documents: await service.list(owner(req)),
       }));

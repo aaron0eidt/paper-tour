@@ -1,3 +1,4 @@
+import type { GenerationActivity } from '../../shared/activity';
 import { randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import type {
@@ -33,6 +34,7 @@ const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
 export interface Library {
   list(owner: string): Promise<DocumentSummary[]>;
   models(owner?: string): Promise<ModelCatalog>;
+  activity?(owner: string, id: string, generationId: string, after: string): Promise<GenerationActivity>;
   resumeConfigured?(owner: string): Promise<void>;
   reserve(owner: string, filename: string, size: number, selection?: TourModelSelection): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
@@ -96,6 +98,13 @@ export class DocumentService implements Library {
       [id, owner],
     );
     return rows[0] ?? missing();
+  }
+  async activity(owner: string, id: string, generationId: string, after: string): Promise<GenerationActivity> {
+    await this.owned(owner, id);
+    const { rows: [generation] } = await this.db.query('select status from tour_generations where id=$1 and document_id=$2', [generationId, id]);
+    if (!generation) return missing();
+    const { rows } = await this.db.query('select id::text,type,data,created_at from generation_events where generation_id=$1 and id>$2 order by id limit 100', [generationId, after]);
+    return { status: generation.status, events: rows.map((r) => ({ id: r.id, type: r.type, data: r.data, at: iso(r.created_at) })) };
   }
   private async summary(row: Row): Promise<DocumentSummary> {
     return {

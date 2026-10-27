@@ -21,11 +21,9 @@ interface UploadPanelProps {
   model: string;
   allowTraining: boolean;
   canUpload: boolean;
-  onResetConsent(): void;
-  onBusyChange?(busy: boolean): void;
 }
 
-export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUpload, onResetConsent, onBusyChange }: UploadPanelProps) {
+export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUpload }: UploadPanelProps) {
   const [stage, setStage] = useState<UploadStage>('idle');
   const [progress, setProgress] = useState(0);
   const [filename, setFilename] = useState('');
@@ -37,7 +35,6 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
   const rejectTransfer = useRef<((error: Error) => void) | null>(null);
   const run = useRef(0);
   const busy = ['checking', 'uploading', 'finishing', 'canceling'].includes(stage);
-  useEffect(() => { onBusyChange?.(stage !== 'idle'); }, [stage, onBusyChange]);
 
   useEffect(
     () => () => {
@@ -140,7 +137,6 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
       setStage('idle');
       setFilename('');
       if (input.current) input.current.value = '';
-      onResetConsent();
       onUploaded();
     } catch (cause) {
       if (!active()) return;
@@ -177,7 +173,6 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
     setFilename('');
     setProgress(0);
     if (input.current) input.current.value = '';
-    onResetConsent();
   }
 
   function drop(event: DragEvent) {

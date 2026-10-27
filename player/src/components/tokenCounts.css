@@ -1,0 +1,9 @@
+.token-meter { flex-basis: 100%; min-width: 0; }
+.token-counts { display: flex; flex-wrap: wrap; gap: 20px; margin: 8px 0; }
+.token-count { display: flex; flex-direction: column; gap: 3px; }
+.token-count dt { font-size: 10px; color: var(--muted); }
+.token-count dd { margin: 0; color: var(--text); font-size: 18px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.token-count.waiting dd { color: var(--muted); animation: token-wait 1.6s ease-in-out infinite; }
+.token-pending { display: block; font-size: 10px; color: var(--muted); }
+@keyframes token-wait { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .token-count.waiting dd { animation: none; } }

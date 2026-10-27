@@ -61,7 +61,7 @@ export function ProfileSettings({ email }: { email: string }) {
         </section>
         <section className="profile-card" aria-labelledby="model-heading">
           <div className="profile-card-heading"><span className="profile-step">02</span><div><h2 id="model-heading">Model &amp; API pricing</h2><p>Your default for new PDFs and new tour versions.</p></div></div>
-          <ModelPicker catalog={models.catalog} model={model} onModelChange={setModel} allowTraining={false} onAllowTrainingChange={() => {}} requestTrainingConsent={false} disabled={busy || models.loading} label="Default tour model" />
+          <ModelPicker catalog={models.catalog} model={model} onModelChange={setModel} disabled={busy || models.loading} label="Default tour model" />
           {models.error && <p className="library-error" role="alert">{models.error} <button className="library-text-button" onClick={models.refresh}>Retry model list</button></p>}
           <button className="library-button primary" disabled={busy || !selected?.tourCompatible || selected.available === false || model === profile.data.defaultModel} onClick={() => void run(() => update({ defaultModel: model }), 'Default model saved. Existing tours are kept.')}>Save default model</button>
         </section>

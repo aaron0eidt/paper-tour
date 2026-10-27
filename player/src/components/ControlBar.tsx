@@ -6,8 +6,6 @@ import { isGoogleVoice, pickVoice, voiceId } from '../narration/voices';
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, VolumeIcon } from './icons';
 import '../voiceSettings.css';
 
-export const SPEEDS = [0.75, 1, 1.25, 1.5];
-
 interface Props {
   steps: FlatStep[];
   state: EngineState;
@@ -25,11 +23,45 @@ interface Props {
   voiceConfig?: Voice;
 }
 
-export function ControlBar({ steps, state, speed, muted, onToggle, onPrev, onNext, onSpeed, onMute, voices = [], voicesLoading = false, selectedVoiceId = '', onVoiceChange, voiceConfig }: Props) {
+export function ControlBar({
+  steps,
+  state,
+  speed,
+  muted,
+  onToggle,
+  onPrev,
+  onNext,
+  onSpeed,
+  onMute,
+  voices = [],
+  voicesLoading = false,
+  selectedVoiceId = '',
+  onVoiceChange,
+  voiceConfig,
+}: Props) {
   const disabled = !steps.length;
   const current = steps[state.index];
   const playing = state.status === 'playing';
   const textRef = useRef<HTMLDivElement>(null);
+  const audioPanel = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (audioPanel.current?.open && !audioPanel.current.contains(event.target as Node))
+        audioPanel.current.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && audioPanel.current?.open) {
+        audioPanel.current.open = false;
+        audioPanel.current.querySelector('summary')?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, []);
   // A speed picked with the mouse or a finger hands focus back, so Space and the arrows control
   // the tour again; with the keyboard, focus stays for further arrow presses.
   const pickedByPointer = useRef(false);
@@ -38,8 +70,19 @@ export function ControlBar({ steps, state, speed, muted, onToggle, onPrev, onNex
   const language = (voiceConfig?.lang ?? automaticVoice?.lang ?? '').toLowerCase().replace(/_/g, '-').split('-')[0];
   const sameLanguage = voices.filter((voice) => voice.lang.toLowerCase().replace(/_/g, '-').split('-')[0] === language);
   const otherLanguages = voices.filter((voice) => !sameLanguage.includes(voice));
-  const sortedVoices = (available: SpeechSynthesisVoice[]) => [...available].sort((a, b) => Number(isGoogleVoice(b)) - Number(isGoogleVoice(a)) || a.name.localeCompare(b.name));
-  const voiceHint = voicesLoading ? 'Loading this browser’s voices…' : !voices.length ? 'This browser lists no voices.' : selectedVoiceId && !selectedIsAvailable ? 'Saved voice unavailable; using Automatic.' : !sameLanguage.some(isGoogleVoice) ? 'No Google voice for this language in this browser.' : selectedVoiceId ? 'Using your selected voice.' : 'Google voice preferred automatically.';
+  const sortedVoices = (available: SpeechSynthesisVoice[]) =>
+    [...available].sort((a, b) => Number(isGoogleVoice(b)) - Number(isGoogleVoice(a)) || a.name.localeCompare(b.name));
+  const voiceHint = voicesLoading
+    ? 'Loading this browser’s voices…'
+    : !voices.length
+      ? 'This browser lists no voices.'
+      : selectedVoiceId && !selectedIsAvailable
+        ? 'Saved voice unavailable; using Automatic.'
+        : !sameLanguage.some(isGoogleVoice)
+          ? 'No Google voice for this language in this browser.'
+          : selectedVoiceId
+            ? 'Using your selected voice.'
+            : 'Google voice preferred automatically.';
 
   // Keep the word being spoken in view when the narration is longer than the box.
   useEffect(() => {
@@ -59,7 +102,12 @@ export function ControlBar({ steps, state, speed, muted, onToggle, onPrev, onNex
   return (
     <footer className="controls">
       <div className="transport">
-        <button className="icon-btn" onClick={onPrev} disabled={disabled || state.status === 'idle' || state.index === 0} aria-label="Previous step">
+        <button
+          className="icon-btn"
+          onClick={onPrev}
+          disabled={disabled || state.status === 'idle' || state.index === 0}
+          aria-label="Previous step"
+        >
           <PrevIcon />
         </button>
         <button className="play-btn" onClick={onToggle} disabled={disabled} aria-label={playing ? 'Pause' : 'Play'}>
@@ -83,7 +131,10 @@ export function ControlBar({ steps, state, speed, muted, onToggle, onPrev, onNex
             <div className="narration-text" ref={textRef} aria-live="off">
               {state.status === 'idle' && <span className="hint">Press play to start. </span>}
               {current.words.map((w, i) => (
-                <span key={i} className={`w${i <= state.word ? ' spoken' : ''}${i === state.word && playing ? ' now' : ''}`}>
+                <span
+                  key={i}
+                  className={`w${i <= state.word ? ' spoken' : ''}${i === state.word && playing ? ' now' : ''}`}
+                >
                   {w}{' '}
                 </span>
               ))}
@@ -95,48 +146,80 @@ export function ControlBar({ steps, state, speed, muted, onToggle, onPrev, onNex
       </div>
 
       <div className="settings">
-        {onVoiceChange && !current?.step.audio && <label className="voice-setting">
-          <span>Voice</span>
-          <select
-            aria-label="Narration voice"
-            value={selectedVoiceId}
-            title={voiceHint}
-            disabled={disabled || !voices.length}
-            onPointerDown={() => (pickedByPointer.current = true)}
-            onKeyDown={() => (pickedByPointer.current = false)}
-            onChange={(event) => {
-              onVoiceChange(event.target.value);
-              if (pickedByPointer.current) event.currentTarget.blur();
-              pickedByPointer.current = false;
-            }}
-          >
-            <option value="">{voicesLoading ? 'Loading voices…' : `Automatic${automaticVoice ? ` · ${automaticVoice.name}` : ' · browser default'}`}</option>
-            {selectedVoiceId && !selectedIsAvailable && <option value={selectedVoiceId} disabled>Saved voice unavailable</option>}
-            {sameLanguage.length > 0 && <optgroup label="For this paper">{sortedVoices(sameLanguage).map((voice) => <option value={voiceId(voice)} key={voiceId(voice)}>{voice.name} ({voice.lang})</option>)}</optgroup>}
-            {otherLanguages.length > 0 && <optgroup label="Other languages">{sortedVoices(otherLanguages).map((voice) => <option value={voiceId(voice)} key={voiceId(voice)}>{voice.name} ({voice.lang})</option>)}</optgroup>}
-          </select>
-          <small>{voiceHint}</small>
-        </label>}
-        <label className="speed">
-          <span>Speed</span>
-          <select
-            value={speed}
-            onPointerDown={() => (pickedByPointer.current = true)}
-            onKeyDown={() => (pickedByPointer.current = false)}
-            onChange={(e) => {
-              onSpeed(Number(e.target.value));
-              if (pickedByPointer.current) e.currentTarget.blur();
-              pickedByPointer.current = false;
-            }}
-            disabled={disabled}
-          >
-            {SPEEDS.map((s) => (
-              <option key={s} value={s}>
-                {s}×
-              </option>
-            ))}
-          </select>
-        </label>
+        <details className="playback-options" ref={audioPanel}>
+          <summary aria-label="Audio settings" title="Voice and playback speed">
+            <svg
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 7h16M4 17h16M8 4v6M16 14v6" />
+            </svg>
+            <span>Audio</span>
+            <span className="playback-speed">{speed}×</span>
+          </summary>
+          <div className="playback-panel">
+            <h3>Audio settings</h3>
+            {onVoiceChange && !current?.step.audio && (
+              <label className="voice-setting">
+                <span>Voice</span>
+                <select
+                  aria-label="Narration voice"
+                  value={selectedVoiceId}
+                  title={voiceHint}
+                  disabled={disabled || !voices.length}
+                  onPointerDown={() => (pickedByPointer.current = true)}
+                  onKeyDown={() => (pickedByPointer.current = false)}
+                  onChange={(event) => {
+                    onVoiceChange(event.target.value);
+                    if (pickedByPointer.current) event.currentTarget.blur();
+                    pickedByPointer.current = false;
+                  }}
+                >
+                  <option value="">
+                    {voicesLoading
+                      ? 'Loading voices…'
+                      : `Automatic${automaticVoice ? ` · ${automaticVoice.name}` : ' · browser default'}`}
+                  </option>
+                  {selectedVoiceId && !selectedIsAvailable && (
+                    <option value={selectedVoiceId} disabled>
+                      Saved voice unavailable
+                    </option>
+                  )}
+                  {sameLanguage.length > 0 && (
+                    <optgroup label="For this paper">
+                      {sortedVoices(sameLanguage).map((voice) => (
+                        <option value={voiceId(voice)} key={voiceId(voice)}>
+                          {voice.name} ({voice.lang})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {otherLanguages.length > 0 && (
+                    <optgroup label="Other languages">
+                      {sortedVoices(otherLanguages).map((voice) => (
+                        <option value={voiceId(voice)} key={voiceId(voice)}>
+                          {voice.name} ({voice.lang})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+                <small>{voiceHint}</small>
+              </label>
+            )}
+            <label className="speed">
+              <span className="speed-heading">Speed <output>{speed.toFixed(2)}×</output></span>
+              <input type="range" aria-label="Narration speed" aria-valuetext={`${speed.toFixed(2)} times normal speed`} min={0.5} max={2} step={0.05} value={speed} onChange={(event) => onSpeed(Number(event.target.value))} disabled={disabled} />
+              <span className="speed-scale" aria-hidden="true"><span>0.5×</span><span>2×</span></span>
+            </label>
+          </div>
+        </details>
         <button
           className={`icon-btn${muted ? ' active' : ''}`}
           onClick={() => onMute(!muted)}

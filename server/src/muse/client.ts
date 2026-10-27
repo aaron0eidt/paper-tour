@@ -1,3 +1,4 @@
+import { sseData } from '../../../shared/sse';
 import { ProcessingError } from '../errors';
 import type { MuseConfig } from '../config';
 
@@ -10,6 +11,7 @@ export interface ModelUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cachedInputTokens?: number;
 }
 export interface Completion {
   value: unknown;
@@ -45,12 +47,77 @@ export class MuseClient {
     this.endpoint = `${url.href.replace(/\/$/, '')}/chat/completions`;
   }
 
+  private async stream(
+    response: Response,
+    onDelta: (text: string) => Promise<void>,
+    onUsage?: (usage: ModelUsage) => Promise<void>,
+  ): Promise<string> {
+    if (!response.body) throw new Error('Missing response stream');
+    let content = '',
+      pending = '',
+      lastFlush = Date.now(),
+      ended = false;
+    let finish: string | undefined,
+      usage: unknown,
+      refusal = false;
+    try {
+      for await (const data of sseData(response.body)) {
+        if (data === '[DONE]') {
+          ended = true;
+          break;
+        }
+        const chunk = JSON.parse(data);
+        if (chunk.error) throw new Error('Provider stream error');
+        const choice = chunk.choices?.[0];
+        if (choice?.delta?.refusal) refusal = true;
+        if (typeof choice?.delta?.content === 'string') {
+          const delta = choice.delta.content;
+          content += delta;
+          pending += delta;
+          if (content.length > 2_000_000) throw new Error('Oversized response');
+          if (pending.length >= 4096 || Date.now() - lastFlush >= 500) {
+            await onDelta(pending);
+            pending = '';
+            lastFlush = Date.now();
+          }
+        }
+        if (choice?.finish_reason) finish = choice.finish_reason;
+        if (chunk.usage) {
+          usage = chunk.usage;
+          const count = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : 0);
+          await onUsage?.({
+            promptTokens: count(chunk.usage.prompt_tokens),
+            completionTokens: count(chunk.usage.completion_tokens),
+            totalTokens: count(chunk.usage.total_tokens),
+            ...(typeof chunk.usage.prompt_tokens_details?.cached_tokens === 'number'
+              ? {
+                  cachedInputTokens: Math.min(
+                    count(chunk.usage.prompt_tokens_details.cached_tokens),
+                    count(chunk.usage.prompt_tokens),
+                  ),
+                }
+              : {}),
+          });
+        }
+      }
+    } finally {
+      if (pending) await onDelta(pending);
+    }
+    if (!ended || !finish) throw new Error('Interrupted response stream');
+    return JSON.stringify({
+      choices: [{ finish_reason: finish, message: { content, ...(refusal ? { refusal: true } : {}) } }],
+      usage,
+    });
+  }
+
   async complete(
     messages: MuseMessage[],
     name: string,
     schema: object,
     maxTokens: number,
     signal?: AbortSignal,
+    onDelta?: (text: string) => Promise<void>,
+    onUsage?: (usage: ModelUsage) => Promise<void>,
   ): Promise<Completion> {
     if (!this.config.apiKey.trim())
       throw new ProcessingError('muse_not_configured', 'Tour creation needs a Muse API key on the server.');
@@ -64,6 +131,7 @@ export class MuseClient {
         headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: this.config.model,
+          ...(onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
           reasoning_effort: 'medium',
           messages,
           max_tokens: maxTokens,
@@ -96,14 +164,25 @@ export class MuseClient {
       );
     let payload: {
       choices?: { finish_reason?: string; message?: { content?: unknown; refusal?: unknown } }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+      };
     };
     try {
-      const raw = await response.text();
+      const raw =
+        onDelta && response.headers.get('content-type')?.includes('text/event-stream')
+          ? await this.stream(response, onDelta, onUsage)
+          : await response.text();
       if (raw.length > 2_000_000) throw new Error('oversized');
       payload = JSON.parse(raw);
-      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.choices)) throw new Error('invalid envelope');
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.choices))
+        throw new Error('invalid envelope');
     } catch {
+      if (abort.aborted)
+        throw new ProcessingError('muse_timeout', 'Muse took too long to respond. Please retry the tour.', true);
       throw new ProcessingError(
         'muse_invalid_response',
         'Muse returned an unreadable response. Please retry the tour.',
@@ -129,6 +208,14 @@ export class MuseClient {
         promptTokens: count(payload.usage?.prompt_tokens),
         completionTokens: count(payload.usage?.completion_tokens),
         totalTokens: count(payload.usage?.total_tokens),
+        ...(typeof payload.usage?.prompt_tokens_details?.cached_tokens === 'number'
+          ? {
+              cachedInputTokens: Math.min(
+                count(payload.usage.prompt_tokens_details.cached_tokens),
+                count(payload.usage.prompt_tokens),
+              ),
+            }
+          : {}),
       },
       requestId: response.headers.get('x-request-id')?.slice(0, 200) ?? null,
     };

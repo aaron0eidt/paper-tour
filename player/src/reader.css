@@ -70,13 +70,21 @@
 }
 .reader-tour-picker {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 5px;
   font-size: 11px;
   color: var(--muted);
   margin-bottom: 15px;
 }
 .reader-tour-picker select {
+  display: block;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line);
@@ -223,4 +231,174 @@
     display: block;
   }
 }
-.reader-header-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.reader-header-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+/* App actions live above the document; the lower toolbar only controls the PDF. */
+.reader-app {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.reader-app-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 54px;
+  min-height: 54px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.reader-app-toolbar button,
+.reader-settings-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 11px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+}
+.reader-settings-button {
+  width: 34px;
+  padding: 0;
+  color: var(--muted);
+}
+.reader-settings-button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.reader-tour-actions {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+}
+.reader-app-toolbar .tour-generation.in-toolbar {
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.reader-app-toolbar .tour-generation.in-toolbar > .tour-generation-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(330px, 36vw);
+}
+.reader-app-toolbar .tour-generation-content strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader-app-toolbar .tour-generation-content progress {
+  flex: 0 0 52px;
+  width: 52px;
+  height: 3px;
+  margin: 0;
+}
+.reader-app-toolbar .tour-generation-content p {
+  display: none;
+}
+.reader-app-toolbar .generation-activity {
+  width: auto;
+  flex: 0 0 auto;
+}
+.reader-app-toolbar .tour-generation-extra {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+}
+.reader-app-toolbar .tour-generation-extra p,
+.reader-app-toolbar .tour-generation-error,
+.reader-app-toolbar .tour-generation-extra a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
+}
+.reader-app-toolbar .activity-dialog button {
+  display: inline-flex;
+}
+.reader-app-toolbar .activity-dialog .activity-call-row {
+  display: block;
+}
+.reader-app-toolbar .activity-dialog {
+  font-size: 12px;
+}
+.reader-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-left: 1px solid var(--line);
+  padding-left: 10px;
+  margin-left: 5px;
+}
+.reader-zoom-controls button {
+  font-size: 16px;
+  width: 30px;
+  padding: 3px;
+}
+.reader-zoom-controls input {
+  width: 47px;
+  text-align: right;
+}
+.reader-toolbar .reader-ids-button {
+  font-size: 10px;
+  color: var(--muted);
+}
+.reader-toolbar button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.reader-toolbar input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.reader-toolbar input::-webkit-inner-spin-button,
+.reader-toolbar input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+@media (max-width: 740px) {
+  .reader-app-toolbar {
+    padding: 7px 10px;
+    gap: 8px;
+  }
+  .reader-toolbar {
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .reader-zoom-controls {
+    padding-left: 6px;
+    margin-left: 2px;
+  }
+}
+@media (max-width: 580px) {
+  .reader-app-toolbar {
+    grid-column: 1;
+  }
+  .reader-mobile-back {
+    display: none;
+  }
+}

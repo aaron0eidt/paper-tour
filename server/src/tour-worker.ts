@@ -1,3 +1,4 @@
+import { generationRecorder } from './activity';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -321,7 +322,10 @@ export class TourWorker {
       const signal = controller.signal;
       let folder: string | undefined;
       const started = Date.now();
+      const record = generationRecorder(this.db.pool, generationId, access?.secret ?? this.config.muse?.apiKey);
       try {
+        await record('run.started', { model: generator.model, analysisId });
+        await record('step.started', { stage: 'preparing' });
         await this.db.query(
           "update tour_generations set status='generating',stage='preparing',model=$2,error=null,error_code=null,updated_at=now() where id=$1",
           [generationId, generator.model],
@@ -330,14 +334,16 @@ export class TourWorker {
         folder = await mkdtemp(resolve(tmpdir(), 'paper-tour-muse-'));
         const input = { documentId, analysisId, uploadPath: row.upload_path as string, doc: row.doc as Doc, folder };
         const images = await (this.prepareImages?.(input, signal) ?? this.loadImages(input, signal));
+        await record('sources.prepared', { sources: images.map(({ targetId, kind, page, label }) => ({ targetId, kind, page, label })) });
+        let lastStage = 'preparing';
         const onProgress = async (progress: TourProgress) => {
           signal.throwIfAborted();
+          if (lastStage !== progress.stage) { await record('step.started', { stage: progress.stage }); lastStage = progress.stage; }
           await this.db.query(
             "update tour_generations set stage=$2,images_done=$3,images_total=$4,updated_at=now() where id=$1 and status='generating'",
             [generationId, progress.stage, progress.imagesDone, progress.imagesTotal],
           );
         };
-        await onProgress({ stage: 'images', imagesDone: 0, imagesTotal: images.length });
         const {
           rows: [previous],
         } = await this.db.query(
@@ -351,8 +357,14 @@ export class TourWorker {
           candidate && typeof candidate === 'object' && !Array.isArray(candidate)
             ? { ...(candidate as Record<string, unknown>), generationId: previous.id }
             : undefined;
+        const { rows: checkpoints } = await this.db.query(
+          `select e.data,g.id as generation_id from generation_events e join tour_generations g on g.id=e.generation_id
+           where g.document_id=$1 and g.analysis_id=$2 and g.model=$3 and e.type='inspection.batch.completed' order by e.id desc limit 200`,
+          [documentId, analysisId, generator.model],
+        );
+        const previousVisualBatches = checkpoints.filter((entry) => typeof entry.data?.cacheKey === 'string').map((entry) => ({ cacheKey: entry.data.cacheKey, observations: entry.data.observations, generationId: entry.generation_id }));
         const generated = await generator.generate(
-          { documentId, analysisId, doc: input.doc, images, previousVisualInspection },
+          { documentId, analysisId, doc: input.doc, images, previousVisualInspection, previousVisualBatches, onEvent: record },
           onProgress,
           signal,
         );
@@ -384,6 +396,7 @@ export class TourWorker {
             "update tour_generations set status='ready',stage='validating',images_done=$2,images_total=$2,result_tour_id=$3,metadata=$4,error=null,error_code=null,updated_at=now(),completed_at=now() where id=$1",
             [generationId, images.length, tour.id, generated.metadata],
           );
+          await generationRecorder(tx, generationId)('run.completed', { durationMs: Date.now() - started, tourId: tour.id });
           await tx.query('update documents set updated_at=now() where id=$1', [documentId]);
         });
         console.log(
@@ -399,6 +412,7 @@ export class TourWorker {
       } catch (error) {
         const failure = safeFailure(error, signal);
         const terminal = failure.configuration || !failure.transient || finalAttempt;
+        await record('run.failed', { code: failure.code, message: failure.message, retrying: !terminal });
         const status = failure.configuration ? 'needs_configuration' : terminal ? 'failed' : 'queued';
         await this.db.query(
           "update tour_generations set status=$2,error_code=$3,error=$4,updated_at=now(),completed_at=case when $2='failed' then now() else null end where id=$1 and status<>'ready'",

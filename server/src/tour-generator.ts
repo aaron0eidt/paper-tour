@@ -1,3 +1,4 @@
+import type { ActivitySink } from './activity';
 import type { Doc, Tour } from '../../shared/paper';
 import type { TourGenerationStage } from '../../shared/contracts';
 
@@ -15,6 +16,8 @@ export interface TourGenerationInput {
   images: TourImage[];
   /** Candidate only: generator must validate image hashes, observations and inspection version. */
   previousVisualInspection?: Record<string, unknown>;
+  onEvent?: ActivitySink;
+  previousVisualBatches?: { cacheKey: string; observations: unknown; generationId: string }[];
 }
 export interface TourProgress {
   stage: TourGenerationStage;

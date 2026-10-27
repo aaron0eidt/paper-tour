@@ -483,3 +483,78 @@ test('model switching routes image inspection and writing to the chosen reasonin
   for (const unsupported of ['muse-image-1.0', 'muse-voice-transcribe-1.0', 'sam-3.1', 'made-up-model'])
     assert.throws(() => new MuseTourGenerator(settings).withModel(unsupported), assertCode('unsupported_model'));
 });
+
+test('streamed Muse output survives split UTF-8/CRLF frames and records real deltas and usage', async () => {
+  const chunks: string[] = [];
+  const usages: unknown[] = [];
+  const text = JSON.stringify({ explanation: 'Größe β' });
+  const wire = [
+    ': heartbeat\r\n\r\n',
+    ...[text.slice(0, 14), text.slice(14)].map((part) => `data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\r\n\r\n`),
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, prompt_tokens_details: { cached_tokens: 8 } } })}\n\n`,
+    'data: [DONE]\n\n',
+  ].join('');
+  const bytes = new TextEncoder().encode(wire);
+  const transport: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.stream, true); assert.equal(body.stream_options.include_usage, true);
+    return new Response(new ReadableStream({ start(controller) { for (let i = 0; i < bytes.length; i++) controller.enqueue(bytes.slice(i, i + 1)); controller.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const completion = await new MuseClient(settings, transport).complete([], 'test', {}, 100, undefined, async (delta) => { chunks.push(delta); }, async (usage) => { usages.push(usage); });
+  assert.deepEqual(usages, [{ promptTokens: 10, completionTokens: 5, totalTokens: 15, cachedInputTokens: 8 }]);
+  assert.equal(completion.usage.cachedInputTokens, 8);
+  assert.equal(chunks.join(''), text); assert.deepEqual(completion.value, { explanation: 'Größe β' }); assert.equal(completion.usage.totalTokens, 15);
+});
+
+test('interrupted or truncated streams cannot become accepted model responses', async () => {
+  for (const suffix of ['', 'data: [DONE]\n\n', `data: ${JSON.stringify({ choices: [{ finish_reason: 'length' }] })}\n\ndata: [DONE]\n\n`]) {
+    const wire = `data: ${JSON.stringify({ choices: [{ delta: { content: '{"ok":true}' } }] })}\n\n${suffix}`;
+    await assert.rejects(new MuseClient(settings, async () => new Response(wire, { headers: { 'content-type': 'text/event-stream' } })).complete([], 'test', {}, 100, undefined, async () => {}), assertCode(suffix.includes('length') ? 'muse_output_truncated' : 'muse_invalid_response'));
+  }
+});
+
+test('generation activity captures actual multimodal prompts without inline image bytes', async () => {
+  const recorded: { type: string; data: Record<string, unknown> }[] = [];
+  const generator = new MuseTourGenerator(settings, provider((request) => request.response_format.json_schema.name === 'paper_visual_observations'
+    ? response({ observations: images.map((image) => ({ targetId: image.targetId, description: 'Blue bar larger than red bar', readable: true, uncertainties: [] })) })
+    : response(draft())));
+  await generator.generate({ ...input, onEvent: async (type, data) => { recorded.push({ type, data }); } });
+  const started = recorded.find((event) => event.type === 'model.started');
+  assert(started); assert(JSON.stringify(started.data).includes('p1.s1')); assert(JSON.stringify(started.data).includes('fig1'));
+  assert(!JSON.stringify(recorded).includes('data:image')); assert(!JSON.stringify(recorded).includes(settings.apiKey));
+  assert(recorded.some((event) => event.type === 'model.completed'));
+});
+
+test('validated visual batch checkpoints survive retries and invalidate on changed evidence', async () => {
+  let inspections = 0;
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const transport = provider((request) => {
+    if (request.response_format.json_schema.name === 'paper_visual_observations') {
+      inspections++;
+      return response({ observations: images.map((image) => ({ targetId: image.targetId, description: 'Verified visible chart.', readable: true, uncertainties: [] })) });
+    }
+    return response(draft());
+  });
+  const generator = new MuseTourGenerator(settings, transport);
+  const original = await generator.generate({ ...input, onEvent: async (type, data) => { events.push({ type, data }); } });
+  const checkpoint = events.find((event) => event.type === 'inspection.batch.completed')!;
+  assert(checkpoint);
+  const batch = { cacheKey: String(checkpoint.data.cacheKey), observations: checkpoint.data.observations, generationId: 'previous-run' };
+  const retried = await generator.generate({ ...input, previousVisualBatches: [batch] });
+  assert.equal(inspections, 1); assert.equal(retried.metadata.reusedVisualBatches, 1);
+  assert.deepEqual(retried.tour, original.tour);
+  for (const changed of [
+    { ...input, analysisId: 'different-analysis' },
+    { ...input, doc: { ...doc, source: { ...doc.source, sha256: 'b'.repeat(64) } } },
+    { ...input, images: images.map((image) => ({ ...image, label: image.label + ' changed' })) },
+  ]) {
+    const result = await generator.generate({ ...changed, previousVisualBatches: [batch] });
+    assert.equal(result.metadata.reusedVisualBatches, 0);
+  }
+  const bad = await generator.generate({ ...input, previousVisualBatches: [{ ...batch, observations: [] }] });
+  assert.equal(bad.metadata.reusedVisualBatches, 0);
+  const differentModel = await new MuseTourGenerator({ ...settings, model: 'muse-wonder-1.0' }, transport).generate({ ...input, previousVisualBatches: [batch] });
+  assert.equal(differentModel.metadata.reusedVisualBatches, 0);
+  assert.equal(inspections, 6);
+});

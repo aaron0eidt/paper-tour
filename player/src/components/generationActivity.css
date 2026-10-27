@@ -1,0 +1,229 @@
+.generation-activity {
+  flex-basis: 100%;
+  min-width: 0;
+  width: 100%;
+  font-size: 12px;
+}
+.activity-dialog {
+  width: min(1080px, calc(100vw - 40px));
+  max-height: calc(100dvh - 48px);
+  box-sizing: border-box;
+  margin: auto;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--panel);
+  font: inherit;
+  box-shadow: 0 20px 80px #0008;
+}
+.activity-dialog::backdrop {
+  background: #05070bbd;
+}
+.activity-dialog-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+}
+.activity-dialog-header h2 {
+  margin: 0 0 5px;
+  font-size: 21px;
+  font-weight: 550;
+}
+.activity-dialog-header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.activity-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.activity-summary .token-meter {
+  flex-basis: auto;
+}
+.activity-summary .token-counts {
+  margin: 0;
+  gap: 24px;
+}
+.activity-summary .token-count {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+.activity-summary .token-count dd {
+  font-size: 16px;
+}
+.activity-summary label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.activity-inspector-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  height: min(600px, calc(100dvh - 240px));
+  min-height: 240px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.activity-call-list {
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  padding: 5px;
+  background: var(--bg);
+}
+.tour-generation .activity-call-row {
+  display: block;
+  text-align: left;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 3px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+}
+.tour-generation .activity-call-row[aria-pressed='true'] {
+  background: var(--panel);
+  border-color: #465775;
+}
+.activity-call-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 550;
+  font-size: 12px;
+}
+.activity-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9cbfba;
+  flex-shrink: 0;
+}
+.activity-state-dot.running {
+  background: var(--accent);
+  animation: token-wait 1.6s ease-in-out infinite;
+}
+.activity-state-dot.failed {
+  background: #f0b4b4;
+}
+.activity-call-meta {
+  display: block;
+  margin: 5px 0 0 13px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.activity-call-row .token-counts {
+  gap: 16px;
+  margin: 6px 0 0 13px;
+}
+.activity-call-row .token-count {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 5px;
+}
+.activity-call-row .token-count dd {
+  font-size: 12px;
+}
+.activity-call-row .token-count dt {
+  font-size: 9px;
+}
+.activity-payload {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  gap: 12px;
+}
+.activity-payload-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.activity-payload-heading span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.activity-payload-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.activity-payload-toolbar [role='group'] {
+  display: flex;
+  gap: 5px;
+}
+.activity-payload-toolbar button {
+  text-transform: capitalize;
+}
+.tour-generation .activity-payload-toolbar button[aria-pressed='true'] {
+  background: #24314a;
+  border-color: var(--accent);
+}
+.activity-dialog pre {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.activity-payload footer {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.activity-dialog .activity-failure {
+  color: #f0b4b4;
+}
+.activity-dialog :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 700px) {
+  .activity-dialog {
+    padding: 14px;
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+  .activity-inspector-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 150px minmax(0, 1fr);
+    height: calc(100dvh - 230px);
+  }
+  .activity-call-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .activity-summary {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-state-dot.running {
+    animation: none;
+  }
+}

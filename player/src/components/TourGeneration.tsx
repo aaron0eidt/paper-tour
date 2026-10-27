@@ -1,3 +1,4 @@
+import { GenerationActivity } from './GenerationActivity';
 import { useEffect, useState } from 'react';
 import type { TourGenerationSummary } from '../../../shared/contracts';
 import { apiRequest } from '../library/client';
@@ -5,7 +6,6 @@ import { isTourGenerationActive, tourGenerationCopy } from '../library/tourGener
 import { useModelCatalog } from '../library/useModelCatalog';
 import { useSettings } from '../library/useSettings';
 import { canUseModel } from '../library/modelChoices';
-import { TrainingConsent } from './TrainingConsent';
 import '../tourGeneration.css';
 
 export interface TourGenerationProps {
@@ -15,6 +15,7 @@ export interface TourGenerationProps {
   canGenerate?: boolean;
   onOpenTour?(tourId: string): void;
   compact?: boolean;
+  toolbar?: boolean;
 }
 
 /** Generation never owns playback: the reader explicitly opens the saved tour. */
@@ -25,6 +26,7 @@ export function TourGeneration({
   canGenerate = true,
   onOpenTour,
   compact = false,
+  toolbar = false,
 }: TourGenerationProps) {
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +34,8 @@ export function TourGeneration({
   const models = useModelCatalog();
   const profile = useSettings();
   const model = profile.data?.defaultModel ?? '';
-  const [allowTraining, setAllowTraining] = useState(false);
-  useEffect(() => setAllowTraining(false), [model]);
   const selected = models.catalog?.models.find((candidate) => candidate.id === model);
+  const allowTraining = selected?.contributor === true;
   useEffect(() => {
     setSubmitted(null);
     setError(null);
@@ -54,7 +55,6 @@ export function TourGeneration({
         body: JSON.stringify({ regenerate, model, allowTraining }),
       });
       setSubmitted(response.generation);
-      setAllowTraining(false);
       onChanged();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not start the tour. Check your connection, then retry.');
@@ -65,11 +65,11 @@ export function TourGeneration({
 
   return (
     <section
-      className={`tour-generation ${copy.kind}${compact ? ' compact' : ''}`}
+      className={`tour-generation ${copy.kind}${compact ? ' compact' : ''}${toolbar ? ' in-toolbar' : ''}`}
       aria-label="Guided tour"
       aria-busy={active || requesting}
     >
-      {(!compact || current?.status !== 'ready') && <div className="tour-generation-content" aria-live="polite">
+      {(!compact || current?.status !== 'ready') && <div className="tour-generation-content" aria-live="polite" title={`${copy.title} ${copy.detail}`}>
         <strong>{requesting ? 'Starting your tour…' : copy.title}</strong>
         <p>{copy.detail}</p>
         {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
@@ -80,7 +80,8 @@ export function TourGeneration({
           />
         )}
       </div>}
-      {error && <p className="tour-generation-error" role="alert">{error}</p>}
+      {current && <GenerationActivity key={current.id} documentId={documentId} generationId={current.id} label={toolbar ? 'Activity' : undefined} />}
+      {error && <p className="tour-generation-error" role="alert" title={error}>{error}</p>}
       {copy.action && canGenerate && (
         <button type="button" disabled={requesting || !validChoice} onClick={() => void create()}>
           {requesting ? 'Starting…' : copy.action}
@@ -97,7 +98,6 @@ export function TourGeneration({
         </button>
       )}
       {canGenerate && <div className="tour-generation-extra">
-        {selected?.contributor && <TrainingConsent checked={allowTraining} onChange={setAllowTraining} disabled={active || requesting} />}
         {current?.status === 'needs_configuration' && <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>Connect Meta in Profile &amp; Settings →</a>}
         {(models.error || profile.error) && <p role="alert">Could not load your model settings. <button type="button" onClick={() => { models.refresh(); profile.refresh(); }}>Retry</button></p>}
       </div>}
