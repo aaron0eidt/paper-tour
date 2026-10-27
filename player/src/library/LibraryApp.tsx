@@ -7,8 +7,10 @@ import { apiRequest, isLibraryConfigured, signOut } from './client';
 import { useSession } from './useSession';
 import { isTourGenerationActive } from './tourGeneration';
 import { TourGeneration } from '../components/TourGeneration';
-import { ModelPicker } from '../components/ModelPicker';
-import { useModelCatalog, useModelPreference } from './useModelCatalog';
+import { useModelCatalog } from './useModelCatalog';
+import { useSettings } from './useSettings';
+import { ProfileSettings } from './ProfileSettings';
+import { TrainingConsent } from '../components/TrainingConsent';
 import { canUseModel } from './modelChoices';
 import '../library.css';
 
@@ -74,6 +76,8 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
         )}
       </div>
     );
+  if (new URLSearchParams(location.search).get('settings') === 'profile')
+    return <ProfileSettings key={auth.session.user.id} email={auth.session.user.email ?? 'Your account'} />;
   return (
     <AuthenticatedLibrary
       key={auth.session.user.id}
@@ -97,7 +101,11 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
   const [dialog, setDialog] = useState<{ document: DocumentSummary; mode: 'rename' | 'delete' } | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const models = useModelCatalog();
-  const preference = useModelPreference(models.catalog);
+  const profile = useSettings();
+  const model = profile.data?.defaultModel ?? '';
+  const [allowTraining, setAllowTraining] = useState(false);
+  useEffect(() => setAllowTraining(false), [model]);
+  const selectedModel = models.catalog?.models.find((candidate) => candidate.id === model);
   const refreshDocuments = () => setRefresh((count) => count + 1);
 
   useEffect(() => {
@@ -182,6 +190,7 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
         <PaperMark />
         <div className="library-account">
           <span title={email}>{email}</span>
+          <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>Profile &amp; Settings</a>
           <button type="button" className="library-text-button" onClick={() => void logout()} disabled={signingOut}>
             {signingOut ? 'Signing out…' : 'Sign out'}
           </button>
@@ -200,20 +209,13 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
           )}
         </div>
         {models.error && <div className="model-catalog-error" role="alert"><p>{models.error}</p><button className="library-text-button" type="button" onClick={models.refresh}>Try again</button></div>}
-        <ModelPicker
-          catalog={models.catalog}
-          model={preference.model}
-          onModelChange={preference.setModel}
-          allowTraining={preference.allowTraining}
-          onAllowTrainingChange={preference.setAllowTraining}
-          disabled={uploadBusy || models.loading}
-          label="Model for new PDFs"
-        />
+        {profile.error && <p className="library-error" role="alert">{profile.error} <button className="library-text-button" onClick={profile.refresh}>Retry settings</button></p>}
+        {selectedModel?.contributor && <TrainingConsent checked={allowTraining} onChange={setAllowTraining} disabled={uploadBusy} />}
         <UploadPanel
-          model={preference.model}
-          allowTraining={preference.allowTraining}
-          canUpload={canUseModel(models.catalog, preference.model, preference.allowTraining) && !models.loading}
-          onResetConsent={preference.resetConsent}
+          model={model}
+          allowTraining={allowTraining}
+          canUpload={!!profile.data && canUseModel(models.catalog, model, allowTraining) && !models.loading}
+          onResetConsent={() => setAllowTraining(false)}
           onBusyChange={setUploadBusy}
           onChanged={refreshDocuments}
           onUploaded={() => {
@@ -403,11 +405,10 @@ function DocumentCard({
           <span>Added {formatDate(item.createdAt)}</span>
         </p>
         {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
-        {canOpen && (item.tourGeneration || (analysisReady && !item.tourCount)) && (
+        {canOpen && item.tourGeneration?.status !== 'ready' && (item.tourGeneration || (analysisReady && !item.tourCount)) && (
           <TourGeneration
             documentId={item.id}
             generation={item.tourGeneration}
-            preferredModel={item.tourModel}
             onChanged={onTourChanged}
             canGenerate={analysisReady || !!item.tourGeneration}
             onOpenTour={() => onOpen()}

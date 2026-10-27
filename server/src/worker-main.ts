@@ -4,13 +4,18 @@ import { storageClient } from './storage';
 import { createQueue, ANALYZE, DELETE, CLEANUP, GENERATE_TOUR } from './queue';
 import { AnalysisWorker } from './worker';
 import { TourWorker } from './tour-worker';
-import { createMuseTourGenerator } from './muse/generator';
+import { createMuseTourGenerator, MuseTourGenerator } from './muse/generator';
+import { SettingsService } from './settings';
 const c = config();
 const db = new Database(c.databaseUrl);
 const { storage } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const worker = new AnalysisWorker(db, storage, c, enqueue);
-const tourWorker = new TourWorker(db, storage, c, createMuseTourGenerator(c.muse));
+const settings = new SettingsService(db, c.muse);
+const tourWorker = new TourWorker(db, storage, c, createMuseTourGenerator(c.muse), undefined, async (owner, model) => {
+  const resolved = await settings.resolveMuse(owner, model);
+  return { generator: new MuseTourGenerator(resolved.config).withModel(model), secret: resolved.config.apiKey, source: resolved.source, version: resolved.version };
+});
 await tourWorker.reconcile(enqueue);
 await boss.work<{ documentId: string; analysisId: string; generationId: string }>(
   GENERATE_TOUR,

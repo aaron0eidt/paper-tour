@@ -50,7 +50,7 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
 
   async function start(file: File, resume = false) {
     if (!resume && busy) return;
-    if (!resume && !canUpload) { setError('Choose an available tour model and confirm any Contributor permission before uploading.'); return; }
+    if (!resume && !canUpload) { setError('Check your model in Profile & Settings and confirm any Contributor permission before uploading.'); return; }
     const token = ++run.current;
     const active = () => token === run.current;
     setError(null);

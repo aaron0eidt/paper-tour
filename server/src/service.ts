@@ -20,6 +20,7 @@ import { Database, type Db } from './db';
 import { HttpError, missing } from './errors';
 import { BUCKET, type FileStorage } from './storage';
 import { ensureTourGeneration, generationSummary } from './tour-worker';
+import type { SettingsService } from './settings';
 
 export type Enqueue = (
   kind: 'analyze' | 'delete' | 'generate_tour',
@@ -31,7 +32,8 @@ const iso = (date: Date | string) => new Date(date).toISOString();
 const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
 export interface Library {
   list(owner: string): Promise<DocumentSummary[]>;
-  models(): Promise<ModelCatalog>;
+  models(owner?: string): Promise<ModelCatalog>;
+  resumeConfigured?(owner: string): Promise<void>;
   reserve(owner: string, filename: string, size: number, selection?: TourModelSelection): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
   generateTour(
@@ -67,18 +69,21 @@ export class DocumentService implements Library {
     readonly maxBytes = 26214400,
     readonly tourModel = process.env.MUSE_MODEL ?? 'muse-spark-1.3',
     readonly catalog?: Pick<MetaModelCatalog, 'get' | 'validateSelection'>,
+    readonly settings?: SettingsService,
   ) {}
-  async models(): Promise<ModelCatalog> {
+  async models(owner?: string): Promise<ModelCatalog> {
+    if (this.settings && owner) return this.settings.models(owner);
     if (!this.catalog) throw new HttpError(503, 'model_catalog_unavailable', 'The model catalog is unavailable.');
     return this.catalog.get();
   }
-  private async selectedModel(model: string, allowTraining: boolean) {
+  private async selectedModel(owner: string, model: string, allowTraining: boolean) {
     if (isContributorModel(model) && !allowTraining)
       throw new HttpError(
         400,
         'contributor_training_consent_required',
         'Contributor models require explicit consent to Meta using the paper content for training.',
       );
+    if (this.settings) return this.settings.validateModel(owner, model, allowTraining);
     if (this.catalog) return this.catalog.validateSelection(model, allowTraining);
     // Isolated service tests can supply a fixed model without a live provider catalog.
     if (model !== this.tourModel)
@@ -127,7 +132,8 @@ export class DocumentService implements Library {
     if (!filename.toLowerCase().endsWith('.pdf') || !Number.isSafeInteger(size) || size < 1 || size > this.maxBytes)
       throw new HttpError(400, 'invalid_upload', 'Choose a PDF up to 25 MiB.');
     const allowTraining = selection.allowTraining === true;
-    const model = await this.selectedModel(selection.model ?? this.tourModel, allowTraining);
+    const defaultModel = this.settings ? (await this.settings.get(owner)).defaultModel : this.tourModel;
+    const model = await this.selectedModel(owner, selection.model ?? defaultModel, allowTraining);
     const id = randomUUID();
     const safeName = filename
       .split(/[\\/]/)
@@ -190,9 +196,10 @@ export class DocumentService implements Library {
     });
   }
   async generateTour(owner: string, id: string, regenerate = false, selection: TourModelSelection = {}) {
+    const defaultModel = this.settings ? (await this.settings.get(owner)).defaultModel : undefined;
     return this.db.transaction(async (tx) => {
       const document = await this.owned(owner, id, tx, true);
-      const model = (selection.model ?? document.tour_model ?? this.tourModel).trim();
+      const model = (selection.model ?? defaultModel ?? document.tour_model ?? this.tourModel).trim();
       const allowTraining = selection.allowTraining === true;
       const {
         rows: [analysis],
@@ -219,7 +226,7 @@ export class DocumentService implements Library {
       }
       if (latest?.status === 'ready' && latest.model === model && !regenerate)
         return { generation: generationSummary(latest) };
-      const validated = await this.selectedModel(model, allowTraining);
+      const validated = await this.selectedModel(owner, model, allowTraining);
       if (latest?.status === 'ready' && latest.model !== validated && !regenerate)
         throw new HttpError(409, 'regeneration_required', 'Create a new tour to use a different model.');
       const generation = await ensureTourGeneration(tx, this.enqueue, id, analysis.id, validated, true, regenerate);
@@ -229,6 +236,15 @@ export class DocumentService implements Library {
         allowTraining,
       ]);
       return { generation: generationSummary(generation) };
+    });
+  }
+  async resumeConfigured(owner: string) {
+    if (!this.settings || !(await this.settings.resolveMuse(owner)).config.apiKey) return;
+    const { rows } = await this.db.query(`select g.document_id,g.analysis_id,g.model from tour_generations g
+      join documents d on d.id=g.document_id where d.owner_id=$1 and d.deleted_at is null and g.status='needs_configuration'`, [owner]);
+    for (const row of rows) await this.db.transaction(async (tx) => {
+      await this.owned(owner, row.document_id, tx, true);
+      await ensureTourGeneration(tx, this.enqueue, row.document_id, row.analysis_id, row.model, true);
     });
   }
   async rename(owner: string, id: string, title: string) {

@@ -586,9 +586,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         }}
         header={
           <>
-            <button className="reader-back" onClick={back}>
+            <div className="reader-header-nav"><button className="reader-back" onClick={back}>
               ‹ Library
             </button>
+            {documentId && <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>Settings</a>}</div>
             <div className="reader-tabs">
               <button className={tab === 'document' ? 'active' : ''} onClick={() => setTab('document')}>
                 Document
@@ -605,21 +606,18 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               <TourGeneration
                 documentId={documentId}
                 generation={manifest.tourGeneration}
-                preferredModel={manifest.document.tourModel}
-                savedModel={manifest.selectedTour?.model}
-                showModelPicker
                 canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
                 onChanged={() => setManifestRefresh((value) => value + 1)}
-                onOpenTour={(tourId) => {
+                onOpenTour={tab === 'document' ? (tourId) => {
                   engine?.pause();
                   setSelection([]);
                   setActiveTour(tourId);
                   setTab('tour');
-                }}
+                } : undefined}
                 compact
               />
             )}
-            {!!manifest?.tours.length && (
+            {(manifest?.tours.length ?? 0) > 1 && manifest && (
               <label className="reader-tour-picker">
                 Saved tour
                 <select

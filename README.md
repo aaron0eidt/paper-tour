@@ -112,14 +112,15 @@ npm run supabase:start
 npm run setup:local
 ```
 
-Add `MODEL_API_KEY` to the root `.env` (server-only), then start the app:
+Optionally set `MODEL_API_KEY` in the root `.env` for shared app access. Users can instead save
+their own Meta key in **Profile & Settings**. Start the app:
 
 ```sh
 npm run db:migrate
 npm run dev
 ```
 
-Open http://localhost:5174/. Model selection and API prices are available in the library and reader.
+Open http://localhost:5174/. Model selection, API keys and prices are in **Profile & Settings**.
 Automatic tours send paper text and rendered page/figure images to Meta.
 
 ```sh

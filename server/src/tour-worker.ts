@@ -145,7 +145,7 @@ function safeFailure(error: unknown, signal: AbortSignal) {
     'configuration_error',
   ].includes(code);
   let message = configuration
-    ? 'Configure a valid Meta Model API key on the server to create this tour.'
+    ? 'Open Profile & Settings to check your Meta API connection.'
     : code === 'context_limit'
       ? 'This paper exceeds the current tour generation limits.'
       : code === 'generation_timeout'
@@ -170,6 +170,7 @@ export class TourWorker {
     readonly config: Config,
     readonly generator: TourGenerator,
     readonly prepareImages?: PrepareTourImages,
+    readonly resolveGenerator?: (owner: string, model: string) => Promise<{ generator: TourGenerator; secret: string; source: string; version: string }>,
   ) {}
   private async locked<T>(documentId: string, run: () => Promise<T>) {
     const connection = await this.db.pool.connect();
@@ -267,7 +268,7 @@ export class TourWorker {
       const {
         rows: [row],
       } = await this.db.query(
-        `select g.*,a.doc,d.upload_path,d.tour_allow_training from tour_generations g join analyses a on a.id=g.analysis_id join documents d on d.id=g.document_id
+        `select g.*,a.doc,d.upload_path,d.tour_allow_training,d.owner_id from tour_generations g join analyses a on a.id=g.analysis_id join documents d on d.id=g.document_id
         where g.id=$1 and g.document_id=$2 and g.analysis_id=$3 and d.deleted_at is null and a.status in ('ready','limited')`,
         [generationId, documentId, analysisId],
       );
@@ -283,10 +284,16 @@ export class TourWorker {
         return;
       }
       let generator: TourGenerator | undefined;
+      let access: { secret: string; source: string; version: string } | undefined;
       try {
-        generator = row.model === this.generator.model ? this.generator : this.generator.withModel?.(row.model);
+        if (this.resolveGenerator) {
+          const resolved = await this.resolveGenerator(row.owner_id, row.model);
+          generator = resolved.generator;
+          access = resolved;
+        } else generator = row.model === this.generator.model ? this.generator : this.generator.withModel?.(row.model);
       } catch {
-        /* An unsupported persisted selection cannot fall back to another model. */
+        await this.db.query("update tour_generations set status='needs_configuration',error_code='configuration_error',error=$2,updated_at=now() where id=$1", [generationId, 'Open Profile & Settings to check your Meta connection.']);
+        return;
       }
       if (!generator || generator.model !== row.model) {
         await this.db.query(
@@ -298,7 +305,7 @@ export class TourWorker {
       if (!generator.configured) {
         await this.db.query(
           "update tour_generations set status='needs_configuration',error_code='muse_not_configured',error=$2,model=$3,updated_at=now() where id=$1 and status<>'ready'",
-          [generationId, 'Configure a Meta Model API key on the server to create this tour.', generator.model],
+          [generationId, 'Open Profile & Settings to connect a Meta API key for this tour.', generator.model],
         );
         return;
       }
@@ -349,6 +356,7 @@ export class TourWorker {
           onProgress,
           signal,
         );
+        if (access) generated.metadata = { ...generated.metadata, credentialSource: access.source, credentialVersion: access.version };
         signal.throwIfAborted();
         if (generated.tour.doc_sha256 !== input.doc.source.sha256)
           throw new ProcessingError('invalid_tour', 'The generated tour does not match this document.');
@@ -404,7 +412,7 @@ export class TourWorker {
             generationId,
             code: failure.code,
             terminal,
-            diagnostics: safeTourDiagnostics(error, this.config.muse?.apiKey),
+            diagnostics: safeTourDiagnostics(error, access?.secret ?? this.config.muse?.apiKey),
           }),
         );
         if (!terminal) throw new ProcessingError(failure.code, failure.message, true);

@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import type { TourGenerationSummary } from '../../../shared/contracts';
 import { apiRequest } from '../library/client';
 import { isTourGenerationActive, tourGenerationCopy } from '../library/tourGeneration';
-import { useModelCatalog, useModelPreference } from '../library/useModelCatalog';
+import { useModelCatalog } from '../library/useModelCatalog';
+import { useSettings } from '../library/useSettings';
 import { canUseModel } from '../library/modelChoices';
-import { ModelPicker } from './ModelPicker';
+import { TrainingConsent } from './TrainingConsent';
 import '../tourGeneration.css';
 
 export interface TourGenerationProps {
@@ -14,9 +15,6 @@ export interface TourGenerationProps {
   canGenerate?: boolean;
   onOpenTour?(tourId: string): void;
   compact?: boolean;
-  preferredModel?: string;
-  savedModel?: string | null;
-  showModelPicker?: boolean;
 }
 
 /** Generation never owns playback: the reader explicitly opens the saved tour. */
@@ -27,15 +25,16 @@ export function TourGeneration({
   canGenerate = true,
   onOpenTour,
   compact = false,
-  preferredModel,
-  savedModel,
-  showModelPicker = false,
 }: TourGenerationProps) {
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<TourGenerationSummary | null>(null);
   const models = useModelCatalog();
-  const choice = useModelPreference(models.catalog, preferredModel ?? generation?.model);
+  const profile = useSettings();
+  const model = profile.data?.defaultModel ?? '';
+  const [allowTraining, setAllowTraining] = useState(false);
+  useEffect(() => setAllowTraining(false), [model]);
+  const selected = models.catalog?.models.find((candidate) => candidate.id === model);
   useEffect(() => {
     setSubmitted(null);
     setError(null);
@@ -43,8 +42,7 @@ export function TourGeneration({
   const current = submitted ?? generation;
   const copy = tourGenerationCopy(current);
   const active = isTourGenerationActive(current);
-  const validChoice = canUseModel(models.catalog, choice.model, choice.allowTraining);
-  const actualModel = savedModel !== undefined ? savedModel : current?.status === 'ready' ? current.model : undefined;
+  const validChoice = !!profile.data && canUseModel(models.catalog, model, allowTraining);
   if (!current && !canGenerate) return null;
 
   async function create(regenerate = false) {
@@ -53,10 +51,10 @@ export function TourGeneration({
     try {
       const response = await apiRequest<{ generation: TourGenerationSummary }>(`/api/documents/${documentId}/tours`, {
         method: 'POST',
-        body: JSON.stringify({ regenerate, model: choice.model, allowTraining: choice.allowTraining }),
+        body: JSON.stringify({ regenerate, model, allowTraining }),
       });
       setSubmitted(response.generation);
-      choice.resetConsent();
+      setAllowTraining(false);
       onChanged();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not start the tour. Check your connection, then retry.');
@@ -71,11 +69,9 @@ export function TourGeneration({
       aria-label="Guided tour"
       aria-busy={active || requesting}
     >
-      <div className="tour-generation-content" aria-live="polite">
+      {(!compact || current?.status !== 'ready') && <div className="tour-generation-content" aria-live="polite">
         <strong>{requesting ? 'Starting your tour…' : copy.title}</strong>
         <p>{copy.detail}</p>
-        {actualModel !== undefined && <p className="tour-model-used">{actualModel === null ? 'Manually authored tour' : `Tour model: ${actualModel}`}</p>}
-        {active && <p className="tour-model-used">Generating with {current?.model}</p>}
         {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
           <progress
             aria-label="Images reviewed for the tour"
@@ -83,12 +79,8 @@ export function TourGeneration({
             max={current.imagesTotal}
           />
         )}
-        {error && (
-          <p className="tour-generation-error" role="alert">
-            {error}
-          </p>
-        )}
-      </div>
+      </div>}
+      {error && <p className="tour-generation-error" role="alert">{error}</p>}
       {copy.action && canGenerate && (
         <button type="button" disabled={requesting || !validChoice} onClick={() => void create()}>
           {requesting ? 'Starting…' : copy.action}
@@ -104,13 +96,11 @@ export function TourGeneration({
           {requesting ? 'Starting…' : 'New tour'}
         </button>
       )}
-      {showModelPicker && canGenerate && <details className="tour-model-settings">
-        <summary>Model &amp; API pricing</summary>
-        <ModelPicker catalog={models.catalog} model={choice.model} onModelChange={choice.setModel}
-          allowTraining={choice.allowTraining} onAllowTrainingChange={choice.setAllowTraining}
-          disabled={active || requesting} compact label="Model for next tour" />
-        {models.error && <p role="alert">{models.error} <button type="button" onClick={models.refresh}>Retry model list</button></p>}
-      </details>}
+      {canGenerate && <div className="tour-generation-extra">
+        {selected?.contributor && <TrainingConsent checked={allowTraining} onChange={setAllowTraining} disabled={active || requesting} />}
+        {current?.status === 'needs_configuration' && <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>Connect Meta in Profile &amp; Settings →</a>}
+        {(models.error || profile.error) && <p role="alert">Could not load your model settings. <button type="button" onClick={() => { models.refresh(); profile.refresh(); }}>Retry</button></p>}
+      </div>}
     </section>
   );
 }

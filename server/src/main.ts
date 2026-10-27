@@ -6,12 +6,15 @@ import { DocumentService } from './service';
 import { createQueue } from './queue';
 import { createApp } from './app';
 import { MetaModelCatalog } from './muse/models';
+import { SettingsService } from './settings';
 const c = config();
 const db = new Database(c.databaseUrl);
 const { storage, authenticate } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
+const settings = new SettingsService(db, c.muse);
 const app = await createApp({
-  service: new DocumentService(db, storage, enqueue, c.maxBytes, c.muse.model, new MetaModelCatalog(c.muse)),
+  service: new DocumentService(db, storage, enqueue, c.maxBytes, c.muse.model, new MetaModelCatalog(c.muse), settings),
+  settings,
   authenticate,
   origins: c.origins,
   spaDir: resolve(ROOT, 'player/dist'),

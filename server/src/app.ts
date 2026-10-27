@@ -6,6 +6,8 @@ import { resolve } from 'node:path';
 import { HttpError } from './errors';
 import type { Library } from './service';
 import type { ReaderState } from '../../shared/contracts';
+import type { SettingsUpdate } from '../../shared/settings';
+import type { SettingsService } from './settings';
 
 const uuid = { type: 'string', format: 'uuid' };
 const documentParams = {
@@ -30,11 +32,12 @@ interface Options {
   origins?: string[];
   spaDir?: string;
   logger?: boolean;
+  settings?: SettingsService;
 }
 export async function createApp(options: Options) {
   const app = Fastify({
-    ajv: { customOptions: { coerceTypes: false } },
-    logger: options.logger ? { redact: ['req.headers.authorization'] } : false,
+    ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
+    logger: options.logger ? { redact: ['req.headers.authorization', 'req.body.apiKey'] } : false,
     bodyLimit: 65536,
   });
   await app.register(cors, { origin: options.origins ?? false });
@@ -58,7 +61,8 @@ export async function createApp(options: Options) {
         },
       });
     }
-    request.log.error(error);
+    if (request.url.startsWith('/api/settings')) request.log.error({ event: 'settings_request_failed' });
+    else request.log.error(error);
     return reply.code(500).send({
       error: {
         code: 'internal_error',
@@ -77,7 +81,25 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
-      api.get('/models', async () => service.models());
+      api.get('/models', async (req) => service.models(owner(req)));
+      if (options.settings) {
+        const settings = options.settings;
+        api.get('/settings', async (req) => settings.get(owner(req)));
+        api.patch<{ Body: SettingsUpdate }>('/settings', { schema: { body: objectBody({
+          defaultModel: { type: 'string', minLength: 1, maxLength: 200 }, credentialSource: { enum: ['app', 'personal'] },
+        }, []) } }, async (req) => {
+          const result = await settings.update(owner(req), req.body);
+          if (req.body.credentialSource) await service.resumeConfigured?.(owner(req));
+          return result;
+        });
+        api.put<{ Body: { apiKey: string } }>('/settings/meta-key', { schema: { body: objectBody({ apiKey: { type: 'string', minLength: 16, maxLength: 8192 } }, ['apiKey']) } }, async (req) => {
+          const result = await settings.saveKey(owner(req), req.body.apiKey);
+          await service.resumeConfigured?.(owner(req));
+          return result;
+        });
+        api.delete('/settings/meta-key', async (req) => settings.removeKey(owner(req)));
+        api.post('/settings/test', async (req) => settings.test(owner(req)));
+      }
       api.get('/documents', async (req) => ({
         documents: await service.list(owner(req)),
       }));

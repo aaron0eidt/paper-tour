@@ -1,0 +1,30 @@
+.profile-main { max-width: 1120px; }
+.profile-eyebrow { color: var(--accent) !important; font-size: 11px !important; letter-spacing: .12em; margin-bottom: 10px !important; }
+.profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.profile-card { padding: 26px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); min-width: 0; }
+.profile-card-heading { display: flex; align-items: start; gap: 13px; margin-bottom: 24px; }
+.profile-card-heading h2 { margin: 0 0 7px; font-size: 19px; font-weight: 550; }
+.profile-card-heading p,.profile-help,.profile-connection-state p { color: var(--muted); font-size: 12px; line-height: 1.65; margin: 0; }
+.profile-step { color: var(--accent); font-size: 11px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.profile-sources { border: 0; padding: 0; margin: 0 0 20px; }
+.profile-sources legend,.profile-field { font-size: 12px; font-weight: 550; display: block; margin-bottom: 10px; }
+.profile-sources label { display: flex; gap: 10px; align-items: start; padding: 13px 0; cursor: pointer; }
+.profile-sources strong { display: block; font-size: 13px; font-weight: 500; }
+.profile-sources small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+.profile-sources input { accent-color: var(--accent); }
+.profile-connection-state { display: flex; align-items: start; gap: 10px; padding: 17px 0; margin: 15px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.profile-connection-state strong { font-size: 12px; font-weight: 500; }
+.profile-connection-state p { margin-top: 5px; font-size: 11px; }
+.profile-dot { flex-shrink: 0; width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--faint); }
+.profile-dot.connected { background: #8dbca9; }
+.profile-key-input { box-sizing: border-box; width: 100%; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 11px 12px; font: inherit; font-size: 13px; }
+.profile-key-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.profile-help { margin: 12px 0; font-size: 11px; }
+.profile-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 18px; align-items: center; }
+.profile-remove { color: #e3adad !important; }
+.profile-card .model-settings { margin-bottom: 20px; padding: 0; border: 0; background: none; }
+.profile-card .model-price-details { width: 100%; }
+.profile-card .model-price-scroll { max-height: 450px; }
+.training-consent { display: flex; align-items: start; gap: 8px; color: var(--muted); font-size: 11px; line-height: 1.6; margin: 12px 0; }
+.training-consent input { margin-top: 3px; accent-color: var(--accent); }
+@media (max-width: 900px) { .profile-grid { grid-template-columns: 1fr; } }

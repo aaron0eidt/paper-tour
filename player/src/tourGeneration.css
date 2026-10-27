@@ -87,10 +87,9 @@
   font-size: 11px;
   padding: 6px 9px;
 }
-.tour-model-settings { flex-basis: 100%; min-width: 0; font-size: 11px; }
-.tour-model-settings > summary { color: var(--accent); cursor: pointer; padding: 5px 0; }
-.tour-model-settings > .model-settings { margin-top: 7px; }
-.tour-generation .tour-model-used { overflow-wrap: anywhere; color: var(--faint); font-size: 10px; }
+.tour-generation-extra { flex-basis: 100%; min-width: 0; font-size: 11px; }
+.tour-generation-extra:empty { display: none; }
+.tour-generation.ready.compact { border: 0; background: transparent; padding: 0; }
 @media (max-width: 600px) {
   .tour-generation {
     align-items: start;
