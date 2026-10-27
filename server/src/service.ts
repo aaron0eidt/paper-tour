@@ -10,8 +10,12 @@ import type {
   SearchHit,
   UploadReservation,
   TourGenerationSummary,
+  TourModelSelection,
 } from '../../shared/contracts';
 import type { Doc, Tour } from '../../shared/paper';
+import type { ModelCatalog } from '../../shared/models';
+import type { MetaModelCatalog } from './muse/models';
+import { isContributorModel } from './muse/models';
 import { Database, type Db } from './db';
 import { HttpError, missing } from './errors';
 import { BUCKET, type FileStorage } from './storage';
@@ -27,9 +31,15 @@ const iso = (date: Date | string) => new Date(date).toISOString();
 const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
 export interface Library {
   list(owner: string): Promise<DocumentSummary[]>;
-  reserve(owner: string, filename: string, size: number): Promise<UploadReservation>;
+  models(): Promise<ModelCatalog>;
+  reserve(owner: string, filename: string, size: number, selection?: TourModelSelection): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
-  generateTour(owner: string, id: string, regenerate?: boolean): Promise<{ generation: TourGenerationSummary }>;
+  generateTour(
+    owner: string,
+    id: string,
+    regenerate?: boolean,
+    selection?: TourModelSelection,
+  ): Promise<{ generation: TourGenerationSummary }>;
   analyze(owner: string, id: string): Promise<{ analysisId: string }>;
   manifest(owner: string, id: string, tourId?: string): Promise<DocumentManifest>;
   rename(owner: string, id: string, title: string): Promise<DocumentSummary>;
@@ -56,7 +66,25 @@ export class DocumentService implements Library {
     readonly enqueue: Enqueue,
     readonly maxBytes = 26214400,
     readonly tourModel = process.env.MUSE_MODEL ?? 'muse-spark-1.3',
+    readonly catalog?: Pick<MetaModelCatalog, 'get' | 'validateSelection'>,
   ) {}
+  async models(): Promise<ModelCatalog> {
+    if (!this.catalog) throw new HttpError(503, 'model_catalog_unavailable', 'The model catalog is unavailable.');
+    return this.catalog.get();
+  }
+  private async selectedModel(model: string, allowTraining: boolean) {
+    if (isContributorModel(model) && !allowTraining)
+      throw new HttpError(
+        400,
+        'contributor_training_consent_required',
+        'Contributor models require explicit consent to Meta using the paper content for training.',
+      );
+    if (this.catalog) return this.catalog.validateSelection(model, allowTraining);
+    // Isolated service tests can supply a fixed model without a live provider catalog.
+    if (model !== this.tourModel)
+      throw new HttpError(503, 'model_catalog_unavailable', 'The model catalog is unavailable.');
+    return model;
+  }
   async owned(owner: string, id: string, db: Db = this.db.pool, lock = false): Promise<Row> {
     const { rows } = await db.query(
       `select * from documents where id=$1 and owner_id=$2 and deleted_at is null ${lock ? 'for update' : ''}`,
@@ -75,6 +103,8 @@ export class DocumentService implements Library {
       analysisError: row.analysis_error ?? null,
       thumbnailUrl: row.thumbnail_path ? await this.storage.sign(row.thumbnail_path) : null,
       tourCount: Number(row.tour_count ?? 0),
+      tourModel: row.tour_model,
+      tourAllowTraining: row.tour_allow_training === true,
       tourGeneration: row.tour_generation ? generationSummary(row.tour_generation) : null,
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
@@ -93,9 +123,11 @@ export class DocumentService implements Library {
     );
     return Promise.all(rows.map((row) => this.summary(row)));
   }
-  async reserve(owner: string, filename: string, size: number) {
+  async reserve(owner: string, filename: string, size: number, selection: TourModelSelection = {}) {
     if (!filename.toLowerCase().endsWith('.pdf') || !Number.isSafeInteger(size) || size < 1 || size > this.maxBytes)
       throw new HttpError(400, 'invalid_upload', 'Choose a PDF up to 25 MiB.');
+    const allowTraining = selection.allowTraining === true;
+    const model = await this.selectedModel(selection.model ?? this.tourModel, allowTraining);
     const id = randomUUID();
     const safeName = filename
       .split(/[\\/]/)
@@ -105,8 +137,8 @@ export class DocumentService implements Library {
     const title = safeName.replace(/\.pdf$/i, '').slice(0, 300) || 'Untitled document';
     const path = `${owner}/${id}/original.pdf`;
     await this.db.query(
-      `insert into documents(id,owner_id,title,original_filename,upload_size,upload_path) values($1,$2,$3,$4,$5,$6)`,
-      [id, owner, title, safeName, size, path],
+      `insert into documents(id,owner_id,title,original_filename,upload_size,upload_path,tour_model,tour_allow_training) values($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id, owner, title, safeName, size, path, model, allowTraining],
     );
     return { documentId: id, bucket: BUCKET, path };
   }
@@ -157,9 +189,11 @@ export class DocumentService implements Library {
       return this.createAnalysis(tx, id);
     });
   }
-  async generateTour(owner: string, id: string, regenerate = false) {
+  async generateTour(owner: string, id: string, regenerate = false, selection: TourModelSelection = {}) {
     return this.db.transaction(async (tx) => {
       const document = await this.owned(owner, id, tx, true);
+      const model = (selection.model ?? document.tour_model ?? this.tourModel).trim();
+      const allowTraining = selection.allowTraining === true;
       const {
         rows: [analysis],
       } = await tx.query("select id from analyses where document_id=$1 and id=$2 and status in ('ready','limited')", [
@@ -167,15 +201,33 @@ export class DocumentService implements Library {
         document.current_analysis_id,
       ]);
       if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
-      const generation = await ensureTourGeneration(
-        tx,
-        this.enqueue,
-        id,
-        analysis.id,
-        this.tourModel,
-        true,
-        regenerate,
+      const {
+        rows: [latest],
+      } = await tx.query(
+        'select * from tour_generations where analysis_id=$1 order by created_at desc,id desc limit 1 for update',
+        [analysis.id],
       );
+      if (latest && ['queued', 'generating'].includes(latest.status)) {
+        if (latest.model !== model)
+          throw new HttpError(
+            409,
+            'generation_in_progress',
+            'A tour is already being created with another model. Wait for it to finish before changing models.',
+          );
+        // An active request is a read of the existing job, never a change to model or consent.
+        return { generation: generationSummary(latest) };
+      }
+      if (latest?.status === 'ready' && latest.model === model && !regenerate)
+        return { generation: generationSummary(latest) };
+      const validated = await this.selectedModel(model, allowTraining);
+      if (latest?.status === 'ready' && latest.model !== validated && !regenerate)
+        throw new HttpError(409, 'regeneration_required', 'Create a new tour to use a different model.');
+      const generation = await ensureTourGeneration(tx, this.enqueue, id, analysis.id, validated, true, regenerate);
+      await tx.query('update documents set tour_model=$2,tour_allow_training=$3 where id=$1', [
+        id,
+        validated,
+        allowTraining,
+      ]);
       return { generation: generationSummary(generation) };
     });
   }
@@ -219,7 +271,7 @@ export class DocumentService implements Library {
       id,
     ]);
     const { rows: tours } = await this.db.query(
-      'select id,title,analysis_id,script from tours where document_id=$1 order by created_at desc,id desc',
+      'select t.id,t.title,t.analysis_id,t.script,g.model from tours t left join tour_generations g on g.id=t.generation_id where t.document_id=$1 order by t.created_at desc,t.id desc',
       [id],
     );
     const {
@@ -267,6 +319,7 @@ export class DocumentService implements Library {
         id: t.id,
         title: t.title,
         analysisId: t.analysis_id,
+        model: t.model ?? null,
       })),
       selectedTour:
         selected && analysis
@@ -275,6 +328,7 @@ export class DocumentService implements Library {
               analysisId: analysis.id,
               doc: analysis.doc as Doc,
               tour: selected.script as Tour,
+              model: selected.model ?? null,
             }
           : null,
       assets,

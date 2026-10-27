@@ -77,10 +77,11 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
+      api.get('/models', async () => service.models());
       api.get('/documents', async (req) => ({
         documents: await service.list(owner(req)),
       }));
-      api.post<{ Body: { filename: string; size: number } }>(
+      api.post<{ Body: { filename: string; size: number; model?: string; allowTraining?: boolean } }>(
         '/documents',
         {
           schema: {
@@ -88,27 +89,52 @@ export async function createApp(options: Options) {
               {
                 filename: { type: 'string', minLength: 1, maxLength: 1024 },
                 size: { type: 'integer', minimum: 1, maximum: 26214400 },
+                model: { type: 'string', minLength: 1, maxLength: 200 },
+                allowTraining: { type: 'boolean' },
               },
               ['filename', 'size'],
             ),
           },
         },
-        async (req, reply) => reply.code(201).send(await service.reserve(owner(req), req.body.filename, req.body.size)),
+        async (req, reply) =>
+          reply.code(201).send(
+            await service.reserve(owner(req), req.body.filename, req.body.size, {
+              model: req.body.model,
+              allowTraining: req.body.allowTraining,
+            }),
+          ),
       );
       api.post<{ Params: { id: string } }>(
         '/documents/:id/complete',
         { schema: { params: documentParams } },
         async (req) => service.complete(owner(req), req.params.id),
       );
-      api.post<{ Params: { id: string }; Body: { regenerate?: boolean } | undefined }>(
+      api.post<{
+        Params: { id: string };
+        Body: { regenerate?: boolean; model?: string; allowTraining?: boolean } | undefined;
+      }>(
         '/documents/:id/tours',
         {
           preValidation: async (req) => {
             if (req.body === undefined) req.body = {};
           },
-          schema: { params: documentParams, body: objectBody({ regenerate: { type: 'boolean' } }, []) },
+          schema: {
+            params: documentParams,
+            body: objectBody(
+              {
+                regenerate: { type: 'boolean' },
+                model: { type: 'string', minLength: 1, maxLength: 200 },
+                allowTraining: { type: 'boolean' },
+              },
+              [],
+            ),
+          },
         },
-        async (req) => service.generateTour(owner(req), req.params.id, req.body?.regenerate ?? false),
+        async (req) =>
+          service.generateTour(owner(req), req.params.id, req.body?.regenerate ?? false, {
+            model: req.body?.model,
+            allowTraining: req.body?.allowTraining,
+          }),
       );
       api.post<{ Params: { id: string } }>(
         '/documents/:id/analyze',

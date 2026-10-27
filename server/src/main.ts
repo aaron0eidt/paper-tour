@@ -5,12 +5,13 @@ import { storageClient } from './storage';
 import { DocumentService } from './service';
 import { createQueue } from './queue';
 import { createApp } from './app';
+import { MetaModelCatalog } from './muse/models';
 const c = config();
 const db = new Database(c.databaseUrl);
 const { storage, authenticate } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const app = await createApp({
-  service: new DocumentService(db, storage, enqueue, c.maxBytes, c.muse.model),
+  service: new DocumentService(db, storage, enqueue, c.maxBytes, c.muse.model, new MetaModelCatalog(c.muse)),
   authenticate,
   origins: c.origins,
   spaDir: resolve(ROOT, 'player/dist'),

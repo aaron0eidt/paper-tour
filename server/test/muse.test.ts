@@ -465,3 +465,21 @@ test('a second invalid draft fails without manufacturing a replacement tour', as
   await assert.rejects(generator.generate(input), TourValidationError);
   assert.equal(drafts, 2);
 });
+
+test('model switching routes image inspection and writing to the chosen reasoning model', async () => {
+  for (const model of ['muse-wonder-1.0', 'muse-spark-1.3', 'muse-spark-1.2', 'muse-spark-1.1', 'muse-spark-1.3-contributor', 'muse-spark-1.2-contributor']) {
+    const requested: string[] = [];
+    const base = new MuseTourGenerator(settings, provider((request) => {
+      requested.push(request.model);
+      if (request.response_format.json_schema.name === 'paper_visual_observations')
+        return response({ observations: images.map((image) => ({ targetId: image.targetId, description: 'Real image evidence.', readable: true, uncertainties: [] })) });
+      return response(draft());
+    }));
+    const selected = base.withModel(model);
+    const result = await selected.generate(input);
+    assert.deepEqual(requested, [model, model]);
+    assert.equal(result.metadata.model, model);
+  }
+  for (const unsupported of ['muse-image-1.0', 'muse-voice-transcribe-1.0', 'sam-3.1', 'made-up-model'])
+    assert.throws(() => new MuseTourGenerator(settings).withModel(unsupported), assertCode('unsupported_model'));
+});

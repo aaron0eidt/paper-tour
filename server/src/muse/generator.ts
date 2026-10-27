@@ -5,15 +5,10 @@ import type { GeneratedTour, TourGenerationInput, TourGenerator, TourImage, Tour
 import { MuseClient, type Completion, type MuseContent, type MuseMessage } from './client';
 import { checkImages, imageEvidence, paperContext } from './context';
 import { materializeTour, TOUR_DRAFT_SCHEMA, TourValidationError, type TourDraft, type DraftStep } from './schema';
-import {
-  coverageInstructions,
-  INSPECTION_INSTRUCTIONS,
-  INSPECTION_VERSION,
-  PROMPT_VERSION,
-  writingInstructions,
-} from './prompts';
+import { coverageInstructions, INSPECTION_INSTRUCTIONS, INSPECTION_VERSION, PROMPT_VERSION, writingInstructions } from './prompts';
 import { MAX_CONTENT_PAGES, MAX_TOUR_STEPS, walkthroughGoals } from './planning';
 import { mergeCoverageSteps } from './coverage';
+import { OFFICIAL_MODELS } from './pricing';
 
 interface VisualObservation {
   targetId: string;
@@ -57,41 +52,21 @@ function imageContent(images: TourImage[]): MuseContent[] {
 /** Reuse only a complete, schema-valid inspection of these exact bytes and analysis. */
 function previousInspection(input: TourGenerationInput, model: string, ajv: Ajv2020): VisualObservation[] | null {
   const cached = input.previousVisualInspection;
-  if (
-    !cached ||
-    cached.model !== model ||
-    cached.analysisId !== input.analysisId ||
-    cached.sourceSha256 !== input.doc.source.sha256 ||
-    cached.fullPaperContext !== true ||
-    !(cached.inspectionVersion === INSPECTION_VERSION || cached.promptVersion === 'paper-tour-muse@1')
-  )
-    return null;
+  if (!cached || cached.model !== model || cached.analysisId !== input.analysisId ||
+    cached.sourceSha256 !== input.doc.source.sha256 || cached.fullPaperContext !== true ||
+    !(cached.inspectionVersion === INSPECTION_VERSION || cached.promptVersion === 'paper-tour-muse@1')) return null;
   const evidence = cached.imagesReviewed as { count?: unknown; sources?: unknown[] } | undefined;
-  if (
-    evidence?.count !== input.images.length ||
-    !Array.isArray(evidence.sources) ||
-    evidence.sources.length !== input.images.length
-  )
-    return null;
+  if (evidence?.count !== input.images.length || !Array.isArray(evidence.sources) || evidence.sources.length !== input.images.length) return null;
   const current = input.images.map(imageEvidence);
-  if (
-    evidence.sources.some((item, index) => {
-      if (!item || typeof item !== 'object') return true;
-      const source = item as Record<string, unknown>;
-      return ['targetId', 'kind', 'page', 'sha256'].some(
-        (key) => source[key] !== current[index][key as keyof (typeof current)[number]],
-      );
-    })
-  )
-    return null;
+  if (evidence.sources.some((item, index) => {
+    if (!item || typeof item !== 'object') return true;
+    const source = item as Record<string, unknown>;
+    return ['targetId', 'kind', 'page', 'sha256'].some((key) => source[key] !== current[index][key as keyof typeof current[number]]);
+  })) return null;
   const check = ajv.compile(visualSchema(input.images));
   const observations = cached.visualObservations;
-  if (
-    !check({ observations }) ||
-    !Array.isArray(observations) ||
-    observations.some((item: VisualObservation, index: number) => item.targetId !== input.images[index].targetId)
-  )
-    return null;
+  if (!check({ observations }) || !Array.isArray(observations) ||
+    observations.some((item: VisualObservation, index: number) => item.targetId !== input.images[index].targetId)) return null;
   return observations as VisualObservation[];
 }
 
@@ -101,11 +76,16 @@ export class MuseTourGenerator implements TourGenerator {
   private readonly client: MuseClient;
   constructor(
     private readonly config: MuseConfig,
-    transport?: typeof fetch,
+    private readonly transport?: typeof fetch,
   ) {
     this.model = config.model;
     this.configured = Boolean(config.apiKey.trim());
     this.client = new MuseClient(config, transport);
+  }
+  withModel(model: string): TourGenerator {
+    if (!OFFICIAL_MODELS[model]?.tourCompatible)
+      throw new ProcessingError('unsupported_model', 'Choose a model that supports paper text and images.');
+    return model === this.model ? this : new MuseTourGenerator({ ...this.config, model }, this.transport);
   }
   async generate(
     input: TourGenerationInput,
@@ -121,10 +101,7 @@ export class MuseTourGenerator implements TourGenerator {
     checkImages(input);
     const goals = walkthroughGoals(input.doc);
     if (goals.requiredPages.length > MAX_CONTENT_PAGES)
-      throw new ProcessingError(
-        'context_limit',
-        'This paper has too many content pages for a detailed automatic tour.',
-      );
+      throw new ProcessingError('context_limit', 'This paper has too many content pages for a detailed automatic tour.');
     const context = paperContext(input.doc);
     const completions: Completion[] = [];
     const observations: VisualObservation[] = [];
@@ -207,69 +184,32 @@ export class MuseTourGenerator implements TourGenerator {
         try {
           result = materializeTour(completion.value, input.doc, input.documentId, this.config.language);
         } catch (error) {
-          if (
-            !(error instanceof TourValidationError) ||
-            error.problems.length !== 1 ||
-            !error.missingPages.length ||
-            coverageRepairPages.length
-          )
-            throw error;
+          if (!(error instanceof TourValidationError) || error.problems.length !== 1 || !error.missingPages.length || coverageRepairPages.length) throw error;
           const draft = completion.value as TourDraft;
           const slots = MAX_TOUR_STEPS - draft.chapters.reduce((n, c) => n + c.steps.length, 0);
           if (error.missingPages.length > Math.min(slots, 12)) throw error;
           coverageRepairPages = error.missingPages;
           const patchSchema = {
-            type: 'object',
-            additionalProperties: false,
-            required: ['steps'],
-            properties: {
-              steps: {
-                type: 'array',
-                minItems: coverageRepairPages.length,
-                maxItems: Math.min(slots, coverageRepairPages.length * 2),
-                items: { $ref: '#/$defs/step' },
-              },
-            },
+            type: 'object', additionalProperties: false, required: ['steps'],
+            properties: { steps: { type: 'array', minItems: coverageRepairPages.length, maxItems: Math.min(slots, coverageRepairPages.length * 2), items: { $ref: '#/$defs/step' } } },
             $defs: TOUR_DRAFT_SCHEMA.$defs,
           };
           await progress('writing', input.images.length);
-          const patch = await this.client.complete(
-            [
-              {
-                role: 'developer',
-                content: coverageInstructions(
-                  this.config.language,
-                  coverageRepairPages,
-                  Math.min(slots, coverageRepairPages.length * 2),
-                ),
-              },
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: context },
-                  {
-                    type: 'text',
-                    text: JSON.stringify({
-                      missingPages: coverageRepairPages,
-                      targetSentences: input.doc.sentences.filter((s) => coverageRepairPages.includes(s.page)),
-                      visualObservations: observations,
-                      existingStepIds: draft.chapters.flatMap((c) => c.steps.map((s) => s.id)),
-                    }),
-                  },
-                  ...imageContent(
-                    input.images.filter((image) => image.kind === 'page' && coverageRepairPages.includes(image.page)),
-                  ),
-                ],
-              },
-            ],
-            'paper_tour_coverage',
-            patchSchema,
-            8192,
-            signal,
-          );
+          const patch = await this.client.complete([
+            { role: 'developer', content: coverageInstructions(this.config.language, coverageRepairPages, Math.min(slots, coverageRepairPages.length * 2)) },
+            { role: 'user', content: [
+              { type: 'text', text: context },
+              { type: 'text', text: JSON.stringify({
+                missingPages: coverageRepairPages,
+                targetSentences: input.doc.sentences.filter((s) => coverageRepairPages.includes(s.page)),
+                visualObservations: observations,
+                existingStepIds: draft.chapters.flatMap((c) => c.steps.map((s) => s.id)),
+              }) },
+              ...imageContent(input.images.filter((image) => image.kind === 'page' && coverageRepairPages.includes(image.page))),
+            ] },
+          ], 'paper_tour_coverage', patchSchema, 8192, signal);
           completions.push(patch);
-          if (!ajv.compile(patchSchema)(patch.value))
-            throw new TourValidationError(['Missing-page explanations did not match the required step format.']);
+          if (!ajv.compile(patchSchema)(patch.value)) throw new TourValidationError(['Missing-page explanations did not match the required step format.']);
           const merged = mergeCoverageSteps(draft, (patch.value as { steps: DraftStep[] }).steps, input.doc);
           await progress('validating', input.images.length);
           result = materializeTour(merged, input.doc, input.documentId, this.config.language);

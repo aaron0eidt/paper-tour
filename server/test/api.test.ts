@@ -21,6 +21,7 @@ test('every library endpoint requires a verified token', async () => {
   });
   try {
     for (const url of [
+      '/api/models',
       '/api/documents',
       `/api/documents/${id}/manifest`,
       `/api/documents/${id}/search?q=test`,
@@ -188,6 +189,86 @@ test('tour regeneration is explicit and accepts the existing empty-body request'
     });
     assert.equal(explicit.statusCode, 200);
     assert.deepEqual(values, [false, true]);
+  } finally {
+    await app.close();
+  }
+});
+
+test('authenticated model catalog and per-request model selections reach the service', async () => {
+  const catalog = {
+    provider: 'meta',
+    defaultModel: 'muse-spark-1.3',
+    availability: 'not_configured',
+    checkedAt: 'now',
+    pricingCheckedAt: 'now',
+    pricingSourceUrl: 'https://dev.meta.ai/docs/pricing',
+    models: [],
+  } as const;
+  const selections: unknown[] = [];
+  const app = await createApp({
+    authenticate: async () => 'owner',
+    service: service({
+      models: async () => ({ ...catalog, models: [] }),
+      reserve: async (_owner, _filename, _size, selection) => {
+        selections.push(selection);
+        return { documentId: id, bucket: 'paper-files', path: 'owner/file.pdf' };
+      },
+      generateTour: async (_owner, _id, _regenerate, selection) => {
+        selections.push(selection);
+        return {
+          generation: {
+            id,
+            analysisId: id,
+            status: 'queued',
+            stage: 'preparing',
+            imagesDone: 0,
+            imagesTotal: 0,
+            error: null,
+            model: 'muse-spark-1.3-contributor',
+            tourId: null,
+          },
+        };
+      },
+    }),
+  });
+  try {
+    assert.equal(
+      (await app.inject({ url: '/api/models', headers: { authorization: 'Bearer valid' } })).json().provider,
+      'meta',
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/documents',
+          headers: { authorization: 'Bearer valid' },
+          payload: { filename: 'paper.pdf', size: 8, model: 'muse-wonder-1.0', allowTraining: false },
+        })
+      ).statusCode,
+      201,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/documents/${id}/tours`,
+          headers: { authorization: 'Bearer valid' },
+          payload: { regenerate: true, model: 'muse-spark-1.3-contributor', allowTraining: true },
+        })
+      ).statusCode,
+      200,
+    );
+    const invalidConsent = await app.inject({
+      method: 'POST',
+      url: `/api/documents/${id}/tours`,
+      headers: { authorization: 'Bearer valid' },
+      payload: { regenerate: true, model: 'muse-spark-1.3-contributor', allowTraining: 'true' },
+    });
+    assert.equal(invalidConsent.statusCode, 400, 'training consent must be an explicit JSON boolean');
+    assert.deepEqual(selections, [
+      { model: 'muse-wonder-1.0', allowTraining: false },
+      { model: 'muse-spark-1.3-contributor', allowTraining: true },
+    ]);
   } finally {
     await app.close();
   }

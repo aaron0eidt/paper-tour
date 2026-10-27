@@ -102,8 +102,7 @@ export class MuseClient {
       const raw = await response.text();
       if (raw.length > 2_000_000) throw new Error('oversized');
       payload = JSON.parse(raw);
-      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.choices))
-        throw new Error('invalid envelope');
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.choices)) throw new Error('invalid envelope');
     } catch {
       throw new ProcessingError(
         'muse_invalid_response',

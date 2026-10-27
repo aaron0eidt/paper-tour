@@ -315,7 +315,7 @@ test(
         const differentModel = new TourWorker(
           db,
           storage,
-          { ...c, muse: { ...c.muse, model: 'other-model' } },
+          c,
           {
             ...generator,
             model: 'other-model',

@@ -28,6 +28,8 @@ export interface GeneratedTour {
 export interface TourGenerator {
   readonly model: string;
   readonly configured: boolean;
+  /** Bind a persisted job model without changing the provider credentials or application state. */
+  withModel?(model: string): TourGenerator;
   generate(
     input: TourGenerationInput,
     onProgress?: (progress: TourProgress) => Promise<void>,

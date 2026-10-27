@@ -279,7 +279,10 @@ export class AnalysisWorker {
       ]);
     else {
       if (!this.enqueue) throw new Error('Tour job enqueue is required for analysis publication.');
-      await ensureTourGeneration(tx, this.enqueue, documentId, analysisId, this.config.muse.model);
+      const {
+        rows: [document],
+      } = await tx.query('select tour_model from documents where id=$1', [documentId]);
+      await ensureTourGeneration(tx, this.enqueue, documentId, analysisId, document.tour_model);
     }
   }
   async remove(documentId: string) {

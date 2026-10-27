@@ -13,6 +13,7 @@ import { ProcessingError } from './errors';
 import type { Enqueue } from './service';
 import type { FileStorage } from './storage';
 import type { TourGenerator, TourImage, TourProgress } from './tour-generator';
+import { isContributorModel } from './muse/models';
 const execute = promisify(execFile);
 
 export function generationSummary(row: QueryResultRow): TourGenerationSummary {
@@ -266,12 +267,34 @@ export class TourWorker {
       const {
         rows: [row],
       } = await this.db.query(
-        `select g.*,a.doc,d.upload_path from tour_generations g join analyses a on a.id=g.analysis_id join documents d on d.id=g.document_id
+        `select g.*,a.doc,d.upload_path,d.tour_allow_training from tour_generations g join analyses a on a.id=g.analysis_id join documents d on d.id=g.document_id
         where g.id=$1 and g.document_id=$2 and g.analysis_id=$3 and d.deleted_at is null and a.status in ('ready','limited')`,
         [generationId, documentId, analysisId],
       );
       if (!row || ['ready', 'failed'].includes(row.status)) return;
-      const generator = this.generator;
+      if (isContributorModel(row.model) && row.tour_allow_training !== true) {
+        await this.db.query(
+          "update tour_generations set status='failed',error_code='contributor_training_consent_required',error=$2,updated_at=now(),completed_at=now() where id=$1",
+          [
+            generationId,
+            'This Contributor model requires explicit consent to Meta using this paper content for training.',
+          ],
+        );
+        return;
+      }
+      let generator: TourGenerator | undefined;
+      try {
+        generator = row.model === this.generator.model ? this.generator : this.generator.withModel?.(row.model);
+      } catch {
+        /* An unsupported persisted selection cannot fall back to another model. */
+      }
+      if (!generator || generator.model !== row.model) {
+        await this.db.query(
+          "update tour_generations set status='failed',error_code='unsupported_model',error=$2,updated_at=now(),completed_at=now() where id=$1",
+          [generationId, 'The selected model is not supported by this tour generator. Choose another model.'],
+        );
+        return;
+      }
       if (!generator.configured) {
         await this.db.query(
           "update tour_generations set status='needs_configuration',error_code='muse_not_configured',error=$2,model=$3,updated_at=now() where id=$1 and status<>'ready'",
@@ -394,7 +417,7 @@ export class TourWorker {
   }
   async reconcile(enqueue: Enqueue, documentId?: string) {
     const { rows: documents } = await this.db.query(
-      `select d.id,a.id as analysis_id from documents d join analyses a on a.id=d.current_analysis_id
+      `select d.id,d.tour_model,a.id as analysis_id from documents d join analyses a on a.id=d.current_analysis_id
        left join lateral(select status from tour_generations where analysis_id=a.id order by created_at desc,id desc limit 1) g on true
        where d.deleted_at is null and a.status in ('ready','limited')
        and (not exists(select 1 from tours t where t.analysis_id=a.id) or g.status='needs_configuration')
@@ -405,9 +428,10 @@ export class TourWorker {
       await this.db.transaction(async (tx) => {
         const {
           rows: [live],
-        } = await tx.query('select current_analysis_id from documents where id=$1 and deleted_at is null for update', [
-          document.id,
-        ]);
+        } = await tx.query(
+          'select current_analysis_id,tour_model from documents where id=$1 and deleted_at is null for update',
+          [document.id],
+        );
         if (!live || live.current_analysis_id !== document.analysis_id) return;
         const {
           rows: [generation],
@@ -425,7 +449,7 @@ export class TourWorker {
           enqueue,
           document.id,
           document.analysis_id,
-          this.generator.model,
+          live.tour_model,
           generation?.status === 'needs_configuration' && this.generator.configured,
         );
       });

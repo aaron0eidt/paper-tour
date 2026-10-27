@@ -15,6 +15,10 @@ export interface TourGenerationSummary {
   model: string;
   tourId: string | null;
 }
+export interface TourModelSelection {
+  model?: string;
+  allowTraining?: boolean;
+}
 export interface ElementRef {
   documentId: string;
   analysisId: string;
@@ -30,6 +34,8 @@ export interface DocumentSummary {
   analysisError: string | null;
   thumbnailUrl: string | null;
   tourCount: number;
+  tourModel?: string;
+  tourAllowTraining?: boolean;
   tourGeneration?: TourGenerationSummary | null;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +52,7 @@ export interface TourSummary {
   id: string;
   title: string;
   analysisId: string;
+  model?: string | null;
 }
 export interface ReaderState {
   page: number;
@@ -62,7 +69,7 @@ export interface DocumentManifest {
   docAnalysisId: string | null;
   doc: Doc | null;
   tours: TourSummary[];
-  selectedTour: { id: string; analysisId: string; doc: Doc; tour: Tour } | null;
+  selectedTour: { id: string; analysisId: string; doc: Doc; tour: Tour; model?: string | null } | null;
   tourGeneration?: TourGenerationSummary | null;
   assets: Record<string, string>;
   readerState: ReaderState | null;

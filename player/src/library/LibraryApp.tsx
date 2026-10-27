@@ -7,6 +7,9 @@ import { apiRequest, isLibraryConfigured, signOut } from './client';
 import { useSession } from './useSession';
 import { isTourGenerationActive } from './tourGeneration';
 import { TourGeneration } from '../components/TourGeneration';
+import { ModelPicker } from '../components/ModelPicker';
+import { useModelCatalog, useModelPreference } from './useModelCatalog';
+import { canUseModel } from './modelChoices';
 import '../library.css';
 
 interface Props {
@@ -92,6 +95,9 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
   const [signingOut, setSigningOut] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ document: DocumentSummary; mode: 'rename' | 'delete' } | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const models = useModelCatalog();
+  const preference = useModelPreference(models.catalog);
   const refreshDocuments = () => setRefresh((count) => count + 1);
 
   useEffect(() => {
@@ -193,7 +199,22 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
             </button>
           )}
         </div>
+        {models.error && <div className="model-catalog-error" role="alert"><p>{models.error}</p><button className="library-text-button" type="button" onClick={models.refresh}>Try again</button></div>}
+        <ModelPicker
+          catalog={models.catalog}
+          model={preference.model}
+          onModelChange={preference.setModel}
+          allowTraining={preference.allowTraining}
+          onAllowTrainingChange={preference.setAllowTraining}
+          disabled={uploadBusy || models.loading}
+          label="Model for new PDFs"
+        />
         <UploadPanel
+          model={preference.model}
+          allowTraining={preference.allowTraining}
+          canUpload={canUseModel(models.catalog, preference.model, preference.allowTraining) && !models.loading}
+          onResetConsent={preference.resetConsent}
+          onBusyChange={setUploadBusy}
           onChanged={refreshDocuments}
           onUploaded={() => {
             setNotice(
@@ -386,6 +407,7 @@ function DocumentCard({
           <TourGeneration
             documentId={item.id}
             generation={item.tourGeneration}
+            preferredModel={item.tourModel}
             onChanged={onTourChanged}
             canGenerate={analysisReady || !!item.tourGeneration}
             onOpenTour={() => onOpen()}

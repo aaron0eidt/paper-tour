@@ -11,14 +11,21 @@ interface PendingUpload {
   file: File;
   reservation: UploadReservation | null;
   transferred: boolean;
+  model: string;
+  allowTraining: boolean;
 }
 
 interface UploadPanelProps {
   onUploaded(): void;
   onChanged(): void;
+  model: string;
+  allowTraining: boolean;
+  canUpload: boolean;
+  onResetConsent(): void;
+  onBusyChange?(busy: boolean): void;
 }
 
-export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
+export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUpload, onResetConsent, onBusyChange }: UploadPanelProps) {
   const [stage, setStage] = useState<UploadStage>('idle');
   const [progress, setProgress] = useState(0);
   const [filename, setFilename] = useState('');
@@ -30,6 +37,7 @@ export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
   const rejectTransfer = useRef<((error: Error) => void) | null>(null);
   const run = useRef(0);
   const busy = ['checking', 'uploading', 'finishing', 'canceling'].includes(stage);
+  useEffect(() => { onBusyChange?.(stage !== 'idle'); }, [stage, onBusyChange]);
 
   useEffect(
     () => () => {
@@ -42,13 +50,14 @@ export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
 
   async function start(file: File, resume = false) {
     if (!resume && busy) return;
+    if (!resume && !canUpload) { setError('Choose an available tour model and confirm any Contributor permission before uploading.'); return; }
     const token = ++run.current;
     const active = () => token === run.current;
     setError(null);
     setFilename(file.name);
     setStage('checking');
     if (!resume) {
-      pending.current = { file, reservation: null, transferred: false };
+      pending.current = { file, reservation: null, transferred: false, model, allowTraining };
       setProgress(0);
     }
     const upload = pending.current!;
@@ -63,7 +72,7 @@ export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
       if (!upload.reservation) {
         upload.reservation = await apiRequest<UploadReservation>('/api/documents', {
           method: 'POST',
-          body: JSON.stringify({ filename: file.name, size: file.size }),
+          body: JSON.stringify({ filename: file.name, size: file.size, model: upload.model, allowTraining: upload.allowTraining }),
         });
         if (!active()) {
           // Cancellation can precede the reservation response. Remove the newly created row too.
@@ -131,6 +140,7 @@ export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
       setStage('idle');
       setFilename('');
       if (input.current) input.current.value = '';
+      onResetConsent();
       onUploaded();
     } catch (cause) {
       if (!active()) return;
@@ -167,6 +177,7 @@ export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
     setFilename('');
     setProgress(0);
     if (input.current) input.current.value = '';
+    onResetConsent();
   }
 
   function drop(event: DragEvent) {
@@ -231,7 +242,7 @@ export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
         accept="application/pdf,.pdf"
         className="library-file-input"
         aria-label="Choose a PDF"
-        disabled={busy}
+        disabled={busy || !canUpload}
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) void start(file);
@@ -248,7 +259,7 @@ export function UploadPanel({ onUploaded, onChanged }: UploadPanelProps) {
           </button>
         )}
         {stage === 'idle' && (
-          <button type="button" className="library-button primary" onClick={() => input.current?.click()}>
+          <button type="button" className="library-button primary" disabled={!canUpload} onClick={() => input.current?.click()}>
             Choose PDF
           </button>
         )}

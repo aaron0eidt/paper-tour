@@ -604,6 +604,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               <TourGeneration
                 documentId={documentId}
                 generation={manifest.tourGeneration}
+                preferredModel={manifest.document.tourModel}
+                savedModel={manifest.selectedTour?.model}
+                showModelPicker
                 canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
                 onChanged={() => setManifestRefresh((value) => value + 1)}
                 onOpenTour={(tourId) => {

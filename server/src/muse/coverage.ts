@@ -11,22 +11,15 @@ export function mergeCoverageSteps(draft: TourDraft, steps: DraftStep[], doc: Do
   if (!draft.chapters.length || !steps.length || steps.some((s) => !missing.has(pages.get(s.source)!)))
     throw new TourValidationError(['Coverage repair must reference only the missing content pages.']);
   const order = textReadingOrder(doc);
-  const sorted = [...steps].sort(
-    (a, b) =>
-      pages.get(a.source)! - pages.get(b.source)! ||
-      (order.get(a.source) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.source) ?? Number.MAX_SAFE_INTEGER),
-  );
+  const sorted = [...steps].sort((a, b) => pages.get(a.source)! - pages.get(b.source)! ||
+    (order.get(a.source) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.source) ?? Number.MAX_SAFE_INTEGER));
   const result = structuredClone(draft);
   for (const step of sorted) {
     const page = pages.get(step.source)!;
     let inserted = false;
     for (const chapter of result.chapters) {
       const at = chapter.steps.findIndex((s) => pages.get(s.source)! > page);
-      if (at !== -1) {
-        chapter.steps.splice(at, 0, structuredClone(step));
-        inserted = true;
-        break;
-      }
+      if (at !== -1) { chapter.steps.splice(at, 0, structuredClone(step)); inserted = true; break; }
     }
     if (!inserted) result.chapters.at(-1)!.steps.push(structuredClone(step));
   }
