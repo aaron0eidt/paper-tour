@@ -1,3 +1,4 @@
+import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, cameraView, initialView, readingScale } from './camera';
 import { TourEngine } from './engine';
@@ -124,11 +125,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     let lastPoll = 0;
     const accept = (value: Loaded) => {
       if (!alive) {
-        if (value.pdf !== loadedRef.current?.pdf) void value.pdf?.destroy();
+        if (value.pdf !== loadedRef.current?.pdf) retirePdf(value.pdf);
         return;
       }
+      const previousPdf = loadedRef.current?.pdf;
       loadedRef.current = value;
       setLoaded(value);
+      if (previousPdf !== value.pdf) retirePdf(previousPdf);
     };
     const refresh = async () => {
       if (loading) return;
@@ -139,15 +142,16 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           accept(await loadPaper(params.paper));
           return;
         }
+        const pinnedTour = activeTour ?? manifestRef.current?.selectedTour?.id;
         const next = await apiRequest<DocumentManifest>(
-          `/api/documents/${documentId}/manifest${activeTour ? `?tourId=${encodeURIComponent(activeTour)}` : ''}`,
+          `/api/documents/${documentId}/manifest${pinnedTour ? `?tourId=${encodeURIComponent(pinnedTour)}` : ''}`,
         );
         if (!alive) return;
         const previous = manifestRef.current;
         const reloadPdf = !!loadedRef.current?.pdf && Date.now() - pdfOpenedAt.current > 45 * 60 * 1000;
         const changed =
           !previous ||
-          !loadedRef.current?.pdf ||
+          !isPdfOpen(loadedRef.current?.pdf) ||
           next.docAnalysisId !== previous.docAnalysisId ||
           next.selectedTour?.id !== previous.selectedTour?.id ||
           reloadPdf;
@@ -163,7 +167,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           const previousPdf = loadedRef.current?.pdf;
           const value = await loadManifest(next, reloadPdf ? undefined : (loadedRef.current ?? undefined));
           if (!alive) {
-            if (value.pdf !== loadedRef.current?.pdf) void value.pdf?.destroy();
+            if (value.pdf !== previousPdf && value.pdf !== loadedRef.current?.pdf) retirePdf(value.pdf);
             return;
           }
           if (reloadPdf && !value.pdf && previousPdf)
@@ -171,13 +175,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           if (reloadPdf) restoredView.current = false;
           if (value.pdf && value.pdf !== previousPdf) pdfOpenedAt.current = Date.now();
           accept(value);
-          if (reloadPdf && previousPdf && previousPdf !== value.pdf) void previousPdf.destroy();
         }
         setFatal(null);
       } catch (error) {
         if (alive && error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) {
           setLoaded(null);
-          void loadedRef.current?.pdf?.destroy();
           loadedRef.current = null;
           onBack();
           return;
@@ -193,6 +195,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           const current = manifestRef.current;
           const working =
             !current ||
+            !isPdfOpen(loadedRef.current?.pdf) ||
             current.document.fileStatus === 'uploading' ||
             ['queued', 'processing'].includes(current.analysis?.status ?? '') ||
             isTourGenerationActive(current.tourGeneration) ||
@@ -213,7 +216,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     const subscription = client?.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || (identity && session?.user.id !== identity)) {
         setLoaded(null);
-        void loadedRef.current?.pdf?.destroy();
         loadedRef.current = null;
         onBack();
       }
@@ -223,12 +225,20 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     return () => subscription?.data.subscription.unsubscribe();
   }, [documentId, onBack]);
 
-  useEffect(
-    () => () => {
-      void loadedRef.current?.pdf?.destroy();
-    },
-    [],
-  );
+  const readerMounted = useRef(false);
+  useEffect(() => {
+    readerMounted.current = true;
+    return () => {
+      readerMounted.current = false;
+      // Also release an accepted PDF whose React update never committed before unmount.
+      const latest = loadedRef.current?.pdf;
+      setTimeout(() => { if (!readerMounted.current) retirePdf(latest); }, 0);
+    };
+  }, []);
+
+  // Dispose only after React stops using the old PDF. Request cancellation must not close
+  // a PDF borrowed by another refresh, and StrictMode's effect replay must keep it alive.
+  usePdfDocument(loaded?.pdf);
 
   const layout = useMemo(() => (loaded?.pdf && loaded.sizes.length ? layoutPages(loaded.sizes) : null), [loaded]);
   const resolver = useMemo(() => (loaded ? new Resolver(loaded.doc, loaded.sizes) : null), [loaded]);

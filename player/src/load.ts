@@ -1,3 +1,4 @@
+import { isPdfOpen } from './pdfLifetime';
 // Loads a paper folder: doc.json, tour.json and the PDF. Missing or invalid files become problems
 // for the UI; the PDF still renders without a tour (and without doc.json) so authors can inspect it.
 
@@ -58,8 +59,8 @@ export async function loadManifest(manifest: DocumentManifest, previous?: Loaded
       };
     }
   }
-  let pdf = previous?.pdf ?? null;
-  let sizes = previous?.sizes ?? [];
+  let pdf = previous?.paper === manifest.document.id && isPdfOpen(previous.pdf) ? previous.pdf : null;
+  let sizes = pdf ? previous!.sizes : [];
   if (!pdf && manifest.pdfUrl) {
     try {
       ({ pdf, sizes } = await openPdf(manifest.pdfUrl));

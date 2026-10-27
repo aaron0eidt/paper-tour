@@ -10,13 +10,19 @@ export type { PDFDocumentProxy, PDFPageProxy };
 
 /** Open a PDF and read every page's size in points (rotation applied). */
 export async function openPdf(url: string): Promise<{ pdf: PDFDocumentProxy; sizes: PageSize[] }> {
-  const pdf = await pdfjs.getDocument({ url }).promise;
-  const sizes: PageSize[] = [];
-  for (let n = 1; n <= pdf.numPages; n++) {
-    const viewport = (await pdf.getPage(n)).getViewport({ scale: 1 });
-    sizes.push({ width: viewport.width, height: viewport.height });
+  const task = pdfjs.getDocument({ url });
+  try {
+    const pdf = await task.promise;
+    const sizes: PageSize[] = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const viewport = (await pdf.getPage(n)).getViewport({ scale: 1 });
+      sizes.push({ width: viewport.width, height: viewport.height });
+    }
+    return { pdf, sizes };
+  } catch (error) {
+    await task.destroy().catch(() => {});
+    throw error;
   }
-  return { pdf, sizes };
 }
 
 export interface PageRender {

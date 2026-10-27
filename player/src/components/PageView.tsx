@@ -1,3 +1,4 @@
+import { getLivePage, isPdfOpen } from '../pdfLifetime';
 import { memo, useEffect, useRef } from 'react';
 import type { Detail } from '../canvasPlan';
 import { BLOCK_COLORS, MARKER, STROKE } from '../colors';
@@ -62,20 +63,21 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
     let job: ReturnType<typeof renderPage> | null = null;
     // A blank page gets a fast low-resolution pass first, then the sharp one.
     const passes = !host.querySelector('canvas') && scale > PREVIEW_SCALE ? [PREVIEW_SCALE, scale] : [scale];
-    pdf
-      .getPage(box.n)
+    getLivePage(pdf, box.n)
       .then(async (page) => {
+        if (!page) return;
         for (const s of passes) {
-          if (cancelled) return;
+          if (cancelled || !isPdfOpen(pdf)) return;
           job = renderPage(page, s);
           const canvas = await job.promise;
-          if (cancelled) return;
+          if (cancelled || !isPdfOpen(pdf)) return;
           for (const c of host.querySelectorAll('canvas')) c.width = c.height = 0;
           host.replaceChildren(canvas);
         }
       })
       .catch((err) => {
-        if (!isCancelled(err)) console.warn(`[pdf] page ${box.n} failed to render`, err);
+        if (!cancelled && isPdfOpen(pdf) && !isCancelled(err))
+          console.warn(`[pdf] page ${box.n} failed to render`, err);
       });
     return () => {
       cancelled = true;
@@ -97,20 +99,20 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
     }
     let cancelled = false;
     let job: ReturnType<typeof renderPage> | null = null;
-    pdf
-      .getPage(box.n)
+    getLivePage(pdf, box.n)
       .then(async (page) => {
-        if (cancelled) return;
+        if (!page || cancelled || !isPdfOpen(pdf)) return;
         job = renderPage(page, detail.scale, detail.rect);
         const canvas = await job.promise;
-        if (cancelled) return;
+        if (cancelled || !isPdfOpen(pdf)) return;
         const [x0, y0, x1, y1] = detail.rect;
         Object.assign(canvas.style, { left: `${x0}px`, top: `${y0}px`, width: `${x1 - x0}px`, height: `${y1 - y0}px` });
         clear();
         host.appendChild(canvas);
       })
       .catch((err) => {
-        if (!isCancelled(err)) console.warn(`[pdf] page ${box.n} detail failed to render`, err);
+        if (!cancelled && isPdfOpen(pdf) && !isCancelled(err))
+          console.warn(`[pdf] page ${box.n} detail failed to render`, err);
       });
     return () => {
       cancelled = true;
@@ -179,7 +181,14 @@ function DebugLayer({ viewBox, data }: { viewBox: string; data: DebugPage }) {
   return (
     <svg className="layer layer-debug" viewBox={viewBox} preserveAspectRatio="none">
       {data.blocks.map((b) => (
-        <rect key={b.id} className="dbg-block" data-id={b.id} data-kind={`block · ${b.type}`} {...rectProps(b.bbox)} stroke={BLOCK_COLORS[b.type]} />
+        <rect
+          key={b.id}
+          className="dbg-block"
+          data-id={b.id}
+          data-kind={`block · ${b.type}`}
+          {...rectProps(b.bbox)}
+          stroke={BLOCK_COLORS[b.type]}
+        />
       ))}
       {data.sentences.map((s) => (
         <g key={s.id} className="dbg-sentence" data-id={s.id} data-kind="sentence">
