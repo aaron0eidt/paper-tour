@@ -1,7 +1,7 @@
 import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, cameraView, initialView, readingScale } from './camera';
-import { TourEngine } from './engine';
+import { EMPTY_BOARD, TourEngine } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutPages } from './layout';
 import { loadManifest, loadPaper } from './load';
@@ -48,6 +48,7 @@ const IDLE: EngineState = {
   word: -1,
   overlays: [],
   camera: { seq: 0, key: null, action: null },
+  board: EMPTY_BOARD,
 };
 const EMPTY_SCENE: Scene = { pages: new Map(), spotlight: false, notes: [], labels: [] };
 const noSubscribe = () => () => {};

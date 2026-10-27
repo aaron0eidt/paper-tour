@@ -402,6 +402,135 @@
             "type"
           ],
           "additionalProperties": false
+        },
+        {
+          "description": "A hand-drawn arrow pointing at the target or a region of it, with an optional short label at its tail.",
+          "properties": {
+            "type": {
+              "const": "arrow"
+            },
+            "target": {
+              "$ref": "#/$defs/targetId"
+            },
+            "region": {
+              "$ref": "#/$defs/region"
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "from": {
+              "enum": [
+                "auto",
+                "left",
+                "right",
+                "top",
+                "bottom"
+              ],
+              "default": "auto",
+              "description": "The side the arrow comes from."
+            },
+            "color": {
+              "$ref": "#/$defs/color"
+            },
+            "at_word": {
+              "$ref": "#/$defs/atWord"
+            },
+            "persist": {
+              "$ref": "#/$defs/persist"
+            }
+          },
+          "required": [
+            "type",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "A hand-drawn circle around the target or a region of it, with an optional short label.",
+          "properties": {
+            "type": {
+              "const": "circle"
+            },
+            "target": {
+              "$ref": "#/$defs/targetId"
+            },
+            "region": {
+              "$ref": "#/$defs/region"
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "color": {
+              "$ref": "#/$defs/color"
+            },
+            "at_word": {
+              "$ref": "#/$defs/atWord"
+            },
+            "persist": {
+              "$ref": "#/$defs/persist"
+            }
+          },
+          "required": [
+            "type",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "Show an item on the side board, replacing the one before. It stays until another board item or board_clear, also across steps.",
+          "properties": {
+            "type": {
+              "const": "board"
+            },
+            "item": {
+              "$ref": "#/$defs/boardItem"
+            },
+            "at_word": {
+              "$ref": "#/$defs/atWord"
+            }
+          },
+          "required": [
+            "type",
+            "item"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "Light up one part of the board item by index: a formula term, a flow node or a bar.",
+          "properties": {
+            "type": {
+              "const": "board_focus"
+            },
+            "part": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "at_word": {
+              "$ref": "#/$defs/atWord"
+            }
+          },
+          "required": [
+            "type",
+            "part"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "Remove the item from the side board.",
+          "properties": {
+            "type": {
+              "const": "board_clear"
+            },
+            "at_word": {
+              "$ref": "#/$defs/atWord"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -414,6 +543,172 @@
         "orange"
       ],
       "default": "yellow"
+    },
+    "boardItem": {
+      "description": "What the side board shows. The model fills a template; the player animates it.",
+      "oneOf": [
+        {
+          "description": "A formula built term by term. Every term is a substring of latex and keeps its colour.",
+          "properties": {
+            "kind": {
+              "const": "formula"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "latex": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 400
+            },
+            "terms": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "latex": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "color": {
+                    "$ref": "#/$defs/color"
+                  }
+                },
+                "required": [
+                  "latex",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "latex",
+            "terms"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "Boxes and arrows of a pipeline or architecture, revealed in order.",
+          "properties": {
+            "kind": {
+              "const": "flow"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "nodes": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "color": {
+                    "$ref": "#/$defs/color"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "edges": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40
+                }
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "nodes",
+            "edges"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "Bars that animate numbers reported in the document.",
+          "properties": {
+            "kind": {
+              "const": "bars"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "unit": {
+              "type": "string",
+              "maxLength": 20
+            },
+            "higher_is_better": {
+              "type": "boolean"
+            },
+            "bars": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "color": {
+                    "$ref": "#/$defs/color"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "bars"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

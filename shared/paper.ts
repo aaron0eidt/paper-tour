@@ -176,9 +176,71 @@ export interface ClearAction {
   at_word?: number;
 }
 
+/** Pen: a hand-drawn arrow pointing at the target (or a region of it), drawn in as the narration reaches it. */
+export interface ArrowAction {
+  type: 'arrow';
+  target: string;
+  region?: Region;
+  label?: string;
+  from?: 'auto' | 'left' | 'right' | 'top' | 'bottom';
+  color?: Color;
+  at_word?: number;
+  persist?: boolean;
+}
+
+/** Pen: a hand-drawn circle around the target (or a region of it). */
+export interface CircleAction {
+  type: 'circle';
+  target: string;
+  region?: Region;
+  label?: string;
+  color?: Color;
+  at_word?: number;
+  persist?: boolean;
+}
+
+export interface FormulaTerm {
+  latex: string;
+  label: string;
+  color?: Color;
+}
+
+/** What the side board shows: the model fills a template, the player animates it. */
+export type BoardItem =
+  | { kind: 'formula'; title?: string; latex: string; terms: FormulaTerm[] }
+  | { kind: 'flow'; title?: string; nodes: { id: string; label: string; color?: Color }[]; edges: [string, string][] }
+  | {
+      kind: 'bars';
+      title?: string;
+      unit?: string;
+      higher_is_better?: boolean;
+      bars: { label: string; value: number; color?: Color }[];
+    };
+
+/** Show an item on the side board; it stays, across steps, until another board item or board_clear. */
+export interface BoardAction {
+  type: 'board';
+  item: BoardItem;
+  at_word?: number;
+}
+
+/** Light up one part of the board item: a formula term, a flow node or a bar, by index. */
+export interface BoardFocusAction {
+  type: 'board_focus';
+  part: number;
+  at_word?: number;
+}
+
+export interface BoardClearAction {
+  type: 'board_clear';
+  at_word?: number;
+}
+
 export type CameraAction = FocusAction | ZoomAction;
-export type OverlayAction = HighlightAction | BoxAction | SpotlightAction | NoteAction;
-export type Action = CameraAction | OverlayAction | ClearAction;
+export type PenAction = ArrowAction | CircleAction;
+export type OverlayAction = HighlightAction | BoxAction | SpotlightAction | NoteAction | PenAction;
+export type BoardControl = BoardAction | BoardFocusAction | BoardClearAction;
+export type Action = CameraAction | OverlayAction | ClearAction | BoardControl;
 
 export interface Step {
   id: string;

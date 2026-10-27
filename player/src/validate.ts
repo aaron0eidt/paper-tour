@@ -15,6 +15,11 @@ const ACTION_FIELDS: Record<string, string[]> = {
   spotlight: ['target'],
   note: ['anchor', 'text'],
   clear: [],
+  arrow: ['target'],
+  circle: ['target'],
+  board: ['item'],
+  board_focus: ['part'],
+  board_clear: [],
 };
 
 export function checkDoc(doc: unknown): string[] {

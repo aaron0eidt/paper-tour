@@ -1,6 +1,7 @@
 // Resolves doc.json IDs to page rects. Tours never carry coordinates; this is the only place where
 // an ID becomes geometry.
 
+import { checkBoardItem } from './board';
 import { DEFAULT_COLOR, DEFAULT_ZOOM_PADDING, splitWords } from './types';
 import type { Action, BBox, Doc, DocBlock, DocEquation, DocFigure, DocPanel, DocSentence, Region, Tour } from './types';
 
@@ -208,6 +209,27 @@ function checkValues(a: Action, where: string, warn: (message: string) => void):
         return null;
       }
       break;
+    case 'arrow':
+      oneOf('from', SIDES, 'auto');
+      oneOf('color', COLORS, DEFAULT_COLOR);
+      if (given.label !== undefined && typeof given.label !== 'string') reset('label', 'no label');
+      break;
+    case 'circle':
+      oneOf('color', COLORS, DEFAULT_COLOR);
+      if (given.label !== undefined && typeof given.label !== 'string') reset('label', 'no label');
+      break;
+    case 'board': {
+      const item = checkBoardItem(given.item, where, warn);
+      if (!item) return null;
+      out.item = item;
+      break;
+    }
+    case 'board_focus':
+      if (!(Number.isInteger(given.part) && (given.part as number) >= 0)) {
+        warn(`board_focus in ${where} needs a part index from 0; skipped.`);
+        return null;
+      }
+      break;
   }
   return out as unknown as Action;
 }
@@ -253,6 +275,9 @@ export function prepareTour(tour: Tour, resolver: Resolver): { tour: Tour; probl
         }
         switch (a.type) {
           case 'clear':
+          case 'board':
+          case 'board_focus':
+          case 'board_clear':
             return [a];
           case 'highlight': {
             const targets = a.targets.filter((t) => known(t, where));

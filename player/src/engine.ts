@@ -2,7 +2,7 @@
 // so it can be driven by tests with a fake narrator and fake timers.
 
 import { DEFAULT_HOLD_MS, DEFAULT_SPEAKER, splitWords } from './types';
-import type { Action, CameraAction, OverlayAction, Step, Tour } from './types';
+import type { Action, BoardControl, BoardItem, CameraAction, OverlayAction, Step, Tour } from './types';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from './narration/narrator';
 
 export type Status = 'idle' | 'playing' | 'paused' | 'ended';
@@ -39,6 +39,17 @@ export interface CameraCommand {
   action: CameraAction | null;
 }
 
+/** The side board: an item stays across steps until replaced or cleared; its focus belongs to the current step. */
+export interface BoardState {
+  /** Key of the action that put the item on the board; null when the board is empty. */
+  key: string | null;
+  item: BoardItem | null;
+  /** The lit part (formula term, flow node or bar), or null. */
+  focus: number | null;
+}
+
+export const EMPTY_BOARD: BoardState = { key: null, item: null, focus: null };
+
 export interface EngineState {
   status: Status;
   index: number;
@@ -46,6 +57,7 @@ export interface EngineState {
   word: number;
   overlays: OverlayEntry[];
   camera: CameraCommand;
+  board: BoardState;
 }
 
 export interface Timers {
@@ -70,6 +82,17 @@ const realTimers: Timers = {
 
 export function isCamera(a: Action): a is CameraAction {
   return a.type === 'focus' || a.type === 'zoom';
+}
+
+export function isBoard(a: Action): a is BoardControl {
+  return a.type === 'board' || a.type === 'board_focus' || a.type === 'board_clear';
+}
+
+/** The board after one board action; a focus only counts in the step being shown. */
+export function boardAfter(board: BoardState, a: BoardControl, key: string, current: boolean): BoardState {
+  if (a.type === 'board') return { key, item: a.item, focus: null };
+  if (a.type === 'board_clear') return EMPTY_BOARD;
+  return current && board.item ? { ...board, focus: a.part } : board;
 }
 
 export function flattenTour(tour: Tour): FlatStep[] {
@@ -110,6 +133,7 @@ export class TourEngine {
   private word = -1;
   private overlays: OverlayEntry[] = [];
   private camera: CameraCommand = { seq: 0, key: null, action: null };
+  private board: BoardState = EMPTY_BOARD;
   private state: EngineState;
 
   /** Incremented whenever a run is started or stopped; callbacks from older runs are ignored. */
@@ -202,7 +226,14 @@ export class TourEngine {
   // ------------------------------------------------------------ internals
 
   private snapshot(): EngineState {
-    return { status: this.status, index: this.index, word: this.word, overlays: this.overlays, camera: this.camera };
+    return {
+      status: this.status,
+      index: this.index,
+      word: this.word,
+      overlays: this.overlays,
+      camera: this.camera,
+      board: this.board,
+    };
   }
 
   private emit(): void {
@@ -237,16 +268,19 @@ export class TourEngine {
   private rebuild(i: number, includeCurrent: boolean): void {
     let overlays: OverlayEntry[] = [];
     let camera: { key: string; action: CameraAction } | null = null;
+    let board = EMPTY_BOARD;
     const last = includeCurrent ? i : i - 1;
     for (let k = 0; k <= last; k++) {
       for (const item of this.steps[k].schedule) {
         const a = item.action;
         if (a.type === 'clear') overlays = overlays.filter((o) => !o.persist);
         else if (isCamera(a)) camera = { key: item.key, action: a };
+        else if (isBoard(a)) board = boardAfter(board, a, item.key, k === i);
         else if (k === i || a.persist) overlays.push({ key: item.key, step: k, action: a, persist: !!a.persist });
       }
     }
     this.overlays = overlays;
+    this.board = board;
     this.camera = { seq: this.camera.seq + 1, key: camera?.key ?? null, action: camera?.action ?? null };
     if (includeCurrent) this.nextAction = this.steps[i].schedule.length;
   }
@@ -257,6 +291,8 @@ export class TourEngine {
       this.overlays = this.overlays.filter((o) => !o.persist);
     } else if (isCamera(a)) {
       this.camera = { seq: this.camera.seq + 1, key: item.key, action: a };
+    } else if (isBoard(a)) {
+      this.board = boardAfter(this.board, a, item.key, true);
     } else {
       const entry = { key: item.key, step, action: a, persist: !!a.persist };
       this.overlays = [...this.overlays.filter((o) => o.key !== item.key), entry];
