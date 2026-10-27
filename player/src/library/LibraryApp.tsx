@@ -189,10 +189,13 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
       <header className="library-header">
         <PaperMark />
         <div className="library-account">
-          <span title={email}>{email}</span>
-          <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>Profile &amp; Settings</a>
-          <button type="button" className="library-text-button" onClick={() => void logout()} disabled={signingOut}>
-            {signingOut ? 'Signing out…' : 'Sign out'}
+          <span className="library-account-email" title={email}>{email}</span>
+          <a className="library-settings-link" href={`${import.meta.env.BASE_URL}?settings=profile`} aria-label="Profile & Settings" title="Profile & Settings">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9.5 3-.6 2.2-2 .9-2-.6-2.4 4.1L4.1 11v2l-1.6 1.4 2.4 4.1 2-.6 2 .9.6 2.2h5l.6-2.2 2-.9 2 .6 2.4-4.1L19.9 13v-2l1.6-1.4-2.4-4.1-2 .6-2-.9L14.5 3z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Settings</span>
+          </a>
+          <button type="button" className="library-sign-out" aria-label={signingOut ? 'Signing out…' : 'Sign out'} title="Sign out" onClick={() => void logout()} disabled={signingOut}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 5H5v14h4M10 12h11m-4-4 4 4-4 4"/></svg>
           </button>
         </div>
       </header>

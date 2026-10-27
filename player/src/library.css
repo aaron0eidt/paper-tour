@@ -67,7 +67,7 @@
 .library-account {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 10px;
   min-width: 0;
 }
 .library-account > span {
@@ -77,6 +77,37 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
+  margin-right: 10px;
+}
+.library-settings-link,
+.library-sign-out {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--panel);
+  text-decoration: none;
+  font-size: 13px;
+}
+.library-settings-link {
+  padding: 0 13px;
+}
+.library-sign-out {
+  width: 40px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.library-settings-link:hover,
+.library-sign-out:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .library-main {
   max-width: 1320px;
