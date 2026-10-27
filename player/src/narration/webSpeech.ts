@@ -1,6 +1,7 @@
 import { clamp, msPerWord, runTimeline, voiceRate } from './narrator';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from './narrator';
-import type { Voice } from '../types';
+import { loadVoices, pickVoice } from './voices';
+export { pickVoice } from './voices';
 
 // Chrome cuts long utterances off (~15 s for some voices), so a step is spoken as a series of
 // sentence-sized utterances while word indexes stay global across them.
@@ -56,50 +57,7 @@ function wordAtChar(chunk: Chunk, charIndex: number): number {
 // Failures that mean speech does not work here at all (when no utterance has ever started).
 const FATAL = new Set(['speech did not start', 'not-allowed', 'synthesis-unavailable']);
 
-let voicesPromise: Promise<SpeechSynthesisVoice[]> | null = null;
-// Some browsers never list any voices; wait for them once, not on every step.
-let voicesWaited = false;
 let lastCancelAt = 0;
-
-/** Voices load asynchronously in Chrome; wait for voiceschanged (with a timeout). */
-function loadVoices(): Promise<SpeechSynthesisVoice[]> {
-  const synth = window.speechSynthesis;
-  const now = synth.getVoices();
-  if (now.length || voicesWaited) return Promise.resolve(now);
-  voicesPromise ??= new Promise((resolve) => {
-    const done = () => {
-      synth.removeEventListener('voiceschanged', done);
-      clearTimeout(timer);
-      voicesWaited = true;
-      resolve(synth.getVoices());
-    };
-    synth.addEventListener('voiceschanged', done);
-    const timer = setTimeout(done, 1500);
-  });
-  return voicesPromise;
-}
-
-export function pickVoice(voices: SpeechSynthesisVoice[], want?: Voice): SpeechSynthesisVoice | undefined {
-  if (!want || !voices.length) return undefined;
-  const norm = (lang: string) => lang.toLowerCase().replace('_', '-');
-  const lang = want.lang ? norm(want.lang) : undefined;
-  const base = lang?.split('-')[0];
-  const exact = lang ? voices.filter((v) => norm(v.lang) === lang) : [];
-  const sameBase = base ? voices.filter((v) => norm(v.lang).split('-')[0] === base) : [];
-  const pool = exact.length ? exact : sameBase.length ? sameBase : voices;
-  // Local voices send word boundary events reliably; network voices often do not.
-  const ranked = [...pool].sort((a, b) => Number(b.localService) - Number(a.localService));
-
-  const hint = want.name_hint?.toLowerCase();
-  if (hint) {
-    const match =
-      ranked.find((v) => v.name.toLowerCase().includes(hint)) ??
-      sameBase.find((v) => v.name.toLowerCase().includes(hint));
-    if (match) return match;
-  }
-  if (!lang) return undefined;
-  return ranked.find((v) => v.default) ?? ranked[0];
-}
 
 export class WebSpeechNarrator implements Narrator {
   readonly name = 'speech';
@@ -109,6 +67,8 @@ export class WebSpeechNarrator implements Narrator {
    */
   available = true;
   private worked = false;
+
+  constructor(private readonly selectedVoiceId = '') {}
 
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle {
     const synth = window.speechSynthesis;
@@ -209,7 +169,7 @@ export class WebSpeechNarrator implements Narrator {
 
     loadVoices().then((voices) => {
       if (cancelled) return;
-      const voice = pickVoice(voices, req.voice);
+      const voice = pickVoice(voices, req.voice, this.selectedVoiceId);
       // Speaking right after cancel() is sometimes dropped by Chrome; give it a moment.
       if (synth.speaking || synth.pending) {
         synth.cancel();

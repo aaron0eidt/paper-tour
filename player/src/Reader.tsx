@@ -5,7 +5,7 @@ import type { CameraCommand, EngineState } from './engine';
 import { layoutPages } from './layout';
 import { loadManifest, loadPaper } from './load';
 import type { Loaded } from './load';
-import { createNarrator, SilentNarrator } from './narration';
+import { createNarrator, SilentNarrator, useBrowserVoices } from './narration';
 import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
@@ -91,6 +91,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  const browserVoices = useBrowserVoices();
   const [speed, setSpeed] = useState(1);
   const [debug, setDebug] = useState(false);
   const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
@@ -239,8 +240,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   const narrator = useCallback(
     (isMuted: boolean) =>
-      createNarrator({ baseUrl: loaded?.baseUrl ?? '/', muted: isMuted, forceSilent: params.silent }),
-    [loaded, params.silent],
+      createNarrator({ baseUrl: loaded?.baseUrl ?? '/', muted: isMuted, forceSilent: params.silent, voiceId: browserVoices.selectedVoiceId }),
+    [loaded, params.silent, browserVoices.selectedVoiceId],
   );
 
   // One engine per loaded tour; narrator (mute) and speed are pushed into it without recreating it.
@@ -779,6 +780,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             onNext={() => engine?.next()}
             onSpeed={setSpeed}
             onMute={setMuted}
+            voices={browserVoices.voices}
+            voicesLoading={browserVoices.loading}
+            selectedVoiceId={browserVoices.selectedVoiceId}
+            onVoiceChange={browserVoices.setSelectedVoiceId}
+            voiceConfig={prepared.tour.voices?.[steps[state.index]?.step.speaker ?? 'host']}
           />
         )}
       </main>

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "esbuild test/engine.test.ts test/readerState.test.ts src/library/modelChoices.test.ts --bundle --platform=node --format=esm --log-level=warning --outbase=. --outdir=node_modules/.cache/paper-tour && node node_modules/.cache/paper-tour/test/engine.test.js && node node_modules/.cache/paper-tour/test/readerState.test.js && node node_modules/.cache/paper-tour/src/library/modelChoices.test.js"
+    "test": "esbuild test/engine.test.ts test/readerState.test.ts src/narration/voices.test.ts src/library/modelChoices.test.ts --bundle --platform=node --format=esm --log-level=warning --outdir=node_modules/.cache/paper-tour && node node_modules/.cache/paper-tour/test/engine.test.js && node node_modules/.cache/paper-tour/test/readerState.test.js && node node_modules/.cache/paper-tour/src/narration/voices.test.js && node node_modules/.cache/paper-tour/src/library/modelChoices.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
