@@ -26,11 +26,18 @@ export interface Config {
   maxPages: number;
   analysisTimeoutMs: number;
   muse: MuseConfig;
+  agent?: { enabled: boolean; maxTurns: number; maxOutputTokens: number; maxRuntimeMs: number };
 }
 export function config(): Config {
   const needed = (name: string) => {
     const value = process.env[name];
     if (!value) throw new Error(`Missing ${name}; configure the root .env before starting the backend.`);
+    return value;
+  };
+  const budget = (name: string, fallback: number) => {
+    if (process.env[name] === undefined) return fallback;
+    const value = Number(process.env[name]);
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive integer.`);
     return value;
   };
   return {
@@ -44,6 +51,12 @@ export function config(): Config {
     maxBytes: 25 * 1024 * 1024,
     maxPages: 100,
     analysisTimeoutMs: 300_000,
+    agent: {
+      enabled: process.env.PAPER_AGENT_ENABLED === 'true',
+      maxTurns: budget('PAPER_AGENT_MAX_TURNS', 64),
+      maxOutputTokens: budget('PAPER_AGENT_MAX_OUTPUT_TOKENS', 128000),
+      maxRuntimeMs: budget('PAPER_AGENT_MAX_RUNTIME_MS', 1200000),
+    },
     muse: {
       apiKey: process.env.MODEL_API_KEY?.trim() || process.env.MUSE_API_KEY?.trim() || '',
       baseUrl: process.env.MUSE_BASE_URL ?? 'https://api.meta.ai/v1',

@@ -21,7 +21,7 @@ export interface TokenUsage {
 export function reportedUsage(events: GenerationEvent[]): Map<string, TokenUsage> {
   const calls = new Map<string, TokenUsage>();
   for (const event of events)
-    if ((event.type === 'model.usage' || event.type === 'model.completed') && event.data.usage)
+    if (['model.usage', 'model.completed', 'model.failed'].includes(event.type) && event.data.usage)
       calls.set(String(event.data.callId), event.data.usage as TokenUsage);
   return calls;
 }

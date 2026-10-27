@@ -3,12 +3,13 @@ import type { Enqueue } from './service';
 export const ANALYZE = 'paper-analyze';
 export const DELETE = 'paper-delete';
 export const GENERATE_TOUR = 'paper-generate-tour';
+export const AGENT_TURN = 'paper-agent-turn';
 export const CLEANUP = 'paper-cleanup';
 export async function createQueue(url: string) {
   const boss = new PgBoss({ connectionString: url, schema: 'pgboss', max: 3 });
   boss.on('error', (error) => console.error('Queue error:', error.message));
   await boss.start();
-  for (const name of [ANALYZE, DELETE, CLEANUP, GENERATE_TOUR])
+  for (const name of [ANALYZE, DELETE, CLEANUP, GENERATE_TOUR, AGENT_TURN])
     await boss.createQueue(name, {
       retryLimit: 2,
       retryDelay: 5,
@@ -16,16 +17,28 @@ export async function createQueue(url: string) {
       expireInSeconds: 900,
     });
   const enqueue: Enqueue = async (kind, data, db) => {
-    await boss.send(kind === 'analyze' ? ANALYZE : kind === 'generate_tour' ? GENERATE_TOUR : DELETE, data, {
-      singletonKey: data.generationId ?? data.analysisId ?? data.documentId,
-      ...(db
-        ? {
-            db: {
-              executeSql: (text: string, values?: unknown[]) => db.query(text, values),
-            },
-          }
-        : {}),
-    });
+    await boss.send(
+      kind === 'agent_turn'
+        ? AGENT_TURN
+        : kind === 'analyze'
+          ? ANALYZE
+          : kind === 'generate_tour'
+            ? GENERATE_TOUR
+            : DELETE,
+      data,
+      {
+        singletonKey: data.agentRunId
+          ? `${data.agentRunId}:${data.wakeIndex}`
+          : (data.generationId ?? data.analysisId ?? data.documentId),
+        ...(db
+          ? {
+              db: {
+                executeSql: (text: string, values?: unknown[]) => db.query(text, values),
+              },
+            }
+          : {}),
+      },
+    );
   };
   return { boss, enqueue };
 }

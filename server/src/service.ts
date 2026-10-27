@@ -1,3 +1,6 @@
+import { generationRecorder } from './activity';
+import { agentSummary, scheduleAgent } from './agent/store';
+import type { AgentRun } from '../../shared/agent';
 import type { GenerationActivity } from '../../shared/activity';
 import { randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
@@ -24,14 +27,16 @@ import { ensureTourGeneration, generationSummary } from './tour-worker';
 import type { SettingsService } from './settings';
 
 export type Enqueue = (
-  kind: 'analyze' | 'delete' | 'generate_tour',
-  data: { documentId: string; analysisId?: string; generationId?: string },
+  kind: 'analyze' | 'delete' | 'generate_tour' | 'agent_turn',
+  data: { documentId: string; analysisId?: string; generationId?: string; agentRunId?: string; wakeIndex?: number },
   db?: Db,
 ) => Promise<void>;
 type Row = QueryResultRow;
 const iso = (date: Date | string) => new Date(date).toISOString();
 const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
 export interface Library {
+  agentRun?(owner: string, id: string, runId: string): Promise<AgentRun>;
+  controlAgent?(owner: string, id: string, runId: string, action: 'pause' | 'resume' | 'cancel'): Promise<AgentRun>;
   list(owner: string): Promise<DocumentSummary[]>;
   models(owner?: string): Promise<ModelCatalog>;
   activity?(owner: string, id: string, generationId: string, after: string): Promise<GenerationActivity>;
@@ -72,6 +77,7 @@ export class DocumentService implements Library {
     readonly tourModel = process.env.MUSE_MODEL ?? 'muse-spark-1.3',
     readonly catalog?: Pick<MetaModelCatalog, 'get' | 'validateSelection'>,
     readonly settings?: SettingsService,
+    readonly agentEnabled = false,
   ) {}
   async models(owner?: string): Promise<ModelCatalog> {
     if (this.settings && owner) return this.settings.models(owner);
@@ -101,10 +107,103 @@ export class DocumentService implements Library {
   }
   async activity(owner: string, id: string, generationId: string, after: string): Promise<GenerationActivity> {
     await this.owned(owner, id);
-    const { rows: [generation] } = await this.db.query('select status from tour_generations where id=$1 and document_id=$2', [generationId, id]);
+    const {
+      rows: [generation],
+    } = await this.db.query('select status from tour_generations where id=$1 and document_id=$2', [generationId, id]);
     if (!generation) return missing();
-    const { rows } = await this.db.query('select id::text,type,data,created_at from generation_events where generation_id=$1 and id>$2 order by id limit 100', [generationId, after]);
-    return { status: generation.status, events: rows.map((r) => ({ id: r.id, type: r.type, data: r.data, at: iso(r.created_at) })) };
+    const { rows } = await this.db.query(
+      'select id::text,type,data,created_at from generation_events where generation_id=$1 and id>$2 order by id limit 100',
+      [generationId, after],
+    );
+    return {
+      status: generation.status,
+      events: rows.map((r) => ({ id: r.id, type: r.type, data: r.data, at: iso(r.created_at) })),
+    };
+  }
+  async agentRun(owner: string, id: string, runId: string) {
+    await this.owned(owner, id);
+    const {
+      rows: [run],
+    } = await this.db.query(
+      'select r.* from agent_runs r join tour_generations g on g.id=r.generation_id where r.id=$1 and g.document_id=$2',
+      [runId, id],
+    );
+    if (!run) return missing();
+    return agentSummary(run);
+  }
+  async controlAgent(owner: string, id: string, runId: string, action: 'pause' | 'resume' | 'cancel') {
+    await this.owned(owner, id);
+    return this.db.transaction(async (tx) => {
+      const {
+        rows: [run],
+      } = await tx.query(
+        'select r.* from agent_runs r join tour_generations g on g.id=r.generation_id where r.id=$1 and g.document_id=$2 for update of r',
+        [runId, id],
+      );
+      if (!run) return missing();
+      if (['completed', 'cancelled'].includes(run.status)) return agentSummary(run);
+      if (action === 'cancel') {
+        await tx.query(
+          "update agent_runs set status='cancelled',reason='Cancelled by user',updated_at=now() where id=$1",
+          [runId],
+        );
+        await tx.query("update tour_generations set status='cancelled',updated_at=now() where id=$1", [
+          run.generation_id,
+        ]);
+      } else if (action === 'pause') {
+        const status = run.status === 'running' ? 'pausing' : 'paused';
+        await tx.query('update agent_runs set status=$2,updated_at=now() where id=$1', [runId, status]);
+        if (status === 'paused')
+          await tx.query("update tour_generations set status='paused',updated_at=now() where id=$1", [
+            run.generation_id,
+          ]);
+      } else if (['paused', 'failed', 'pausing'].includes(run.status)) {
+        if (['credentials_changed', 'context_changed'].includes(run.reason)) {
+          await generationRecorder(
+            tx,
+            run.generation_id,
+            '',
+            run.id,
+          )('context.reset', { reason: run.reason, previousSessionId: run.session_id });
+          await tx.query(
+            "update agent_runs set session_id=null,head_response_id=null,state=jsonb_set(jsonb_set(jsonb_set(state,'{presented}','{}'),'{delivered}','{}'),'{observations}','{}') where id=$1",
+            [runId],
+          );
+          await tx.query('delete from agent_steps where run_id=$1 and step=$2', [runId, run.turn_index]);
+        }
+        if (run.reason === 'Context initialization unexpectedly requested tools.')
+          await tx.query('delete from agent_steps where run_id=$1 and step=$2', [runId, run.turn_index]);
+        // An unknown dispatch is retried only after this explicit resume, never automatically.
+        await tx.query(
+          "update agent_steps set status='prepared' where run_id=$1 and status='dispatching' and response_id is null",
+          [runId],
+        );
+        const {
+          rows: [failed],
+        } = await tx.query("select * from agent_steps where run_id=$1 and step=$2 and status='received'", [
+          runId,
+          run.turn_index,
+        ]);
+        if (failed?.response && failed.response.status !== 'completed') {
+          await tx.query("update agent_steps set status='done' where run_id=$1 and step=$2", [runId, run.turn_index]);
+          await tx.query('update agent_runs set turn_index=turn_index+1 where id=$1', [runId]);
+        }
+        await tx.query(
+          "update agent_runs set status='queued',reason=null,budget_base=jsonb_build_object('turns',turns,'output',output_tokens,'runtime',runtime_ms),updated_at=now() where id=$1",
+          [runId],
+        );
+        await tx.query(
+          "update tour_generations set status='queued',error=null,error_code=null,updated_at=now() where id=$1",
+          [run.generation_id],
+        );
+        await scheduleAgent(tx, this.enqueue, runId, id);
+      }
+      const {
+        rows: [updated],
+      } = await tx.query('select * from agent_runs where id=$1', [runId]);
+      await generationRecorder(tx, run.generation_id, '', run.id)('run.control', { action, status: updated.status });
+      return agentSummary(updated);
+    });
   }
   private async summary(row: Row): Promise<DocumentSummary> {
     return {
@@ -223,7 +322,11 @@ export class DocumentService implements Library {
         'select * from tour_generations where analysis_id=$1 order by created_at desc,id desc limit 1 for update',
         [analysis.id],
       );
-      if (latest && ['queued', 'generating'].includes(latest.status)) {
+      if (
+        latest &&
+        (['queued', 'generating', 'paused'].includes(latest.status) ||
+          (latest.engine === 'agent' && latest.status === 'needs_configuration'))
+      ) {
         if (latest.model !== model)
           throw new HttpError(
             409,
@@ -238,7 +341,16 @@ export class DocumentService implements Library {
       const validated = await this.selectedModel(owner, model, allowTraining);
       if (latest?.status === 'ready' && latest.model !== validated && !regenerate)
         throw new HttpError(409, 'regeneration_required', 'Create a new tour to use a different model.');
-      const generation = await ensureTourGeneration(tx, this.enqueue, id, analysis.id, validated, true, regenerate);
+      const generation = await ensureTourGeneration(
+        tx,
+        this.enqueue,
+        id,
+        analysis.id,
+        validated,
+        true,
+        regenerate,
+        this.agentEnabled ? 'agent' : 'legacy',
+      );
       await tx.query('update documents set tour_model=$2,tour_allow_training=$3 where id=$1', [
         id,
         validated,
@@ -249,12 +361,21 @@ export class DocumentService implements Library {
   }
   async resumeConfigured(owner: string) {
     if (!this.settings || !(await this.settings.resolveMuse(owner)).config.apiKey) return;
-    const { rows } = await this.db.query(`select g.document_id,g.analysis_id,g.model from tour_generations g
-      join documents d on d.id=g.document_id where d.owner_id=$1 and d.deleted_at is null and g.status='needs_configuration'`, [owner]);
-    for (const row of rows) await this.db.transaction(async (tx) => {
-      await this.owned(owner, row.document_id, tx, true);
-      await ensureTourGeneration(tx, this.enqueue, row.document_id, row.analysis_id, row.model, true);
-    });
+    const { rows } = await this.db.query(
+      `select g.document_id,g.analysis_id,g.model,g.agent_run_id from tour_generations g
+      join documents d on d.id=g.document_id where d.owner_id=$1 and d.deleted_at is null and g.status='needs_configuration'`,
+      [owner],
+    );
+    for (const row of rows) {
+      if (row.agent_run_id) {
+        await this.controlAgent(owner, row.document_id, row.agent_run_id, 'resume');
+        continue;
+      }
+      await this.db.transaction(async (tx) => {
+        await this.owned(owner, row.document_id, tx, true);
+        await ensureTourGeneration(tx, this.enqueue, row.document_id, row.analysis_id, row.model, true);
+      });
+    }
   }
   async rename(owner: string, id: string, title: string) {
     title = title.trim();
@@ -316,7 +437,7 @@ export class DocumentService implements Library {
     const assets: Record<string, string> = {};
     if (analysis) {
       const { rows: files } = await this.db.query(
-        'select logical_path,storage_path from assets where document_id=$1 and analysis_id=$2',
+        "select logical_path,storage_path from assets where document_id=$1 and analysis_id=$2 and kind <> 'visual_context'",
         [id, analysis.id],
       );
       await Promise.all(

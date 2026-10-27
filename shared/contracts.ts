@@ -2,9 +2,17 @@ import type { Doc, Tour, BBox } from './paper';
 
 export type FileStatus = 'uploading' | 'uploaded' | 'invalid';
 export type AnalysisStatus = 'queued' | 'processing' | 'ready' | 'limited' | 'failed';
-export type TourGenerationStatus = 'queued' | 'generating' | 'ready' | 'failed' | 'needs_configuration';
+export type TourGenerationStatus =
+  | 'queued'
+  | 'generating'
+  | 'ready'
+  | 'failed'
+  | 'needs_configuration'
+  | 'paused'
+  | 'cancelled';
 export type TourGenerationStage = 'preparing' | 'images' | 'writing' | 'validating';
 export interface TourGenerationSummary {
+  agentRunId?: string | null;
   id: string;
   analysisId: string;
   status: TourGenerationStatus;

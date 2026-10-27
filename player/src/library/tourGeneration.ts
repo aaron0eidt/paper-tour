@@ -28,6 +28,20 @@ export function tourGenerationCopy(generation?: TourGenerationSummary | null): T
         kind: 'unavailable',
         action: 'Retry tour',
       };
+    case 'paused':
+      return {
+        title: 'Tour generation paused',
+        detail: generation.error ?? 'Resume from the Activity panel.',
+        kind: 'pending',
+        action: null,
+      };
+    case 'cancelled':
+      return {
+        title: 'Tour generation cancelled',
+        detail: 'Saved tours are kept.',
+        kind: 'idle',
+        action: 'Create tour',
+      };
     case 'failed':
       return {
         title: 'Tour creation interrupted',

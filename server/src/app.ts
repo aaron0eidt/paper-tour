@@ -86,55 +86,137 @@ export async function createApp(options: Options) {
       if (options.settings) {
         const settings = options.settings;
         api.get('/settings', async (req) => settings.get(owner(req)));
-        api.patch<{ Body: SettingsUpdate }>('/settings', { schema: { body: objectBody({
-          defaultModel: { type: 'string', minLength: 1, maxLength: 200 }, credentialSource: { enum: ['app', 'personal'] },
-        }, []) } }, async (req) => {
-          const result = await settings.update(owner(req), req.body);
-          if (req.body.credentialSource) await service.resumeConfigured?.(owner(req));
-          return result;
-        });
-        api.put<{ Body: { apiKey: string } }>('/settings/meta-key', { schema: { body: objectBody({ apiKey: { type: 'string', minLength: 16, maxLength: 8192 } }, ['apiKey']) } }, async (req) => {
-          const result = await settings.saveKey(owner(req), req.body.apiKey);
-          await service.resumeConfigured?.(owner(req));
-          return result;
-        });
+        api.patch<{ Body: SettingsUpdate }>(
+          '/settings',
+          {
+            schema: {
+              body: objectBody(
+                {
+                  defaultModel: { type: 'string', minLength: 1, maxLength: 200 },
+                  credentialSource: { enum: ['app', 'personal'] },
+                },
+                [],
+              ),
+            },
+          },
+          async (req) => {
+            const result = await settings.update(owner(req), req.body);
+            if (req.body.credentialSource) await service.resumeConfigured?.(owner(req));
+            return result;
+          },
+        );
+        api.put<{ Body: { apiKey: string } }>(
+          '/settings/meta-key',
+          { schema: { body: objectBody({ apiKey: { type: 'string', minLength: 16, maxLength: 8192 } }, ['apiKey']) } },
+          async (req) => {
+            const result = await settings.saveKey(owner(req), req.body.apiKey);
+            await service.resumeConfigured?.(owner(req));
+            return result;
+          },
+        );
         api.delete('/settings/meta-key', async (req) => settings.removeKey(owner(req)));
         api.post('/settings/test', async (req) => settings.test(owner(req)));
       }
-      api.get<{ Params: { id: string; generationId: string }; Querystring: { after?: string } }>(
-        '/documents/:id/generations/:generationId/events',
-        { schema: { params: { type: 'object', required: ['id', 'generationId'], properties: { id: uuid, generationId: uuid } },
-          querystring: { type: 'object', additionalProperties: false, properties: { after: { type: 'string', pattern: '^[0-9]{1,18}$' } } } } },
-        async (req, reply) => {
-          if (!service.activity) throw new HttpError(503, 'activity_unavailable', 'Activity is unavailable.');
-          let cursor = req.query.after ?? '0';
-          let batch = await service.activity(owner(req), req.params.id, req.params.generationId, cursor);
-          reply.header('Content-Type', 'text/event-stream').header('Cache-Control', 'no-store').header('X-Accel-Buffering', 'no');
-          // Fastify applies CORS headers before we take ownership of the stream.
-          reply.hijack();
-          reply.raw.writeHead(200, Object.fromEntries(Object.entries(reply.getHeaders()).filter(([, value]) => value !== undefined).map(([key, value]) => [key, Array.isArray(value) ? value : String(value)])));
-          const controller = new AbortController();
-          const close = () => controller.abort();
-          reply.raw.on('close', close);
-          const send = async (value: unknown) => {
-            if (controller.signal.aborted) return;
-            if (!reply.raw.write(`data: ${JSON.stringify(value)}\n\n`)) {
-              await new Promise<void>((resolve) => { const done = () => { reply.raw.off('drain', done); controller.signal.removeEventListener('abort', done); resolve(); }; reply.raw.once('drain', done); controller.signal.addEventListener('abort', done, { once: true }); });
+      for (const runRoute of [false, true])
+        api.get<{ Params: { id: string; generationId: string }; Querystring: { after?: string } }>(
+          runRoute
+            ? '/documents/:id/agent-runs/:generationId/events'
+            : '/documents/:id/generations/:generationId/events',
+          {
+            schema: {
+              params: {
+                type: 'object',
+                required: ['id', 'generationId'],
+                properties: { id: uuid, generationId: uuid },
+              },
+              querystring: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { after: { type: 'string', pattern: '^[0-9]{1,18}$' } },
+              },
+            },
+          },
+          async (req, reply) => {
+            if (!service.activity) throw new HttpError(503, 'activity_unavailable', 'Activity is unavailable.');
+            let generationId = req.params.generationId;
+            if (runRoute) {
+              if (!service.agentRun) throw new HttpError(503, 'agent_unavailable', 'Agent runs are unavailable.');
+              generationId = (await service.agentRun(owner(req), req.params.id, req.params.generationId)).generationId;
             }
-          };
-          try {
-            const end = Date.now() + 20_000;
-            while (!controller.signal.aborted) {
-              for (const event of batch.events) { await send({ event }); cursor = event.id; }
-              await send({ status: batch.status });
-              if ((!['queued', 'generating'].includes(batch.status) && batch.events.length < 100) || Date.now() >= end) break;
-              if (batch.events.length < 100) await delay(700, undefined, { signal: controller.signal });
-              batch = await service.activity(owner(req), req.params.id, req.params.generationId, cursor);
+            let cursor = req.query.after ?? '0';
+            let batch = await service.activity(owner(req), req.params.id, generationId, cursor);
+            reply
+              .header('Content-Type', 'text/event-stream')
+              .header('Cache-Control', 'no-store')
+              .header('X-Accel-Buffering', 'no');
+            // Fastify applies CORS headers before we take ownership of the stream.
+            reply.hijack();
+            reply.raw.writeHead(
+              200,
+              Object.fromEntries(
+                Object.entries(reply.getHeaders())
+                  .filter(([, value]) => value !== undefined)
+                  .map(([key, value]) => [key, Array.isArray(value) ? value : String(value)]),
+              ),
+            );
+            const controller = new AbortController();
+            const close = () => controller.abort();
+            reply.raw.on('close', close);
+            const send = async (value: unknown) => {
+              if (controller.signal.aborted) return;
+              if (!reply.raw.write(`data: ${JSON.stringify(value)}\n\n`)) {
+                await new Promise<void>((resolve) => {
+                  const done = () => {
+                    reply.raw.off('drain', done);
+                    controller.signal.removeEventListener('abort', done);
+                    resolve();
+                  };
+                  reply.raw.once('drain', done);
+                  controller.signal.addEventListener('abort', done, { once: true });
+                });
+              }
+            };
+            try {
+              const end = Date.now() + 20_000;
+              while (!controller.signal.aborted) {
+                for (const event of batch.events) {
+                  await send({ event });
+                  cursor = event.id;
+                }
+                await send({ status: batch.status });
+                if (
+                  (!['queued', 'generating'].includes(batch.status) && batch.events.length < 100) ||
+                  Date.now() >= end
+                )
+                  break;
+                if (batch.events.length < 100) await delay(700, undefined, { signal: controller.signal });
+                batch = await service.activity(owner(req), req.params.id, generationId, cursor);
+              }
+            } catch {
+              if (!controller.signal.aborted) await send({ error: 'Activity interrupted. Reconnecting…' });
+            } finally {
+              reply.raw.off('close', close);
+              reply.raw.end();
             }
-          } catch { if (!controller.signal.aborted) await send({ error: 'Activity interrupted. Reconnecting…' }); }
-          finally { reply.raw.off('close', close); reply.raw.end(); }
+          },
+        );
+      api.get<{ Params: { id: string; runId: string } }>(
+        '/documents/:id/agent-runs/:runId',
+        { schema: { params: { type: 'object', required: ['id', 'runId'], properties: { id: uuid, runId: uuid } } } },
+        async (req) => {
+          if (!service.agentRun) throw new HttpError(503, 'agent_unavailable', 'Agent runs are unavailable.');
+          return service.agentRun(owner(req), req.params.id, req.params.runId);
         },
       );
+      for (const action of ['pause', 'resume', 'cancel'] as const)
+        api.post<{ Params: { id: string; runId: string } }>(
+          `/documents/:id/agent-runs/:runId/${action}`,
+          { schema: { params: { type: 'object', required: ['id', 'runId'], properties: { id: uuid, runId: uuid } } } },
+          async (req) => {
+            if (!service.controlAgent) throw new HttpError(503, 'agent_unavailable', 'Agent controls are unavailable.');
+            return service.controlAgent(owner(req), req.params.id, req.params.runId, action);
+          },
+        );
       api.get('/documents', async (req) => ({
         documents: await service.list(owner(req)),
       }));

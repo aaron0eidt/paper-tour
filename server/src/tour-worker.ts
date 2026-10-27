@@ -19,6 +19,7 @@ const execute = promisify(execFile);
 
 export function generationSummary(row: QueryResultRow): TourGenerationSummary {
   return {
+    agentRunId: row.agent_run_id ?? null,
     id: row.id,
     analysisId: row.analysis_id,
     status: row.status,
@@ -40,6 +41,7 @@ export async function ensureTourGeneration(
   model: string,
   retry = false,
   regenerate = false,
+  engine: 'legacy' | 'agent' = 'legacy',
 ): Promise<QueryResultRow> {
   const {
     rows: [existing],
@@ -47,11 +49,12 @@ export async function ensureTourGeneration(
     'select * from tour_generations where analysis_id=$1 order by created_at desc,id desc limit 1 for update',
     [analysisId],
   );
-  if (existing && ['queued', 'generating'].includes(existing.status)) return existing;
+  if (existing && ['queued', 'generating', 'paused'].includes(existing.status)) return existing;
+  if (existing?.engine === 'agent' && existing.status === 'needs_configuration') return existing;
   if (existing?.status === 'ready' && !regenerate) return existing;
   if (existing && ['failed', 'needs_configuration'].includes(existing.status) && !retry) return existing;
   let row: QueryResultRow;
-  if (existing && existing.status !== 'ready') {
+  if (existing && existing.status !== 'ready' && existing.engine !== 'agent') {
     const {
       rows: [updated],
     } = await tx.query(
@@ -67,6 +70,17 @@ export async function ensureTourGeneration(
       [randomUUID(), documentId, analysisId, model],
     );
     row = created;
+  }
+  if (!existing || row.id !== existing.id) {
+    await tx.query('update tour_generations set engine=$2 where id=$1', [row.id, engine]);
+    row.engine = engine;
+    if (engine === 'agent') {
+      const {
+        rows: [run],
+      } = await tx.query('insert into agent_runs(generation_id) values($1) returning id', [row.id]);
+      await tx.query('update tour_generations set agent_run_id=$2 where id=$1', [row.id, run.id]);
+      row.agent_run_id = run.id;
+    }
   }
   await enqueue('generate_tour', { documentId, analysisId, generationId: row.id }, tx);
   return row;
@@ -171,7 +185,10 @@ export class TourWorker {
     readonly config: Config,
     readonly generator: TourGenerator,
     readonly prepareImages?: PrepareTourImages,
-    readonly resolveGenerator?: (owner: string, model: string) => Promise<{ generator: TourGenerator; secret: string; source: string; version: string }>,
+    readonly resolveGenerator?: (
+      owner: string,
+      model: string,
+    ) => Promise<{ generator: TourGenerator; secret: string; source: string; version: string }>,
   ) {}
   private async locked<T>(documentId: string, run: () => Promise<T>) {
     const connection = await this.db.pool.connect();
@@ -183,7 +200,7 @@ export class TourWorker {
       connection.release();
     }
   }
-  private async loadImages(input: TourImagePreparation, signal: AbortSignal): Promise<TourImage[]> {
+  async loadImages(input: TourImagePreparation, signal: AbortSignal): Promise<TourImage[]> {
     signal.throwIfAborted();
     const pdf = await this.storage.download(input.uploadPath);
     if (createHash('sha256').update(pdf).digest('hex') !== input.doc.source.sha256)
@@ -293,7 +310,10 @@ export class TourWorker {
           access = resolved;
         } else generator = row.model === this.generator.model ? this.generator : this.generator.withModel?.(row.model);
       } catch {
-        await this.db.query("update tour_generations set status='needs_configuration',error_code='configuration_error',error=$2,updated_at=now() where id=$1", [generationId, 'Open Profile & Settings to check your Meta connection.']);
+        await this.db.query(
+          "update tour_generations set status='needs_configuration',error_code='configuration_error',error=$2,updated_at=now() where id=$1",
+          [generationId, 'Open Profile & Settings to check your Meta connection.'],
+        );
         return;
       }
       if (!generator || generator.model !== row.model) {
@@ -334,11 +354,16 @@ export class TourWorker {
         folder = await mkdtemp(resolve(tmpdir(), 'paper-tour-muse-'));
         const input = { documentId, analysisId, uploadPath: row.upload_path as string, doc: row.doc as Doc, folder };
         const images = await (this.prepareImages?.(input, signal) ?? this.loadImages(input, signal));
-        await record('sources.prepared', { sources: images.map(({ targetId, kind, page, label }) => ({ targetId, kind, page, label })) });
+        await record('sources.prepared', {
+          sources: images.map(({ targetId, kind, page, label }) => ({ targetId, kind, page, label })),
+        });
         let lastStage = 'preparing';
         const onProgress = async (progress: TourProgress) => {
           signal.throwIfAborted();
-          if (lastStage !== progress.stage) { await record('step.started', { stage: progress.stage }); lastStage = progress.stage; }
+          if (lastStage !== progress.stage) {
+            await record('step.started', { stage: progress.stage });
+            lastStage = progress.stage;
+          }
           await this.db.query(
             "update tour_generations set stage=$2,images_done=$3,images_total=$4,updated_at=now() where id=$1 and status='generating'",
             [generationId, progress.stage, progress.imagesDone, progress.imagesTotal],
@@ -362,13 +387,32 @@ export class TourWorker {
            where g.document_id=$1 and g.analysis_id=$2 and g.model=$3 and e.type='inspection.batch.completed' order by e.id desc limit 200`,
           [documentId, analysisId, generator.model],
         );
-        const previousVisualBatches = checkpoints.filter((entry) => typeof entry.data?.cacheKey === 'string').map((entry) => ({ cacheKey: entry.data.cacheKey, observations: entry.data.observations, generationId: entry.generation_id }));
+        const previousVisualBatches = checkpoints
+          .filter((entry) => typeof entry.data?.cacheKey === 'string')
+          .map((entry) => ({
+            cacheKey: entry.data.cacheKey,
+            observations: entry.data.observations,
+            generationId: entry.generation_id,
+          }));
         const generated = await generator.generate(
-          { documentId, analysisId, doc: input.doc, images, previousVisualInspection, previousVisualBatches, onEvent: record },
+          {
+            documentId,
+            analysisId,
+            doc: input.doc,
+            images,
+            previousVisualInspection,
+            previousVisualBatches,
+            onEvent: record,
+          },
           onProgress,
           signal,
         );
-        if (access) generated.metadata = { ...generated.metadata, credentialSource: access.source, credentialVersion: access.version };
+        if (access)
+          generated.metadata = {
+            ...generated.metadata,
+            credentialSource: access.source,
+            credentialVersion: access.version,
+          };
         signal.throwIfAborted();
         if (generated.tour.doc_sha256 !== input.doc.source.sha256)
           throw new ProcessingError('invalid_tour', 'The generated tour does not match this document.');
@@ -396,7 +440,10 @@ export class TourWorker {
             "update tour_generations set status='ready',stage='validating',images_done=$2,images_total=$2,result_tour_id=$3,metadata=$4,error=null,error_code=null,updated_at=now(),completed_at=now() where id=$1",
             [generationId, images.length, tour.id, generated.metadata],
           );
-          await generationRecorder(tx, generationId)('run.completed', { durationMs: Date.now() - started, tourId: tour.id });
+          await generationRecorder(tx, generationId)('run.completed', {
+            durationMs: Date.now() - started,
+            tourId: tour.id,
+          });
           await tx.query('update documents set updated_at=now() where id=$1', [documentId]);
         });
         console.log(
@@ -458,10 +505,10 @@ export class TourWorker {
         const {
           rows: [generation],
         } = await tx.query(
-          'select status from tour_generations where analysis_id=$1 order by created_at desc,id desc limit 1',
+          'select status,engine from tour_generations where analysis_id=$1 order by created_at desc,id desc limit 1',
           [document.analysis_id],
         );
-        if (generation?.status === 'failed') return;
+        if (generation?.engine === 'agent' || generation?.status === 'failed') return;
         const {
           rows: [hasTour],
         } = await tx.query('select id from tours where analysis_id=$1 limit 1', [document.analysis_id]);
@@ -473,6 +520,8 @@ export class TourWorker {
           document.analysis_id,
           live.tour_model,
           generation?.status === 'needs_configuration' && this.generator.configured,
+          false,
+          this.config.agent?.enabled ? 'agent' : 'legacy',
         );
       });
   }

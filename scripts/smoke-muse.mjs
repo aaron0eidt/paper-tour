@@ -68,10 +68,18 @@ async function api(path, options = {}) {
   assert(response.ok, `${path}: ${JSON.stringify(body)}`);
   return body;
 }
+const profile = await api('/settings');
+const model = profile.defaultModel;
+const allowTraining = model.endsWith('-contributor');
 const pdf = await readFile(pdfPath);
 const reservation = await api('/documents', {
   method: 'POST',
-  body: JSON.stringify({ filename: `Muse visual smoke ${randomUUID().slice(0, 8)}.pdf`, size: pdf.length }),
+  body: JSON.stringify({
+    filename: `Muse visual smoke ${randomUUID().slice(0, 8)}.pdf`,
+    size: pdf.length,
+    model,
+    allowTraining,
+  }),
 });
 const upload = await client.storage
   .from(reservation.bucket)
@@ -80,7 +88,11 @@ if (upload.error) throw upload.error;
 await api(`/documents/${reservation.documentId}/complete`, { method: 'POST' });
 let manifest,
   last = '';
-for (let attempt = 0; attempt < 330; attempt++) {
+const waitSeconds =
+  process.env.PAPER_AGENT_ENABLED === 'true'
+    ? Math.ceil(Number(process.env.PAPER_AGENT_MAX_RUNTIME_MS || 1200000) / 1000) + 60
+    : 330;
+for (let attempt = 0; attempt < waitSeconds; attempt++) {
   manifest = await api(`/documents/${reservation.documentId}/manifest`);
   const generation = manifest.tourGeneration;
   const state = JSON.stringify({
@@ -94,14 +106,50 @@ for (let attempt = 0; attempt < 330; attempt++) {
     console.log(state);
     last = state;
   }
-  if (generation && ['ready', 'failed', 'needs_configuration'].includes(generation.status)) break;
+  if (generation && ['ready', 'failed', 'needs_configuration', 'paused', 'cancelled'].includes(generation.status))
+    break;
   await new Promise((done) => setTimeout(done, 1000));
 }
 assert.equal(manifest.tourGeneration?.status, 'ready', JSON.stringify(manifest.tourGeneration));
 assert(manifest.selectedTour && manifest.selectedTour.analysisId === manifest.docAnalysisId);
 assert(manifest.selectedTour.tour.chapters.flatMap((chapter) => chapter.steps).length > 0);
 assert.equal(manifest.selectedTour.tour.doc_sha256, manifest.doc.source.sha256);
-const second = await api(`/documents/${reservation.documentId}/tours`, { method: 'POST' });
+let agentReport;
+if (manifest.tourGeneration.agentRunId) {
+  const run = await api(`/documents/${reservation.documentId}/agent-runs/${manifest.tourGeneration.agentRunId}`);
+  assert.equal(run.status, 'completed');
+  const traceResponse = await fetch(
+    `http://127.0.0.1:3001/api/documents/${reservation.documentId}/agent-runs/${run.id}/events`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  assert(traceResponse.ok);
+  const events = (await traceResponse.text())
+    .split('\n\n')
+    .filter(Boolean)
+    .map((frame) => JSON.parse(frame.slice(6)))
+    .flatMap((frame) => (frame.event ? [frame.event] : []));
+  assert(events.some((e) => e.type === 'tool.completed' && e.data.name === 'view_visuals'));
+  assert(events.some((e) => e.type === 'tool.completed' && e.data.name === 'finish_tour' && e.data.output.published));
+  const calls = events.filter((e) => e.type === 'model.completed');
+  agentReport = {
+    agentRunId: run.id,
+    turns: run.turns,
+    tools: events.filter((e) => e.type === 'tool.started').length,
+    usage: calls.reduce(
+      (sum, e) => ({
+        input: sum.input + e.data.usage.promptTokens,
+        output: sum.output + e.data.usage.completionTokens,
+        cached: sum.cached + (e.data.usage.cachedInputTokens ?? 0),
+      }),
+      { input: 0, output: 0, cached: 0 },
+    ),
+  };
+  console.log('Agent report', JSON.stringify(agentReport));
+}
+const second = await api(`/documents/${reservation.documentId}/tours`, {
+  method: 'POST',
+  body: JSON.stringify({ model, allowTraining }),
+});
 assert.equal(second.generation.tourId, manifest.selectedTour.id);
 const fresh = await api(`/documents/${reservation.documentId}/manifest`);
 assert.equal(fresh.tours.length, 1);
@@ -112,6 +160,7 @@ await writeFile(
       documentId: reservation.documentId,
       tourId: manifest.selectedTour.id,
       imagesReviewed: manifest.tourGeneration.imagesDone,
+      ...agentReport,
     },
     null,
     2,

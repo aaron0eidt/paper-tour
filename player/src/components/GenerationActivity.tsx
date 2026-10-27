@@ -3,7 +3,8 @@ import { reportedUsage, type TokenUsage } from '../../../shared/activity';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GenerationEvent } from '../../../shared/activity';
 import { sseData } from '../../../shared/sse';
-import { activityStream } from '../library/client';
+import type { AgentRun } from '../../../shared/agent';
+import { apiRequest, activityStream } from '../library/client';
 import './generationActivity.css';
 
 function payloadText(value: unknown): string {
@@ -13,8 +14,47 @@ function name(value: unknown): string {
   return String(value ?? '').replaceAll('_', ' ');
 }
 
-export function GenerationActivity({ documentId, generationId, label = 'Activity & model output' }: { documentId: string; generationId: string; label?: string }) {
+export function GenerationActivity({
+  documentId,
+  generationId,
+  agentRunId,
+  onChanged,
+  label = 'Activity & model output',
+}: {
+  documentId: string;
+  generationId: string;
+  agentRunId?: string | null;
+  onChanged?(): void;
+  label?: string;
+}) {
+  const [run, setRun] = useState<AgentRun | null>(null);
+  const [controlling, setControlling] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [open, setOpen] = useState(false);
+  const lastRunStatus = useRef<string>();
+  useEffect(() => {
+    if (
+      open &&
+      run &&
+      ['queued', 'running', 'pausing'].includes(run.status) &&
+      ['paused', 'failed'].includes(lastRunStatus.current ?? '')
+    )
+      setRevision((n) => n + 1);
+    lastRunStatus.current = run?.status;
+  }, [run?.status, open]);
+  const runPath = `/api/documents/${documentId}/agent-runs/${agentRunId}`;
+  async function control(action: 'pause' | 'resume' | 'cancel') {
+    setControlling(true);
+    try {
+      setRun(await apiRequest<AgentRun>(`${runPath}/${action}`, { method: 'POST' }));
+      setRevision((n) => n + 1);
+      onChanged?.();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not update the run.');
+    } finally {
+      setControlling(false);
+    }
+  }
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showSystem, setShowSystem] = useState(false);
   const [tab, setTab] = useState<'input' | 'output' | 'request'>('output');
@@ -37,6 +77,14 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
     setConnected(false);
     if (!open) return;
     const controller = new AbortController();
+    const refreshRun = () => {
+      if (agentRunId)
+        void apiRequest<AgentRun>(runPath, { signal: controller.signal })
+          .then(setRun)
+          .catch(() => {});
+    };
+    refreshRun();
+    const timer = setInterval(refreshRun, 3000);
     let cursor = '0';
     const pause = () =>
       new Promise<void>((resolve) => {
@@ -53,7 +101,7 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
         let finished = false;
         try {
           const response = await activityStream(
-            `/api/documents/${documentId}/generations/${generationId}/events?after=${cursor}`,
+            `${agentRunId ? runPath : `/api/documents/${documentId}/generations/${generationId}`}/events?after=${cursor}`,
             controller.signal,
           );
           if (controller.signal.aborted) return;
@@ -82,8 +130,11 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
         await pause();
       }
     })();
-    return () => controller.abort();
-  }, [documentId, generationId, open]);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
+  }, [documentId, generationId, agentRunId, open, revision]);
   const calls = useMemo(() => {
     const grouped = new Map<string, GenerationEvent[]>();
     for (const event of events)
@@ -96,12 +147,12 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
     return grouped;
   }, [events]);
   const rows = events.filter(
-    (event) => event.type === 'model.started' || (showSystem && !event.type.startsWith('model.')),
+    (event) => ['model.started', 'tool.started'].includes(event.type) || (showSystem && !event.data.callId),
   );
   const selected = rows.find((event) => event.id === selectedId) ?? rows.at(-1);
   const selectedCall = selected?.data.callId ? (calls.get(String(selected.data.callId)) ?? []) : [];
-  const completion = selectedCall.find((event) => event.type === 'model.completed');
-  const failure = selectedCall.find((event) => event.type === 'model.failed');
+  const completion = selectedCall.find((event) => ['model.completed', 'tool.completed'].includes(event.type));
+  const failure = completion ? undefined : [...selectedCall].reverse().find((event) => event.type === 'model.failed');
   const usageByCall = reportedUsage(events);
   const totals = usageByCall.size
     ? [...usageByCall.values()].reduce(
@@ -116,19 +167,23 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
         { promptTokens: 0, completionTokens: 0, totalTokens: 0 } as TokenUsage,
       )
     : undefined;
+  const isTool = selected?.type === 'tool.started';
   const isModel = selected?.type === 'model.started';
   const output =
     completion?.data.output ??
+    failure?.data.output ??
     (selectedCall
       .filter((event) => event.type === 'model.delta')
       .map((event) => String(event.data.delta))
       .join('') ||
       'Waiting for model output…');
   const payload = selected
-    ? !isModel
+    ? !isModel && !isTool
       ? selected.data
       : tab === 'input'
-        ? selected.data.messages
+        ? isTool
+          ? selected.data.arguments
+          : selected.data.messages
         : tab === 'request'
           ? { ...selected.data, messages: undefined, requestId: completion?.data.requestId, error: failure?.data }
           : output
@@ -136,7 +191,7 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
   const text = payloadText(payload);
   const title = (event: GenerationEvent) =>
     name(
-      event.type === 'model.started'
+      ['model.started', 'tool.started'].includes(event.type)
         ? event.data.name
         : event.type === 'step.started'
           ? event.data.stage
@@ -158,12 +213,34 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
           <div>
             <h2>Tour activity</h2>
             <span>
-              {status ? status.replaceAll('_', ' ') : connected ? 'Live' : 'Connecting…'} · {calls.size} model calls
+              {run?.status ?? (status ? status.replaceAll('_', ' ') : connected ? 'Live' : 'Connecting…')} ·{' '}
+              {events.filter((e) => e.type === 'model.started').length} model calls ·{' '}
+              {events.filter((e) => e.type === 'tool.started').length} tools
             </span>
           </div>
-          <button type="button" onClick={() => setOpen(false)} aria-label="Close activity">
-            Close
-          </button>
+          <div className="activity-run-actions">
+            {run && !['completed', 'cancelled'].includes(run.status) && (
+              <>
+                <button
+                  type="button"
+                  disabled={controlling || run.status === 'pausing'}
+                  onClick={() => void control(['paused', 'failed'].includes(run.status) ? 'resume' : 'pause')}
+                >
+                  {run.status === 'pausing'
+                    ? 'Pausing…'
+                    : ['paused', 'failed'].includes(run.status)
+                      ? 'Resume'
+                      : 'Pause'}
+                </button>
+                <button type="button" disabled={controlling} onClick={() => void control('cancel')}>
+                  Cancel run
+                </button>
+              </>
+            )}
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close activity">
+              Close
+            </button>
+          </div>
         </header>
         {open && (
           <>
@@ -174,6 +251,13 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
                 System events
               </label>
             </div>
+            {run && ['paused', 'pausing'].includes(run.status) && (
+              <p className="activity-run-note" role="status">
+                {run.status === 'pausing'
+                  ? 'Pausing at the next checkpoint. The current model call may finish first.'
+                  : run.reason || 'Your progress is saved. Resume when ready.'}
+              </p>
+            )}
             {error && <p role="status">{error}</p>}
             {!events.length && (
               <p>
@@ -186,11 +270,18 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
               <nav className="activity-call-list" aria-label="Model calls and events">
                 {rows.map((event, index) => {
                   const group = calls.get(String(event.data.callId)) ?? [];
-                  const done = group.find((item) => item.type === 'model.completed');
-                  const failed = group.some((item) => item.type === 'model.failed');
+                  const done = group.find((item) => ['model.completed', 'tool.completed'].includes(item.type));
+                  const failed =
+                    !!(done?.data.output as { error?: unknown })?.error ||
+                    (!done &&
+                      group.some(
+                        (item) =>
+                          item.type === 'model.failed' ||
+                          (item.type === 'tool.completed' && !!(item.data.output as { error?: unknown })?.error),
+                      ));
                   const images = ((event.data.messages as { content: unknown }[] | undefined) ?? [])
                     .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
-                    .filter((part) => part.type === 'image');
+                    .filter((part) => ['image', 'input_image'].includes(part.type));
                   return (
                     <button
                       key={event.id}
@@ -216,7 +307,7 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
                           minute: '2-digit',
                           second: '2-digit',
                         })}
-                        {done
+                        {done?.data.durationMs !== undefined
                           ? ` · ${(Number(done.data.durationMs) / 1000).toFixed(1)}s`
                           : failed
                             ? ' · Failed'
@@ -237,23 +328,25 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
                   <>
                     <div className="activity-payload-heading">
                       <strong>{title(selected)}</strong>
-                      <span>{isModel ? String(selected.data.model) : selected.type}</span>
+                      <span>{isModel ? String(selected.data.model) : isTool ? 'Paper tool' : selected.type}</span>
                     </div>
                     <div className="activity-payload-toolbar">
                       <div role="group" aria-label="Inspect payload">
-                        {(isModel ? (['input', 'output', 'request'] as const) : ([] as const)).map((value) => (
-                          <button
-                            key={value}
-                            type="button"
-                            aria-pressed={tab === value}
-                            onClick={() => {
-                              setTab(value);
-                              setCopied(false);
-                            }}
-                          >
-                            {value}
-                          </button>
-                        ))}
+                        {(isModel || isTool ? (['input', 'output', 'request'] as const) : ([] as const)).map(
+                          (value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-pressed={tab === value}
+                              onClick={() => {
+                                setTab(value);
+                                setCopied(false);
+                              }}
+                            >
+                              {value}
+                            </button>
+                          ),
+                        )}
                       </div>
                       <button
                         type="button"
@@ -268,7 +361,7 @@ export function GenerationActivity({ documentId, generationId, label = 'Activity
                       </button>
                     </div>
                     {failure && <p className="activity-failure">{String(failure.data.code)}</p>}
-                    <pre tabIndex={0} aria-label={`${isModel ? tab : 'Event'} payload`}>
+                    <pre tabIndex={0} aria-label={`${isModel || isTool ? tab : 'Event'} payload`}>
                       {text}
                     </pre>
                     <footer>

@@ -69,19 +69,34 @@ export function TourGeneration({
       aria-label="Guided tour"
       aria-busy={active || requesting}
     >
-      {(!compact || current?.status !== 'ready') && <div className="tour-generation-content" aria-live="polite" title={`${copy.title} ${copy.detail}`}>
-        <strong>{requesting ? 'Starting your tour…' : copy.title}</strong>
-        <p>{copy.detail}</p>
-        {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
-          <progress
-            aria-label="Images reviewed for the tour"
-            value={Math.min(current.imagesTotal, Math.max(0, current.imagesDone))}
-            max={current.imagesTotal}
-          />
-        )}
-      </div>}
-      {current && <GenerationActivity key={current.id} documentId={documentId} generationId={current.id} label={toolbar ? 'Activity' : undefined} />}
-      {error && <p className="tour-generation-error" role="alert" title={error}>{error}</p>}
+      {(!compact || current?.status !== 'ready') && (
+        <div className="tour-generation-content" aria-live="polite" title={`${copy.title} ${copy.detail}`}>
+          <strong>{requesting ? 'Starting your tour…' : copy.title}</strong>
+          <p>{copy.detail}</p>
+          {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
+            <progress
+              aria-label="Images reviewed for the tour"
+              value={Math.min(current.imagesTotal, Math.max(0, current.imagesDone))}
+              max={current.imagesTotal}
+            />
+          )}
+        </div>
+      )}
+      {current && (
+        <GenerationActivity
+          key={current.id}
+          documentId={documentId}
+          generationId={current.id}
+          agentRunId={current.agentRunId}
+          onChanged={onChanged}
+          label={toolbar ? 'Activity' : undefined}
+        />
+      )}
+      {error && (
+        <p className="tour-generation-error" role="alert" title={error}>
+          {error}
+        </p>
+      )}
       {copy.action && canGenerate && (
         <button type="button" disabled={requesting || !validChoice} onClick={() => void create()}>
           {requesting ? 'Starting…' : copy.action}
@@ -93,14 +108,38 @@ export function TourGeneration({
         </button>
       )}
       {current?.status === 'ready' && canGenerate && (
-        <button type="button" disabled={requesting || !validChoice} onClick={() => void create(true)} title="Create a new tour version; your saved tours are kept">
+        <button
+          type="button"
+          disabled={requesting || !validChoice}
+          onClick={() => void create(true)}
+          title="Create a new tour version; your saved tours are kept"
+        >
           {requesting ? 'Starting…' : 'New tour'}
         </button>
       )}
-      {canGenerate && <div className="tour-generation-extra">
-        {current?.status === 'needs_configuration' && <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>Connect Meta in Profile &amp; Settings →</a>}
-        {(models.error || profile.error) && <p role="alert">Could not load your model settings. <button type="button" onClick={() => { models.refresh(); profile.refresh(); }}>Retry</button></p>}
-      </div>}
+      {canGenerate && (
+        <div className="tour-generation-extra">
+          {current?.status === 'needs_configuration' && (
+            <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>
+              Connect Meta in Profile &amp; Settings →
+            </a>
+          )}
+          {(models.error || profile.error) && (
+            <p role="alert">
+              Could not load your model settings.{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  models.refresh();
+                  profile.refresh();
+                }}
+              >
+                Retry
+              </button>
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

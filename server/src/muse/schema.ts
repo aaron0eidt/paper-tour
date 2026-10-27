@@ -49,7 +49,11 @@ export interface TourDraft {
 function formatErrors(errors: typeof checkDraft.errors): string[] {
   return (errors ?? []).slice(0, 8).map((e) => `${e.instancePath || '/'}: ${e.message}`);
 }
-export function validateDraft(value: unknown, doc: Doc): { draft: TourDraft; evidence: Record<string, string[]> } {
+export function validateDraft(
+  value: unknown,
+  doc: Doc,
+  partial = false,
+): { draft: TourDraft; evidence: Record<string, string[]> } {
   if (!checkDraft(value)) throw new TourValidationError(formatErrors(checkDraft.errors));
   const draft = value as unknown as TourDraft;
   const elements = new Map(indexElements(doc).map((element) => [element.id, element]));
@@ -59,8 +63,10 @@ export function validateDraft(value: unknown, doc: Doc): { draft: TourDraft; evi
   const order = textReadingOrder(doc);
   const goals = walkthroughGoals(doc);
   const proseSentenceIds = new Set(goals.proseSentenceIds);
-  const coveredPages = new Set<number>(), highlighted = new Set<string>();
-  let lastPage = 0, lastTextOrder = -1;
+  const coveredPages = new Set<number>(),
+    highlighted = new Set<string>();
+  let lastPage = 0,
+    lastTextOrder = -1;
   const chapters = new Set<string>(),
     steps = new Set<string>();
   const evidence: Record<string, string[]> = Object.create(null);
@@ -86,7 +92,10 @@ export function validateDraft(value: unknown, doc: Doc): { draft: TourDraft; evi
       if (source) {
         coveredPages.add(source.page);
         const textOrder = order.get(item.source);
-        if (source.page < lastPage || (source.page === lastPage && textOrder !== undefined && textOrder < lastTextOrder))
+        if (
+          source.page < lastPage ||
+          (source.page === lastPage && textOrder !== undefined && textOrder < lastTextOrder)
+        )
           problems.push(`${item.id}: source ${item.source} moves backward; follow page and text reading order`);
         if (source.page > lastPage) lastTextOrder = -1;
         lastPage = source.page;
@@ -103,16 +112,24 @@ export function validateDraft(value: unknown, doc: Doc): { draft: TourDraft; evi
         if ('target' in action) known(action.target, item.id);
         if ('anchor' in action) known(action.anchor, item.id);
         if ('targets' in action) action.targets.forEach((id) => known(id, item.id));
-        const targets = 'target' in action ? [action.target] : 'anchor' in action ? [action.anchor] : 'targets' in action ? action.targets : [];
+        const targets =
+          'target' in action
+            ? [action.target]
+            : 'anchor' in action
+              ? [action.anchor]
+              : 'targets' in action
+                ? action.targets
+                : [];
         if (source && targets.some((id) => elements.has(id) && elements.get(id)!.page !== source.page))
           problems.push(`${item.id}: visual actions must stay on source page ${source.page}`);
         if (action.type === 'highlight') {
           if (action.targets.length > 3 || action.targets.some((id) => !sentenceIds.has(id)))
             problems.push(`${item.id}: highlight 1–3 exact sentence IDs per action`);
-          for (const id of action.targets) if (sentenceIds.has(id)) {
-            if (proseSentenceIds.has(id)) highlighted.add(id);
-            hasSentenceHighlight = true;
-          }
+          for (const id of action.targets)
+            if (sentenceIds.has(id)) {
+              if (proseSentenceIds.has(id)) highlighted.add(id);
+              hasSentenceHighlight = true;
+            }
         }
         if (action.at_word !== undefined && action.at_word >= words)
           problems.push(`${item.id}: at_word ${action.at_word} exceeds ${words} words`);
@@ -130,33 +147,46 @@ export function validateDraft(value: unknown, doc: Doc): { draft: TourDraft; evi
           visuallyExplained = true;
       }
       const sourceBlock = source?.kind === 'sentence' ? blocks.get(String(source.data.block)) : blocks.get(item.source);
-      const isProse = sourceBlock?.type === 'paragraph' ||
+      const isProse =
+        sourceBlock?.type === 'paragraph' ||
         (source?.kind === 'section' && doc.sentences.some((s) => s.page === source.page && proseSentenceIds.has(s.id)));
       if (isProse && !hasSentenceHighlight)
         problems.push(`${item.id}: prose explanation needs a precise sentence highlight`);
     }
   }
   if (totalSteps > MAX_TOUR_STEPS) problems.push(`Tour exceeds ${MAX_TOUR_STEPS} steps; use a shorter walkthrough`);
-  if (totalSteps < goals.minimumSteps) problems.push(`Tour is too coarse: use at least ${goals.minimumSteps} small explanation steps`);
+  if (!partial && totalSteps < goals.minimumSteps)
+    problems.push(`Tour is too coarse: use at least ${goals.minimumSteps} small explanation steps`);
   const missingPages = goals.requiredPages.filter((page) => !coveredPages.has(page));
-  if (missingPages.length) problems.push(`Missing walkthrough of content pages: ${missingPages.join(', ')}`);
+  if (!partial && missingPages.length)
+    problems.push(`Missing walkthrough of content pages: ${missingPages.join(', ')}`);
   const minimumHighlights = goals.minimumDistinctHighlights;
-  if (highlighted.size < minimumHighlights)
-    problems.push(`Highlight at least ${minimumHighlights} distinct important sentences, currently ${highlighted.size}`);
+  if (!partial && highlighted.size < minimumHighlights)
+    problems.push(
+      `Highlight at least ${minimumHighlights} distinct important sentences, currently ${highlighted.size}`,
+    );
   if (draft.chapters.reduce((n, c) => n + c.steps.reduce((m, s) => m + s.say.length, 0), 0) > 40_000)
     problems.push('Tour narration exceeds the supported length');
-  if (doc.figures.length && !visuallyExplained)
+  if (!partial && doc.figures.length && !visuallyExplained)
     problems.push('Explain at least one actual figure or table using a zoom, box or spotlight action');
   if (problems.length) throw new TourValidationError(problems.slice(0, 12), missingPages);
   return { draft, evidence };
 }
 export class TourValidationError extends ProcessingError {
-  constructor(readonly problems: string[], readonly missingPages: number[] = []) {
+  constructor(
+    readonly problems: string[],
+    readonly missingPages: number[] = [],
+  ) {
     super('invalid_tour', 'The generated tour did not pass document validation.');
   }
 }
 export function materializeTour(value: unknown, doc: Doc, documentId: string, language: string) {
   const { draft, evidence } = validateDraft(value, doc);
+  const textSources = new Set([
+    ...doc.sentences.map((s) => s.id),
+    ...doc.blocks.map((b) => b.id),
+    ...doc.sections.map((s) => s.id),
+  ]);
   const tour: Tour = {
     schema: 'paper-tour/tour@0.1',
     title: draft.title,
@@ -167,10 +197,15 @@ export function materializeTour(value: unknown, doc: Doc, documentId: string, la
     chapters: draft.chapters.map((chapter) => ({
       ...chapter,
       steps: chapter.steps.map(({ evidence: _evidence, source, ...item }) => {
-        // The declared chronological source owns the first camera move. Models often focus
-        // its whole paragraph; pinning to the source keeps its precise highlight in view.
+        // Pin prose to its exact reading anchor, while preserving a visual panel/region camera move.
+        // Changing a panel target would also change the coordinate frame of its region.
         const navigation = item.actions.findIndex((a) => a.type === 'focus' || a.type === 'zoom');
-        return { ...item, actions: item.actions.map((a, index) => index === navigation ? { ...a, target: source } : a) };
+        return {
+          ...item,
+          actions: item.actions.map((a, index) =>
+            index === navigation && textSources.has(source) ? { ...a, target: source } : a,
+          ),
+        };
       }),
     })),
   };

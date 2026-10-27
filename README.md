@@ -131,3 +131,15 @@ npm run test:integration
 
 Integration tests require the local Supabase stack. `Dockerfile` and `compose.yaml` provide an
 optional deployment setup; environment variables are listed in `.env.example`.
+
+Set `PAPER_AGENT_ENABLED=true` for new tours to use the persistent paper agent. Existing jobs keep
+their original engine. The agent uses Meta Responses, saved paper sessions and seven scoped
+paper tools; its instructions and tool schemas are in `server/src/agent/tools.ts`. Runs and tool
+results are private server-side records. **Activity** shows model/tool inputs, results and token
+usage, with Pause, Resume and Cancel controls. Limits in `.env.example` pause work at a checkpoint;
+resuming grants another budget segment. An uncertain provider dispatch requires explicit resume.
+Provider prompt caching is measured separately from local image/observation reuse.
+
+Run `npm run test:smoke:muse` for an explicit live test with the configured local test account.
+It uploads a small diagram PDF and checks saved tours, source links and the agent journal when
+enabled; it uses the profile's selected model and consumes API tokens.

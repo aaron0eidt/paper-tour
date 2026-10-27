@@ -282,7 +282,16 @@ export class AnalysisWorker {
       const {
         rows: [document],
       } = await tx.query('select tour_model from documents where id=$1', [documentId]);
-      await ensureTourGeneration(tx, this.enqueue, documentId, analysisId, document.tour_model);
+      await ensureTourGeneration(
+        tx,
+        this.enqueue,
+        documentId,
+        analysisId,
+        document.tour_model,
+        false,
+        false,
+        this.config.agent?.enabled ? 'agent' : 'legacy',
+      );
     }
   }
   async remove(documentId: string) {

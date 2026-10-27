@@ -271,7 +271,7 @@ test('source-derived prompt goals scale with real prose and leave image-only PDF
   const scanned = structuredClone(doc);
   scanned.blocks = []; scanned.sentences = [];
   assert.equal(walkthroughGoals(scanned).minimumSteps, 1);
-  assert.equal(PROMPT_VERSION, 'paper-tour-muse@2');
+  assert.equal(PROMPT_VERSION, 'paper-tour-muse@3');
 });
 
 test('camera materialization pins a broad model focus to the declared source sentence', () => {
