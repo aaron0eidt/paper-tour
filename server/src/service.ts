@@ -25,6 +25,8 @@ import { HttpError, missing } from './errors';
 import { BUCKET, type FileStorage } from './storage';
 import { ensureTourGeneration, generationSummary } from './tour-worker';
 import type { SettingsService } from './settings';
+import { answerQuestion, askError, askModel, figureImage, type AskAnswer, type AskRequest } from './harness/ask';
+import { MuseClient } from './muse/client';
 
 export type Enqueue = (
   kind: 'analyze' | 'delete' | 'generate_tour' | 'agent_turn',
@@ -66,6 +68,7 @@ export interface Library {
   }>;
   elements(owner: string, id: string, analysisId: string | undefined, ids: string[]): Promise<IndexedElement[]>;
   figure(owner: string, id: string, analysisId: string | undefined, elementId: string): Promise<FigureContext>;
+  ask?(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
 }
 
 export class DocumentService implements Library {
@@ -587,5 +590,87 @@ export class DocumentService implements Library {
       ) as IndexedElement[],
       imageUrl: asset ? await this.storage.sign(asset.storage_path) : null,
     };
+  }
+  /** Questions in flight per owner: each one is a paid model call. */
+  private readonly asking = new Map<string, number>();
+  /** A question about one of the owner's documents, answered as a short micro-tour (harness/ask.ts). */
+  async ask(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
+    if (!this.settings) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
+    const question = request.question.trim();
+    if (!question) throw new HttpError(400, 'invalid_question', 'Type a question first.');
+    const document = await this.owned(owner, id);
+    let analysisId: string | null = document.current_analysis_id;
+    let tour: Tour | undefined;
+    if (request.tourId) {
+      const {
+        rows: [row],
+      } = await this.db.query('select script,analysis_id from tours where id=$1 and document_id=$2', [
+        request.tourId,
+        id,
+      ]);
+      if (!row) missing();
+      // The tour's own analysis, so the answer points at the IDs the tour on screen uses.
+      tour = row.script as Tour;
+      analysisId = row.analysis_id;
+    }
+    const {
+      rows: [analysis],
+    } = analysisId
+      ? await this.db.query(
+          "select id,doc from analyses where id=$1 and document_id=$2 and status in ('ready','limited')",
+          [analysisId, id],
+        )
+      : { rows: [] };
+    if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
+    const active = this.asking.get(owner) ?? 0;
+    if (active >= 2) throw new HttpError(429, 'too_many_questions', 'Wait for the current answer, then ask again.');
+    this.asking.set(owner, active + 1);
+    const started = Date.now();
+    const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
+    try {
+      const doc = analysis.doc as Doc;
+      const [muse, image] = await Promise.all([
+        this.settings.resolveMuse(owner, model),
+        figureImage(this.db.pool, this.storage, analysis.id, doc, request.figureId),
+      ]);
+      if (!muse.config.apiKey)
+        throw new HttpError(
+          409,
+          'model_not_configured',
+          'Connect a Meta API key under Profile & Settings to ask questions.',
+        );
+      const history = (request.history ?? [])
+        .map((turn) => ({ question: turn.question.trim(), answer: turn.answer.trim() }))
+        .filter((turn) => turn.question && turn.answer)
+        .slice(-4);
+      const { answer, completions } = await answerQuestion({
+        client: new MuseClient(muse.config, this.settings.transport),
+        doc,
+        documentId: id,
+        request: { ...request, question, history },
+        tour,
+        image,
+        language: tour?.voices?.host?.lang ?? muse.config.language,
+        signal,
+      });
+      console.log(
+        JSON.stringify({
+          event: 'question_answered',
+          documentId: id,
+          model,
+          answerable: answer.answerable,
+          steps: answer.steps.length,
+          modelCalls: completions.length,
+          durationMs: Date.now() - started,
+        }),
+      );
+      return answer;
+    } catch (error) {
+      throw askError(error);
+    } finally {
+      const left = (this.asking.get(owner) ?? 1) - 1;
+      if (left > 0) this.asking.set(owner, left);
+      else this.asking.delete(owner);
+    }
   }
 }

@@ -1,0 +1,428 @@
+import katex, { type KatexOptions } from 'katex';
+import type { BoardItem } from '../../../shared/paper';
+
+// Side-board items written by the model (notes/HARNESS.md, "Formula breakdown"): their response schemas and the code
+// checks that decide whether an item is shown. A failed check drops the item with its problems, so the caller can ask
+// for one repair or keep the step without a board.
+
+export type BoardKind = BoardItem['kind'];
+export type FormulaItem = Extract<BoardItem, { kind: 'formula' }>;
+export type FlowItem = Extract<BoardItem, { kind: 'flow' }>;
+export type BarsItem = Extract<BoardItem, { kind: 'bars' }>;
+
+/** A checked item, or null with the reasons; null without problems means the model chose to draw nothing. */
+export interface BoardCheck<T extends BoardItem = BoardItem> {
+  item: T | null;
+  problems: string[];
+}
+
+/** Sizes that keep the board calm and readable. */
+export const BOARD_LIMITS = {
+  title: 60,
+  terms: [2, 6],
+  termLatex: 200,
+  termLabelWords: 7,
+  termLabel: 48,
+  bars: [2, 6],
+  barLabelWords: 4,
+  barLabel: 32,
+  unit: 12,
+  nodes: [3, 7],
+  nodeLabelWords: 4,
+  nodeLabel: 28,
+  edges: 12,
+} as const;
+/** Flow node IDs the model chooses from; a board_focus cue names a node by its ID. */
+export const FLOW_NODE_IDS = Array.from({ length: BOARD_LIMITS.nodes[1] }, (_, i) => `node-${i + 1}`);
+
+type Obj = Record<string, unknown>;
+const none = () => ({ item: null, problems: [] });
+const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
+const rows = (v: unknown) => (Array.isArray(v) ? v.filter(isObj) : []);
+const text = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+/** Words a listener hears: tokens with a letter or digit, so "+" or "&" do not count. */
+const wordCount = (s: string) => s.split(' ').filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+const titled = (v: unknown) => {
+  const title = text(v);
+  return title && title.length <= BOARD_LIMITS.title ? { title } : {};
+};
+
+// ------------------------------------------------------------------------------------------------- formula
+
+/** Commands KaTeX renders without trust as red error text: links, images and raw HTML. */
+const UNSAFE_LATEX = /\\(?:href|url|includegraphics|html[A-Za-z]*)(?![A-Za-z])/;
+/** Colour commands, which would paint over the colours the board gives the terms. */
+const COLOR_LATEX = /\\(?:color|textcolor|colorbox|fcolorbox)(?![A-Za-z])/;
+/** KaTeX as the board runs it (player/src/components/Board.tsx): only its own term classes are trusted. */
+const KATEX: KatexOptions = {
+  displayMode: true,
+  throwOnError: true,
+  strict: 'ignore',
+  trust: (context) => context.command === '\\htmlClass' && /^pt-term pt-term-\d+$/.test(context.class),
+};
+
+/** Why KaTeX cannot render `latex` on the board (display mode), or null when it can. */
+export function latexError(latex: string): string | null {
+  if (UNSAFE_LATEX.test(latex)) return 'links, images and HTML commands are not allowed';
+  if (COLOR_LATEX.test(latex)) return 'colour commands are not allowed, since the board colours the terms itself';
+  try {
+    katex.renderToString(latex, KATEX);
+    return null;
+  } catch (error) {
+    const raw = (error as { rawMessage?: unknown }).rawMessage;
+    return typeof raw === 'string' ? raw.slice(0, 160) : 'it does not parse';
+  }
+}
+
+/** Drop what papers carry around an equation but the board does not show: $ wrappers, numbers, final punctuation. */
+function tidyLatex(v: unknown): string {
+  return text(v)
+    .replace(/^(?:\$\$?|\\\[|\\\()\s*|\s*(?:\$\$?|\\\]|\\\))$/g, '')
+    .replace(/\\(?:begin|end)\{(?:equation|displaymath)\*?\}/g, '')
+    .replace(/\\(?:label|tag)\*?\{[^{}]*\}|\\(?:nonumber|notag)(?![A-Za-z])/g, '')
+    .replace(/(?:\s|\\[,;:! ]|~)*(?<!\\)[,.;]\s*$/, '')
+    .trim();
+}
+
+/** The term as it is written in latex: exact, else the same characters spaced differently; '' when it is not there. */
+function locate(latex: string, term: string): string {
+  if (!term || latex.includes(term)) return term;
+  const chars = [...term.replace(/\s+/g, '')].map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return chars.length ? (new RegExp(chars.join('\\s*')).exec(latex)?.[0] ?? '') : '';
+}
+
+// Term placement mirrors the player's wrapTerms (player/src/board.ts), so a formula passes here exactly when the board
+// can colour every term: a term takes its first occurrence that starts and ends between tokens and does not cross a
+// term placed before it, preferring one that overlaps nothing; it may nest inside another term, never cross it.
+type Span = [number, number];
+const overlaps = (a: Span, b: Span) => a[0] < b[1] && b[0] < a[1];
+const contains = (a: Span, b: Span) => a[0] <= b[0] && b[1] <= a[1];
+const crosses = (a: Span, b: Span) => overlaps(a, b) && !contains(a, b) && !contains(b, a);
+const CONTROL_WORD = /\\[a-zA-Z]+/y;
+
+/** Positions between LaTeX tokens: a control word, a control symbol or one character. */
+function tokenBounds(latex: string): boolean[] {
+  const bounds = new Array<boolean>(latex.length + 1).fill(false);
+  for (let i = 0; i < latex.length; ) {
+    bounds[i] = true;
+    CONTROL_WORD.lastIndex = i;
+    const word = CONTROL_WORD.exec(latex);
+    const code = latex.charCodeAt(i);
+    i += word ? word[0].length : latex[i] === '\\' ? 2 : code >= 0xd800 && code <= 0xdbff ? 2 : 1;
+  }
+  bounds[latex.length] = true;
+  return bounds;
+}
+
+/** The LaTeX with each span wrapped in a group as the board wraps it: closes before opens, outer spans outside. */
+function wrapSpans(latex: string, spans: Span[]): string {
+  const marks = spans.flatMap(([start, end], term) => [
+    { at: start, open: true, len: end - start, term },
+    { at: end, open: false, len: end - start, term },
+  ]);
+  marks.sort((a, b) => {
+    if (a.at !== b.at) return a.at - b.at;
+    if (a.open !== b.open) return a.open ? 1 : -1;
+    return a.open ? b.len - a.len || a.term - b.term : a.len - b.len || b.term - a.term;
+  });
+  let out = '',
+    last = 0;
+  for (const m of marks) {
+    out += latex.slice(last, m.at) + (m.open ? `\\htmlClass{pt-term pt-term-${m.term}}{` : '}');
+    last = m.at;
+  }
+  return out + latex.slice(last);
+}
+
+/** KaTeX's HTML for the formula as the board renders it, or null when it does not parse. */
+function rendered(latex: string): string | null {
+  try {
+    return katex.renderToString(latex, KATEX);
+  } catch {
+    return null;
+  }
+}
+/** How many big operators show their limits above and below, such as a sum from i = 1 to n. */
+const limitsIn = (html: string) => html.split('op-limits').length - 1;
+
+/**
+ * Where the board colours a term, given the terms placed before it; a problem when it cannot be coloured, or only by
+ * changing how the formula is typeset: an exponent cut from its symbol, or an operator cut from its limits.
+ */
+function placeTerm(latex: string, bounds: boolean[], placed: Span[], term: string): Span | string {
+  if (/^[_^]/.test(term)) return `"${term}" is an exponent or index without its symbol; include the symbol, as in K^T`;
+  const found: Span[] = [];
+  for (let at = latex.indexOf(term); at >= 0; at = latex.indexOf(term, at + 1)) found.push([at, at + term.length]);
+  const whole = found.filter(([start, end]) => bounds[start] && bounds[end]);
+  if (!whole.length) return `"${term}" only appears inside a longer command or symbol; choose a longer piece around it`;
+  const options = whole.filter((span) => !placed.some((s) => crosses(s, span)));
+  if (!options.length) {
+    const other = placed.findIndex((s) => crosses(s, whole[0]));
+    return `"${term}" cuts across term ${other + 1}; choose parts that do not cut each other`;
+  }
+  const taken = (span: Span) => (placed.some((s) => overlaps(s, span)) ? 1 : 0);
+  options.sort((a, b) => taken(a) - taken(b) || a[0] - b[0]);
+  // The board takes the first option that renders; judge that one.
+  for (const span of options) {
+    const html = rendered(wrapSpans(latex, [...placed, span]));
+    if (html === null) continue;
+    if (limitsIn(html) < limitsIn(rendered(latex) ?? ''))
+      return `"${term}" leaves its limits behind; include them, as in \\sum_{i=1}^{n}`;
+    return span;
+  }
+  return `"${term}" is not a complete symbol or group of the formula`;
+}
+
+/**
+ * A formula the board builds term by term: KaTeX renders the LaTeX, every term is a complete symbol or group copied
+ * from it that the board can colour (it may sit inside another term, never cut across one), and labels are short.
+ * Colours stay unset, so the player's palette applies. Reusable for any board formula, such as one in an answer.
+ */
+export function checkFormula(raw: unknown): BoardCheck<FormulaItem> {
+  if (!isObj(raw)) return none();
+  const latex = tidyLatex(raw.latex);
+  const given = rows(raw.terms);
+  if (!latex && !given.length) return none();
+  const problems: string[] = [];
+  const error = latex ? (latex.length > 400 ? 'it is longer than 400 characters' : latexError(latex)) : 'it is empty';
+  if (error) problems.push(`latex cannot be rendered: ${error}`);
+  const [fewest, most] = BOARD_LIMITS.terms;
+  if (given.length < fewest) problems.push(`give ${fewest} to ${most} terms`);
+  const terms = given.slice(0, most).map((t) => ({ latex: locate(latex, text(t.latex)), label: text(t.label) }));
+  const bounds = tokenBounds(latex);
+  const placed: Span[] = [];
+  terms.forEach((term, i) => {
+    const name = `term ${i + 1}`;
+    const repeated = terms.findIndex((t) => t.latex === term.latex);
+    if (!term.latex) problems.push(`${name}: its latex is not copied exactly from the formula's latex`);
+    else if (repeated < i) problems.push(`${name}: it repeats term ${repeated + 1}`);
+    else if (term.latex.length > BOARD_LIMITS.termLatex)
+      problems.push(`${name}: it is longer than ${BOARD_LIMITS.termLatex} characters; choose a smaller part`);
+    else if (!error) {
+      const place = placeTerm(latex, bounds, placed, term.latex);
+      if (typeof place === 'string') problems.push(`${name}: ${place}`);
+      else placed.push(place);
+    }
+    if (!term.label) problems.push(`${name}: the label is empty`);
+    else if (wordCount(term.label) > BOARD_LIMITS.termLabelWords || term.label.length > BOARD_LIMITS.termLabel)
+      problems.push(`${name}: the label "${term.label}" is too long; use at most 5 words`);
+  });
+  if (problems.length) return { item: null, problems };
+  return { item: { kind: 'formula', ...titled(raw.title), latex, terms }, problems: [] };
+}
+
+// ---------------------------------------------------------------------------------------------------- bars
+
+const NUMBER = /([-−–+]?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?:\s?([kKMB])(?!\p{L}))?/gu;
+const SCALE: Record<string, number> = { k: 1e3, K: 1e3, M: 1e6, B: 1e9 };
+
+/**
+ * Every number a text prints, read the way a reader would: 1,024 is 1024, 0,5 may also be 0.5, −2.1 is negative while
+ * the 20 in "10-20" is not, and 100K is both 100 and 100000.
+ */
+export function numbersIn(source: string): number[] {
+  const out: number[] = [];
+  for (const m of source.matchAll(NUMBER)) {
+    const before = source[m.index - 1] ?? ' ';
+    const sign = m[1] && m[1] !== '+' && !/[\p{L}\p{N})\]]/u.test(before) ? -1 : 1;
+    const digits = m[2].replace(/,+$/, '');
+    const grouped = /^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?$/.test(digits);
+    const values = grouped ? [Number(digits.replace(/,/g, ''))] : digits.split(',').filter(Boolean).map(Number);
+    if (!grouped && /^\d+,\d+$/.test(digits)) values.push(Number(digits.replace(',', '.')));
+    for (const value of values.filter(Number.isFinite)) {
+      out.push(sign * value);
+      if (m[3]) out.push(sign * value * SCALE[m[3]]);
+    }
+  }
+  return out;
+}
+
+const sameNumber = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+/** Citation markers such as [38] or [3, 7], which table rows carry but bar labels do not need. */
+const CITATION = /\s*\[\d+(?:\s*[,–-]\s*\d+)*\]/g;
+
+/**
+ * Bars of the document's own numbers: 2 to 6 bars with short, distinct labels, and every value printed in `evidence`
+ * (the text the model was shown). A board of invented numbers is dropped.
+ */
+export function checkBars(raw: unknown, evidence: string): BoardCheck<BarsItem> {
+  if (!isObj(raw)) return none();
+  const given = rows(raw.bars);
+  if (!given.length) return none();
+  const problems: string[] = [];
+  const [fewest, most] = BOARD_LIMITS.bars;
+  if (given.length < fewest || given.length > most)
+    problems.push(`give ${fewest} to ${most} bars, not ${given.length}`);
+  const printed = numbersIn(evidence);
+  const bars = given.map((b, i) => {
+    const name = `bar ${i + 1}`;
+    const label = text(b.label).replace(CITATION, '').trim();
+    if (!label) problems.push(`${name}: the label is empty`);
+    else if (wordCount(label) > BOARD_LIMITS.barLabelWords || label.length > BOARD_LIMITS.barLabel)
+      problems.push(`${name}: the label "${label}" is too long; use at most 4 words`);
+    else if (given.slice(0, i).some((o) => text(o.label).replace(CITATION, '').trim() === label))
+      problems.push(`${name}: the label "${label}" is used twice`);
+    const value = b.value;
+    if (typeof value !== 'number' || !Number.isFinite(value)) problems.push(`${name}: the value is not a number`);
+    else if (value < 0) problems.push(`${name}: bars show values of 0 or more`);
+    else if (!printed.some((n) => sameNumber(n, value)))
+      problems.push(`${name}: ${value} does not appear in the evidence; copy numbers exactly as printed`);
+    return { label, value: value as number };
+  });
+  if (problems.length) return { item: null, problems };
+  const unit = text(raw.unit);
+  return {
+    item: {
+      kind: 'bars',
+      ...titled(raw.title),
+      ...(unit && unit.length <= BOARD_LIMITS.unit ? { unit } : {}),
+      ...(typeof raw.higher_is_better === 'boolean' ? { higher_is_better: raw.higher_is_better } : {}),
+      bars,
+    },
+    problems: [],
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------- flow
+
+/**
+ * Nodes in a stable topological order, so every arrow points forward; a flow with a cycle keeps its listed order and
+ * its loop-back arrow, which the board draws beside the nodes.
+ */
+function forward(ids: string[], edges: [string, string][]): string[] {
+  const waiting = new Map(ids.map((id) => [id, 0]));
+  for (const [, to] of edges) waiting.set(to, waiting.get(to)! + 1);
+  const ready = ids.filter((id) => !waiting.get(id));
+  const order: string[] = [];
+  while (ready.length) {
+    const id = ready.shift()!;
+    order.push(id);
+    for (const [from, to] of edges) {
+      if (from !== id) continue;
+      waiting.set(to, waiting.get(to)! - 1);
+      if (!waiting.get(to)) ready.push(to);
+    }
+    ready.sort((a, b) => ids.indexOf(a) - ids.indexOf(b));
+  }
+  return order.length === ids.length ? order : ids;
+}
+
+/**
+ * A small flow of boxes and arrows: 3 to 7 nodes with short labels and distinct IDs in the order the work flows, and
+ * every node connected. Unknown, repeated and self arrows are dropped first.
+ */
+export function checkFlow(raw: unknown): BoardCheck<FlowItem> {
+  if (!isObj(raw)) return none();
+  const given = rows(raw.nodes);
+  if (!given.length) return none();
+  const problems: string[] = [];
+  const [fewest, most] = BOARD_LIMITS.nodes;
+  if (given.length < fewest || given.length > most)
+    problems.push(`give ${fewest} to ${most} nodes, not ${given.length}`);
+  const nodes = given.map((n) => ({ id: text(n.id), label: text(n.label) }));
+  nodes.forEach((node, i) => {
+    const name = `node ${i + 1}`;
+    if (!FLOW_NODE_IDS.includes(node.id)) problems.push(`${name}: the id must be one of ${FLOW_NODE_IDS.join(', ')}`);
+    else if (nodes.findIndex((o) => o.id === node.id) < i) problems.push(`${name}: the id ${node.id} is used twice`);
+    if (!node.label) problems.push(`${name}: the label is empty`);
+    else if (wordCount(node.label) > BOARD_LIMITS.nodeLabelWords || node.label.length > BOARD_LIMITS.nodeLabel)
+      problems.push(`${name}: the label "${node.label}" is too long; use at most 3 words`);
+  });
+  if (problems.length) return { item: null, problems };
+  const ids = nodes.map((n) => n.id);
+  const pairs = new Map<string, [string, string]>();
+  for (const e of Array.isArray(raw.edges) ? raw.edges : []) {
+    const [from, to] = Array.isArray(e) ? e.map(text) : isObj(e) ? [text(e.from), text(e.to)] : [];
+    if (from && to && from !== to && ids.includes(from) && ids.includes(to)) pairs.set(`${from}>${to}`, [from, to]);
+  }
+  const edges = [...pairs.values()];
+  // Every node joins one connected picture: no loose boxes.
+  const group = new Map(ids.map((id) => [id, id]));
+  const root = (id: string): string => (group.get(id) === id ? id : root(group.get(id)!));
+  for (const [a, b] of edges) group.set(root(a), root(b));
+  const loose = nodes.filter((n) => root(n.id) !== root(ids[0]));
+  if (!edges.length) problems.push('add arrows from each node to the next');
+  else if (edges.length > BOARD_LIMITS.edges)
+    problems.push(`use at most ${BOARD_LIMITS.edges} arrows, not ${edges.length}`);
+  else if (loose.length) problems.push(`connect ${loose.map((n) => n.id).join(', ')} to the others with arrows`);
+  if (problems.length) return { item: null, problems };
+  const order = forward(ids, edges);
+  return {
+    item: { kind: 'flow', ...titled(raw.title), nodes: order.map((id) => nodes.find((n) => n.id === id)!), edges },
+    problems: [],
+  };
+}
+
+/** Check a board item of the kind the beat asked for; `evidence` is the text a bars board's numbers must come from. */
+export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {
+  return kind === 'formula' ? checkFormula(raw) : kind === 'bars' ? checkBars(raw, evidence) : checkFlow(raw);
+}
+
+/** How many parts board_focus can light up: formula terms, flow nodes or bars. */
+export const boardParts = (item: BoardItem) =>
+  item.kind === 'formula' ? item.terms.length : item.kind === 'flow' ? item.nodes.length : item.bars.length;
+
+// ------------------------------------------------------------------------------------------------- schemas
+
+const field = (maxLength: number, description: string) => ({ type: 'string', maxLength, description });
+const object = (properties: Record<string, object>) => ({
+  type: 'object',
+  additionalProperties: false,
+  required: Object.keys(properties),
+  properties,
+});
+
+/** The response schema of one board item the model fills in; every field is required, as constrained decoding wants. */
+export function boardSchema(kind: BoardKind) {
+  if (kind === 'formula')
+    return object({
+      title: field(BOARD_LIMITS.title, 'What the formula computes, at most 6 words.'),
+      latex: { ...field(400, 'The whole equation in LaTeX that KaTeX renders, without its number.'), minLength: 1 },
+      terms: {
+        type: 'array',
+        minItems: BOARD_LIMITS.terms[0],
+        maxItems: BOARD_LIMITS.terms[1],
+        items: object({
+          latex: {
+            ...field(
+              BOARD_LIMITS.termLatex,
+              'Copied character for character from latex: one symbol or a complete group.',
+            ),
+            minLength: 1,
+          },
+          label: { ...field(BOARD_LIMITS.termLabel, 'What this part means, at most 5 plain words.'), minLength: 1 },
+        }),
+      },
+    });
+  if (kind === 'bars')
+    return object({
+      title: field(BOARD_LIMITS.title, 'What the bars compare, at most 6 words.'),
+      unit: field(BOARD_LIMITS.unit, 'The metric, such as BLEU, % or F1.'),
+      higher_is_better: { type: 'boolean' },
+      bars: {
+        type: 'array',
+        maxItems: BOARD_LIMITS.bars[1],
+        description: '2-6 results for one metric, or empty for no board.',
+        items: object({
+          label: { ...field(BOARD_LIMITS.barLabel, 'The method or setting, at most 4 words.'), minLength: 1 },
+          value: { type: 'number', description: 'Copied exactly as printed in the evidence.' },
+        }),
+      },
+    });
+  const node = { type: 'string', enum: FLOW_NODE_IDS };
+  return object({
+    title: field(BOARD_LIMITS.title, 'What the flow shows, at most 6 words.'),
+    nodes: {
+      type: 'array',
+      maxItems: BOARD_LIMITS.nodes[1],
+      description: '3-7 stages in the order the work flows, or empty for no board.',
+      items: object({ id: node, label: { ...field(BOARD_LIMITS.nodeLabel, 'At most 3 words.'), minLength: 1 } }),
+    },
+    edges: {
+      type: 'array',
+      maxItems: BOARD_LIMITS.edges,
+      description: 'Arrows from an earlier node to a later one.',
+      items: object({ from: node, to: node }),
+    },
+  });
+}

@@ -1,13 +1,15 @@
 import { getLivePage, isPdfOpen } from '../pdfLifetime';
 import { memo, useEffect, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import type { Detail } from '../canvasPlan';
 import { BLOCK_COLORS, MARKER, STROKE } from '../colors';
 import { isCancelled, renderPage } from '../pdf';
 import type { PDFDocumentProxy } from '../pdf';
 import type { PageBox } from '../layout';
 import { BOX_PAD, SPOT_PAD } from '../scene';
-import type { PageShapes } from '../scene';
+import type { PageShapes, PenShape } from '../scene';
 import type { BBox, DocBlock, DocEquation, DocFigure, DocPanel, DocSentence } from '../types';
+import '../pen.css';
 
 export interface DebugPage {
   blocks: DocBlock[];
@@ -172,10 +174,37 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
         )}
       </svg>
 
+      {/* Above the spotlight: an arrow's tail lies outside the target it points at. */}
+      {!!shapes?.pens.length && (
+        <svg className="layer layer-pen" viewBox={viewBox} preserveAspectRatio="none">
+          {shapes.pens.map((p) => (
+            <PenMark key={p.key} pen={p} />
+          ))}
+        </svg>
+      )}
+
       {debug && <DebugLayer viewBox={viewBox} data={debug} />}
     </div>
   );
 });
+
+/** One pen stroke, drawn in by its dash; an arrow's head follows its shaft. */
+function PenMark({ pen }: { pen: PenShape }) {
+  const color = STROKE[pen.color];
+  if (pen.kind === 'circle') return <path className="pen-stroke pen-loop" d={pen.d} stroke={color} pathLength={1} />;
+  const [x, y] = pen.tip;
+  const head = { '--pen-head-fit': pen.head.fit, '--pen-head-max': pen.head.max } as CSSProperties;
+  return (
+    <g stroke={color}>
+      <path className="pen-stroke" d={pen.d} pathLength={1} />
+      <g transform={`translate(${x} ${y}) rotate(${pen.angle})`} style={head}>
+        {pen.wings.map((d, i) => (
+          <path key={i} className="pen-stroke pen-head" d={d} pathLength={1} />
+        ))}
+      </g>
+    </g>
+  );
+}
 
 function DebugLayer({ viewBox, data }: { viewBox: string; data: DebugPage }) {
   return (

@@ -1,0 +1,385 @@
+/* ---------------------------------------------------------------- ask bar */
+
+/* One glass card: a tray (status and question chips) that folds open above the field. It reads on the dark stage
+   and on a white page alike. */
+.ask {
+  --ask-glass: rgba(20, 23, 32, 0.9);
+  --ask-edge: rgba(255, 255, 255, 0.08);
+  --ask-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  width: min(680px, 100%);
+  margin: 0 auto;
+  font-size: 14px;
+  color: var(--text);
+  pointer-events: auto;
+}
+
+/* Optional placement: floating over the bottom of a positioned container, e.g. above the control bar. */
+.ask.ask-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--ask-dock-bottom, 16px);
+  z-index: 18;
+  width: min(680px, calc(100% - 32px));
+}
+
+.ask-card {
+  border: 1px solid var(--ask-edge);
+  border-radius: 18px;
+  background: var(--ask-glass);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 44px -16px rgba(0, 0, 0, 0.65),
+    0 2px 8px rgba(0, 0, 0, 0.28);
+  transition:
+    border-color 180ms ease,
+    box-shadow 220ms ease;
+}
+
+.ask-card.focused,
+.ask-card.busy {
+  border-color: rgba(126, 166, 255, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 0 4px rgba(126, 166, 255, 0.1),
+    0 18px 44px -16px rgba(0, 0, 0, 0.65),
+    0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+.ask :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ tray */
+
+.ask-tray {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 280ms var(--ask-ease);
+}
+
+.ask-tray.open {
+  grid-template-rows: 1fr;
+}
+
+/* Folded content stays visible while it closes, then leaves the tab order. */
+.ask-tray-clip {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 280ms;
+}
+
+.ask-tray.open .ask-tray-clip {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.ask-tray-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 12px 4px;
+}
+
+.ask-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 20px;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--muted);
+  animation: ask-rise 240ms var(--ask-ease) both;
+}
+
+/* Icons sit on the first line when a message wraps. */
+.ask-status svg {
+  flex: none;
+  margin-top: 1.5px;
+}
+
+.ask-status.yes svg {
+  color: var(--accent);
+}
+
+.ask-status.partly svg {
+  color: var(--warn);
+}
+
+.ask-status.failed {
+  color: #ffcfcf;
+}
+
+.ask-status.failed svg {
+  color: var(--error);
+}
+
+.ask-retry {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.ask-retry:hover {
+  background: rgba(126, 166, 255, 0.1);
+}
+
+/* "Thinking": a soft light passes over the word. The light starts and ends outside the word, so the loop has no seam. */
+.ask-shimmer {
+  background: linear-gradient(90deg, var(--muted) 35%, var(--text) 50%, var(--muted) 65%) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 500;
+  animation: ask-shimmer 2s linear infinite;
+}
+
+.ask-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* min-width: 0 lets a long question shrink to the card and end in an ellipsis instead of being cut off. */
+  min-width: 0;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #c9cdd9;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: ask-rise 260ms var(--ask-ease) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.ask-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ask-chip:hover {
+  border-color: rgba(126, 166, 255, 0.4);
+  background: rgba(126, 166, 255, 0.08);
+  color: var(--text);
+}
+
+.ask-chip.resume {
+  border-color: rgba(126, 166, 255, 0.35);
+  background: rgba(126, 166, 255, 0.1);
+  color: var(--accent);
+}
+
+.ask-chip.resume:hover {
+  background: rgba(126, 166, 255, 0.16);
+}
+
+.ask-chip svg {
+  flex: none;
+}
+
+/* ----------------------------------------------------------------- field */
+
+.ask-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 7px 7px 7px 15px;
+}
+
+.ask-spark {
+  flex: none;
+  margin-bottom: 9px;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.ask .ask-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  margin: 0;
+  padding: 6px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.ask .ask-input:focus-visible {
+  outline: none;
+}
+
+.ask-input::placeholder {
+  color: var(--faint);
+}
+
+.ask-input[readonly] {
+  color: var(--muted);
+}
+
+.ask-count {
+  flex: none;
+  margin-bottom: 8px;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-kbd {
+  flex: none;
+  margin-bottom: 7px;
+  min-width: 20px;
+  text-align: center;
+}
+
+.ask-send {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--faint);
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 120ms ease;
+}
+
+.ask .ask-send:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.ask-send.ready {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.ask-send.ready:hover {
+  background: #96b7ff;
+}
+
+.ask-send.stop {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.ask-send.stop:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.ask-send:not(:disabled):active {
+  transform: scale(0.94);
+}
+
+.ask-ring {
+  position: absolute;
+  inset: -2px;
+  width: 36px;
+  height: 36px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 26 74;
+  animation: ask-spin 1s linear infinite;
+}
+
+@keyframes ask-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes ask-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+@keyframes ask-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 860px) {
+  .ask.ask-dock {
+    width: calc(100% - 24px);
+  }
+  .ask-kbd {
+    display: none;
+  }
+  /* 16px keeps iOS Safari from zooming the page when the field gets focus. */
+  .ask .ask-input {
+    padding: 5px 0;
+    font-size: 16px;
+    line-height: 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-tray,
+  .ask-tray-clip {
+    transition: none;
+  }
+  .ask-status,
+  .ask-chip,
+  .ask-ring {
+    animation: none;
+  }
+  .ask-send:not(:disabled):active {
+    transform: none;
+  }
+  .ask-shimmer {
+    animation: none;
+    background: none;
+    color: var(--muted);
+  }
+}

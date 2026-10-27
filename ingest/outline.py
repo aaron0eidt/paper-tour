@@ -27,6 +27,33 @@ def fmt_bbox(b):
     return "[" + ", ".join(f"{v:g}" for v in b) + "]"
 
 
+def fmt_blocks(ids):
+    return ids[0] if len(ids) == 1 else f"{ids[0]} … {ids[-1]} ({len(ids)} blocks)"
+
+
+def exercise_lines(exercises, blocks, full):
+    """Each task with its heading, then its parts (sub-parts indented) with the text they start with."""
+    out = []
+
+    def parts(items, depth):
+        for p in items:
+            pts = f"{p['points']:g} points, " if "points" in p else ""
+            first = blocks.get(p["blocks"][0], {}).get("text", "")
+            out.append(f"{'  ' * depth}{p['id']:<{12 - 2 * depth}} p{p['page']:<3} {pts}{fmt_blocks(p['blocks'])}: "
+                       f"{clip(first, full)}")
+            parts(p.get("parts", []), depth + 1)
+
+    for e in exercises:
+        facts = [e["title"]] if e.get("title") else []
+        if "points" in e:
+            facts.append(f"{e['points']:g} points")
+        facts.append(fmt_blocks(e["blocks"]))
+        out.append(f"{e['id']:<12} p{e['page']:<3} {', '.join(facts)}")
+        out.append(f"{'':<12} heading {e['block']}: {clip(blocks.get(e['block'], {}).get('text', ''), full)}")
+        parts(e["parts"], 1)
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Print the ID outline of a paper folder's doc.json.")
     ap.add_argument("folder", help="paper folder containing doc.json, e.g. demo/attention")
@@ -43,12 +70,14 @@ def main(argv=None):
 
     src = doc["source"]
     sentences = {s["id"]: s for s in doc["sentences"]}
+    exercises = doc.get("exercises", [])
     out = []
     out.append(f"# {src.get('title', src['file'])}")
     out.append(f"# {src['file']}, {src['num_pages']} pages, sha256 {src['sha256'][:12]}, {src['generator']}")
     out.append(f"# {len(doc['blocks'])} blocks, {len(doc['sentences'])} sentences, "
                f"{len(doc['sections'])} sections, {len(doc['figures'])} figures/tables, "
-               f"{len(doc['equations'])} equations; whole pages are page1..page{len(doc['pages'])}")
+               f"{len(doc['equations'])} equations" + (f", {len(exercises)} exercises" if exercises else "")
+               + f"; whole pages are page1..page{len(doc['pages'])}")
 
     out.append("")
     out.append("## Sections")
@@ -74,6 +103,11 @@ def main(argv=None):
         out.append("(none)")
     for e in doc["equations"]:
         out.append(f"{e['id']:<6} p{e['page']:<3} {e.get('block', '-'):<8} {clip(e['text'], args.full)}")
+
+    if exercises:
+        out.append("")
+        out.append("## Exercises")
+        out.extend(exercise_lines(exercises, {b["id"]: b for b in doc["blocks"]}, args.full))
 
     for page in doc["pages"]:
         n = page["n"]

@@ -1,0 +1,866 @@
+import { randomUUID } from 'node:crypto';
+import {
+  splitWords,
+  type Action,
+  type BoardItem,
+  type CameraAction,
+  type Color,
+  type Doc,
+  type Step,
+  type Tour,
+} from '../../../shared/paper';
+import type { Db } from '../db';
+import { HttpError, ProcessingError } from '../errors';
+import type { Completion, MuseClient, MuseMessage } from '../muse/client';
+import { isContributorModel } from '../muse/models';
+import { OFFICIAL_MODELS } from '../muse/pricing';
+import type { FileStorage } from '../storage';
+import type { TourImage } from '../tour-generator';
+import { findAnchor, tourProblems } from './assemble';
+import { BOARD_LIMITS, checkFormula } from './board';
+import { imageParts, type Effort } from './calls';
+import { REGION_NAMES, regionOf } from './direct';
+import { paperBlock, proseSentences } from './paper-block';
+import { SHARED_RULES } from './prompts';
+
+// Ask (notes/HARNESS.md): retrieve passages in code, answer in one model call whose cues may only point at them, then
+// turn the answer into canonical tour steps the player inserts as a micro-tour.
+
+/** One earlier exchange; a follow-up question may build on it. */
+export interface AskTurn {
+  question: string;
+  answer: string;
+}
+/** A learner's question, with where they are in the tour and what they are looking at. */
+export interface AskRequest {
+  question: string;
+  tourId?: string;
+  stepId?: string;
+  figureId?: string;
+  history?: AskTurn[];
+}
+export const ANSWERABLE = ['yes', 'partly', 'no'] as const;
+export type Answerable = (typeof ANSWERABLE)[number];
+/** The answer as a micro-tour: steps in the tour contract, plus two questions to ask next. */
+export interface AskAnswer {
+  answerable: Answerable;
+  steps: Step[];
+  followups: string[];
+}
+
+// ------------------------------------------------------------------ retrieval
+
+export interface Passage {
+  id: string;
+  kind: 'sentence' | 'figure' | 'equation' | 'section';
+  page: number;
+  /** As the model reads it. */
+  text: string;
+}
+/** Passages for one question and the IDs its cues may point at. */
+export interface Retrieval {
+  /** The current step's evidence and its neighbours, the figure asked about, and elements the question names. */
+  focus: Passage[];
+  /** The best BM25 matches that are not in focus, best first. */
+  ranked: Passage[];
+  sentences: string[];
+  /** Figures, tables, their panels and equations. */
+  visuals: string[];
+  /** Where the camera goes when a step points at nothing. */
+  home?: string;
+}
+
+const STOP = new Set(
+  `a about above after again all also am an and any are as at be because been before being between both but by can
+  could did do does doing done during each either for from further had has have having he her here hers him his how i
+  if in into is it its itself just me more most my no nor not now of off on once only or other our out over own same
+  she should so some such than that the their them then there these they this those through to too under until up
+  upon us very was we were what when where whether which while who whom why will with within would you your`.split(
+    /\s+/,
+  ),
+);
+
+/** Rough stem: enough to match plurals and -ing/-ed forms ("keys" and "key", "scaled" and "scale"). */
+function stem(word: string): string {
+  let w = word;
+  if (/(ss|ch|sh|x|z)es$/.test(w) && w.length > 4) w = w.slice(0, -2);
+  else if (w.endsWith('ies') && w.length > 4) w = `${w.slice(0, -3)}y`;
+  else if (/[^aiosu]s$/.test(w) && w.length > 3) w = w.slice(0, -1);
+  const suffix = /(ing|ed|ly)$/.exec(w);
+  if (suffix && w.length - suffix[0].length >= 3) w = w.slice(0, -suffix[0].length);
+  return w.length > 3 && w.endsWith('e') ? w.slice(0, -1) : w;
+}
+
+/** Search terms of a text: lower-case stems without stop words; "d_k" also yields "dk", as PDF text often writes it. */
+export function searchTerms(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.toLowerCase().match(/\d+(?:[.,]\d+)*|[\p{L}\p{N}]+(?:_[\p{L}\p{N}]+)*/gu) ?? []) {
+    const token = raw.replace(/,(?=\d{3}\b)/g, '');
+    const parts = token.includes('_') ? [...token.split('_'), token.replace(/_/g, '')] : [token];
+    for (const part of parts)
+      if (!STOP.has(part) && (part.length > 1 || /\d/.test(part))) out.push(/\d/.test(part) ? part : stem(part));
+  }
+  return out;
+}
+
+/** BM25 scores of each document (a list of terms) for weighted query terms. */
+export function bm25(docs: string[][], query: Map<string, number>, k1 = 1.2, b = 0.75): number[] {
+  const avg = docs.reduce((sum, d) => sum + d.length, 0) / Math.max(1, docs.length) || 1;
+  const df = new Map<string, number>();
+  for (const d of docs) for (const t of new Set(d)) if (query.has(t)) df.set(t, (df.get(t) ?? 0) + 1);
+  return docs.map((d) => {
+    const tf = new Map<string, number>();
+    for (const t of d) if (query.has(t)) tf.set(t, (tf.get(t) ?? 0) + 1);
+    let score = 0;
+    for (const [t, f] of tf) {
+      const idf = Math.log(1 + (docs.length - df.get(t)! + 0.5) / (df.get(t)! + 0.5));
+      score += query.get(t)! * idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + (b * d.length) / avg)));
+    }
+    return score;
+  });
+}
+
+const figureName = (f: Doc['figures'][number]) => `${f.kind === 'table' ? 'Table' : 'Figure'} ${f.number}`;
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+
+/** Everything a question can be matched against, with the text BM25 searches (equations also by their surrounding sentences). */
+function corpus(doc: Doc): { passage: Passage; search: string }[] {
+  const out: { passage: Passage; search: string }[] = proseSentences(doc).map((s) => ({
+    passage: { id: s.id, kind: 'sentence', page: s.page, text: s.text },
+    search: s.text,
+  }));
+  for (const f of doc.figures) {
+    const text = `${figureName(f)}: ${f.caption}`;
+    out.push({ passage: { id: f.id, kind: 'figure', page: f.page, text }, search: text });
+  }
+  const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
+  const blocks = doc.blocks;
+  for (const e of doc.equations) {
+    // Extracted equation text is often garbled; the sentences around it say what it computes.
+    const at = blocks.findIndex((b) => b.id === e.block);
+    const before = at > 0 ? blocks[at - 1].sentences.at(-1) : undefined;
+    const after = at >= 0 && at + 1 < blocks.length ? blocks[at + 1].sentences[0] : undefined;
+    const around = [before, after].map((id) => (id ? (sentences.get(id)?.text ?? '') : '')).join(' ');
+    const text = `Equation (${e.number}): ${e.text}`;
+    out.push({ passage: { id: e.id, kind: 'equation', page: e.page, text }, search: `${text} ${around}` });
+  }
+  for (const s of doc.sections) {
+    const text = `Section ${s.number ? `${s.number} ` : ''}${s.title}`;
+    out.push({ passage: { id: s.id, kind: 'section', page: s.page, text }, search: text });
+  }
+  return out;
+}
+
+/** Elements the question names: "Figure 3", "Table II", "Eq. (2)", "Section 4.1". */
+export function namedElements(doc: Doc, question: string): string[] {
+  const ids: string[] = [];
+  for (const m of question.matchAll(/\b(fig(?:ure)?s?|tab(?:le)?s?)\.?\s*([0-9]+[a-z]?|[ivxlc]+)\b/gi)) {
+    const kind = m[1].toLowerCase().startsWith('fig') ? 'figure' : 'table';
+    // "Figure 2a" names a panel of Figure 2: the figure brings its panels along.
+    const numbers = [m[2], m[2].replace(/(?<=\d)[a-z]$/i, '')].map((n) => n.toLowerCase());
+    const f = doc.figures.find((f) => f.kind === kind && numbers.includes(f.number.toLowerCase()));
+    if (f) ids.push(f.id);
+  }
+  for (const m of question.matchAll(/\b(?:eq(?:uation)?s?)\.?\s*\(?([0-9]+[a-z]?)\)?/gi)) {
+    const e = doc.equations.find((e) => e.number.toLowerCase() === m[1].toLowerCase());
+    if (e) ids.push(e.id);
+  }
+  for (const m of question.matchAll(/(?:\bsec(?:tion)?s?\.?|§)\s*([0-9]+(?:\.[0-9]+)*)/gi)) {
+    const s = doc.sections.find((s) => s.number === m[1]);
+    if (s) ids.push(s.id);
+  }
+  return [...new Set(ids)];
+}
+
+/** Every element a tour step points at or moves the camera to. */
+function stepTargets(step: Step): string[] {
+  return step.actions.flatMap((a) =>
+    'targets' in a ? a.targets : 'target' in a ? [a.target] : 'anchor' in a ? [a.anchor] : [],
+  );
+}
+
+export function findStep(tour: Tour | undefined, stepId: string | undefined): Step | undefined {
+  return stepId ? tour?.chapters.flatMap((c) => c.steps).find((s) => s.id === stepId) : undefined;
+}
+
+const RANKED = 12;
+// Short section titles win BM25's length normalisation too easily; they are context, not answers.
+const KIND_WEIGHT: Record<Passage['kind'], number> = { sentence: 1, figure: 1, equation: 1, section: 0.6 };
+const KIND_CAP: Record<Passage['kind'], number> = { sentence: RANKED, figure: 3, equation: 3, section: 2 };
+
+/**
+ * Retrieval in code: BM25 over prose sentences, captions, equations and section titles for the question (with the
+ * previous question and the current narration as weaker context), plus what the learner is looking at.
+ */
+export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval {
+  const query = new Map<string, number>();
+  const weigh = (text: string | undefined, weight: number) => {
+    for (const t of searchTerms(text ?? '')) query.set(t, Math.max(query.get(t) ?? 0, weight));
+  };
+  weigh(request.question, 1);
+  weigh(request.history?.at(-1)?.question, 0.5);
+  weigh(step?.say, 0.25);
+  const items = corpus(doc);
+  const byId = new Map(items.map((item) => [item.passage.id, item.passage]));
+  const figures = new Map(doc.figures.map((f) => [f.id, f]));
+  const panelOf = new Map(doc.figures.flatMap((f) => f.panels.map((p) => [p.id, f.id] as const)));
+  const blocks = new Map(doc.blocks.map((b) => [b.id, b]));
+
+  // In focus: the step's evidence with its neighbours, the figure asked about with its citing sentences, named elements.
+  const order = items.filter((i) => i.passage.kind === 'sentence').map((i) => i.passage.id);
+  const position = new Map(order.map((id, i) => [id, i]));
+  const known = (id: string | undefined) => (id && byId.has(id) ? id : id ? panelOf.get(id) : undefined);
+  const focus: string[] = [];
+  const add = (id: string | undefined) => {
+    const k = known(id);
+    if (k && !focus.includes(k)) focus.push(k);
+  };
+  const evidence = (step ? stepTargets(step) : [])
+    .flatMap((id) => blocks.get(id)?.sentences.slice(0, 4) ?? [id])
+    .filter((id) => known(id));
+  for (const id of evidence) {
+    const at = position.get(id);
+    if (at === undefined) add(id);
+    else [order[at - 1], id, order[at + 1]].forEach(add);
+  }
+  const asked = [known(request.figureId)].find((id) => id && ['figure', 'equation'].includes(byId.get(id)!.kind));
+  if (asked) {
+    add(asked);
+    figures.get(asked)?.referenced_by.slice(0, 2).forEach(add);
+  }
+  const named = namedElements(doc, request.question);
+  named.forEach(add);
+
+  const scores = bm25(
+    items.map((i) => searchTerms(i.search)),
+    query,
+  );
+  const taken = new Map<Passage['kind'], number>();
+  const ranked = items
+    .map((item, i) => ({ passage: item.passage, score: scores[i] * KIND_WEIGHT[item.passage.kind], i }))
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .filter(({ passage }) => {
+      const n = taken.get(passage.kind) ?? 0;
+      if (n >= KIND_CAP[passage.kind]) return false;
+      taken.set(passage.kind, n + 1);
+      return true;
+    })
+    .slice(0, RANKED)
+    .map((r) => r.passage)
+    .filter((p) => !focus.includes(p.id));
+
+  const all = [...focus.map((id) => byId.get(id)!), ...ranked];
+  const visuals = all.flatMap((p) =>
+    p.kind === 'figure'
+      ? [p.id, ...(figures.get(p.id)?.panels.map((x) => x.id) ?? [])]
+      : p.kind === 'equation'
+        ? [p.id]
+        : [],
+  );
+  const namedVisual = named.find((id) => byId.get(id)?.kind !== 'section');
+  return {
+    focus: focus.map((id) => byId.get(id)!),
+    ranked,
+    sentences: all.filter((p) => p.kind === 'sentence').map((p) => p.id),
+    visuals: [...new Set(visuals)],
+    home: asked ?? namedVisual ?? known(evidence[0]) ?? named[0] ?? ranked[0]?.id,
+  };
+}
+
+// ---------------------------------------------------------------- the call
+
+export const CUE_ACTIONS = ['highlight', 'box', 'arrow', 'circle', 'spotlight', 'note'] as const;
+const BOARD_KINDS = ['none', 'formula', 'flow', 'bars'] as const;
+const NO_BOARD = {
+  kind: 'none',
+  title: '',
+  latex: '',
+  terms: [],
+  nodes: [],
+  bars: [],
+  unit: '',
+  higher_is_better: true,
+};
+/** One short answer for a different document (rule 8): weak models copy format and depth from an example. */
+const EXAMPLE = JSON.stringify({
+  plan: 'Asks why the learning rate warms up. p4.s7 gives the reason and eq2 the schedule.',
+  answerable: 'yes',
+  steps: [
+    {
+      say: 'The authors warm up the learning rate because large updates early in training made it unstable. So the rate starts small and grows step by step.',
+      cues: [{ action: 'highlight', target: 'p4.s7', region: 'whole', label: '', anchor: 'large updates early' }],
+      board: NO_BOARD,
+    },
+    {
+      say: 'Equation two gives the schedule. For the first four thousand steps the rate grows linearly, then it decays with the inverse square root of the step number.',
+      cues: [{ action: 'box', target: 'eq2', region: 'whole', label: 'the schedule', anchor: 'Equation two gives' }],
+      board: {
+        ...NO_BOARD,
+        kind: 'formula',
+        title: 'Learning-rate schedule',
+        latex: 'lr = d^{-0.5} \\cdot \\min(s^{-0.5}, s \\cdot w^{-1.5})',
+        terms: [
+          { latex: 's \\cdot w^{-1.5}', label: 'linear warmup', anchor: 'grows linearly' },
+          { latex: 's^{-0.5}', label: 'decay', anchor: 'inverse square root' },
+        ],
+      },
+    },
+  ],
+  followups: ['How long is the warmup?', 'What happens without warmup?'],
+});
+
+/** The task's fixed part: identical for every question on a document, so it extends the cached prefix. */
+export function askInstructions(language: string) {
+  return `TASK: answer the learner's question as a short spoken micro-tour in ${JSON.stringify(language)} that points at
+the document while it speaks.
+1. "answerable": "yes" if the document answers the question, "partly" if it answers part of it, "no" if it does not.
+2. Write 1 to 3 steps. The first sentence of the first step answers the question directly. Each "say" has at most 60
+   words in short spoken sentences. Add a step only when the answer has parts, for example the idea, then the formula.
+3. Say only what the document supports. Knowledge from outside it is allowed only as background: start that sentence
+   with "As background," and point at nothing while saying it. When the document does not answer the question, say so
+   plainly, then point at the closest passage.
+4. Cues point at a listed ID while you speak. "highlight" marks a sentence that states what you say (at most 2 per
+   step). "box", "arrow" or "circle" marks a figure, panel or equation, with a "label" of at most 4 words or empty.
+   "spotlight" dims everything else. "note" writes a remark of at most 12 words next to a target. "anchor" is 2 to 6
+   words copied exactly from "say": the cue appears when the voice reaches them. Use 1 to 3 cues per step, on one page
+   or one figure when you can. For an arrow or circle on the figure whose image is attached, "region" says where the
+   part lies in that image; otherwise, and for every other cue, "region" is "whole".
+5. The board is optional, at most one item per step; otherwise its "kind" is "none" and the other fields stay empty.
+   - "formula" when the question is about an equation: its LaTeX, and 2 to 4 terms, each a separate part with "latex"
+     copied exactly from the formula, a "label" of 1 to 4 words and an "anchor" where "say" explains that term.
+   - "bars" to compare 2 to 6 numbers that appear in the passages, with their "unit".
+   - "flow" for a process of 3 to 6 stages in order, each "label" at most 3 words.
+6. "followups": two short questions, at most 12 words each, that the learner could ask next and the document answers.
+EXAMPLE OUTPUT for a different document:
+${EXAMPLE}`;
+}
+
+function passageLine(p: Passage, doc: Doc): string {
+  if (p.kind === 'section') return `${p.text} (page ${p.page}; for orientation, not a target)`;
+  if (p.kind === 'sentence') return `[${p.id}] ${clip(p.text, 400)}`;
+  const figure = doc.figures.find((f) => f.id === p.id);
+  const panels = figure?.panels.map((x) => `${x.id}${x.label ? ` ${x.label}` : ''}`).join(', ');
+  return `[${p.id}] ${clip(p.text, p.kind === 'figure' ? 500 : 300)} (page ${p.page})${panels ? ` | panels ${panels}` : ''}`;
+}
+
+/** The task's variable part: the question, the conversation so far, the narration and the retrieved passages. */
+export function askContext(request: AskRequest, retrieval: Retrieval, doc: Doc, step?: Step, image?: TourImage) {
+  const lines = [`QUESTION: ${request.question}`];
+  if (request.history?.length) {
+    lines.push('EARLIER IN THIS CONVERSATION (oldest first; the question may build on it):');
+    for (const turn of request.history) lines.push(`Q: ${turn.question}`, `A: ${clip(turn.answer, 700)}`);
+  }
+  if (step) lines.push(`THE TOUR WAS SAYING: ${step.say}`);
+  if (retrieval.focus.length)
+    lines.push(
+      'IN FOCUS (on screen, asked about or named in the question):',
+      ...retrieval.focus.map((p) => passageLine(p, doc)),
+    );
+  if (retrieval.ranked.length)
+    lines.push('RETRIEVED PASSAGES (best match first):', ...retrieval.ranked.map((p) => passageLine(p, doc)));
+  if (!retrieval.focus.length && !retrieval.ranked.length) lines.push('No passage matched the question.');
+  if (image)
+    lines.push(`The image of ${image.label} [${image.targetId}] is attached. Describe only what is visible or stated.`);
+  lines.push('Point only at the IDs listed here.');
+  return lines.join('\n');
+}
+
+/**
+ * The answer's schema: actions, answerability, regions and board kinds are enums, and cues may only target retrieved
+ * IDs. Regions other than "whole" are offered only when the model can see the figure.
+ */
+export function answerSchema(retrieval: Retrieval, regions: readonly string[] = ['whole']) {
+  const ids = [...retrieval.sentences, ...retrieval.visuals];
+  const text = (maxLength: number, description?: string) => ({
+    type: 'string',
+    maxLength,
+    ...(description ? { description } : {}),
+  });
+  const object = (properties: Record<string, unknown>) => ({
+    type: 'object',
+    additionalProperties: false,
+    required: Object.keys(properties),
+    properties,
+  });
+  const anchor = text(80, 'A 2-6 word phrase copied exactly from say.');
+  const cue = object({
+    action: { type: 'string', enum: CUE_ACTIONS },
+    target: ids.length ? { type: 'string', enum: ids } : { type: 'string', maxLength: 0 },
+    region: { type: 'string', enum: regions, description: 'arrow or circle: where the part is in the attached image.' },
+    label: text(100, 'box, arrow or circle: at most 4 words or empty; note: its text, at most 12 words.'),
+    anchor,
+  });
+  const limits = BOARD_LIMITS;
+  const parts = (max: number, item: object) => ({ type: 'array', maxItems: max, items: item });
+  const board = object({
+    kind: { type: 'string', enum: BOARD_KINDS },
+    title: text(limits.title),
+    latex: text(400, 'formula only: the LaTeX of the whole formula.'),
+    terms: parts(
+      limits.terms[1],
+      object({ latex: text(160, 'Copied exactly from latex.'), label: text(limits.termLabel), anchor }),
+    ),
+    nodes: parts(limits.nodes[1], object({ label: text(limits.nodeLabel), anchor })),
+    bars: parts(limits.bars[1], object({ label: text(limits.barLabel), value: { type: 'number' }, anchor })),
+    unit: text(limits.unit),
+    higher_is_better: { type: 'boolean' },
+  });
+  return object({
+    plan: text(600),
+    answerable: { type: 'string', enum: ANSWERABLE },
+    steps: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 3,
+      items: object({
+        say: { type: 'string', minLength: 1, maxLength: 480, description: 'At most 60 spoken words.' },
+        cues: { type: 'array', maxItems: ids.length ? 4 : 0, items: cue },
+        board,
+      }),
+    },
+    followups: { type: 'array', minItems: 2, maxItems: 2, items: text(120) },
+  });
+}
+
+// ------------------------------------------------------------ conversion
+
+const MAX_WORDS = 60;
+/** Pen colours: boxes as in tours, arrows and circles in the pink of a tutor's pen. */
+const PEN: Record<'box' | 'arrow' | 'circle', Color> = { box: 'orange', arrow: 'pink', circle: 'pink' };
+const SHA256 = /^[0-9a-f]{64}$/;
+
+type Raw = Record<string, unknown>;
+const isRaw = (v: unknown): v is Raw => typeof v === 'object' && v !== null && !Array.isArray(v);
+const list = (v: unknown): Raw[] => (Array.isArray(v) ? v.filter(isRaw) : []);
+const str = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+const firstWords = (s: string, n: number) => splitWords(s).slice(0, n).join(' ');
+
+const SPOKEN_COMMANDS: Record<string, string> = {
+  sqrt: 'square root of',
+  cdot: 'times',
+  times: 'times',
+  frac: '',
+  left: '',
+  right: '',
+};
+
+/**
+ * Text as the voice should read it: no markdown or LaTeX remnants ("$\sqrt{d_k}$" becomes "square root of d k"),
+ * while prices and names such as "$5" or "C#" stay.
+ */
+function plain(text: string): string {
+  return text
+    .replace(/\$([^$]+)\$/g, '$1')
+    .replace(
+      /\\([a-zA-Z]+)/g,
+      (_, name: string) => ` ${Object.hasOwn(SPOKEN_COMMANDS, name) ? SPOKEN_COMMANDS[name] : name} `,
+    )
+    .replace(/[_^]/g, ' ')
+    .replace(/[{}`*\\]/g, '')
+    .replace(/^#+\s*/, '')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** At most 60 words, cut after the last whole sentence when that keeps enough of it. */
+export function spoken(text: string): string {
+  const say = plain(text);
+  const words = splitWords(say);
+  if (words.length <= MAX_WORDS) return say;
+  const cut = words.slice(0, MAX_WORDS).join(' ');
+  const sentences = /^[\s\S]*[.!?](?=\s|$)/.exec(cut)?.[0];
+  return sentences && splitWords(sentences).length >= 15 ? sentences : `${cut.replace(/[,;:]$/, '')}.`;
+}
+
+/** Word index where an anchor phrase starts in `say` (cleaned like the narration), or null when it is not there. */
+const anchorAt = (say: string, anchor: string) => findAnchor(say, plain(anchor));
+
+/** A pen label: at most 4 words, else none, since a cut-off label reads worse than no label (as in tours). */
+function markLabel(label: string): { label?: string } {
+  const text = label.replace(/[.,;:]+$/, '');
+  return text && splitWords(text).length <= 4 && text.length <= 40 ? { label: text } : {};
+}
+
+/** Numbers written in a text, as magnitudes ("1,024", "28.4", "95%"). */
+export function numbersIn(text: string): number[] {
+  return (text.match(/\d+(?:,\d{3})*(?:\.\d+)?/g) ?? [])
+    .map((n) => Number(n.replace(/,/g, '')))
+    .filter(Number.isFinite);
+}
+
+/**
+ * A board item from the model's flat board, or null when it is "none" or unusable. A formula must pass the board's
+ * own check (KaTeX renders it, terms are exact separate parts of it), bars must use numbers from the passages, a flow
+ * needs three stages. Each part carries the word where `say` explains it, for board_focus.
+ */
+export function boardFromAnswer(
+  raw: unknown,
+  say: string,
+  numbers: number[],
+): { item: BoardItem; focus: (number | null)[] } | null {
+  if (!isRaw(raw)) return null;
+  const title = str(raw.title).slice(0, BOARD_LIMITS.title);
+  const titled = title ? { title } : {};
+  const at = (part: Raw | undefined) => (part ? anchorAt(say, str(part.anchor)) : null);
+  const short = (v: unknown, words: number, chars: number) => firstWords(str(v), words).slice(0, chars);
+  if (raw.kind === 'formula') {
+    const { item } = checkFormula(raw);
+    // Each checked term keeps the anchor of the term it came from, matched by its LaTeX ignoring spaces.
+    const squash = (s: string) => s.replace(/\s+/g, '');
+    const given = list(raw.terms);
+    const source = (latex: string) => given.find((t) => squash(str(t.latex)) === squash(latex));
+    return item ? { item, focus: item.terms.map((t) => at(source(t.latex))) } : null;
+  }
+  if (raw.kind === 'flow') {
+    const nodes = list(raw.nodes)
+      .map((n) => ({ label: short(n.label, BOARD_LIMITS.nodeLabelWords, BOARD_LIMITS.nodeLabel), at: at(n) }))
+      .filter((n) => n.label)
+      .slice(0, BOARD_LIMITS.nodes[1]);
+    if (nodes.length < BOARD_LIMITS.nodes[0]) return null;
+    const id = (i: number) => `node-${i + 1}`;
+    return {
+      item: {
+        kind: 'flow',
+        ...titled,
+        nodes: nodes.map((n, i) => ({ id: id(i), label: n.label })),
+        edges: nodes.slice(1).map((_, i): [string, string] => [id(i), id(i + 1)]),
+      },
+      focus: nodes.map((n) => n.at),
+    };
+  }
+  if (raw.kind === 'bars') {
+    // Only the document's own numbers: each value must be written in the passages the model was given.
+    const reported = (v: unknown): v is number =>
+      typeof v === 'number' && Number.isFinite(v) && numbers.some((n) => Math.abs(n - Math.abs(v)) < 1e-9);
+    const bars = list(raw.bars)
+      .flatMap((b) => {
+        const label = short(b.label, BOARD_LIMITS.barLabelWords, BOARD_LIMITS.barLabel);
+        return label && reported(b.value) ? [{ label, value: b.value, at: at(b) }] : [];
+      })
+      .slice(0, BOARD_LIMITS.bars[1]);
+    if (bars.length < BOARD_LIMITS.bars[0]) return null;
+    const unit = str(raw.unit).slice(0, BOARD_LIMITS.unit);
+    return {
+      item: {
+        kind: 'bars',
+        ...titled,
+        ...(unit ? { unit } : {}),
+        ...(typeof raw.higher_is_better === 'boolean' ? { higher_is_better: raw.higher_is_better } : {}),
+        bars: bars.map(({ label, value }) => ({ label, value })),
+      },
+      focus: bars.map((b) => b.at),
+    };
+  }
+  return null;
+}
+
+export interface AnswerContext {
+  doc: Doc;
+  retrieval: Retrieval;
+  documentId: string;
+  question: string;
+  history: AskTurn[];
+  /** Numbers a bars board may show: those written in the passages the model was given. */
+  numbers: number[];
+  /** The figure whose image the model saw: only marks on it may point at a region. */
+  imaged?: string;
+}
+
+/** What the camera does to show an element, and which view it is in (one page of text, one figure, one equation). */
+type View = { key: string; camera: CameraAction };
+
+function viewer(doc: Doc): (id: string) => View | null {
+  const pages = new Map([...doc.sentences, ...doc.sections].map((s) => [s.id, s.page]));
+  const figureOf = new Map(
+    doc.figures.flatMap((f) => [[f.id, f.id] as const, ...f.panels.map((p) => [p.id, f.id] as const)]),
+  );
+  const equations = new Set(doc.equations.map((e) => e.id));
+  return (id) => {
+    const figure = figureOf.get(id);
+    if (figure) return { key: `figure:${figure}`, camera: { type: 'zoom', target: figure } };
+    if (equations.has(id)) return { key: `equation:${id}`, camera: { type: 'zoom', target: id } };
+    const page = pages.get(id);
+    return page ? { key: `page:${page}`, camera: { type: 'focus', target: id } } : null;
+  };
+}
+
+/**
+ * One canonical step. The camera opens on the first cue's target (focus for text, zoom for figures and equations) and
+ * moves at most once more; cues fire at their anchors; a board item shows from the start and lights each part as the
+ * narration reaches it.
+ */
+function toStep(
+  raw: Raw,
+  id: string,
+  first: boolean,
+  context: AnswerContext,
+  view: (id: string) => View | null,
+  highlighted: Set<string>,
+): Step | null {
+  const say = spoken(str(raw.say));
+  const words = splitWords(say).length;
+  if (words < 3) return null;
+  const sentences = new Set(context.retrieval.sentences);
+  const visuals = new Set(context.retrieval.visuals);
+  const timing = (at: number) => (at > 0 ? { at_word: Math.min(at, words - 1) } : {});
+  const cues = list(raw.cues)
+    .map((c) => ({
+      action: str(c.action),
+      target: str(c.target),
+      region: str(c.region),
+      label: str(c.label),
+      at: anchorAt(say, str(c.anchor)) ?? 0,
+    }))
+    .filter((c) =>
+      c.action === 'highlight'
+        ? sentences.has(c.target)
+        : c.action === 'note'
+          ? !!c.label && (sentences.has(c.target) || visuals.has(c.target))
+          : (CUE_ACTIONS as readonly string[]).includes(c.action) && visuals.has(c.target),
+    )
+    .sort((a, b) => a.at - b.at);
+  const actions: Action[] = [];
+  let current: string | undefined;
+  let moves = 0;
+  const look = (target: string, at: number) => {
+    const v = view(target);
+    if (!v || v.key === current) return !!v;
+    if (moves >= 2) return false;
+    actions.push({ ...v.camera, ...timing(moves ? at : 0) });
+    current = v.key;
+    moves++;
+    return true;
+  };
+  let highlights = 0;
+  for (const cue of cues) {
+    if (cue.action === 'highlight' && (highlights >= 2 || highlighted.has(cue.target))) continue;
+    if (!look(cue.target, cue.at)) continue;
+    const when = timing(cue.at);
+    if (cue.action === 'highlight') {
+      highlights++;
+      highlighted.add(cue.target);
+      actions.push({ type: 'highlight', targets: [cue.target], color: 'yellow', ...when });
+    } else if (cue.action === 'note')
+      actions.push({ type: 'note', anchor: cue.target, text: firstWords(cue.label, 12).slice(0, 140), ...when });
+    else if (cue.action === 'spotlight') actions.push({ type: 'spotlight', target: cue.target, ...when });
+    else if (cue.action === 'box')
+      actions.push({ type: 'box', target: cue.target, color: PEN.box, ...markLabel(cue.label), ...when });
+    else if (cue.action === 'arrow' || cue.action === 'circle') {
+      // A part of the figure only when the model saw that figure; otherwise the mark goes around the whole target.
+      const seen = context.imaged && view(cue.target)?.key === `figure:${context.imaged}`;
+      const region = seen ? regionOf(cue.region) : undefined;
+      actions.push({
+        type: cue.action,
+        target: cue.target,
+        ...(region ? { region } : {}),
+        color: PEN[cue.action],
+        ...markLabel(cue.label),
+        ...when,
+      });
+    }
+  }
+  if (!moves && first && context.retrieval.home) look(context.retrieval.home, 0);
+  const board = boardFromAnswer(raw.board, say, context.numbers);
+  if (board) {
+    const focus = board.focus.flatMap((at, part) =>
+      at === null ? [] : [{ type: 'board_focus' as const, part, ...timing(at) }],
+    );
+    actions.splice(moves ? 1 : 0, 0, { type: 'board', item: board.item }, ...focus);
+  }
+  return { id, say, actions };
+}
+
+/** Steps that pass the tour contract: the canonical schema, real IDs, at_word inside the narration. */
+function checked(steps: Step[], context: AnswerContext): Step[] {
+  const sha = context.doc.source.sha256;
+  const tour = (s: Step[]): Tour => ({
+    schema: 'paper-tour/tour@0.1',
+    title: 'Answer',
+    paper: context.documentId,
+    ...(SHA256.test(sha) ? { doc_sha256: sha } : {}),
+    chapters: [{ id: 'answer', title: 'Answer', steps: s }],
+  });
+  const ok = (s: Step[]) => !tourProblems(tour(s), context.doc).length;
+  if (!steps.length || ok(steps)) return steps;
+  // Drop just the actions the contract rejects, then any step that still fails.
+  return steps.flatMap((step) => {
+    const kept = { ...step, actions: step.actions.filter((a) => ok([{ ...step, actions: [a] }])) };
+    return ok([kept]) ? [kept] : [];
+  });
+}
+
+function followups(raw: unknown, context: AnswerContext): string[] {
+  const asked = new Set(
+    [context.question, ...context.history.map((t) => t.question)].map((q) => q.trim().toLowerCase()),
+  );
+  const out: string[] = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    let q = str(item)
+      .replace(/^(?:[-•*]|\d+[.)])\s+/, '')
+      .replace(/^["'“‘]+|["'”’]+$/g, '')
+      .trim();
+    if (q.length > 120) q = q.slice(0, 120).replace(/\s+\S*$/, '');
+    if (!q) continue;
+    if (!/[?？]$/.test(q)) q = `${q.replace(/[.!;:,]+$/, '')}?`;
+    if (!asked.has(q.toLowerCase()) && !out.some((o) => o.toLowerCase() === q.toLowerCase())) out.push(q);
+  }
+  return out.slice(0, 2);
+}
+
+/** The model's answer as checked tour steps, or null when no step survives. */
+export function buildAnswer(value: unknown, context: AnswerContext): AskAnswer | null {
+  if (!isRaw(value)) return null;
+  const view = viewer(context.doc);
+  const highlighted = new Set<string>();
+  const prefix = `ask-${randomUUID().slice(0, 8)}`;
+  const steps: Step[] = [];
+  for (const raw of list(value.steps).slice(0, 3)) {
+    const step = toStep(raw, `${prefix}-${steps.length + 1}`, !steps.length, context, view, highlighted);
+    if (step) steps.push(step);
+  }
+  const valid = checked(steps, context);
+  if (!valid.length) return null;
+  const answerable = ANSWERABLE.find((a) => a === value.answerable) ?? 'partly';
+  return { answerable, steps: valid, followups: followups(value.followups, context) };
+}
+
+const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused']);
+const ASK_TIMEOUT_MS = 75_000;
+/** Low effort first; medium once when the first answer cannot answer or is unusable. Budgets include reasoning. */
+const ATTEMPTS: { effort: Effort; maxTokens: number }[] = [
+  { effort: 'low', maxTokens: 6_000 },
+  { effort: 'medium', maxTokens: 12_000 },
+];
+
+export interface AskInput {
+  client: MuseClient;
+  doc: Doc;
+  documentId: string;
+  request: AskRequest;
+  tour?: Tour;
+  /** The crop of the figure asked about, when it was cheap to load. */
+  image?: TourImage;
+  language: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Answer one question: retrieve, call the model behind the shared prefix (SHARED_RULES and the paper block, as the tour
+ * writer sends them, so the provider can reuse its cache), and convert the answer into checked steps.
+ */
+export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnswer; completions: Completion[] }> {
+  const { client, doc, request } = input;
+  const step = findStep(input.tour, request.stepId);
+  const retrieval = retrieve(doc, request, step);
+  const task = `${askInstructions(input.language)}\n\n${askContext(request, retrieval, doc, step, input.image)}`;
+  const messages: MuseMessage[] = [
+    { role: 'developer', content: SHARED_RULES },
+    { role: 'user', content: `<DOCUMENT>\n${paperBlock(doc)}\n</DOCUMENT>` },
+    { role: 'user', content: [{ type: 'text', text: task }, ...imageParts(input.image ? [input.image] : [])] },
+  ];
+  const schema = answerSchema(retrieval, input.image ? REGION_NAMES : ['whole']);
+  const context: AnswerContext = {
+    doc,
+    retrieval,
+    documentId: input.documentId,
+    question: request.question,
+    history: request.history ?? [],
+    numbers: numbersIn([...retrieval.focus, ...retrieval.ranked].map((p) => p.text).join('\n')),
+    imaged: input.image?.targetId,
+  };
+  const signal = AbortSignal.any([AbortSignal.timeout(ASK_TIMEOUT_MS), ...(input.signal ? [input.signal] : [])]);
+  const completions: Completion[] = [];
+  let answer: AskAnswer | null = null;
+  for (const { effort, maxTokens } of ATTEMPTS) {
+    let value: unknown;
+    try {
+      const completion = await client.complete(
+        messages,
+        'ask_answer',
+        schema,
+        maxTokens,
+        signal,
+        undefined,
+        undefined,
+        effort,
+      );
+      completions.push(completion);
+      value = completion.value;
+    } catch (error) {
+      // A usable first answer survives a failed retry; otherwise only the model's own faults earn a retry.
+      if (answer) break;
+      if (effort !== 'low' || !(error instanceof ProcessingError && MODEL_FAULTS.has(error.code))) throw error;
+      continue;
+    }
+    answer = buildAnswer(value, context) ?? answer;
+    if (answer && answer.answerable !== 'no') break;
+  }
+  if (!answer) throw new ProcessingError('muse_invalid_response', 'The model returned no usable answer.');
+  return { answer, completions };
+}
+
+// ------------------------------------------------------------- service glue
+
+/** The document's own model answers its questions; a Contributor model only with this paper's training consent. */
+export function askModel(model: unknown, allowTraining: boolean, fallback: string): string {
+  let id = typeof model === 'string' ? model.trim() : '';
+  if (isContributorModel(id) && !allowTraining) id = id.replace(/-contributor$/, '');
+  const known = Object.hasOwn(OFFICIAL_MODELS, id) ? OFFICIAL_MODELS[id] : undefined;
+  return known?.tourCompatible && (allowTraining || !known.contributor) ? id : fallback;
+}
+
+/** Model failures in plain words for the learner; a key problem points to the settings. */
+export function askError(error: unknown): unknown {
+  if (!(error instanceof ProcessingError)) return error;
+  if (['muse_not_configured', 'muse_auth_failed'].includes(error.code))
+    return new HttpError(
+      409,
+      'model_not_configured',
+      'Check your Meta API key under Profile & Settings, then ask again.',
+    );
+  if (error.code === 'muse_rate_limited')
+    return new HttpError(429, 'model_busy', 'The model is busy right now. Ask again in a moment.');
+  if (error.code === 'muse_timeout')
+    return new HttpError(504, 'answer_timeout', 'The answer took too long. Ask again, or ask a shorter question.');
+  if (error.transient)
+    return new HttpError(503, 'model_unavailable', 'The model could not be reached. Ask again in a moment.');
+  return new HttpError(502, 'answer_failed', 'The model could not answer this. Try asking it another way.');
+}
+
+const IMAGE_WAIT_MS = 2_500;
+const IMAGE_MAX_BYTES = 1_500_000;
+
+/** The crop of the figure asked about, only when it is small and arrives quickly; otherwise the caption is enough. */
+export async function figureImage(
+  db: Db,
+  storage: FileStorage,
+  analysisId: string,
+  doc: Doc,
+  figureId?: string,
+): Promise<TourImage | undefined> {
+  const figure = figureId
+    ? doc.figures.find((f) => f.id === figureId || f.panels.some((p) => p.id === figureId))
+    : undefined;
+  if (!figure) return undefined;
+  try {
+    const {
+      rows: [asset],
+    } = await db.query(
+      "select storage_path,content_type from assets where analysis_id=$1 and logical_path=$2 and kind='figure'",
+      [analysisId, figure.image],
+    );
+    if (!asset) return undefined;
+    const data = await Promise.race([
+      storage.download(asset.storage_path),
+      new Promise<null>((resolve) => setTimeout(resolve, IMAGE_WAIT_MS, null).unref()),
+    ]);
+    if (!data || data.length > IMAGE_MAX_BYTES) return undefined;
+    const type = asset.content_type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+    const dataUrl = `data:${type};base64,${data.toString('base64')}`;
+    return { targetId: figure.id, kind: figure.kind, page: figure.page, label: figureName(figure), dataUrl };
+  } catch {
+    return undefined;
+  }
+}

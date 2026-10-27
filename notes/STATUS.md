@@ -31,11 +31,37 @@ findings were confirmed and 2 refuted. All of them, with evidence and suggested 
 - Partly fixed: L1-3, L1-4, L6-1 and L6-3, and on the upload path only L1-5, L1-6 and L1-8 (`process.py` handles
   rotated pages, bad files and scans; the `ingest.py` command line does not).
 
+**Tutor build (10-27 evening, Aaron's direction; see PLAN.md, HARNESS.md and USE-CASES.md):**
+- **Short tours (done):** `server/src/harness/` replaces the page-by-page writer: a paper card, a beat plan by preset
+  (quick about 6 steps, standard 10-12, deep up to 22, never more than 30), parallel beat direction, assembly and
+  validation in code. Default via `TOUR_WRITER=harness`; `PAPER_AGENT_ENABLED` now defaults to false. A real standard
+  tour of the demo paper: 23 s, 11 steps, about $0.20. Run it locally with `server/scripts-local-run-harness.ts`
+  (git-excluded) and view it at `?paper=attention-short` (git-excluded folder).
+- **Contract (done):** pen actions `arrow` and `circle`, and a side board (`board` with formula, flow or bars,
+  `board_focus`, `board_clear`), in schema/tour.schema.json and shared/paper.ts; the engine tracks the board.
+- **Built by five parallel agents, stopped before their reviews to save usage** (all type checks, server tests,
+  ingest tests and the demo identity check pass; one player test fails):
+  - Pen: arrows and circles drawn on the page (scene.ts, PageView.tsx, ScreenLayer.tsx, pen.css, test/pen.test.ts,
+    not yet in `npm test`). Test tour: `?paper=pen-test` (git-excluded folder).
+  - Board: KaTeX formula built term by term, flow and bars (components/Board.tsx, board.ts, board.css), placed by
+    Reader.tsx. `player/test/board.test.ts` fails on "a bar has a rounded tip away from zero and a square base on it",
+    which also stops the later player tests in the chain. Test tour: `?paper=board-test`.
+  - Writer: formula, flow and bars boards and pen cues in the harness (server/src/harness/board.ts and others,
+    test/harness-board.test.ts). Not yet run against the real API.
+  - Ask: `server/src/harness/ask.ts`, a route in app.ts/service.ts, test/ask.test.ts, and `player/src/ask/`
+    (AskPanel, api). Not yet wired into Reader.tsx.
+  - Exercises: exercise-sheet structure in doc.json (ingest.py, validate.py, outline.py, doc schema, shared/paper.ts,
+    test_exercises.py); papers ingest exactly as before.
+- None of the agents' work has been reviewed. Review each stream's diff before building on it.
+
 **Next, in order:**
-1. Re-check the player findings, then fix the medium findings and the low ones that are cheap.
-2. Real TTS with word timestamps, filling `audio` in each step; browser voices are the fallback.
-3. Voice Q&A: pause, answer with the current step as context, emit the same actions, resume.
-4. Draw a box on a figure and ask about it.
+1. Fix the failing board test, add the pen test to `npm test`, and review the five streams' diffs.
+2. Wire AskPanel into Reader.tsx: pause the tour, play the answer as a short second tour on the same narrator,
+   camera, pen and board, then "back to the tour" or "ask another"; suggested questions at the end.
+3. Run a real tour on the demo paper with the board and pen, and look at it in the player.
+4. Push: main is ahead of origin with local commits (pull --rebase first).
+5. Then: push-to-talk with Muse Voice Transcribe, the formula deep dive on demand, exercise-sheet tutor mode, and the
+   use cases in USE-CASES.md (course packs, contracts, life admin).
 
 **Running the static demo:** after the README quick start, `npm run dev` in `player/` (or `npm run dev:demo` from the
 root), then open http://localhost:5174/?paper=attention. Add `&silent=1&rate=4` to test quickly without speech.

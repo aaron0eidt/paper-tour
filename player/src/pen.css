@@ -1,0 +1,63 @@
+/* Pen marks: arrows and circles drawn on the page like a tutor's pen (geometry in scene.ts). */
+
+.pen-stroke {
+  fill: none;
+  /* The stage scales the page by --zoom, so this stays the same width on screen. */
+  stroke-width: calc(2.5px * var(--inv-zoom, 1));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* With pathLength="1": one dash as long as the path, pulled in from behind a longer gap. */
+  stroke-dasharray: 1 2;
+  stroke-dashoffset: 1;
+  animation: pen-draw 460ms cubic-bezier(0.3, 0.55, 0.3, 1) forwards;
+}
+
+.pen-loop {
+  animation-duration: 640ms;
+}
+
+/* The head is drawn at length 1 and scaled to --head page points: the length that suits the
+   shaft (--pen-head-fit), kept between 11 and 17 px on screen, and never more than
+   --pen-head-max so a short shaft keeps a short head when zoomed far out. The stroke width
+   undoes that scale. */
+.pen-head {
+  --head: min(
+    clamp(calc(11 * var(--inv-zoom, 1)), var(--pen-head-fit, 8), calc(17 * var(--inv-zoom, 1))),
+    var(--pen-head-max, 16)
+  );
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transform: scale(var(--head));
+  stroke-width: calc(2.5px * var(--inv-zoom, 1) / var(--head));
+  animation-duration: 170ms;
+  animation-delay: 430ms;
+  animation-timing-function: cubic-bezier(0.2, 0.6, 0.35, 1);
+}
+
+@keyframes pen-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Labels (in the screen layer) appear once their stroke is drawn. */
+.box-label.pen-label {
+  animation: pen-label-in 240ms ease-out 560ms both;
+}
+
+@keyframes pen-label-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pen-stroke {
+    animation: none;
+    stroke-dasharray: none;
+  }
+  .box-label.pen-label {
+    animation: none;
+  }
+}

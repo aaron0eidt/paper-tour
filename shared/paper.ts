@@ -89,6 +89,35 @@ export interface DocEquation {
   text: string;
 }
 
+/** A part of an exercise: "a)", "(b)", or a sub-part such as "(ii)" under "(c)". */
+export interface DocExercisePart {
+  /** The task's ID and the label: ex1.a, ex1.c.ii. */
+  id: string;
+  /** The printed label without brackets: "a" for "(a)" and "a)". */
+  label: string;
+  points?: number;
+  page: number;
+  /** Blocks of the part in reading order, starting with the label's block; includes its sub-parts. */
+  blocks: string[];
+  parts?: DocExercisePart[];
+}
+
+/** A task of an exercise sheet: "Aufgabe 1 (4 Punkte)", "Exercise 2 [6 points]". */
+export interface DocExercise {
+  /** "ex" and the printed number: ex1, ex2.3, exH1; a repeated number gets a suffix, ex1-2. */
+  id: string;
+  number: string;
+  title?: string;
+  points?: number;
+  /** Page of the heading. */
+  page: number;
+  /** The block that starts with the heading. */
+  block: string;
+  /** Every block of the task in reading order, heading first, across pages. */
+  blocks: string[];
+  parts: DocExercisePart[];
+}
+
 export interface Doc {
   schema: 'paper-tour/doc@0.1';
   source: DocSource;
@@ -98,6 +127,8 @@ export interface Doc {
   sentences: DocSentence[];
   figures: DocFigure[];
   equations: DocEquation[];
+  /** Exercise sheets only: the tasks and their parts. Absent for other documents. */
+  exercises?: DocExercise[];
 }
 
 // --------------------------------------------------------------- tour.json

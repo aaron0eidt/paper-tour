@@ -1,16 +1,32 @@
+import type { Doc } from '../../../shared/paper';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
 import type { GeneratedTour, TourGenerationInput, TourGenerator, TourImage, TourProgress } from '../tour-generator';
 import { MuseClient, type MuseMessage } from '../muse/client';
 import { checkImages, imageEvidence } from '../muse/context';
 import { OFFICIAL_MODELS } from '../muse/pricing';
-import { assembleTour, beatStep, tourProblems } from './assemble';
-import { planBeats, type Preset } from './beats';
+import { assembleTour, beatStep, boardProblems, tourProblems, tourSeconds } from './assemble';
+import { planBeats, type Beat, type Preset } from './beats';
 import { imageParts, pool, recordedCalls } from './calls';
 import { cardProblems, cardSchema, cleanCard, evidencePool, fallbackCard, repairTurn, type PaperCard } from './card';
-import { beatBrief, beatTargets, cleanDirection, directionSchema, type Direction } from './direct';
+import {
+  beatBrief,
+  beatTargets,
+  boardRepair,
+  cleanDirection,
+  directOptions,
+  directionSchema,
+  type Direction,
+} from './direct';
 import { paperBlock } from './paper-block';
 import { HARNESS_VERSION, SHARED_RULES, cardTask, directTask } from './prompts';
+
+/** The image a beat's direction sees: the figure's own crop, or for a formula the page with the typeset equation. */
+function beatImage(beat: Beat, doc: Doc, images: TourImage[]): TourImage | undefined {
+  const equation = doc.equations.find((e) => e.id === beat.target);
+  if (equation) return images.find((i) => i.kind === 'page' && i.targetId === `page${equation.page}`);
+  return images.find((i) => i.targetId === beat.target && i.kind !== 'page');
+}
 
 const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused']);
 /** A beat survives the model's own faults and transient provider errors; credentials and rejected requests do not. */
@@ -104,23 +120,33 @@ export class HarnessTourGenerator implements TourGenerator {
     const results = await pool(beats, 6, async (beat) => {
       const targets = beatTargets(beat, doc);
       const beatSchema = directionSchema(beat, targets);
-      const image = input.images.find((i) => i.targetId === beat.target && i.kind !== 'page');
+      const image = beatImage(beat, doc, input.images);
+      const options = directOptions(beat);
+      const text = directTask(language, beatBrief(beat, doc, targets), options);
       const task: MuseMessage[] = [
         ...prefix,
-        {
-          role: 'user',
-          content: [{ type: 'text', text: directTask(language, beatBrief(beat, doc, targets)) }, ...imageParts(image ? [image] : [])],
-        },
+        { role: 'user', content: [{ type: 'text', text }, ...imageParts(image ? [image] : [])] },
       ];
       let direction: Direction | null = null;
-      for (let attempt = 0; attempt < 2 && !direction; attempt++) {
+      // One repair at most: for an unusable answer, or for a board that failed its checks (the step keeps its first
+      // usable direction either way, without the board if the repair does not fix it).
+      for (let attempt = 0; attempt < 2 && !(direction && !direction.boardProblems?.length); attempt++) {
         try {
           const completion = await call(task, 'beat_direction', beatSchema, 6_000, 'low', signal);
-          direction = cleanDirection(completion.value, beat, targets);
-          if (!direction)
+          const next = cleanDirection(completion.value, beat, targets);
+          if (next && (!direction || !next.boardProblems?.length)) direction = next;
+          if (next?.boardProblems?.length) {
+            await input.onEvent?.('board.rejected', {
+              beat: beat.id,
+              problems: next.boardProblems,
+              attempt: attempt + 1,
+            });
+            task.push(...boardRepair(completion.value, beat.board!, next.boardProblems));
+          } else if (!next)
             task.push(
               ...repairTurn(completion.value, [
-                'say must be 25-45 spoken words; every cue needs an allowed action, a listed target and an anchor copied from say.',
+                `say must be 25-${options.words} spoken words.`,
+                'Every cue needs an allowed action, a listed target and an anchor copied from say.',
               ]),
             );
         } catch (error) {
@@ -139,7 +165,7 @@ export class HarnessTourGenerator implements TourGenerator {
     const used = new Set<string>();
     const steps = beats.map((beat, i) => beatStep(beat, results[i].targets, results[i].direction, doc, used));
     const tour = assembleTour(card!, beats, steps, doc, input.documentId, language, this.preset);
-    const problems = tourProblems(tour, doc);
+    const problems = [...tourProblems(tour, doc), ...boardProblems(tour)];
     if (problems.length) {
       await input.onEvent?.('validation.failed', { stage: 'assemble', problems });
       throw new ProcessingError('invalid_tour', 'The generated tour did not pass document validation.');
@@ -156,6 +182,15 @@ export class HarnessTourGenerator implements TourGenerator {
         cardSource,
         paperCard: card,
         fallbackBeats: beats.filter((_, i) => !results[i].direction).map((beat) => beat.id),
+        boards: {
+          shown: results.flatMap(({ direction }, i) =>
+            direction?.board ? [`${beats[i].id}:${direction.board.kind}`] : [],
+          ),
+          dropped: results.flatMap(({ direction }, i) =>
+            direction?.boardProblems?.length ? [{ beat: beats[i].id, problems: direction.boardProblems }] : [],
+          ),
+        },
+        estimatedSeconds: tourSeconds(tour),
         sourceSha256: doc.source.sha256,
         analysisId: input.analysisId,
         imagesReviewed: { count: keyImages.length, sources: keyImages.map(imageEvidence) },

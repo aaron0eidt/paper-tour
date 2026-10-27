@@ -146,6 +146,34 @@
           "text": { "type": "string", "description": "Extracted text; math is usually garbled, so treat it as a hint only." }
         }
       }
+    },
+    "exercises": {
+      "type": "array",
+      "description": "Tasks of an exercise sheet (\"Aufgabe 1 (4 Punkte)\", \"Exercise 2 [6 points]\") in reading order, with their parts. Present only when the document has tasks. A task or part ID points at all of its blocks.",
+      "items": {
+        "type": "object",
+        "required": ["id", "number", "page", "block", "blocks", "parts"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/exerciseId" },
+          "number": { "type": "string", "description": "Printed number such as \"2.3\" or \"H1\"." },
+          "title": { "type": "string", "description": "Printed title such as \"Lineare Gleichungssysteme\", if the heading has one." },
+          "points": { "type": "number", "minimum": 0, "description": "Points stated in the heading; \"2+3 Punkte\" is 5." },
+          "page": { "type": "integer", "minimum": 1, "description": "Page of the heading." },
+          "block": { "$ref": "#/$defs/blockId", "description": "The block that starts with the heading. A heading on a line of its own is a block of its own; one that runs into the statement (\"Aufgabe 3 (5 Punkte) Sei V ...\") shares its block with the statement's first lines." },
+          "blocks": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Every block of the task in reading order, from the heading block to the end of its last part, across pages.",
+            "items": { "$ref": "#/$defs/blockId" }
+          },
+          "parts": {
+            "type": "array",
+            "description": "Parts in order: \"a)\", \"(b)\", or \"(i)\" when the task numbers its parts in roman numerals. May be empty.",
+            "items": { "$ref": "#/$defs/exercisePart" }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -160,6 +188,38 @@
     "sectionId": { "type": "string", "pattern": "^sec-[a-z0-9][a-z0-9.-]*$" },
     "figureId": { "type": "string", "pattern": "^(fig|tab)[0-9A-Za-z]+$" },
     "panelId": { "type": "string", "pattern": "^(fig|tab)[0-9A-Za-z]+\\.[a-z]$" },
-    "equationId": { "type": "string", "pattern": "^eq[0-9A-Za-z]+$" }
+    "equationId": { "type": "string", "pattern": "^eq[0-9A-Za-z]+$" },
+    "exerciseId": {
+      "type": "string",
+      "description": "\"ex\" and the printed number: ex1, ex2.3, exH1, exIV; a number printed twice gets a suffix, ex1-2.",
+      "pattern": "^ex([A-Z]?[0-9]+(\\.[0-9]+)*[a-z]?|[IVX]+)(-[1-9][0-9]*)?$"
+    },
+    "exercisePartId": {
+      "type": "string",
+      "description": "The task's ID and the part's label: ex1.a, or ex1.c.ii for a sub-part.",
+      "pattern": "^ex([A-Z]?[0-9]+(\\.[0-9]+)*[a-z]?|[IVX]+)(-[1-9][0-9]*)?(\\.[a-z]+){1,2}$"
+    },
+    "exercisePart": {
+      "type": "object",
+      "required": ["id", "label", "page", "blocks"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/exercisePartId" },
+        "label": { "type": "string", "pattern": "^[a-z]+$", "description": "The printed label without brackets: \"a\" for \"(a)\" and \"a)\", \"ii\" for \"(ii)\"." },
+        "points": { "type": "number", "minimum": 0 },
+        "page": { "type": "integer", "minimum": 1, "description": "Page of the part's first block." },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Blocks of the part in reading order, starting with the one that holds its label; includes the blocks of its sub-parts.",
+          "items": { "$ref": "#/$defs/blockId" }
+        },
+        "parts": {
+          "type": "array",
+          "description": "Sub-parts such as (i) and (ii) under (c). Absent when there are none.",
+          "items": { "$ref": "#/$defs/exercisePart" }
+        }
+      }
+    }
   }
 }

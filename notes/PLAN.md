@@ -123,7 +123,9 @@ word timestamps is an option only if the hackathon allows non-Meta services.
 
 ## Beyond papers
 
-The engine only needs a document with stable IDs. Use cases, roughly in order of value for us:
+The engine only needs a document with stable IDs. [USE-CASES.md](USE-CASES.md) ranks 22 use cases with market
+context; it recommends course packs, then contracts and leases ("what changed"), then life admin from phone photos in
+the reader's language. Use cases, roughly in order of value for us:
 
 | Use case | What the tour does | New work | Priority |
 |---|---|---|---|

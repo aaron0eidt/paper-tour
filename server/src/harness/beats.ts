@@ -1,4 +1,5 @@
 import type { Doc } from '../../../shared/paper';
+import type { BoardKind } from './board';
 import type { Arc, CardItem, CardRef, PaperCard } from './card';
 
 export const PRESETS = ['quick', 'standard', 'deep'] as const;
@@ -17,6 +18,8 @@ export interface Beat {
   target?: string;
   detail?: boolean;
   questions?: string[];
+  /** The side-board item the beat may draw: a formula's terms, a method's flow or a result's numbers as bars. */
+  board?: BoardKind;
 }
 
 const RESULT_RE = /\b(result|accura|perform|compar|score|bleu|error|outperform|benchmark|ablation|speed|cost)/i;
@@ -25,8 +28,12 @@ const RESULT_RE = /\b(result|accura|perform|compar|score|bleu|error|outperform|b
 export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   const deep = preset === 'deep';
   const beats: Omit<Beat, 'id'>[] = [];
+  // The board a beat may draw: a method as a flow, a result's numbers as bars (formulas and figures below).
+  const boards: Partial<Record<BeatKind, BoardKind>> = { method: 'flow', result: 'bars' };
   const text = (kind: BeatKind, arc: Arc, item: CardItem | undefined) => {
-    if (item?.text && item.evidence.length) beats.push({ kind, arc, point: item.text, evidence: item.evidence });
+    const board = boards[kind];
+    if (item?.text && item.evidence.length)
+      beats.push({ kind, arc, point: item.text, evidence: item.evidence, ...(board ? { board } : {}) });
   };
   const figureArc = (ref: CardRef): Arc => {
     const figure = doc.figures.find((f) => f.id === ref.id);
@@ -34,13 +41,33 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   };
   const figure = (ref: CardRef | undefined) => {
     if (!ref) return;
-    beats.push({ kind: 'figure', arc: figureArc(ref), point: ref.why, evidence: [], target: ref.id });
-    if (deep) beats.push({ kind: 'figure', arc: figureArc(ref), point: ref.why, evidence: [], target: ref.id, detail: true });
+    const arc = figureArc(ref);
+    // A table's numbers may become bars, and a diagram of the method a simplified flow; a results plot draws on itself.
+    const table = doc.figures.find((f) => f.id === ref.id)?.kind === 'table';
+    const board: BoardKind | undefined = table ? 'bars' : arc === 'method' ? 'flow' : undefined;
+    const beat: Omit<Beat, 'id'> = {
+      kind: 'figure',
+      arc,
+      point: ref.why,
+      evidence: [],
+      target: ref.id,
+      ...(board ? { board } : {}),
+    };
+    beats.push(beat);
+    if (deep) beats.push({ ...beat, detail: true });
   };
   const formula = (ref: CardRef | undefined) => {
     if (!ref) return;
-    beats.push({ kind: 'formula', arc: 'method', point: ref.why, evidence: [], target: ref.id });
-    if (deep) beats.push({ kind: 'formula', arc: 'method', point: ref.why, evidence: [], target: ref.id, detail: true });
+    const beat: Omit<Beat, 'id'> = {
+      kind: 'formula',
+      arc: 'method',
+      point: ref.why,
+      evidence: [],
+      target: ref.id,
+      board: 'formula',
+    };
+    beats.push(beat);
+    if (deep) beats.push({ ...beat, detail: true });
   };
   const methods = card.method_steps.slice(0, preset === 'quick' ? 1 : preset === 'standard' ? 3 : 4);
   const figures = card.key_figures.slice(0, preset === 'quick' ? 1 : preset === 'standard' ? 2 : 3);

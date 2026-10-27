@@ -12,6 +12,10 @@ a bbox is [x0, y0, x1, y1]. The pipeline per page is:
   chars -> words -> rows (one baseline) -> blocks (rows of one paragraph, heading, ...)
   graphics (images, visible vector paths) + captions -> figure and table regions
   classification -> reading order -> sections -> sentences -> doc.json
+
+On an exercise sheet, task headings ("Aufgabe 1 (4 Punkte)") are found before classification and the
+tasks and their parts ("a)", "(b)") after reading order; doc.json then has an "exercises" list. Other
+documents come out exactly as without that step.
 """
 
 import argparse
@@ -50,6 +54,34 @@ PAGE_NUMBER_RE = re.compile(r"^(\d{1,4}|[ivxlc]{1,6}|page \d+( of \d+)?)$", re.I
 VENUE_RE = re.compile(r"conference|proceedings|workshop|preprint|copyright|©|licen[cs]e|arxiv|journal|vol\.", re.I)
 FOOTNOTE_MARK_RE = re.compile(r"^[\d∗*†‡§¶‖#a-z]{1,3}")
 BULLETS = {"•", "◦", "▪", "▸", "►", "∙", "‣"}
+
+# Exercise sheets (see find_exercises): task headings such as "Aufgabe 2.3 (4 Punkte)", "Exercise 2 [6 points]",
+# "Hausaufgabe H1" or "1. Aufgabe", and the parts under a task: "a)", "(b)", "(ii)", "c.".
+_GERMAN_TASK = r"(?!Teil)(?:[A-ZÄÖÜ][a-zäöüß]*aufgabe|Aufgabe|AUFGABE|Übung|ÜBUNG|Uebung)"
+_TASK_END = r"\*?(?=$|\s|[.:(\[–—])"
+TASK_RE = re.compile(
+    r"^(?P<kw>" + _GERMAN_TASK + r"|Exercise|EXERCISE|Problem|PROBLEM|Task|TASK|Question|QUESTION)\s*"
+    r"(?P<num>[A-Z]?\d{1,3}(?:\.\d{1,3}){0,2}[a-z]?|[IVX]{1,5})" + _TASK_END)
+TASK_NUMBER_FIRST_RE = re.compile(r"^(?P<num>\d{1,3})\.\s*(?P<kw>" + _GERMAN_TASK + r")" + _TASK_END)
+SHEET_WORDS = ("aufgabe", "übung", "uebung", "exercise")      # never a paper's run-in heading
+PAPER_HEADINGS = {"abstract", "references", "bibliography"}
+PART_RE = re.compile(r"^(?:\((?P<p>[a-z]|[ivx]{1,4})\)|(?P<q>[a-z]|[ivx]{1,4})[).])(?=\s|$)")
+# Other list items ("2.", "(3)", "•"): not parts, but they end the parts indented further than them
+LIST_MARK_RE = re.compile(r"^(?:\d{1,2}[.)]|\(\d{1,2}\)|[•◦▪▸►∙‣–—*-])(?=\s)")
+POINTS_RE = re.compile(
+    r"(?<![\w.,])(\d{1,3}(?:[.,]\d{1,2})?(?:\s*\+\s*\d{1,3}(?:[.,]\d{1,2})?)*)\s*"
+    r"(?:Bonuspunkte|Punkte|Punkt|Pkt|Pts|Pt|points|point|marks|mark|BP|P)\.?(?=\s*(?:[)\],;]|$))", re.I)
+ROMAN_LABELS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"]
+# First words of a statement run in after a task heading ("Aufgabe 1: Gegeben sei ..."), as opposed to a title
+STATEMENT_WORDS = {
+    "sei", "seien", "es", "gegeben", "man", "wir", "zeigen", "berechnen", "bestimmen", "beweisen", "lösen",
+    "finden", "geben", "untersuchen", "entscheiden", "betrachten", "begründen", "skizzieren", "prüfen",
+    "überprüfen", "verwenden", "implementieren", "schreiben", "für", "ist", "sind", "wie", "was", "welche",
+    "welcher", "welches", "warum", "bitte", "let", "show", "prove", "compute", "find", "consider", "suppose",
+    "assume", "determine", "calculate", "given", "solve", "use", "write", "explain", "derive", "describe",
+    "give", "verify", "evaluate", "implement", "sketch", "state", "recall", "define", "check", "what", "how",
+    "which", "why", "is", "are", "does", "do", "can", "we", "if", "for", "in",
+}
 
 UNNUMBERED_HEADINGS = {
     "abstract", "references", "bibliography", "acknowledgements", "acknowledgments",
@@ -206,6 +238,7 @@ class Row:
         self.baseline = median(w.baseline for w in main)
         # the line band of the row's main type; tall glyphs (√, Σ) and scripts stick out of it
         self.core = (median(w.bbox[1] for w in main), median(w.bbox[3] for w in main))
+        self.task = None          # the task heading this row starts (exercise sheets, see mark_task_heads)
 
     @property
     def text(self):
@@ -1262,23 +1295,23 @@ def _label_groups(rows):
 def find_title(page, body):
     best = None
     for b in page.blocks:
-        if b.horizontal and b.bbox[3] < 0.5 * page.height and b.size >= 1.25 * body:
+        if b.horizontal and b.bbox[3] < 0.5 * page.height and b.size >= 1.25 * body and b.rows[0].task is None:
             if best is None or b.size > best.size:
                 best = b
     return best
 
 
-def repeated_margin_texts(pages):
-    """Normalized texts that recur in the top or bottom margin of several pages (running heads)."""
+def repeated_margin_texts(pages, least=3):
+    """Normalized texts that recur in the top or bottom margin of `least` pages or more (running heads)."""
     seen = Counter()
     for page in pages:
         keys = set()
         for b in page.blocks:
             bb = b.bbox
-            if len(b.rows) == 1 and (bb[3] < 0.1 * page.height or bb[1] > 0.9 * page.height):
+            if len(b.rows) == 1 and b.rows[0].task is None and (bb[3] < 0.1 * page.height or bb[1] > 0.9 * page.height):
                 keys.add(re.sub(r"\d+", "#", b.raw_text.lower()).strip())
         seen.update(keys)
-    return {k for k, n in seen.items() if n >= 3 and len(pages) >= 3}
+    return {k for k, n in seen.items() if n >= least and len(pages) >= least}
 
 
 def footnote_rule_y(page):
@@ -1305,7 +1338,8 @@ def classify_block(b, page, stats, title, running):
     one_row = len(b.rows) == 1
     if one_row and PAGE_NUMBER_RE.match(t) and (bb[1] > 0.88 * H or bb[3] < 0.12 * H):
         return "header_footer"
-    if re.sub(r"\d+", "#", t.lower()) in running:
+    # a sheet's title often repeats its running head; only the copy in the margin is the running head
+    if re.sub(r"\d+", "#", t.lower()) in running and (not stats.sheet or bb[3] < 0.1 * H or bb[1] > 0.9 * H):
         return "header_footer"
     if title is not None and page.n == 1 and bb[3] <= title.bbox[1]:
         return "header_footer"        # notices above the title
@@ -1357,7 +1391,8 @@ def equation_tags(b, page):
 
 def classify(pages, stats):
     body = stats.fonts.body_size
-    running = repeated_margin_texts(pages)
+    # an exercise sheet repeats its course line on both pages of a two-page sheet
+    running = repeated_margin_texts(pages, 2 if stats.sheet else 3)
     title = find_title(pages[0], body) if pages else None
     stats.title = title
     for page in pages:
@@ -1374,7 +1409,13 @@ def classify(pages, stats):
                   and ABSTRACT_RE.match(b.raw_text)]
         paras = [b.bbox[1] for b in page.blocks if b.type == "paragraph" and b.bbox[1] > title.bbox[3]
                  and is_textlike(b, page, body) and len(b.rows) >= 3]
-        limit = min(heads) if heads else (min(paras) if paras else title.bbox[3])
+        tasks = [r.bbox[1] for b in page.blocks for r in b.rows if r.task is not None and r.bbox[1] > title.bbox[3]]
+        if tasks:     # an exercise sheet: the course and due-date lines end at the first task or paragraph
+            paras = [b.bbox[1] for b in page.blocks if b.type == "paragraph" and b.bbox[1] > title.bbox[3]
+                     and is_textlike(b, page, body)]
+            limit = min(heads + tasks + paras)
+        else:
+            limit = min(heads) if heads else (min(paras) if paras else title.bbox[3])
         for b in page.blocks:
             if (b.type in ("paragraph", "other", "heading") and b.bbox[1] >= title.bbox[3] - 1
                     and b.bbox[3] <= limit + 1):
@@ -1813,6 +1854,374 @@ def equation_records(pages):
     return out
 
 
+# ---------------------------------------------------------------------------- exercises
+
+def parse_points(text):
+    """Points stated in text: "4 Punkte", "2+3 P.", "1,5 points" (summed); None if there are none or they are
+    per part ("je 2 Punkte")."""
+    m = POINTS_RE.search(text)
+    if m is None or re.search(r"\b(je|jeweils|each)\s*$", text[:m.start()], re.I):
+        return None
+    total = round(sum(float(v.replace(",", ".")) for v in re.split(r"\s*\+\s*", m.group(1))), 2)
+    return int(total) if total == int(total) else total
+
+
+def points_only(text):
+    """Points when text is nothing but a points statement, such as "(4 Punkte)" or "[5 points]"."""
+    m = POINTS_RE.search(text)
+    if m is None or re.sub(r"[\s()\[\]]", "", text[:m.start()] + text[m.end():]):
+        return None
+    return parse_points(text)
+
+
+def bracket_end(text, i):
+    """Index just after the bracket group that opens at text[i]; None if it never closes."""
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] in "([":
+            depth += 1
+        elif text[j] in ")]":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return None
+
+
+def split_groups(text):
+    """Plain text and bracket groups of a heading: "Eigenvalues [6 points]" -> ("Eigenvalues", ["6 points"])."""
+    plain, groups, i = [], [], 0
+    while i < len(text):
+        j = bracket_end(text, i) if text[i] in "([" else None
+        if j is None:
+            plain.append(text[i])
+            i += 1
+        else:
+            groups.append(text[i + 1:j - 1])
+            plain.append(" ")
+            i = j
+    return " ".join("".join(plain).split()), groups
+
+
+def points_beside(page, row):
+    """Points set apart on the same line, right of the row: "Aufgabe 1 <hfill> (4 Punkte)". The line is the
+    first word's, as a fraction later in the row ("(a) a_n = 3n/(n - 1)") moves the row's baseline."""
+    base = row.words[0].baseline
+    for r in page.rows:
+        if (r is not row and r.horizontal and r.bbox[0] > row.bbox[2]
+                and abs(r.baseline - base) <= 0.3 * row.size):
+            pts = points_only(r.text)
+            if pts is not None:
+                return pts
+    return None
+
+
+def task_heading(row, page, stats, paper_like):
+    """The task heading that starts row, with the evidence for it; None if the row does not start with one.
+
+    "Aufgabe 1 (4 Punkte)" on its own line and "**Problem 2.** (Eigenvalues, 6 points) Let A ..." run into
+    the statement are both headings; "Problem 3 is hard" at the start of a paragraph is not. The evidence
+    is bold or larger type, stated points, a line of its own, punctuation after the number and the word
+    itself ("Aufgabe" and "Exercise" are rarely anything else)."""
+    text = row.text
+    m = TASK_RE.match(text) or TASK_NUMBER_FIRST_RE.match(text)
+    if m is None:
+        return None
+    after = text[m.end():].lstrip()
+    if re.match(r"\d{1,3}\b", after) and not POINTS_RE.match(after):
+        return None                   # a grading table's header: "Aufgabe 1 2 3 Summe", not "Aufgabe 1 4 Punkte"
+    body = stats.fonts.body_size
+    bold_end, pos = 0, 0              # end of the leading run of bold words
+    for w in row.words:
+        if w.bold < 0.9:
+            break
+        pos += len(w.text) + 1
+        bold_end = pos - 1
+    kw_bold = bold_end >= m.end()
+    # the heading runs on over punctuation and bracket groups: "Problem 2. (Eigenvalues, 6 points)"
+    end = max(m.end(), bold_end) if kw_bold else m.end()
+    while end < len(text):
+        if text[end].isspace() or text[end] in ".:–—-":
+            end += 1
+        elif text[end] in "([" and bracket_end(text, end):
+            end = bracket_end(text, end)
+        else:
+            break
+    head, rest = text[m.end():end], text[end:].strip()
+    delimited = m.re is TASK_NUMBER_FIRST_RE or head.lstrip()[:1] in (".", ":", "(", "[")
+    large = row.size >= 1.05 * body
+    # the rest of the line is a title ("Exercise 2: Eigenvalues") or the statement run in after the heading
+    core, tail = split_groups(rest)
+    starts, pos = [], 0
+    for w in row.words:
+        starts.append(pos)
+        pos += len(w.text) + 1
+    rest_words = [w for w, s in zip(row.words, starts) if s >= end]
+    n = sum(w.nchars for w in rest_words)
+    math = sum(w.math * w.nchars for w in rest_words) / n if n else 0.0
+    short = row.bbox[2] < page.cols[row.cls][1] - 3 * row.size
+    title_like = (0 < len(core.split()) <= 8 and core[:1].isupper() and core[-1:] not in ".:;,!?"
+                  and not re.search(r"[:=]", core) and core.split()[0].lower() not in STATEMENT_WORDS and math < 0.2)
+    own_line = not rest or all_bold(row) or large or (short and (title_like or points_only(core) is not None))
+    plain, groups = split_groups(head + " " + rest if own_line else head)
+    points = next((p for p in (parse_points(g) for g in groups) if p is not None), None)
+    bare = POINTS_RE.search(plain) if points is None else None
+    if bare:                          # "Aufgabe 1 – 4 Punkte"
+        points, plain = parse_points(plain), plain[:bare.start()] + plain[bare.end():]
+    if points is None and not own_line and tail:
+        points = points_only("(" + tail[-1] + ")") if rest.endswith((")", "]")) else None
+    if points is None:
+        points = points_beside(page, row)
+    title = plain.strip(" .:–—-") or next((g for g in (POINTS_RE.sub("", g).strip(" ,;") for g in groups) if g), "")
+    kw = m.group("kw").lower()
+    vocab = kw.endswith(SHEET_WORDS)
+    score = (2 * kw_bold + 2 * large + 2 * (points is not None) + own_line + delimited
+             + (vocab or not paper_like))
+    if paper_like and not vocab and points is None:
+        score = 0                     # "Task 1:" and "Problem 2." run-in heads of a paper
+    return {"keyword": m.group("kw"), "number": m.group("num"), "title": title, "points": points,
+            "own_line": own_line, "score": score, "strong": kw_bold or large or points is not None}
+
+
+def mark_task_heads(pages, stats):
+    """Set row.task on every task heading; True when the document is an exercise sheet.
+
+    Runs before classification, which keeps task headings out of the title and the author lines. A
+    heading inside a paragraph needs bold or larger type or points; in a document with an abstract or
+    references, "Problem", "Task" and "Question" also need points."""
+    paper_like = any(r.horizontal and (ABSTRACT_RE.match(r.text)
+                                       or r.text.strip().lower().rstrip(".:") in PAPER_HEADINGS)
+                     for page in pages for r in page.rows)
+    found = []
+    for page in pages:
+        for b in page.blocks:
+            if b.caption or not b.horizontal:
+                continue
+            for k, r in enumerate(b.rows):
+                head = task_heading(r, page, stats, paper_like)
+                if head and head["score"] >= 2 and (k == 0 or head["strong"]):
+                    found.append((b, r, head))
+    # "Übung 5" set as the sheet's title above "Aufgabe 1", "Aufgabe 2" is not a task
+    title = find_title(pages[0], stats.fonts.body_size) if pages else None
+    first = next((f for f in found if title is not None and f[1] is title.rows[0]), None)
+    if first is not None and first[2]["points"] is None:
+        others = [f for f in found if f is not first]
+        kw = first[2]["keyword"].lower()
+        if (not others or all(f[2]["keyword"].lower() != kw for f in others)
+                or first[1].size > max(f[1].size for f in others) + 0.5):
+            found.remove(first)
+    for _, r, head in found:
+        r.task = head
+    return bool(found)
+
+
+def next_label(kind, label):
+    if kind == "alpha":
+        return chr(ord(label) + 1) if len(label) == 1 and label < "z" else None
+    k = ROMAN_LABELS.index(label) if label in ROMAN_LABELS else len(ROMAN_LABELS)
+    return ROMAN_LABELS[k + 1] if k + 1 < len(ROMAN_LABELS) else None
+
+
+def place_label(label, levels, new_list):
+    """Depth of a part label in its task, or None when it does not continue the task's lists.
+
+    levels holds the open lists as [kind, last label]: "b" follows "a", "ii" follows "i", and "i" after
+    "c" opens sub-parts ("(c)(i)"), while "i" after "h" is the ninth part. A new list starts only where
+    new_list allows it (a row that starts a block or follows a full stop), at most two levels deep."""
+    for depth in range(len(levels) - 1, -1, -1):
+        kind, last = levels[depth]
+        if label == next_label(kind, last):
+            del levels[depth + 1:]
+            levels[depth][1] = label
+            return depth
+    kind = {"a": "alpha", "i": "roman"}.get(label)
+    if not new_list or kind is None or len(levels) >= 2 or (levels and levels[-1][0] == kind):
+        return None
+    levels.append([kind, label])
+    return len(levels) - 1
+
+
+SPLITTABLE = {"paragraph", "other", "equation"}
+
+
+def find_exercises(pages):
+    """Tasks and their parts, in reading order, from the headings that mark_task_heads found.
+
+    A task runs from its heading to the next task heading or the next other heading; its parts start
+    at rows with a label ("a)", "(b)", "(ii)") in sequence. Blocks are split so that every task and every
+    part starts a block of its own, and the pages are put in reading order again, so that "(2 Punkte)"
+    set beside part a stays with it. Returns [{"head", "block", "blocks", "parts"}] with Block objects;
+    a part is {"label", "points", "blocks", "parts"}. exercise_records turns them into IDs."""
+    tasks, starts = cut_exercises(pages)
+    task, open_parts = None, []
+    for page in pages:
+        order_page(page)
+        for b in page.ordered:
+            if b.type in ("header_footer", "footnote"):
+                continue
+            kind, x, depth = starts.get(b, (None, None, None))
+            if kind == "task":
+                task, open_parts = x, []
+            elif kind == "part":
+                open_parts = open_parts[:depth] + [x]
+            elif kind == "end":
+                open_parts = open_parts[:depth]
+            elif b.type == "heading":
+                task, open_parts = None, []                  # "Hinweise" after the last task
+            if task is not None:
+                task["block"] = task["block"] or b
+                for owner in [task] + open_parts:
+                    owner["blocks"].append(b)
+    for t in tasks:
+        settle_points(t, pages)
+    return tasks
+
+
+def cut_exercises(pages):
+    """Find tasks and parts in reading order and split blocks so that each of them starts a block.
+
+    Returns the tasks, with their parts nested but no blocks yet, and {block: (kind, task or part, depth)}
+    for the blocks that start a task, a part, or the end of parts ("end", None, number of parts kept)."""
+    tasks, task, levels, open_parts, starts = [], None, [], [], {}
+    for page in pages:
+        for b in page.ordered:
+            if b.type in ("header_footer", "footnote"):
+                continue
+            if b.type == "heading" and points_only(b.raw_text) is not None:
+                b.type = "paragraph"         # "(6 Punkte)" set apart from "Aufgabe 1" is no section
+            if b.type == "heading" and b.rows[0].task is None:
+                task, levels, open_parts = None, [], []
+            splittable = b.type in SPLITTABLE and b.horizontal
+            cuts = [[0, None]]                               # [first row, what starts there]
+            for k, r in enumerate(b.rows):
+                if k > 0 and not splittable:
+                    break
+                start = None
+                if r.task is not None:
+                    task, levels, open_parts = {"head": r.task, "block": None, "blocks": [], "parts": []}, [], []
+                    tasks.append(task)
+                    start = ("task", task, 0)
+                elif task is not None and splittable:
+                    m = PART_RE.match(r.text)
+                    after = r.text[m.end():].lstrip() if m else ""
+                    prev = b.rows[k - 1] if k else None
+                    # a list starts on a new line of its own, not in "... wie in Teil" / "(a) beschrieben"
+                    new_list = (prev is None or prev.task is not None or not after[:1].islower()
+                                or re.search(r"[.:;!?]$", prev.text) or abs(r.bbox[0] - prev.bbox[0]) >= 0.5 * r.size)
+                    label = (m.group("p") or m.group("q")) if m else None
+                    trial = [level[:] for level in levels]
+                    depth = place_label(label, trial, new_list) if m else None
+                    parent = None
+                    if depth is not None:
+                        parent = open_parts[depth - 1] if depth else task
+                    if parent is not None and all(p["label"] != label for p in parent["parts"]):
+                        end = bracket_end(after, 0) if after.startswith(("(", "[")) else None
+                        part = {"label": label, "row": r, "blocks": [], "parts": [],
+                                "points": points_only(after[:end]) if end else None}
+                        parent["parts"].append(part)
+                        levels, open_parts = trial, open_parts[:depth] + [part]
+                        start = ("part", part, depth)
+                    elif open_parts and r.bbox[0] < open_parts[-1]["row"].bbox[0] - 0.5 * r.size and (
+                            LIST_MARK_RE.match(r.text) or (k == 0 and b.type == "paragraph" and r.math < 0.3)):
+                        # "2. Justify ..." after "1. ... a. ... b. ...", or a note after the list: the
+                        # parts indented further than this line end here
+                        keep = next((i for i, p in enumerate(open_parts)
+                                     if p["row"].bbox[0] > r.bbox[0] + 0.5 * r.size), len(open_parts))
+                        levels, open_parts = levels[:keep], open_parts[:keep]
+                        start = ("end", None, keep)
+                if start is None:
+                    continue
+                at = k
+                # the top rows of a matrix set beside a part's label sit above the label's line
+                while (start[0] == "part" and at - 1 > cuts[-1][0] and b.rows[at - 1].bbox[0] > r.words[0].bbox[2]
+                       and r.baseline - b.rows[at - 1].baseline < b.rows[at - 1].baseline - b.rows[at - 2].baseline):
+                    at -= 1
+                if cuts[-1][0] == at:
+                    cuts[-1] = [at, start]
+                else:
+                    cuts.append([at, start])
+                if start[0] == "task" and r.task["own_line"] and splittable and k + 1 < len(b.rows):
+                    cuts.append([k + 1, None])               # the statement under the heading line
+            pieces = [b]
+            if len(cuts) > 1:
+                ends = [c[0] for c in cuts[1:]] + [len(b.rows)]
+                pieces = [Block(b.page, b.rows[first:last], b.type) for (first, _), last in zip(cuts, ends)]
+                at = page.blocks.index(b)
+                page.blocks[at:at + 1] = pieces
+            for piece, (_, start) in zip(pieces, cuts):
+                if start is not None:
+                    starts[piece] = start
+                    if start[0] == "part":
+                        piece.type = "paragraph"             # a list item, even one full of math
+    return tasks, starts
+
+
+def settle_points(task, pages):
+    """Points stated at the end of a part's label line or of its text ("... gilt. (2 Punkte)"), or set apart
+    to the right of either; the same for a task without parts whose heading states none."""
+    by_page = {p.n: p for p in pages}
+
+    def stated(lines):
+        for row, page in lines:
+            text = row.text
+            if text.endswith((")", "]")):
+                pts = points_only(text[text.rfind("(" if text.endswith(")") else "["):])
+                if pts is not None:
+                    return pts
+            pts = points_beside(by_page[page], row)
+            if pts is not None:
+                return pts
+        return None
+
+    def visit(part):
+        for sub in part["parts"]:
+            visit(sub)
+        if part["points"] is None:
+            lines = [(part["row"], part["blocks"][0].page)]
+            if not part["parts"]:
+                lines.append((part["blocks"][-1].rows[-1], part["blocks"][-1].page))
+            part["points"] = stated(lines)
+
+    for part in task["parts"]:
+        visit(part)
+    if task["head"]["points"] is None and not task["parts"]:
+        task["head"]["points"] = stated([(task["blocks"][-1].rows[-1], task["blocks"][-1].page)])
+
+
+def exercise_records(tasks):
+    """doc.json entries for the tasks of find_exercises, once blocks have IDs: ex1, ex2.3, exH1, and parts
+    ex1.a, ex1.c.ii. A number printed twice (sheets 1 and 2 in one PDF) gets ex1-2."""
+    def part_records(parent, parts):
+        out = []
+        for p in parts:
+            rec = {"id": f"{parent}.{p['label']}", "label": p["label"]}
+            if p["points"] is not None:
+                rec["points"] = p["points"]
+            rec.update(page=p["blocks"][0].page, blocks=[b.id for b in p["blocks"]])
+            if p["parts"]:
+                rec["parts"] = part_records(rec["id"], p["parts"])
+            out.append(rec)
+        return out
+
+    records, seen = [], set()
+    for t in tasks:
+        head = t["head"]
+        base = "ex" + head["number"]
+        eid, k = base, 2
+        while eid in seen:
+            eid = f"{base}-{k}"
+            k += 1
+        seen.add(eid)
+        rec = {"id": eid, "number": head["number"]}
+        if head["title"]:
+            rec["title"] = head["title"]
+        if head["points"] is not None:
+            rec["points"] = head["points"]
+        rec.update(page=t["block"].page, block=t["block"].id, blocks=[b.id for b in t["blocks"]],
+                   parts=part_records(eid, t["parts"]))
+        records.append(rec)
+    return records
+
+
 # ---------------------------------------------------------------------------- pipeline
 
 class Stats:
@@ -1820,7 +2229,9 @@ class Stats:
 
 
 def analyse(pdf):
-    """Run the whole pipeline; returns (pages, sections, figures, equations, stats)."""
+    """Run the whole pipeline; returns (pages, sections, figures, equations, stats).
+
+    stats.exercises holds the doc.json entries of an exercise sheet's tasks (empty for other documents)."""
     raw_pages = [read_lines(p) for p in pdf]
     char_fonts, char_sizes = Counter(), Counter()
     for lines in raw_pages:
@@ -1876,12 +2287,15 @@ def analyse(pdf):
         for reg in page.regions:
             claim_region_text(page, reg)
 
+    stats.sheet = mark_task_heads(pages, stats)
     classify(pages, stats)
     for page in pages:
         order_page(page)
+    tasks = find_exercises(pages) if stats.sheet else []
     sections = build_sections(pages, pdf.get_toc())
     split_references(pages, sections)
     assign_ids_and_sentences(pages, build_vocab(pages))
+    stats.exercises = exercise_records(tasks)
     figures = figure_records(pages)
     link_references(pages, figures)
     equations = equation_records(pages)
@@ -1937,7 +2351,7 @@ def build_doc(pdf_path, pdf, pages, sections, figures, equations, stats):
             rec["number"] = s["number"]
         rec.update(title=s["title"], level=s["level"], page=s["block"].page, block=s["block"].id)
         secs.append(rec)
-    return {
+    doc = {
         "schema": SCHEMA_ID,
         "source": source,
         "pages": [{"n": p.n, "width": round(p.width, 2), "height": round(p.height, 2)} for p in pages],
@@ -1947,6 +2361,9 @@ def build_doc(pdf_path, pdf, pages, sections, figures, equations, stats):
         "figures": [{k: v for k, v in f.items() if not k.startswith("_")} for f in figures],
         "equations": equations,
     }
+    if getattr(stats, "exercises", None):
+        doc["exercises"] = stats.exercises     # only exercise sheets have the key
+    return doc
 
 
 def schema_errors(doc):
@@ -2003,15 +2420,20 @@ TYPE_COLORS = {
 SENTENCE_FILLS = [(1.0, 0.9, 0.2), (0.3, 0.85, 1.0)]
 
 
-def render_debug(pdf_path, pages, figures, equations, out_dir):
+def render_debug(pdf_path, pages, figures, equations, out_dir, exercises=()):
     dbg_dir = os.path.join(out_dir, "_debug")
     os.makedirs(dbg_dir, exist_ok=True)
     dbg = pymupdf.open(pdf_path)
-    figs_by_page, eqs_by_page = {}, {}
+    figs_by_page, eqs_by_page, starts = {}, {}, {}
     for f in figures:
         figs_by_page.setdefault(f["page"], []).append(f)
     for e in equations:
         eqs_by_page.setdefault(e["page"], []).append(e)
+    todo = list(exercises)
+    while todo:                       # the block each task and part starts at
+        x = todo.pop()
+        starts.setdefault(x["blocks"][0], []).append(x["id"])
+        todo.extend(x.get("parts", []))
     wanted = set()
     for page in pages:
         p = dbg[page.n - 1]
@@ -2038,6 +2460,9 @@ def render_debug(pdf_path, pages, figures, equations, out_dir):
         for b in page.ordered:
             x0, y0 = b.bbox[0], b.bbox[1]
             p.insert_text((x0 + 0.5, max(y0 - 0.6, 5)), f"{b.id} {b.type}", fontsize=4.2, color=TYPE_COLORS[b.type])
+            if b.id in starts:
+                p.insert_text((max(x0 - 34, 2), y0 + 6), " ".join(sorted(starts[b.id])), fontsize=6,
+                              color=(0.8, 0.0, 0.4))
         for f in figs_by_page.get(page.n, []):
             p.insert_text((f["bbox"][0] + 1, f["bbox"][1] + 7), f["id"], fontsize=7, color=(0.0, 0.6, 0.0))
             for pn in f["panels"]:
@@ -2090,12 +2515,13 @@ def main(argv=None):
         fh.write(dump_doc(doc))
     write_figures(figures, out_dir)
     if args.debug:
-        render_debug(pdf_path, pages, figures, equations, out_dir)
+        render_debug(pdf_path, pages, figures, equations, out_dir, doc.get("exercises", ()))
 
     n_tab = sum(1 for f in figures if f["kind"] == "table")
     print(f"wrote {os.path.join(out_dir, 'doc.json')}: {len(pages)} pages, {len(doc['blocks'])} blocks, "
           f"{len(doc['sentences'])} sentences, {len(sections)} sections, {len(figures) - n_tab} figures, "
-          f"{n_tab} tables, {sum(len(f['panels']) for f in figures)} panels, {len(equations)} equations")
+          f"{n_tab} tables, {sum(len(f['panels']) for f in figures)} panels, {len(equations)} equations"
+          + (f", {len(doc['exercises'])} exercises" if "exercises" in doc else ""))
     return 0
 
 

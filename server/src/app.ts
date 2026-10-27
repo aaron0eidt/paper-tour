@@ -9,6 +9,7 @@ import type { Library } from './service';
 import type { ReaderState } from '../../shared/contracts';
 import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
+import type { AskRequest } from './harness/ask';
 
 const uuid = { type: 'string', format: 'uuid' };
 const documentParams = {
@@ -411,6 +412,43 @@ export async function createApp(options: Options) {
           },
         },
         async (req) => service.figure(owner(req), req.params.id, req.query.analysisId, req.params.elementId),
+      );
+      const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
+      api.post<{ Params: { id: string }; Body: AskRequest }>(
+        '/documents/:id/ask',
+        {
+          schema: {
+            params: documentParams,
+            body: objectBody(
+              {
+                question: text(500),
+                tourId: uuid,
+                stepId: text(200),
+                figureId: text(100),
+                history: {
+                  type: 'array',
+                  maxItems: 4,
+                  items: objectBody({ question: text(500), answer: text(2000) }, ['question', 'answer']),
+                },
+              },
+              ['question'],
+            ),
+          },
+        },
+        async (req, reply) => {
+          if (!service.ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
+          // A learner who cancels or leaves stops the model call too.
+          const controller = new AbortController();
+          const cancel = () => {
+            if (!reply.raw.writableFinished) controller.abort();
+          };
+          reply.raw.once('close', cancel);
+          try {
+            return await service.ask(owner(req), req.params.id, req.body, controller.signal);
+          } finally {
+            reply.raw.off('close', cancel);
+          }
+        },
       );
     },
     { prefix: '/api' },

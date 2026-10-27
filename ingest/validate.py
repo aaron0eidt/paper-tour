@@ -224,13 +224,62 @@ def check_doc(doc, folder, report):
         check_bbox(e.get("bbox"), f, path + ".bbox", report, page)
         if "block" in e and e["block"] not in blocks:
             report.error(f, path + ".block", f"unknown block {e['block']!r}")
+    exercises = check_exercises(doc, blocks, check_page, report)
 
     index = {}
     for kind, ids in (("block", blocks), ("sentence", sentences), ("section", sections),
                       ("figure/table", figures), ("panel", panels), ("equation", equations)):
         for x in ids:
             index[x] = kind
+    index.update(exercises)
     return index, num_pages
+
+
+def check_exercises(doc, blocks, check_page, report):
+    """Tasks and parts of an exercise sheet: unique IDs named after their task, known blocks in reading
+    order, each block in one task, and every part inside its parent. Returns {ID: kind}."""
+    f = "doc.json"
+    order = {b["id"]: i for i, b in items(doc, "blocks") if "id" in b}
+    kinds, owner = {}, {}
+
+    def check(x, path, parent, outer):
+        xid = x.get("id")
+        if xid in kinds:
+            report.error(f, path + ".id", f"duplicate exercise ID {xid!r}")
+        kinds[xid] = "exercise" if parent is None else "exercise part"
+        if parent is not None and xid != f"{parent}.{x.get('label')}":
+            report.error(f, path + ".id", f"part {xid!r} is not named after {parent!r} and its label "
+                                          f"{x.get('label')!r}")
+        check_page(x, path, None)
+        ids = [b for b in x.get("blocks", []) or [] if isinstance(b, str)]
+        for j, bid in enumerate(ids):
+            if bid not in blocks:
+                report.error(f, f"{path}.blocks[{j}]", f"unknown block {bid!r}")
+            elif outer is not None and bid not in outer:
+                report.error(f, f"{path}.blocks[{j}]", f"block {bid!r} is not one of {parent!r}'s blocks")
+        known = [order[b] for b in ids if b in order]
+        if known != sorted(set(known)):
+            report.error(f, path + ".blocks", "blocks are not in reading order, or one is listed twice")
+        if ids and ids[0] in blocks and blocks[ids[0]].get("page") != x.get("page"):
+            report.error(f, path + ".page", f"page is {x.get('page')} but the first block {ids[0]!r} is on page "
+                                            f"{blocks[ids[0]].get('page')}")
+        for j, part in enumerate(x.get("parts", []) or []):
+            if isinstance(part, dict):
+                check(part, f"{path}.parts[{j}]", xid, set(ids))
+        return ids
+
+    for i, ex in items(doc, "exercises"):
+        path = f"$.exercises[{i}]"
+        ids = check(ex, path, None, None)
+        if ex.get("block") not in blocks:
+            report.error(f, path + ".block", f"unknown block {ex.get('block')!r}")
+        elif ids and ids[0] != ex["block"]:
+            report.error(f, path + ".block", f"{ex['block']!r} is not the first of the exercise's blocks")
+        for bid in ids:
+            if bid in owner and owner[bid] != ex.get("id"):
+                report.error(f, path + ".blocks", f"block {bid!r} also belongs to {owner[bid]!r}")
+            owner.setdefault(bid, ex.get("id"))
+    return kinds
 
 
 # ---------------------------------------------------------------------------- tour.json
@@ -242,6 +291,8 @@ def kind_of(target):
         return "panel" if "." in target else "figure/table"
     if target.startswith("eq"):
         return "equation"
+    if re.match(r"^ex([A-Z]?\d|[IVX])", target):
+        return "exercise part" if re.search(r"\.[a-z]+$", target) else "exercise"
     if re.match(r"^p\d+\.b", target):
         return "block"
     if re.match(r"^p\d+\.s", target):
@@ -329,7 +380,8 @@ def main(argv=None):
             index, num_pages = check_doc(doc, folder, report)
             summary.append(f"doc.json: {len(doc['blocks'])} blocks, {len(doc['sentences'])} sentences, "
                            f"{len(doc['sections'])} sections, {len(doc['figures'])} figures/tables, "
-                           f"{len(doc['equations'])} equations")
+                           f"{len(doc['equations'])} equations"
+                           + (f", {plural(len(doc['exercises']), 'exercise')}" if doc.get("exercises") else ""))
         elif doc is not None:
             summary.append("doc.json: schema errors, integrity checks skipped")
     if os.path.isfile(tour_path):

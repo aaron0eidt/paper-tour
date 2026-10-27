@@ -1,4 +1,5 @@
-// The side board: checks that a board item can be drawn, and lays out flows. Rendering is in
+// The side board: checks that a board item can be drawn, and computes what the board draws (term
+// wrapping, flow and bar geometry, easing). Pure, so it can be tested; rendering is in
 // components/Board.tsx.
 
 import type { BoardItem, Color, FormulaTerm } from './types';
@@ -6,6 +7,27 @@ import type { BoardItem, Color, FormulaTerm } from './types';
 const COLORS: readonly string[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
 /** Term colours in order, when the tour does not choose one: distinct and readable on the dark board. */
 export const BOARD_PALETTE: Color[] = ['blue', 'orange', 'green', 'pink', 'yellow'];
+
+/**
+ * Ink for each colour on the dark board: lighter steps of the page colours, for glyphs and strokes.
+ * Every pair stays apart under protanopia and deuteranopia (OKLab ΔE ≥ 8.9) and for full colour
+ * vision (ΔE ≥ 15.9), and each clears 3:1 on the board.
+ */
+export const BOARD_INK: Record<Color, string> = {
+  blue: '#4c95ff',
+  orange: '#ff9a4d',
+  green: '#36c793',
+  pink: '#f497e0',
+  yellow: '#ecdc5c',
+};
+
+export type FlowItem = Extract<BoardItem, { kind: 'flow' }>;
+export type BarsItem = Extract<BoardItem, { kind: 'bars' }>;
+
+/** A formula term's colour: its own, else the palette in order. */
+export function termColor(term: FormulaTerm, index: number): Color {
+  return term.color ?? BOARD_PALETTE[index % BOARD_PALETTE.length];
+}
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -64,7 +86,7 @@ export function checkBoardItem(raw: unknown, where: string, warn: (message: stri
  * Columns for a flow: each node goes one column right of its furthest predecessor (cycles are cut),
  * and nodes keep their listed order inside a column. Returns [column, row] per node index.
  */
-export function flowLayout(item: Extract<BoardItem, { kind: 'flow' }>): [number, number][] {
+export function flowLayout(item: FlowItem): [number, number][] {
   const index = new Map(item.nodes.map((n, i) => [n.id, i]));
   const column = item.nodes.map(() => 0);
   for (let pass = 0; pass < item.nodes.length; pass++) {
@@ -86,3 +108,408 @@ export function flowLayout(item: Extract<BoardItem, { kind: 'flow' }>): [number,
     return [c, r];
   });
 }
+
+// ------------------------------------------------------------------ formula
+
+type Span = [number, number];
+const overlaps = (a: Span, b: Span) => a[0] < b[1] && b[0] < a[1];
+const contains = (a: Span, b: Span) => a[0] <= b[0] && b[1] <= a[1];
+const crosses = (a: Span, b: Span) => overlaps(a, b) && !contains(a, b) && !contains(b, a);
+const CONTROL_WORD = /\\[a-zA-Z]+/y;
+
+/** Positions between LaTeX tokens: a control word, a control symbol or one character. */
+function tokenBounds(latex: string): boolean[] {
+  const bounds = new Array<boolean>(latex.length + 1).fill(false);
+  let i = 0;
+  while (i < latex.length) {
+    bounds[i] = true;
+    CONTROL_WORD.lastIndex = i;
+    const word = CONTROL_WORD.exec(latex);
+    const code = latex.charCodeAt(i);
+    if (word) i += word[0].length;
+    else if (latex[i] === '\\') i = Math.min(latex.length, i + 2);
+    else i += code >= 0xd800 && code <= 0xdbff ? 2 : 1;
+  }
+  bounds[latex.length] = true;
+  return bounds;
+}
+
+/** The LaTeX with each span wrapped in \htmlClass{pt-term pt-term-N}{…}; spans nest but never cross. */
+function wrapSpans(latex: string, spans: (Span | null)[]): string {
+  const marks: { at: number; open: boolean; len: number; term: number }[] = [];
+  spans.forEach((s, term) => {
+    if (!s) return;
+    marks.push({ at: s[0], open: true, len: s[1] - s[0], term }, { at: s[1], open: false, len: s[1] - s[0], term });
+  });
+  // At one position: closes before opens; inner spans close first and outer spans open first.
+  marks.sort((a, b) => {
+    if (a.at !== b.at) return a.at - b.at;
+    if (a.open !== b.open) return a.open ? 1 : -1;
+    return a.open ? b.len - a.len || a.term - b.term : a.len - b.len || b.term - a.term;
+  });
+  let out = '';
+  let last = 0;
+  for (const m of marks) {
+    out += latex.slice(last, m.at) + (m.open ? `\\htmlClass{pt-term pt-term-${m.term}}{` : '}');
+    last = m.at;
+  }
+  return out + latex.slice(last);
+}
+
+/**
+ * The formula with each term wrapped in \htmlClass{pt-term pt-term-N}{…}, so the board can colour it.
+ * A term takes its first occurrence that starts and ends between tokens and is free of the terms
+ * placed before it; only when none is free does it nest inside (or around) one. A wrap that does not
+ * parse (it splits a group, say) is not used, so a bad term loses only its colour.
+ */
+export function wrapTerms(
+  latex: string,
+  terms: FormulaTerm[],
+  parses: (latex: string) => boolean,
+): { latex: string; placed: boolean[] } {
+  const bounds = tokenBounds(latex);
+  const spans: (Span | null)[] = [];
+  for (const term of terms) {
+    const options: Span[] = [];
+    for (let at = term.latex ? latex.indexOf(term.latex) : -1; at >= 0; at = latex.indexOf(term.latex, at + 1)) {
+      const span: Span = [at, at + term.latex.length];
+      if (bounds[span[0]] && bounds[span[1]] && !spans.some((s) => s && crosses(s, span))) options.push(span);
+    }
+    const taken = (span: Span) => (spans.some((s) => s && overlaps(s, span)) ? 1 : 0);
+    options.sort((a, b) => taken(a) - taken(b) || a[0] - b[0]);
+    spans.push(options.find((span) => parses(wrapSpans(latex, [...spans, span]))) ?? null);
+  }
+  return { latex: wrapSpans(latex, spans), placed: spans.map((s) => s !== null) };
+}
+
+// --------------------------------------------------------------------- flow
+
+/** Text width in px at the size the board draws it. */
+export type Measure = (text: string) => number;
+
+export interface FlowNodeBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** The label, wrapped to the box. */
+  lines: string[];
+}
+
+export interface FlowEdgePath {
+  from: number;
+  to: number;
+  /** The curve, ending just short of the target. */
+  d: string;
+  /** The arrowhead: two short strokes that meet at the end of the curve. */
+  head: string;
+}
+
+export interface FlowGeometry {
+  /** Natural size in px; the board draws it at `scale` (never above 1). */
+  width: number;
+  height: number;
+  scale: number;
+  /** Ranks run top to bottom (else left to right). */
+  vertical: boolean;
+  nodes: FlowNodeBox[];
+  edges: FlowEdgePath[];
+}
+
+/** Line height of node labels; labels are drawn at 13px. */
+export const FLOW_LINE = 17;
+const FLOW_PAD = { x: 14, y: 10 };
+const FLOW_W = { min: 92, max: 176 };
+// Gaps between ranks (room for the arrows): they grow within these limits to use the board.
+const FLOW_RANK_GAP = { vertical: [30, 50], horizontal: [38, 64] };
+const FLOW_FILL = 0.8;
+const FLOW_MIN_SCALE = 0.8;
+const FLOW_LANE_GAP = 14;
+// Room around the nodes for the focus ring, and beside them for edges that loop back.
+const FLOW_MARGIN = 8;
+const FLOW_LOOP = 28;
+const FLOW_HEAD = 5;
+const FLOW_GAP = 3;
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const round = (v: number) => Math.round(v * 10) / 10;
+const pt = (x: number, y: number) => `${round(x)} ${round(y)}`;
+
+function ellipsize(text: string, width: number, measure: Measure): string {
+  let t = text;
+  while (t.length > 1 && measure(`${t}…`) > width) t = t.slice(0, -1);
+  return `${t.trimEnd()}…`;
+}
+
+/** The text, cut with an ellipsis when it is wider than `width` px. */
+export function fitText(text: string, width: number, measure: Measure): string {
+  return measure(text) <= width ? text : ellipsize(text, width, measure);
+}
+
+/** Greedy word wrap to `width` px in at most `max` lines; text that does not fit ends in an ellipsis. */
+export function wrapLabel(text: string, width: number, measure: Measure, max = 3): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && measure(next) > width) {
+      lines.push(line);
+      line = word;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  if (lines.length > max) lines.splice(max - 1, lines.length, lines.slice(max - 1).join(' '));
+  return lines.map((l) => (measure(l) > width ? ellipsize(l, width, measure) : l));
+}
+
+/** An arrowhead at `tip` pointing along the unit vector (ux, uy). */
+function arrowHead(tipX: number, tipY: number, ux: number, uy: number): string {
+  const bx = tipX - ux * FLOW_HEAD;
+  const by = tipY - uy * FLOW_HEAD;
+  const px = -uy * FLOW_HEAD * 0.8;
+  const py = ux * FLOW_HEAD * 0.8;
+  return `M${pt(bx + px, by + py)} L${pt(tipX, tipY)} L${pt(bx - px, by - py)}`;
+}
+
+/** A forward edge leaves the source's far side for the target's near side; a back edge loops beside both. */
+function edgePath(a: FlowNodeBox, b: FlowNodeBox, vertical: boolean, forward: boolean): Omit<FlowEdgePath, 'from' | 'to'> {
+  if (forward && vertical) {
+    const [sx, sy, ex, ey] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y - FLOW_GAP];
+    const k = Math.max(10, (ey - sy) / 2);
+    return { d: `M${pt(sx, sy)} C${pt(sx, sy + k)} ${pt(ex, ey - k)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, 1) };
+  }
+  if (forward) {
+    const [sx, sy, ex, ey] = [a.x + a.w, a.y + a.h / 2, b.x - FLOW_GAP, b.y + b.h / 2];
+    const k = Math.max(10, (ex - sx) / 2);
+    return { d: `M${pt(sx, sy)} C${pt(sx + k, sy)} ${pt(ex - k, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 1, 0) };
+  }
+  if (vertical) {
+    const [sx, sy, ex, ey] = [a.x + a.w, a.y + a.h / 2, b.x + b.w + FLOW_GAP, b.y + b.h / 2];
+    const loop = FLOW_LOOP + Math.max(0, sx - ex);
+    return { d: `M${pt(sx, sy)} C${pt(sx + loop, sy)} ${pt(ex + loop, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, -1, 0) };
+  }
+  const [sx, sy, ex, ey] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y + b.h + FLOW_GAP];
+  const loop = FLOW_LOOP + Math.max(0, sy - ey);
+  return { d: `M${pt(sx, sy)} C${pt(sx, sy + loop)} ${pt(ex, ey + loop)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, -1) };
+}
+
+/**
+ * Where a flow's boxes and arrows go in a board of `box` px: ranks from flowLayout run along the
+ * board's long side, so a tall side panel stacks them and a wide one lines them up. Both ways are
+ * laid out and the one that needs less shrinking wins; when both fit, the one shaped like the board.
+ */
+export function flowGeometry(item: FlowItem, box: { width: number; height: number }, measure: Measure): FlowGeometry {
+  const place = flowLayout(item);
+  const index = new Map(item.nodes.map((n, i) => [n.id, i]));
+  const ranks = Math.max(...place.map(([c]) => c)) + 1;
+  const inRank = Array.from({ length: ranks }, (_, r) => place.flatMap(([c], i) => (c === r ? [i] : [])));
+  const w = clamp(Math.max(...item.nodes.map((n) => measure(n.label))) + 2 * FLOW_PAD.x, FLOW_W.min, FLOW_W.max);
+  const lines = item.nodes.map((n) => wrapLabel(n.label, w - 2 * FLOW_PAD.x, measure));
+  const heights = lines.map((l) => l.length * FLOW_LINE + 2 * FLOW_PAD.y);
+  const forward = item.edges.map(([a, b]) => place[index.get(b)!][0] > place[index.get(a)!][0]);
+  const loops = forward.some((f) => !f) ? FLOW_LOOP : 0;
+
+  const build = (vertical: boolean): FlowGeometry => {
+    const nodes: FlowNodeBox[] = new Array(item.nodes.length);
+    let width: number;
+    let height: number;
+    // The gap that spreads the ranks over FLOW_FILL of the board's length, within limits.
+    const rankGap = (room: number, used: number, [min, max]: number[]) =>
+      ranks > 1 ? clamp((room * FLOW_FILL - used - 2 * FLOW_MARGIN) / (ranks - 1), min, max) : 0;
+    if (vertical) {
+      const depth = inRank.map((ids) => Math.max(...ids.map((i) => heights[i])));
+      const span = inRank.map((ids) => ids.length * w + (ids.length - 1) * FLOW_LANE_GAP);
+      const used = depth.reduce((s, d) => s + d, 0);
+      const gap = rankGap(box.height, used, FLOW_RANK_GAP.vertical);
+      width = Math.max(...span) + 2 * FLOW_MARGIN + loops;
+      height = used + (ranks - 1) * gap + 2 * FLOW_MARGIN;
+      let y = FLOW_MARGIN;
+      inRank.forEach((ids, r) => {
+        const x0 = (width - loops - span[r]) / 2;
+        ids.forEach((i, lane) => {
+          nodes[i] = { x: x0 + lane * (w + FLOW_LANE_GAP), y: y + (depth[r] - heights[i]) / 2, w, h: heights[i], lines: lines[i] };
+        });
+        y += depth[r] + gap;
+      });
+    } else {
+      const stack = inRank.map((ids) => ids.reduce((s, i) => s + heights[i], 0) + (ids.length - 1) * FLOW_LANE_GAP);
+      const gap = rankGap(box.width, ranks * w, FLOW_RANK_GAP.horizontal);
+      width = ranks * w + (ranks - 1) * gap + 2 * FLOW_MARGIN;
+      height = Math.max(...stack) + 2 * FLOW_MARGIN + loops;
+      inRank.forEach((ids, r) => {
+        let y = (height - loops - stack[r]) / 2;
+        for (const i of ids) {
+          nodes[i] = { x: FLOW_MARGIN + r * (w + gap), y, w, h: heights[i], lines: lines[i] };
+          y += heights[i] + FLOW_LANE_GAP;
+        }
+      });
+    }
+    const edges = item.edges.map(([a, b], e) => {
+      const from = index.get(a)!;
+      const to = index.get(b)!;
+      return { from, to, ...edgePath(nodes[from], nodes[to], vertical, forward[e]) };
+    });
+    const scale = Math.min(1, box.width / width, box.height / height);
+    return { width, height, scale, vertical, nodes, edges };
+  };
+
+  const v = build(true);
+  const h = build(false);
+  const best = Math.abs(v.scale - h.scale) > 0.001 ? (v.scale > h.scale ? v : h) : box.height >= box.width ? v : h;
+  // Labels stay readable: a flow that would shrink further scrolls on the board instead.
+  return { ...best, scale: Math.max(FLOW_MIN_SCALE, best.scale) };
+}
+
+// --------------------------------------------------------------------- bars
+
+/** The best bar when the tour says which way is better (the first one on a tie), else null. */
+export function bestBar(item: BarsItem): number | null {
+  if (item.higher_is_better === undefined) return null;
+  let best = 0;
+  item.bars.forEach((b, i) => {
+    if (item.higher_is_better ? b.value > item.bars[best].value : b.value < item.bars[best].value) best = i;
+  });
+  return best;
+}
+
+/** Decimal places a value is written with (at most 4), so an animated number ends as reported. */
+export function decimalsOf(value: number): number {
+  const text = Math.abs(value).toString();
+  if (text.includes('e')) return Math.abs(value) < 1 ? 4 : 0;
+  const dot = text.indexOf('.');
+  return dot < 0 ? 0 : Math.min(4, text.length - dot - 1);
+}
+
+/** A value as the board prints it: grouped digits, fixed places, and a % sign when that is the unit. */
+export function formatValue(value: number, places: number, unit?: string): string {
+  const rounded = Number(value.toFixed(places)) || 0; // no "-0.0" on the way up from zero
+  const text = rounded.toLocaleString('en-US', { minimumFractionDigits: places, maximumFractionDigits: places });
+  return unit === '%' ? `${text}%` : text;
+}
+
+export interface BarRow {
+  /** Top of the bar. */
+  y: number;
+  /** The bar runs from x0 to x1; one of them is the zero line. */
+  x0: number;
+  x1: number;
+  /** Vertical centre of the label, which starts at the left edge. */
+  labelY: number;
+  /** Where the value is printed: after the tip of a positive bar, before the tip of a negative one. */
+  valueX: number;
+  valueAnchor: 'start' | 'end';
+}
+
+export interface BarsLayout {
+  width: number;
+  height: number;
+  /** Labels sit above their bars when a label column would leave the bars too little room. */
+  labelsAbove: boolean;
+  zeroX: number;
+  rows: BarRow[];
+}
+
+/** Bars are this thick: thin marks, with air between rows. */
+export const BAR_THICKNESS = 12;
+const BAR_PITCH = { beside: 34, above: 50 };
+const BAR_LABEL_GAP = 14;
+const BAR_VALUE_GAP = 8;
+// Beside a label column the bars must keep this share of the width, else the labels go above them.
+const BAR_MIN_TRACK = 0.55;
+
+/**
+ * Horizontal bars from a shared zero line, in a board `width` px wide. `labelWidths` and
+ * `valueWidths` are the measured texts (a value's width includes its badge, if it has one).
+ */
+export function barsLayout(item: BarsItem, width: number, labelWidths: number[], valueWidths: number[]): BarsLayout {
+  const values = item.bars.map((b) => b.value);
+  const lo = Math.min(0, ...values);
+  const hi = Math.max(0, ...values);
+  const after = Math.max(0, ...valueWidths.filter((_, i) => values[i] >= 0)) + BAR_VALUE_GAP;
+  const before = values.some((v) => v < 0) ? Math.max(...valueWidths.filter((_, i) => values[i] < 0)) + BAR_VALUE_GAP : 0;
+  const column = Math.max(...labelWidths) + BAR_LABEL_GAP;
+  const labelsAbove = width - column - before - after < width * BAR_MIN_TRACK;
+  const start = (labelsAbove ? 0 : column) + before;
+  const end = Math.max(start + 1, width - after);
+  const x = (v: number) => start + ((v - lo) / (hi - lo || 1)) * (end - start);
+  const zeroX = x(0);
+  const pitch = labelsAbove ? BAR_PITCH.above : BAR_PITCH.beside;
+  const top = labelsAbove ? 22 : 0;
+  const rows = values.map((v, i): BarRow => {
+    const y = top + i * pitch;
+    const tip = x(v);
+    return {
+      y,
+      x0: Math.min(zeroX, tip),
+      x1: Math.max(zeroX, tip),
+      labelY: labelsAbove ? y - 13 : y + BAR_THICKNESS / 2,
+      valueX: v < 0 ? tip - BAR_VALUE_GAP : tip + BAR_VALUE_GAP,
+      valueAnchor: v < 0 ? 'end' : 'start',
+    };
+  });
+  return { width, height: top + (values.length - 1) * pitch + BAR_THICKNESS + 2, labelsAbove, zeroX, rows };
+}
+
+/** Radius of a bar's tip, the end away from zero; its base on the zero line is square. */
+const BAR_RADIUS = 4;
+
+/** A bar from x0 to x1 (x0 < x1), with its tip on the right or the left; empty when it has no length. */
+export function barPath(x0: number, x1: number, y: number, tipRight: boolean): string {
+  const h = BAR_THICKNESS;
+  const r = Math.min(BAR_RADIUS, (x1 - x0) / 2);
+  if (r <= 0) return '';
+  const [tip, base, side] = tipRight ? [x1, x0, 1] : [x0, x1, -1];
+  // From the base along the top edge, round the tip's two corners, and back along the bottom.
+  return (
+    `M${round(base)} ${y}H${round(tip - side * r)}A${r} ${r} 0 0 ${tipRight ? 1 : 0} ${round(tip)} ${y + r}` +
+    `V${y + h - r}A${r} ${r} 0 0 ${tipRight ? 1 : 0} ${round(tip - side * r)} ${y + h}H${round(base)}Z`
+  );
+}
+
+/** CSS clip that shows `progress` (0..1) of a bar from the zero line, its edge rounded like the tip. */
+export function barClip(progress: number, tipRight: boolean): string {
+  const hidden = `${((1 - Math.max(0, Math.min(1, progress))) * 100).toFixed(2)}%`;
+  return tipRight
+    ? `inset(0 ${hidden} 0 0 round 0 ${BAR_RADIUS}px ${BAR_RADIUS}px 0)`
+    : `inset(0 0 0 ${hidden} round ${BAR_RADIUS}px 0 0 ${BAR_RADIUS}px)`;
+}
+
+// ------------------------------------------------------------------- easing
+
+/** CSS cubic-bezier(x1, y1, x2, y2) as a function of time 0..1, so script can follow a CSS animation. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+  const x = (s: number) => ((ax * s + bx) * s + cx) * s;
+  const y = (s: number) => ((ay * s + by) * s + cy) * s;
+  const slope = (s: number) => (3 * ax * s + 2 * bx) * s + cx;
+  return (t) => {
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    // Newton's method converges in a few steps; bisection covers flat stretches.
+    let s = t;
+    for (let i = 0; i < 8; i++) {
+      const err = x(s) - t;
+      if (Math.abs(err) < 1e-7) return y(s);
+      const d = slope(s);
+      if (Math.abs(d) < 1e-6) break;
+      s = clamp(s - err / d, 0, 1);
+    }
+    let lo = 0;
+    let hi = 1;
+    s = t;
+    for (let i = 0; i < 40 && Math.abs(x(s) - t) > 1e-7; i++) {
+      if (x(s) < t) lo = s;
+      else hi = s;
+      s = (lo + hi) / 2;
+    }
+    return y(s);
+  };
+}
+
+/** The board's ease-out (also --board-ease-out in board.css): quick to start, long and soft to land. */
+export const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];

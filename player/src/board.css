@@ -1,0 +1,572 @@
+/* The side board: a dark panel beside the stage that builds formulas, flows and bars. */
+
+/* ------------------------------------------------------------------ layout */
+
+/* The stage and the board side by side; below 860px the board sits under the stage. */
+.board-split {
+  --board-w: clamp(280px, 34cqw, 440px);
+  --board-h: clamp(200px, 42cqh, 340px);
+  /* The dock moves like the camera (ease-in-out cubic); content lands with a long ease-out
+     (EASE_OUT in board.ts). */
+  --board-dock-ease: cubic-bezier(0.65, 0, 0.35, 1);
+  --board-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  container: board-split / size;
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.board-split > .viewport {
+  flex: 1;
+  min-width: 0;
+}
+
+.board-dock {
+  position: relative;
+  flex: none;
+  width: 0;
+  overflow: hidden;
+  transition: width 560ms var(--board-dock-ease);
+}
+
+.board-dock[data-open] {
+  width: var(--board-w);
+}
+
+.board {
+  --board-bg: #11141b;
+  --board-raised: #171b24;
+  --board-rule: #2c3240;
+  --board-edge: #4a5264;
+  --board-bar: #4a5366;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--board-w);
+  background: var(--board-bg);
+  border-left: 1px solid var(--line);
+  color: var(--text);
+  animation: board-in 420ms ease 60ms backwards;
+  transition: opacity 240ms ease;
+}
+
+.board-dock:not([data-open]) .board {
+  opacity: 0;
+}
+
+@media (max-width: 860px) {
+  .board-split {
+    flex-direction: column;
+  }
+  .board-dock {
+    width: auto;
+    height: 0;
+    transition-property: height;
+  }
+  .board-dock[data-open] {
+    width: auto;
+    height: var(--board-h);
+  }
+  .board {
+    right: 0;
+    bottom: auto;
+    width: auto;
+    height: var(--board-h);
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* -------------------------------------------------------------- the panel */
+
+.board-view {
+  container: board-view / size;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 24px 24px;
+}
+
+/* A replaced item fades out above the one building in. */
+.board-view.leaving {
+  z-index: 1;
+  pointer-events: none;
+  animation: board-out 240ms ease forwards;
+}
+
+.board-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  animation: board-rise 480ms var(--board-ease-out) 120ms backwards;
+}
+
+.board-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.board-unit {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* A body taller than the board scrolls, its last pixels fading out to show there is more. */
+.board-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--board-rule) transparent;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+}
+
+/* The content sits a little above the middle when there is room and scrolls from the top when
+   there is not. A flow fills the body and centres itself. */
+.board-body::before,
+.board-body::after {
+  content: '';
+  flex: 1 1 0;
+}
+
+.board-body::after {
+  flex-grow: 1.4;
+}
+
+.board-view[data-kind='flow'] .board-body::before,
+.board-view[data-kind='flow'] .board-body::after {
+  display: none;
+}
+
+@keyframes board-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes board-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes board-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* ----------------------------------------------------------------- formula */
+
+.formula {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* Colour is computed from three numbers, so the build and the focus never fight over it:
+   --board-lit goes 0 to 1 as a term lights up in the build, --board-on is 1 for the term in
+   focus (lit even before its turn), and --board-dim goes 0 to 1 as a part recedes behind it. */
+@property --board-lit {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+
+@property --board-on {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --board-dim {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+.formula-math {
+  --fit: 1;
+  padding: 12px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  font-size: calc(23px * var(--fit));
+  text-align: center;
+  color: color-mix(in srgb, var(--text) calc(100% - var(--board-dim) * 70%), var(--board-bg));
+  transition: --board-dim 460ms ease;
+  animation: board-rise 620ms var(--board-ease-out) 200ms backwards;
+}
+
+.formula-math .katex-display {
+  margin: 0;
+}
+
+/* Too wide for one line: break between KaTeX's top-level boxes (after a relation or operator). */
+.formula-math.is-wrapped .katex-display > .katex {
+  white-space: normal;
+}
+
+.formula-math.is-wrapped .katex-html {
+  line-height: 1.6;
+}
+
+/* After the formula fades in, its terms light up one after another, each with a short glow that
+   settles into whatever state follows (the keyframe names no end value). */
+.formula-math .pt-term {
+  --board-term: color-mix(in srgb, var(--c) calc(max(var(--board-lit), var(--board-on)) * 100%), var(--text));
+  color: color-mix(in srgb, var(--board-term) calc(100% - var(--board-dim) * 68%), var(--board-bg));
+  animation:
+    term-lit 520ms ease calc(760ms + var(--i, 0) * 460ms) backwards,
+    term-glow 1100ms ease-out calc(760ms + var(--i, 0) * 460ms);
+  transition:
+    --board-on 460ms ease,
+    --board-dim 460ms ease,
+    filter 460ms ease;
+}
+
+@keyframes term-lit {
+  from {
+    --board-lit: 0;
+  }
+}
+
+@keyframes term-glow {
+  30% {
+    filter: drop-shadow(0 0 9px color-mix(in srgb, var(--c) 70%, transparent));
+  }
+}
+
+.formula.has-focus .formula-math,
+.formula.has-focus .pt-term {
+  --board-dim: 1;
+}
+
+/* In focus: the term (with any term inside it) keeps its colour and a soft glow; the rest recedes. */
+.formula.has-focus .pt-term.is-focus,
+.formula.has-focus .pt-term.is-focus .pt-term {
+  --board-on: 1;
+  --board-dim: 0;
+}
+
+.formula.has-focus .pt-term.is-focus {
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--c) 55%, transparent));
+}
+
+.formula-source code {
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--board-raised);
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.formula-legend {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each legend row arrives with its term. */
+.formula-legend li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  animation: board-rise 520ms var(--board-ease-out) calc(760ms + var(--i, 0) * 460ms) backwards;
+}
+
+.formula-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  column-gap: 16px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  transition:
+    opacity 360ms ease,
+    background-color 360ms ease;
+}
+
+.formula-symbol {
+  min-width: 44px;
+  font-size: 14.5px;
+  white-space: nowrap;
+  color: var(--c);
+}
+
+code.formula-symbol {
+  font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.formula-label {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  transition: color 360ms ease;
+}
+
+.formula.has-focus .formula-row {
+  opacity: 0.4;
+}
+
+.formula.has-focus .formula-row.is-focus {
+  opacity: 1;
+  background: color-mix(in srgb, var(--c) 9%, transparent);
+}
+
+.formula-row.is-focus .formula-label {
+  color: var(--text);
+}
+
+/* A wide, short board (under the stage) puts the legend beside the formula. */
+@container board-view (min-width: 600px) and (max-height: 420px) {
+  .formula {
+    flex-direction: row;
+    align-items: center;
+    gap: 28px;
+  }
+  .formula-math {
+    flex: 1.2;
+    min-width: 0;
+  }
+  .formula-legend {
+    flex: 1;
+  }
+}
+
+/* -------------------------------------------------------------------- flow */
+
+.flow {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Auto margins centre the drawing, and keep it scrollable from its start when it overflows. */
+.flow-svg {
+  display: block;
+  margin: auto;
+  overflow: visible;
+}
+
+/* Boxes appear in their listed order; an arrow draws in once both of its ends are there (its
+   --i is the later end's), and its head lands as the line arrives. */
+.flow-node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: node-in 640ms var(--board-ease-out) calc(260ms + var(--i, 0) * 210ms) backwards;
+}
+
+@keyframes node-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+.flow-node-state {
+  transition: opacity 360ms ease;
+}
+
+.flow.has-focus .flow-node:not(.is-focus) .flow-node-state {
+  opacity: 0.36;
+}
+
+.flow-box {
+  fill: var(--board-raised);
+  stroke: #333a4a;
+  stroke-width: 1.25;
+  transition:
+    fill 360ms ease,
+    stroke 360ms ease;
+}
+
+.flow-node.has-color .flow-box {
+  fill: color-mix(in srgb, var(--c) 10%, var(--board-bg));
+  stroke: color-mix(in srgb, var(--c) 58%, var(--board-bg));
+}
+
+.flow-node.is-focus .flow-box {
+  fill: color-mix(in srgb, var(--c) 16%, var(--board-bg));
+  stroke: var(--c);
+}
+
+.flow-ring {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1;
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.flow-node.is-focus .flow-ring {
+  opacity: 0.32;
+}
+
+.flow-label {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.flow-edge {
+  transition: opacity 360ms ease;
+}
+
+.flow-edge-line,
+.flow-edge-head {
+  fill: none;
+  stroke: var(--board-edge);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 360ms ease;
+}
+
+.flow-edge-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: edge-draw 540ms var(--board-dock-ease) calc(400ms + var(--i, 0) * 210ms) backwards;
+}
+
+.flow-edge-head {
+  animation: board-in 240ms ease calc(880ms + var(--i, 0) * 210ms) backwards;
+}
+
+@keyframes edge-draw {
+  from {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  2% {
+    opacity: 1;
+  }
+}
+
+.flow.has-focus .flow-edge:not(.is-lit) {
+  opacity: 0.32;
+}
+
+.flow-edge.is-lit .flow-edge-line,
+.flow-edge.is-lit .flow-edge-head {
+  stroke: var(--c);
+}
+
+/* -------------------------------------------------------------------- bars */
+
+.bars {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Labels arrive after the board (or the item before) has faded; the bars then grow in script. */
+.bars-svg {
+  display: block;
+  overflow: visible;
+  animation: board-in 420ms ease 180ms backwards;
+}
+
+.bars-zero {
+  stroke: var(--board-rule);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.bar-state {
+  transition: opacity 360ms ease;
+}
+
+.bars.has-focus .bar:not(.is-focus) .bar-state {
+  opacity: 0.34;
+}
+
+.bar-fill {
+  fill: var(--c);
+  transition: fill 360ms ease;
+}
+
+.bar-label {
+  fill: var(--muted);
+  font-size: 12.5px;
+  font-weight: 450;
+  transition: fill 360ms ease;
+}
+
+.bar.is-focus .bar-label {
+  fill: var(--text);
+}
+
+.bar-value text {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bar-badge {
+  opacity: 0;
+  transition: opacity 420ms ease;
+}
+
+.bar-badge[data-in] {
+  opacity: 1;
+}
+
+.bar-badge rect {
+  fill: color-mix(in srgb, var(--c) 16%, transparent);
+}
+
+.bar-badge text {
+  fill: var(--c);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------ under the stage */
+
+/* The board under the stage is short: tighter margins and a smaller formula. */
+@media (max-width: 860px) {
+  .board-view {
+    gap: 12px;
+    padding: 16px 18px 18px;
+  }
+  .formula-math {
+    font-size: calc(19px * var(--fit));
+  }
+}
+
+/* ---------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .board-dock,
+  .board,
+  .board * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

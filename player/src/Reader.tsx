@@ -1,6 +1,7 @@
 import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, cameraView, initialView, readingScale } from './camera';
+import type { View } from './camera';
 import { EMPTY_BOARD, TourEngine } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutPages } from './layout';
@@ -11,6 +12,7 @@ import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
 import type { Doc } from './types';
+import { BoardSplit } from './components/Board';
 import { ControlBar } from './components/ControlBar';
 import type { DebugPage } from './components/PageView';
 import { Problems } from './components/Problems';
@@ -269,6 +271,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   );
 
   // Camera: frame the engine's current camera command; re-frame instantly on resize.
+  // `framed` is the last command and the view chosen for it, so a resize can frame it again.
+  const framed = useRef<{ cmd: CameraCommand; view: View } | null>(null);
   const frame = useCallback(
     (cmd: CameraCommand, instant: boolean) => {
       if (!layout || !resolver) return;
@@ -279,6 +283,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         if (!view) return;
         if (instant) camera.jumpTo(view);
         else camera.animateTo(view);
+        framed.current = { cmd, view: camera.targetView };
       } catch (err) {
         console.warn('[camera] could not frame', cmd.action, err);
       }
@@ -318,9 +323,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       camera.jumpTo(viewFromPosition(layout, camera.viewport, savedPosition.current));
       return;
     }
-    // Reflow preserves the page-relative reading position, including restored/manual navigation.
-    camera.jumpTo(camera.getView());
-  }, [camera, layout]);
+    // While the camera still shows the target it last framed, the new size (the board opening or
+    // closing, a window resize) frames that target again, so it stays whole and in view. Otherwise
+    // reflow preserves the page-relative reading position, including restored/manual navigation.
+    const last = framed.current;
+    if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating);
+    else camera.jumpTo(camera.getView());
+  }, [camera, layout, frame]);
 
   useEffect(() => {
     if (!engine) return;
@@ -832,15 +841,17 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           </button>
         </div>
         {layout ? (
-          <Stage
-            pdf={loaded?.pdf ?? null}
-            layout={layout}
-            camera={camera}
-            scene={scene}
-            debugPages={debug ? debugPages : null}
-            onViewportChange={onViewportChange}
-            onCopyId={onCopyId}
-          />
+          <BoardSplit board={state.board} camera={camera}>
+            <Stage
+              pdf={loaded?.pdf ?? null}
+              layout={layout}
+              camera={camera}
+              scene={scene}
+              debugPages={debug ? debugPages : null}
+              onViewportChange={onViewportChange}
+              onCopyId={onCopyId}
+            />
+          </BoardSplit>
         ) : (
           <div className="viewport loading">{fatal ? `Could not load the paper: ${fatal}` : 'Loading paper…'}</div>
         )}

@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { project } from '../camera';
-import type { Camera, ScreenRect, Viewport } from '../camera';
+import type { Camera, ScreenRect, View, Viewport } from '../camera';
 import { STROKE } from '../colors';
 import { parseNote } from '../markup';
-import type { SceneLabel, SceneNote } from '../scene';
+import type { PenLabelSide, SceneLabel, SceneNote } from '../scene';
 
 type Side = 'right' | 'left' | 'top' | 'bottom';
 
@@ -11,6 +11,10 @@ const GAP = 14;
 const EDGE = 10;
 // A label chip is about this tall; inside a box it stays this far above the box's bottom.
 const LABEL_H = 22;
+// Between a pen label and the point it hangs from.
+const PEN_GAP = 6;
+// A pen mark smaller than this on screen (zoomed far out) shows no label.
+const PEN_MIN_MARK = 32;
 const SIDES: Side[] = ['right', 'left', 'bottom', 'top'];
 const OPPOSITE: Record<Side, Side> = { right: 'left', left: 'right', top: 'bottom', bottom: 'top' };
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(lo, hi), Math.max(lo, v));
@@ -29,8 +33,33 @@ export function labelPosition(r: ScreenRect, vp: Viewport): { left: number; top:
 }
 
 /**
- * Notes and box labels live in screen space above the viewport, so they stay readable at any zoom.
- * They are re-projected through the camera on every camera frame.
+ * Where a pen label goes, from the screen point it hangs from: on the given side of an arrow's
+ * tail, or up and to the right of a circle. Always inside the viewport.
+ */
+export function penLabelPosition(
+  x: number,
+  y: number,
+  side: PenLabelSide,
+  size: { w: number; h: number },
+  vp: Viewport,
+): { left: number; top: number } {
+  const { w, h } = size;
+  const [left, top] =
+    side === 'left'
+      ? [x - PEN_GAP - w, y - h / 2]
+      : side === 'right'
+        ? [x + PEN_GAP, y - h / 2]
+        : side === 'top'
+          ? [x - w / 2, y - PEN_GAP - h]
+          : side === 'bottom'
+            ? [x - w / 2, y + PEN_GAP]
+            : [x + PEN_GAP, y - h - PEN_GAP];
+  return { left: clamp(left, EDGE, vp.width - w - EDGE), top: clamp(top, EDGE, vp.height - h - EDGE) };
+}
+
+/**
+ * Notes and box and pen labels live in screen space above the viewport, so they stay readable at
+ * any zoom. They are re-projected through the camera on every camera frame.
  */
 export function ScreenLayer({ camera, notes, labels }: { camera: Camera; notes: SceneNote[]; labels: SceneLabel[] }) {
   const view = useSyncExternalStore(camera.subscribe, camera.getView);
@@ -38,6 +67,7 @@ export function ScreenLayer({ camera, notes, labels }: { camera: Camera; notes: 
   return (
     <div className="screen-layer">
       {labels.map((l) => {
+        if (l.pin) return <PenLabel key={l.key} label={l} pin={l.pin} view={view} vp={vp} />;
         const pos = labelPosition(project(l.rect, view, vp), vp);
         if (!pos) return null;
         return (
@@ -84,6 +114,44 @@ export function chooseSide(pref: SceneNote['side'], a: ScreenRect, size: { w: nu
   }
   if (current && fits(current)) return current;
   return SIDES.reduce((best, s) => (room[s] / need[s] > room[best] / need[best] ? s : best));
+}
+
+interface PenLabelProps {
+  label: SceneLabel;
+  pin: NonNullable<SceneLabel['pin']>;
+  view: View;
+  vp: Viewport;
+}
+
+/** A pen mark's label, measured so it can be kept inside the viewport. */
+function PenLabel({ label, pin, view, vp }: PenLabelProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: LABEL_H });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setSize({ w: el.offsetWidth, h: el.offsetHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const at = project([pin.x, pin.y, pin.x, pin.y], view, vp);
+  const { left, top } = penLabelPosition(at.left, at.top, pin.side, size, vp);
+  // Stays mounted while its mark is off screen or tiny, so it fades in once rather than on every return.
+  const mark = project(label.rect, view, vp);
+  const hidden = !onScreen(mark, vp) || Math.max(mark.right - mark.left, mark.bottom - mark.top) < PEN_MIN_MARK;
+  return (
+    <div
+      ref={ref}
+      className="box-label pen-label"
+      style={{ left, top, background: STROKE[label.color], visibility: hidden ? 'hidden' : undefined }}
+    >
+      {label.text}
+    </div>
+  );
 }
 
 function placeCard(side: Side, a: ScreenRect, size: { w: number; h: number }, vp: Viewport) {
