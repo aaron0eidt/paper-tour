@@ -100,6 +100,16 @@ export async function createApp(options: Options) {
         { schema: { params: documentParams } },
         async (req) => service.complete(owner(req), req.params.id),
       );
+      api.post<{ Params: { id: string }; Body: { regenerate?: boolean } | undefined }>(
+        '/documents/:id/tours',
+        {
+          preValidation: async (req) => {
+            if (req.body === undefined) req.body = {};
+          },
+          schema: { params: documentParams, body: objectBody({ regenerate: { type: 'boolean' } }, []) },
+        },
+        async (req) => service.generateTour(owner(req), req.params.id, req.body?.regenerate ?? false),
+      );
       api.post<{ Params: { id: string } }>(
         '/documents/:id/analyze',
         { schema: { params: documentParams } },

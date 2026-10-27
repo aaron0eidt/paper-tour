@@ -1,13 +1,31 @@
 import { config } from './config';
 import { Database } from './db';
 import { storageClient } from './storage';
-import { createQueue, ANALYZE, DELETE, CLEANUP } from './queue';
+import { createQueue, ANALYZE, DELETE, CLEANUP, GENERATE_TOUR } from './queue';
 import { AnalysisWorker } from './worker';
+import { TourWorker } from './tour-worker';
+import { createMuseTourGenerator } from './muse/generator';
 const c = config();
 const db = new Database(c.databaseUrl);
 const { storage } = storageClient(c.supabaseUrl, c.serviceKey);
-const { boss } = await createQueue(c.databaseUrl);
-const worker = new AnalysisWorker(db, storage, c);
+const { boss, enqueue } = await createQueue(c.databaseUrl);
+const worker = new AnalysisWorker(db, storage, c, enqueue);
+const tourWorker = new TourWorker(db, storage, c, createMuseTourGenerator(c.muse));
+await tourWorker.reconcile(enqueue);
+await boss.work<{ documentId: string; analysisId: string; generationId: string }>(
+  GENERATE_TOUR,
+  { batchSize: 1, includeMetadata: true },
+  async (jobs) => {
+    for (const job of jobs)
+      await tourWorker.generate(
+        job.data.documentId,
+        job.data.analysisId,
+        job.data.generationId,
+        job.retryCount >= 2,
+        job.signal,
+      );
+  },
+);
 await boss.work<{ documentId: string; analysisId: string }>(
   ANALYZE,
   { batchSize: 1, includeMetadata: true },

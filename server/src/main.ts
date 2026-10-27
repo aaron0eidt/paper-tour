@@ -10,7 +10,7 @@ const db = new Database(c.databaseUrl);
 const { storage, authenticate } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const app = await createApp({
-  service: new DocumentService(db, storage, enqueue, c.maxBytes),
+  service: new DocumentService(db, storage, enqueue, c.maxBytes, c.muse.model),
   authenticate,
   origins: c.origins,
   spaDir: resolve(ROOT, 'player/dist'),

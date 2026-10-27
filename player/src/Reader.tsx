@@ -15,6 +15,8 @@ import type { DebugPage } from './components/PageView';
 import { Problems } from './components/Problems';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
+import { TourGeneration } from './components/TourGeneration';
+import { isTourGenerationActive } from './library/tourGeneration';
 import { apiRequest, ApiRequestError, getSupabase } from './library/client';
 import type { DocumentManifest, ReaderState, SearchHit } from '../../shared/contracts';
 import type { OverlayEntry } from './engine';
@@ -103,6 +105,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [selection, setSelection] = useState<OverlayEntry[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [manifestRefresh, setManifestRefresh] = useState(0);
   const restoredView = useRef(false);
   const savedPosition = useRef<ReaderState | null>(null);
   const loadedRef = useRef<Loaded | null>(null);
@@ -189,7 +192,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           const working =
             !current ||
             current.document.fileStatus === 'uploading' ||
-            ['queued', 'processing'].includes(current.analysis?.status ?? '');
+            ['queued', 'processing'].includes(current.analysis?.status ?? '') ||
+            isTourGenerationActive(current.tourGeneration) ||
+            (!!current.doc && !current.tours.length && !current.tourGeneration);
           if (!document.hidden && (working || Date.now() - lastPoll > 60_000)) void refresh();
         }, 4000)
       : undefined;
@@ -197,7 +202,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       alive = false;
       clearInterval(interval);
     };
-  }, [params.paper, documentId, activeTour, onBack]);
+  }, [params.paper, documentId, activeTour, onBack, manifestRefresh]);
 
   useEffect(() => {
     if (!documentId) return;
@@ -595,6 +600,21 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 Tour
               </button>
             </div>
+            {documentId && manifest && (manifest.tourGeneration || !manifest.tours.length) && (
+              <TourGeneration
+                documentId={documentId}
+                generation={manifest.tourGeneration}
+                canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
+                onChanged={() => setManifestRefresh((value) => value + 1)}
+                onOpenTour={(tourId) => {
+                  engine?.pause();
+                  setSelection([]);
+                  setActiveTour(tourId);
+                  setTab('tour');
+                }}
+                compact
+              />
+            )}
             {!!manifest?.tours.length && (
               <label className="reader-tour-picker">
                 Saved tour

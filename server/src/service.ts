@@ -9,15 +9,17 @@ import type {
   ReaderState,
   SearchHit,
   UploadReservation,
+  TourGenerationSummary,
 } from '../../shared/contracts';
 import type { Doc, Tour } from '../../shared/paper';
 import { Database, type Db } from './db';
 import { HttpError, missing } from './errors';
 import { BUCKET, type FileStorage } from './storage';
+import { ensureTourGeneration, generationSummary } from './tour-worker';
 
 export type Enqueue = (
-  kind: 'analyze' | 'delete',
-  data: { documentId: string; analysisId?: string },
+  kind: 'analyze' | 'delete' | 'generate_tour',
+  data: { documentId: string; analysisId?: string; generationId?: string },
   db?: Db,
 ) => Promise<void>;
 type Row = QueryResultRow;
@@ -27,6 +29,7 @@ export interface Library {
   list(owner: string): Promise<DocumentSummary[]>;
   reserve(owner: string, filename: string, size: number): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
+  generateTour(owner: string, id: string, regenerate?: boolean): Promise<{ generation: TourGenerationSummary }>;
   analyze(owner: string, id: string): Promise<{ analysisId: string }>;
   manifest(owner: string, id: string, tourId?: string): Promise<DocumentManifest>;
   rename(owner: string, id: string, title: string): Promise<DocumentSummary>;
@@ -52,6 +55,7 @@ export class DocumentService implements Library {
     readonly storage: FileStorage,
     readonly enqueue: Enqueue,
     readonly maxBytes = 26214400,
+    readonly tourModel = process.env.MUSE_MODEL ?? 'muse-spark-1.3',
   ) {}
   async owned(owner: string, id: string, db: Db = this.db.pool, lock = false): Promise<Row> {
     const { rows } = await db.query(
@@ -71,6 +75,7 @@ export class DocumentService implements Library {
       analysisError: row.analysis_error ?? null,
       thumbnailUrl: row.thumbnail_path ? await this.storage.sign(row.thumbnail_path) : null,
       tourCount: Number(row.tour_count ?? 0),
+      tourGeneration: row.tour_generation ? generationSummary(row.tour_generation) : null,
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
       lastOpenedAt: row.last_opened_at ? iso(row.last_opened_at) : null,
@@ -78,7 +83,8 @@ export class DocumentService implements Library {
   }
   private selectSummary = `select d.*,a.status as analysis_status,a.error as analysis_error,
     (select storage_path from assets where document_id=d.id and analysis_id=d.current_analysis_id and kind='thumbnail' limit 1) as thumbnail_path,
-    (select count(*) from tours t where t.document_id=d.id) as tour_count
+    (select count(*) from tours t where t.document_id=d.id) as tour_count,
+    (select to_jsonb(g) from tour_generations g where g.document_id=d.id and g.analysis_id=d.current_analysis_id order by g.created_at desc,g.id desc limit 1) as tour_generation
     from documents d left join lateral(select status,error from analyses where document_id=d.id order by created_at desc,id desc limit 1) a on true`;
   async list(owner: string) {
     const { rows } = await this.db.query(
@@ -149,6 +155,28 @@ export class DocumentService implements Library {
       if (d.file_status !== 'uploaded')
         throw new HttpError(409, 'pdf_not_ready', 'Complete a valid PDF upload before analyzing it.');
       return this.createAnalysis(tx, id);
+    });
+  }
+  async generateTour(owner: string, id: string, regenerate = false) {
+    return this.db.transaction(async (tx) => {
+      const document = await this.owned(owner, id, tx, true);
+      const {
+        rows: [analysis],
+      } = await tx.query("select id from analyses where document_id=$1 and id=$2 and status in ('ready','limited')", [
+        id,
+        document.current_analysis_id,
+      ]);
+      if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
+      const generation = await ensureTourGeneration(
+        tx,
+        this.enqueue,
+        id,
+        analysis.id,
+        this.tourModel,
+        true,
+        regenerate,
+      );
+      return { generation: generationSummary(generation) };
     });
   }
   async rename(owner: string, id: string, title: string) {
@@ -251,6 +279,7 @@ export class DocumentService implements Library {
           : null,
       assets,
       readerState: saved?.state ?? null,
+      tourGeneration: row.tour_generation ? generationSummary(row.tour_generation) : null,
     };
   }
   async saveState(owner: string, id: string, state: ReaderState) {

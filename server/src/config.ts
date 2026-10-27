@@ -7,6 +7,13 @@ try {
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
 }
+export interface MuseConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  language: string;
+  timeoutMs: number;
+}
 export interface Config {
   databaseUrl: string;
   supabaseUrl: string;
@@ -18,6 +25,7 @@ export interface Config {
   maxBytes: number;
   maxPages: number;
   analysisTimeoutMs: number;
+  muse: MuseConfig;
 }
 export function config(): Config {
   const needed = (name: string) => {
@@ -36,5 +44,12 @@ export function config(): Config {
     maxBytes: 25 * 1024 * 1024,
     maxPages: 100,
     analysisTimeoutMs: 300_000,
+    muse: {
+      apiKey: process.env.MODEL_API_KEY?.trim() || process.env.MUSE_API_KEY?.trim() || '',
+      baseUrl: process.env.MUSE_BASE_URL ?? 'https://api.meta.ai/v1',
+      model: process.env.MUSE_MODEL ?? 'muse-spark-1.3',
+      language: process.env.MUSE_TOUR_LANGUAGE ?? 'en-US',
+      timeoutMs: Math.max(1000, Math.min(300_000, Number(process.env.MUSE_TIMEOUT_MS) || 300_000)),
+    },
   };
 }

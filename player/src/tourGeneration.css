@@ -1,0 +1,99 @@
+.tour-generation {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+.tour-generation-content {
+  flex: 1;
+  min-width: 0;
+}
+.tour-generation strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.45;
+}
+.tour-generation p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tour-generation.pending {
+  border-color: #354866;
+}
+.tour-generation.pending strong {
+  color: #c0d2f8;
+}
+.tour-generation.ready strong {
+  color: #a8c9cc;
+}
+.tour-generation.failed strong {
+  color: #f0b4b4;
+}
+.tour-generation progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-top: 10px;
+  accent-color: var(--accent);
+}
+.tour-generation button {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border: 1px solid #465775;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tour-generation button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.tour-generation button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.tour-generation button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tour-generation p.tour-generation-error {
+  color: #f0b4b4;
+}
+.tour-generation.compact {
+  margin-top: 13px;
+  padding: 11px 12px;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.tour-generation.compact .tour-generation-content {
+  flex-basis: 100%;
+}
+.tour-generation.compact strong {
+  font-size: 12px;
+}
+.tour-generation.compact p {
+  font-size: 11px;
+}
+.tour-generation.compact button {
+  font-size: 11px;
+  padding: 6px 9px;
+}
+.tour-generation .tour-model-used { overflow-wrap: anywhere; color: var(--faint); font-size: 10px; }
+@media (max-width: 600px) {
+  .tour-generation {
+    align-items: start;
+    flex-wrap: wrap;
+  }
+  .tour-generation-content {
+    flex-basis: 100%;
+  }
+}

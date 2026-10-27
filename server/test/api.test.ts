@@ -149,3 +149,46 @@ test('malformed JSON and empty JSON bodies remain client errors', async () => {
     await app.close();
   }
 });
+
+test('tour regeneration is explicit and accepts the existing empty-body request', async () => {
+  const values: boolean[] = [];
+  const app = await createApp({
+    authenticate: async () => 'owner',
+    service: service({
+      generateTour: async (_owner, _id, regenerate) => {
+        values.push(Boolean(regenerate));
+        return {
+          generation: {
+            id,
+            analysisId: id,
+            status: 'ready',
+            stage: 'validating',
+            imagesDone: 1,
+            imagesTotal: 1,
+            error: null,
+            model: 'test',
+            tourId: id,
+          },
+        };
+      },
+    }),
+  });
+  try {
+    const empty = await app.inject({
+      method: 'POST',
+      url: `/api/documents/${id}/tours`,
+      headers: { authorization: 'Bearer valid' },
+    });
+    assert.equal(empty.statusCode, 200);
+    const explicit = await app.inject({
+      method: 'POST',
+      url: `/api/documents/${id}/tours`,
+      headers: { authorization: 'Bearer valid' },
+      payload: { regenerate: true },
+    });
+    assert.equal(explicit.statusCode, 200);
+    assert.deepEqual(values, [false, true]);
+  } finally {
+    await app.close();
+  }
+});

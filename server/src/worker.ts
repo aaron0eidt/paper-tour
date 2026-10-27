@@ -11,6 +11,8 @@ import { Database, type Db } from './db';
 import { ProcessingError } from './errors';
 import type { FileStorage } from './storage';
 import { indexElements } from './elements';
+import { ensureTourGeneration } from './tour-worker';
+import type { Enqueue } from './service';
 const execute = promisify(execFile);
 export interface ProcessResult {
   parser_version: string;
@@ -100,6 +102,7 @@ export class AnalysisWorker {
     readonly db: Database,
     readonly storage: FileStorage,
     readonly config: Config,
+    readonly enqueue?: Enqueue,
   ) {}
   private async locked<T>(documentId: string, run: () => Promise<T>): Promise<T> {
     const connection = await this.db.pool.connect();
@@ -274,6 +277,10 @@ export class AnalysisWorker {
         p.tour.title,
         p.tour,
       ]);
+    else {
+      if (!this.enqueue) throw new Error('Tour job enqueue is required for analysis publication.');
+      await ensureTourGeneration(tx, this.enqueue, documentId, analysisId, this.config.muse.model);
+    }
   }
   async remove(documentId: string) {
     await this.locked(documentId, async () => {

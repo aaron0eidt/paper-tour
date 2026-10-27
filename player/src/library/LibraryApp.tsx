@@ -5,6 +5,8 @@ import { DocumentDialog } from './DocumentDialog';
 import { UploadPanel } from './UploadPanel';
 import { apiRequest, isLibraryConfigured, signOut } from './client';
 import { useSession } from './useSession';
+import { isTourGenerationActive } from './tourGeneration';
+import { TourGeneration } from '../components/TourGeneration';
 import '../library.css';
 
 interface Props {
@@ -108,7 +110,11 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
           (item) =>
             item.analysisStatus === 'queued' ||
             item.analysisStatus === 'processing' ||
-            item.fileStatus === 'uploading',
+            item.fileStatus === 'uploading' ||
+            isTourGenerationActive(item.tourGeneration) ||
+            ((item.analysisStatus === 'ready' || item.analysisStatus === 'limited') &&
+              !item.tourCount &&
+              !item.tourGeneration),
         );
         if (processing) timer = setTimeout(() => void load(), 3000);
       } catch (cause) {
@@ -191,7 +197,7 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
           onChanged={refreshDocuments}
           onUploaded={() => {
             setNotice(
-              'PDF saved. Its contents are being prepared; you can open it while this runs.',
+              'PDF saved. We’ll prepare its contents, then create a guided tour. You can read it while this runs.',
             );
             refreshDocuments();
           }}
@@ -280,6 +286,7 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
               onRename={() => setDialog({ document: item, mode: 'rename' })}
               onDelete={() => setDialog({ document: item, mode: 'delete' })}
               onRetry={() => void retryAnalysis(item)}
+              onTourChanged={refreshDocuments}
             />
           ))}
         </div>
@@ -304,6 +311,7 @@ function DocumentCard({
   onRename,
   onDelete,
   onRetry,
+  onTourChanged,
 }: {
   document: DocumentSummary;
   busy: boolean;
@@ -311,6 +319,7 @@ function DocumentCard({
   onRename(): void;
   onDelete(): void;
   onRetry(): void;
+  onTourChanged(): void;
 }) {
   const status =
     item.fileStatus === 'invalid'
@@ -329,6 +338,7 @@ function DocumentCard({
                   ? { label: 'Analysis interrupted', kind: 'failed' }
                   : { label: 'PDF saved', kind: 'ready' };
   const canOpen = item.fileStatus === 'uploaded';
+  const analysisReady = item.analysisStatus === 'ready' || item.analysisStatus === 'limited';
   return (
     <article className="library-document">
       <button
@@ -372,6 +382,16 @@ function DocumentCard({
           <span>Added {formatDate(item.createdAt)}</span>
         </p>
         {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
+        {canOpen && (item.tourGeneration || (analysisReady && !item.tourCount)) && (
+          <TourGeneration
+            documentId={item.id}
+            generation={item.tourGeneration}
+            onChanged={onTourChanged}
+            canGenerate={analysisReady || !!item.tourGeneration}
+            onOpenTour={() => onOpen()}
+            compact
+          />
+        )}
         <div className="library-document-actions">
           <button type="button" className="library-text-button" disabled={!canOpen} onClick={onOpen}>
             Open paper

@@ -10,6 +10,7 @@
     "db:migrate": "npm --prefix server run migrate",
     "import:demo": "npm --prefix server run import-demo --",
     "test:smoke": "node scripts/smoke-local.mjs",
+    "test:smoke:muse": "node scripts/smoke-muse.mjs",
     "test:integration": "node scripts/test-integration.mjs"
   },
   "engines": {

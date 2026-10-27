@@ -2,6 +2,19 @@ import type { Doc, Tour, BBox } from './paper';
 
 export type FileStatus = 'uploading' | 'uploaded' | 'invalid';
 export type AnalysisStatus = 'queued' | 'processing' | 'ready' | 'limited' | 'failed';
+export type TourGenerationStatus = 'queued' | 'generating' | 'ready' | 'failed' | 'needs_configuration';
+export type TourGenerationStage = 'preparing' | 'images' | 'writing' | 'validating';
+export interface TourGenerationSummary {
+  id: string;
+  analysisId: string;
+  status: TourGenerationStatus;
+  stage: TourGenerationStage;
+  imagesDone: number;
+  imagesTotal: number;
+  error: string | null;
+  model: string;
+  tourId: string | null;
+}
 export interface ElementRef {
   documentId: string;
   analysisId: string;
@@ -17,6 +30,7 @@ export interface DocumentSummary {
   analysisError: string | null;
   thumbnailUrl: string | null;
   tourCount: number;
+  tourGeneration?: TourGenerationSummary | null;
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string | null;
@@ -49,6 +63,7 @@ export interface DocumentManifest {
   doc: Doc | null;
   tours: TourSummary[];
   selectedTour: { id: string; analysisId: string; doc: Doc; tour: Tour } | null;
+  tourGeneration?: TourGenerationSummary | null;
   assets: Record<string, string>;
   readerState: ReaderState | null;
 }
