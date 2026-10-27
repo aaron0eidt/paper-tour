@@ -118,6 +118,7 @@ export class MuseClient {
     signal?: AbortSignal,
     onDelta?: (text: string) => Promise<void>,
     onUsage?: (usage: ModelUsage) => Promise<void>,
+    effort: 'low' | 'medium' | 'high' = 'medium',
   ): Promise<Completion> {
     if (!this.config.apiKey.trim())
       throw new ProcessingError('muse_not_configured', 'Tour creation needs a Muse API key on the server.');
@@ -132,7 +133,7 @@ export class MuseClient {
         body: JSON.stringify({
           model: this.config.model,
           ...(onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
-          reasoning_effort: 'medium',
+          reasoning_effort: effort,
           messages,
           max_tokens: maxTokens,
           response_format: { type: 'json_schema', json_schema: { name, strict: false, schema } },

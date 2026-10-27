@@ -41,6 +41,24 @@
         "$ref": "#/$defs/voice"
       }
     },
+    "preset": {
+      "enum": [
+        "quick",
+        "standard",
+        "deep"
+      ],
+      "description": "Length the tour was written for: quick (about 6 steps), standard (about 10-12) or deep (up to 24)."
+    },
+    "suggested_questions": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "description": "Questions offered to the learner when the tour ends."
+    },
     "chapters": {
       "type": "array",
       "minItems": 1,

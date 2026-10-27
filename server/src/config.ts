@@ -26,6 +26,8 @@ export interface Config {
   maxPages: number;
   analysisTimeoutMs: number;
   muse: MuseConfig;
+  /** harness: short main-idea tours (notes/HARNESS.md); muse: the earlier one-shot, page-by-page writer. */
+  tours: { writer: 'harness' | 'muse'; preset: 'quick' | 'standard' | 'deep' };
   agent?: { enabled: boolean; maxTurns: number; maxOutputTokens: number; maxRuntimeMs: number };
 }
 export function config(): Config {
@@ -40,6 +42,11 @@ export function config(): Config {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive integer.`);
     return value;
   };
+  const choice = <T extends string>(name: string, options: readonly T[], fallback: T): T => {
+    const value = process.env[name] ?? fallback;
+    if (!options.includes(value as T)) throw new Error(`${name} must be one of ${options.join(', ')}.`);
+    return value as T;
+  };
   return {
     databaseUrl: needed('DATABASE_URL'),
     supabaseUrl: needed('SUPABASE_URL'),
@@ -51,6 +58,10 @@ export function config(): Config {
     maxBytes: 25 * 1024 * 1024,
     maxPages: 100,
     analysisTimeoutMs: 300_000,
+    tours: {
+      writer: choice('TOUR_WRITER', ['harness', 'muse'], 'harness'),
+      preset: choice('TOUR_PRESET', ['quick', 'standard', 'deep'], 'standard'),
+    },
     agent: {
       enabled: process.env.PAPER_AGENT_ENABLED === 'true',
       maxTurns: budget('PAPER_AGENT_MAX_TURNS', 64),

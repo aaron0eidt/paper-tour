@@ -202,6 +202,10 @@ export interface Tour {
   doc_sha256?: string;
   level?: 'intro' | 'grad' | 'expert';
   voices?: Record<string, Voice>;
+  /** Length the tour was written for. */
+  preset?: 'quick' | 'standard' | 'deep';
+  /** Questions offered to the learner when the tour ends. */
+  suggested_questions?: string[];
   chapters: Chapter[];
 }
 
