@@ -3,7 +3,7 @@ import type { Doc } from '../../../shared/paper';
 import { MAX_TOUR_STEPS, walkthroughGoals } from './planning';
 
 // Bump when changing tour behavior; persisted generations record this version.
-export const PROMPT_VERSION = 'paper-tour-muse@3';
+export const PROMPT_VERSION = 'paper-tour-muse@4';
 export const INSPECTION_VERSION = 'paper-tour-visuals@1';
 
 export const INSPECTION_INSTRUCTIONS = `You are the visual reader for a scientific paper tutor. Read the complete paper context to interpret the attached page images, figures and tables in context.

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ROOT } from '../src/config';
 import { validateVisualDirection, visualFrame, checkComponents } from '../src/muse/visual-direction';
-import { materializeTour, type TourDraft } from '../src/muse/schema';
+import { materializeTour, validateDraft, type TourDraft } from '../src/muse/schema';
 import type { Doc, Tour, Region } from '../../shared/paper';
 const doc: Doc = {
   schema: 'paper-tour/doc@0.1',
@@ -162,4 +162,44 @@ test('a prose anchor cannot silently change a visual camera coordinate frame', (
     () => validateVisualDirection(d, doc, observations, true),
     (error) => JSON.stringify((error as any).problems).includes('coordinate frame'),
   );
+});
+
+test('spoken phrases resolve to exact narration words and never enter the player schema', () => {
+  const d = draft();
+  d.chapters[0].steps[0].actions[1] = {
+    type: 'box',
+    target: 'fig1',
+    region: left,
+    at_word: 1,
+    at_phrase: 'INPUT stage',
+  };
+  const normalized = validateDraft(d, doc).draft;
+  assert.equal(normalized.chapters[0].steps[0].actions[1].at_word, 3);
+  assert.equal(normalized.chapters[0].steps[0].actions[1].at_phrase, undefined);
+  assert.equal(d.chapters[0].steps[0].actions[1].at_word, 1, 'validation must not mutate provider input');
+  const result = materializeTour(d, doc, 'test', 'en-US');
+  assert.deepEqual(result.tour.chapters[0].steps[0].actions[1], {
+    type: 'box',
+    target: 'fig1',
+    region: left,
+    at_word: 3,
+  });
+});
+
+test('missing or ambiguous speech anchors are returned as repairable errors', () => {
+  const d = draft();
+  d.chapters[0].steps[0].say = 'Input flows to output; input is reused.';
+  const action = d.chapters[0].steps[0].actions[1];
+  action.at_phrase = 'input';
+  assert.throws(
+    () => validateDraft(d, doc),
+    (e) => JSON.stringify((e as any).problems).includes('exactly once'),
+  );
+  action.at_phrase = 'not spoken';
+  assert.throws(
+    () => validateDraft(d, doc),
+    (e) => JSON.stringify((e as any).problems).includes('exactly once'),
+  );
+  action.at_phrase = 'input is reused';
+  assert.equal(validateDraft(d, doc).draft.chapters[0].steps[0].actions[1].at_word, 4);
 });

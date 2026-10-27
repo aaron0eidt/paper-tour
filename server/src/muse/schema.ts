@@ -9,6 +9,14 @@ import { MAX_TOUR_STEPS, textReadingOrder, walkthroughGoals } from './planning';
 
 const canonical = JSON.parse(readFileSync(resolve(ROOT, 'schema/tour.schema.json'), 'utf8'));
 const defs = structuredClone(canonical.$defs);
+// Draft-only speech anchors are resolved once, before saving canonical player actions.
+for (const action of defs.action.oneOf)
+  action.properties.at_phrase = {
+    type: 'string',
+    minLength: 1,
+    maxLength: 180,
+    description: 'A unique phrase copied from this step narration. Triggers at its first word; overrides at_word.',
+  };
 // Provider output carries explicit evidence; server supplies immutable document identity.
 const step = defs.step;
 step.properties.evidence = { type: 'array', minItems: 1, maxItems: 12, items: { type: 'string', minLength: 1 } };
@@ -33,11 +41,12 @@ export const TOUR_DRAFT_SCHEMA = {
 const ajv = new Ajv2020({ strict: false, allErrors: true });
 const checkDraft = ajv.compile(TOUR_DRAFT_SCHEMA);
 const checkCanonical = ajv.compile(canonical);
+export type DraftAction = Action & { at_phrase?: string };
 export interface DraftStep {
   id: string;
   source: string;
   say: string;
-  actions: Action[];
+  actions: DraftAction[];
   evidence: string[];
   hold_ms?: number;
 }
@@ -55,7 +64,7 @@ export function validateDraft(
   partial = false,
 ): { draft: TourDraft; evidence: Record<string, string[]> } {
   if (!checkDraft(value)) throw new TourValidationError(formatErrors(checkDraft.errors));
-  const draft = value as unknown as TourDraft;
+  const draft = resolveSpeechAnchors(value as unknown as TourDraft);
   const elements = new Map(indexElements(doc).map((element) => [element.id, element]));
   const ids = new Set(elements.keys());
   const sentenceIds = new Set(doc.sentences.map((s) => s.id));
@@ -179,6 +188,34 @@ export class TourValidationError extends ProcessingError {
   ) {
     super('invalid_tour', 'The generated tour did not pass document validation.');
   }
+}
+/** Match narration tokens rather than asking the model to count word offsets. */
+export function resolveSpeechAnchors(value: TourDraft): TourDraft {
+  const token = (word: string) => word.toLowerCase().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '');
+  return {
+    ...value,
+    chapters: value.chapters.map((chapter) => ({
+      ...chapter,
+      steps: chapter.steps.map((step) => {
+        const words = step.say.trim().split(/\s+/).map(token);
+        return {
+          ...step,
+          actions: step.actions.map(({ at_phrase, ...action }) => {
+            if (at_phrase === undefined) return action;
+            const phrase = at_phrase.trim().split(/\s+/).map(token);
+            const matches = words.flatMap((_, index) =>
+              phrase.every((word, offset) => word === words[index + offset]) ? [index] : [],
+            );
+            if (!phrase.some(Boolean) || matches.length !== 1)
+              throw new TourValidationError([
+                `${step.id}: at_phrase ${JSON.stringify(at_phrase)} must occur exactly once in say; copy a longer unique phrase from the narration.`,
+              ]);
+            return { ...action, at_word: matches[0] };
+          }),
+        };
+      }),
+    })),
+  };
 }
 export function materializeTour(value: unknown, doc: Doc, documentId: string, language: string) {
   const { draft, evidence } = validateDraft(value, doc);
