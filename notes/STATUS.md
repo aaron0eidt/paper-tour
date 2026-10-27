@@ -19,23 +19,27 @@ The product plan is in [PLAN.md](PLAN.md).
 reproduces the committed file byte for byte. Then run `validate.py`, and look at the `check_tour.py` renders of the
 steps you changed.
 
-**Review round on the scaffold, stopped early:** six reviewers each looked at one area, and a skeptic verified every
-finding. 37 findings were confirmed and 2 refuted. All of them, with evidence and suggested fixes, are in
-[review-2026-10-26.json](review-2026-10-26.json). They predate the library app.
+**Review round on the scaffold:** six reviewers each looked at one area, and a skeptic verified every finding. 37
+findings were confirmed and 2 refuted. All of them, with evidence and suggested fixes, are in
+[review-2026-10-26.json](review-2026-10-26.json), which also records each finding's current `status`.
 - Confirmed findings by severity: 3 high (all ingestion on unseen papers), 12 medium, 22 low.
-- The ingest and player fixers were stopped partway through. Some of their edits are in the code and all checks still
-  pass, but which findings they actually fixed is not recorded, so re-check every finding before marking it done.
-- Ingest 0.2 (Nikolas) detects roman-numeral (IEEE) headings and matches captions more loosely, which may cover L1-7.
-- The README now covers L6-1 (Python 3.10+) and most of L6-3 (testing options, tour tools). The other tour and docs
-  findings (L5-*, L6-*) are open.
+- Re-checked against the current code on 10-27, except the player findings (L3-\*, L4-\*, L6-4), which are still
+  `unchecked`: 3 fixed, 7 partial, 16 open.
+- The three high findings are fixed. L1-1 (tall booktabs tables) already was; L1-2 (tables beside each other or above
+  a plot) and L1-7 (IEEE headings, run-in abstract, "TABLE I" captions) were fixed on 10-27, with regression tests in
+  `ingest/test_ingest_layout.py`.
+- Partly fixed: L1-3, L1-4, L6-1 and L6-3, and on the upload path only L1-5, L1-6 and L1-8 (`process.py` handles
+  rotated pages, bad files and scans; the `ingest.py` command line does not).
 
 **Next, in order:**
-1. Re-check and fix the high findings L1-1 (tall booktabs tables) and L1-2 (tables crossing the column gutter), and
-   confirm L1-7 (roman-numeral headings).
-2. Fix the medium findings, then the low ones that are cheap.
-3. Real TTS with word timestamps, filling `audio` in each step; browser voices are the fallback.
-4. Voice Q&A: pause, answer with the current step as context, emit the same actions, resume.
-5. Draw a box on a figure and ask about it.
+1. Re-check the player findings, then fix the medium findings and the low ones that are cheap.
+2. Real TTS with word timestamps, filling `audio` in each step; browser voices are the fallback.
+3. Voice Q&A: pause, answer with the current step as context, emit the same actions, resume.
+4. Draw a box on a figure and ask about it.
 
 **Running the static demo:** after the README quick start, `npm run dev` in `player/` (or `npm run dev:demo` from the
 root), then open http://localhost:5174/?paper=attention. Add `&silent=1&rate=4` to test quickly without speech.
+
+**Local Supabase with Colima:** `npm run supabase:start` fails with "bind source path does not exist: /var/folders/…",
+because the experimental stack mounts a temp folder that Colima's VM cannot see (it shares only your home folder).
+Give it a temp folder inside the repo instead: `mkdir -p .data/tmp && TMPDIR=$PWD/.data/tmp npm run supabase:start`.

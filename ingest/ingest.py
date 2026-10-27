@@ -40,6 +40,8 @@ CAPTION_RE = re.compile(r"^(Figure|Fig\.?|FIGURE|FIG\.?|Table|TABLE|Tab\.)\s*([A
 NUM_HEADING_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+([A-Za-z].*)$")
 ROMAN_HEADING_RE = re.compile(r"^([IVXLCDM]{1,8})\.\s+([A-Z].*)$")
 LETTER_HEADING_RE = re.compile(r"^([A-Z](?:\.\d{1,2}){0,3})\.?\s+([A-Z].*)$")
+SUBSECTION_RE = re.compile(r"^([A-Z])\.\s+([A-Z].*)$")        # IEEE "A. Overview"
+ABSTRACT_RE = re.compile(r"^(Abstract|ABSTRACT)\b\s*[-—–:.]?\s*\S")
 EQ_TAG_RE = re.compile(r"^\(([A-Z]?\.?\d{1,3}[a-z]?)\)$")
 FIG_REF_RE = re.compile(
     r"\b(Fig(?:ure)?s?\.?|Tab(?:le)?s?\.?)\s*~?"
@@ -79,6 +81,7 @@ SUFFIX_RE = re.compile(
     r"(ing|ings|ed|ly|tion|tions|ation|ations|ization|izations|ment|ments|ness|er|ers|able|ible|"
     r"ity|ities|al|ally|ive|ively|ous|ize|ized|izes|ence|ences|ance|ances|ist|ists|ism|ful|less|est)")
 BOLD_FONT_RE = re.compile(r"bold|black|heavy|semibold|demi|-medi|cmbx|\.b$|-b$", re.I)
+ITALIC_FONT_RE = re.compile(r"italic|oblique|ital$|cmti|-it$", re.I)
 MATH_FONT_RE = re.compile(
     r"^(cmmi|cmsy|cmex|cmbsy|cmmib|msam|msbm|eufm|eusm|euex|rsfs|stmary|wasy|lasy|txmi|txsy|"
     r"txex|pxmi|pxsy|ntxmi|ntxsy|newtxmath|zxmi|mtmi|mtsy|lmmath|latinmodernmath|cambriamath|"
@@ -154,7 +157,7 @@ def rounded(r):
 # ---------------------------------------------------------------------------- text model
 
 class Word:
-    __slots__ = ("text", "bbox", "size", "sizes", "bold", "math", "letters_math", "baseline", "nchars")
+    __slots__ = ("text", "bbox", "size", "sizes", "bold", "italic", "math", "letters_math", "baseline", "nchars")
 
     def __init__(self, chars, fonts):
         # chars: (c, bbox, baseline, size, font, flags)
@@ -166,6 +169,7 @@ class Word:
         n = len(chars)
         self.nchars = n
         self.bold = sum(is_bold(c[4], c[5]) for c in chars) / n
+        self.italic = sum(is_italic(c[4], c[5]) for c in chars) / n
         self.math = sum(fonts.is_math(c[4]) for c in chars) / n
         letters = [c for c in chars if c[0].isalpha()]
         self.letters_math = sum(fonts.is_math(c[4]) for c in letters) / len(letters) if letters else 0.0
@@ -192,6 +196,7 @@ class Row:
         n = sum(w.nchars for w in self.words)
         self.nchars = n
         self.bold = sum(w.bold * w.nchars for w in self.words) / n
+        self.italic = sum(w.italic * w.nchars for w in self.words) / n
         self.math = sum(w.math * w.nchars for w in self.words) / n
         self.sizes = Counter()
         for w in self.words:
@@ -248,6 +253,10 @@ class Block:
         return self._weighted("bold")
 
     @property
+    def italic(self):
+        return self._weighted("italic")
+
+    @property
     def math(self):
         return self._weighted("math")
 
@@ -280,6 +289,7 @@ class Page:
         self.blocks = []
         self.regions = []
         self.images, self.shapes, self.hrules, self.vrules = [], [], [], []
+        self.marks = []           # shapes that are plotted curves or lines (see _is_mark)
         self.gutter = None
         self.cols = {}
         self.ordered = []         # blocks in reading order (after ordering)
@@ -305,6 +315,10 @@ class Fonts:
 
 def is_bold(font, flags):
     return bool(flags & 16) or bool(BOLD_FONT_RE.search(font))
+
+
+def is_italic(font, flags):
+    return bool(flags & 2) or bool(ITALIC_FONT_RE.search(font))
 
 
 # ---------------------------------------------------------------------------- extraction
@@ -512,6 +526,18 @@ def ends_sentence(row):
     return bool(re.search(r"[.!?:][\"”’')\]]*$", row.text))
 
 
+def bare_caption_label(row):
+    """A table caption line holding only its label ("TABLE IV"): IEEE sets the caption text below it."""
+    m = CAPTION_RE.match(row.text)
+    return bool(m) and m.group(1).lower().startswith("tab") and not row.text[m.end():].strip()
+
+
+def is_subsection_line(row):
+    """An IEEE subsection heading: "A. Overview" in italics on a line of its own."""
+    t = row.text
+    return row.italic >= 0.8 and len(row.words) <= 8 and bool(SUBSECTION_RE.match(t)) and not t.endswith(".")
+
+
 def can_join(block, prev, row, page, stats):
     if not prev.horizontal:
         return False
@@ -528,6 +554,8 @@ def can_join(block, prev, row, page, stats):
     both_math = is_display_math(prev, page, body) and is_display_math(row, page, body)
     if d <= 0.3 * size or d > size * (stats.leading + (1.0 if both_math else 0.3)):
         return False
+    if len(block.rows) == 1 and bare_caption_label(prev) and not starts_new_block(row, body):
+        return x_overlap(row.bbox, prev.bbox) > 0    # its text, in small capitals of mixed size
     if size / min(row.size, prev.size) > 1.15:
         return False
     bb = block.bbox
@@ -539,6 +567,8 @@ def can_join(block, prev, row, page, stats):
     front = page.n == 1 and row.bbox[1] < stats.front_y
     if not front and all_bold(prev) != all_bold(row):
         return False         # a bold heading line followed by text (or the other way round)
+    if is_subsection_line(prev) != is_subsection_line(row):
+        return False         # the same for an italic IEEE subsection heading
     if is_display_math(prev, page, body) != is_display_math(row, page, body):
         return False
     indent = row.bbox[0] - prev.bbox[0]
@@ -600,6 +630,17 @@ def _opacity(v):
     return 1.0 if v is None else v
 
 
+def _is_mark(drawing):
+    """A plotted curve or line: Bezier pieces or diagonal segments, which table rules, frames
+    and cell fills never have."""
+    for item in drawing.get("items", ()):
+        if item[0] == "c":
+            return True
+        if item[0] == "l" and abs(item[1].x - item[2].x) > 0.5 and abs(item[1].y - item[2].y) > 0.5:
+            return True
+    return False
+
+
 def read_graphics(page):
     """Visible images and vector paths, honouring clip paths; thin paths become rules."""
     W, H = page.width, page.height
@@ -643,6 +684,8 @@ def read_graphics(page):
             page.vrules.append(r)
         else:
             page.shapes.append(r)
+            if _is_mark(e):
+                page.marks.append(r)
 
 
 def drop_text_decorations(page):
@@ -728,9 +771,15 @@ def is_heading_like(b, body):
         return True
     if NUM_HEADING_RE.match(t) and styled and not t.endswith("."):
         return True
-    if t.lower().rstrip(".:") in UNNUMBERED_HEADINGS and styled:
+    # IEEE sets REFERENCES and its subsections at body size in regular weight: in capitals, and
+    # "A. Overview" in italics on a line of its own
+    one_row = len(b.rows) == 1
+    if t.lower().rstrip(".:") in UNNUMBERED_HEADINGS and (styled or (one_row and t.isupper())):
         return True
-    return len(b.rows) == 1 and b.bold >= 0.9 and b.size >= 1.1 * body
+    if (SUBSECTION_RE.match(t) and one_row and len(t.split()) <= 8 and not t.endswith(".")
+            and (styled or b.italic >= 0.8)):
+        return True
+    return one_row and b.bold >= 0.9 and b.size >= 1.1 * body
 
 
 def is_textlike(b, page, body, wide_frac=0.6):
@@ -796,20 +845,66 @@ def _is_cell(page, block, xs):
     return False
 
 
-def rules_linked(page, a, b):
-    """Two horizontal rules of one table: similar width, overlapping, no body text between.
+def _similar(a, b):
+    """Horizontal rules of comparable width that overlap: candidates for one table."""
+    wa, wb = width(a), width(b)
+    return x_overlap(a, b) >= 0.5 * min(wa, wb) and min(wa, wb) >= 0.6 * max(wa, wb)
+
+
+def band_has_rows(page, top, bot, xs):
+    """Some text row is centred between y=top and y=bot and overlaps xs."""
+    return any(r.horizontal and top < (r.bbox[1] + r.bbox[3]) / 2 < bot and r.bbox[2] > xs[0] and r.bbox[0] < xs[1]
+               for r in page.rows)
+
+
+def band_has_plot(page, top, bot, xs):
+    """Plotted curves cross a good part of the band between y=top and y=bot within xs."""
+    parts = [p for p in (intersect(m, (xs[0], top, xs[1], bot)) for m in page.marks) if p and height(p) >= 1]
+    return bool(parts) and width(union_all(parts)) >= 0.3 * (xs[1] - xs[0])
+
+
+def rules_linked(page, a, b, body):
+    """Two neighbouring horizontal rules of one table: similar width, overlapping, and only table
+    rows between them.
 
     Rules of the same x-extent (booktabs \\toprule, \\midrule, \\bottomrule) link across any
-    number of rows; other pairs only when they are close."""
-    wa, wb = width(a), width(b)
-    if x_overlap(a, b) < 0.5 * min(wa, wb) or min(wa, wb) < 0.6 * max(wa, wb):
+    number of rows; other pairs only when they are close. Unless they form a double rule, the
+    band between them must hold text and no plotted curves: the frame of a plot right under a
+    table, or a plot's grid lines, are not table rules."""
+    if not _similar(a, b):
         return False
     top, bot = sorted((a[1], b[1]))
+    if any(top < c[1] < bot and _similar(c, a) and _similar(c, b) for c in page.hrules):
+        return False                  # the rule between them links them
     xs = (max(a[0], b[0]), min(a[2], b[2]))
+    if bot - top > 0.8 * body and (not band_has_rows(page, top, bot, xs) or band_has_plot(page, top, bot, xs)):
+        return False
     if bot - top <= 90:
         return not barrier_between(page, top, bot, xs, True)
     same_extent = abs(a[0] - b[0]) <= 2 and abs(a[2] - b[2]) <= 2
     return same_extent and not barrier_between(page, top, bot, xs, True, cells_ok=True)
+
+
+def trim_skeleton(page, rules, down):
+    """Cut a table skeleton at the first band, going away from the caption, that holds plotted
+    curves: the rules from there on, and rules touching the vertical rules there, frame a plot."""
+    hs = sorted((r for r in rules if height(r) <= 2.5), key=lambda r: r[1], reverse=not down)
+    keep = hs[:1]
+    for prev, nxt in zip(hs, hs[1:]):
+        top, bot = sorted((prev[1], nxt[1]))
+        xs = (max(prev[0], nxt[0]), min(prev[2], nxt[2]))
+        if xs[1] > xs[0] and band_has_plot(page, top, bot, xs):
+            break
+        keep.append(nxt)
+    if len(keep) == len(hs):
+        return rules
+    y0, y1 = min(r[1] for r in keep), max(r[3] for r in keep)
+    vs = [r for r in rules if height(r) > 2.5]
+    cut = [v for v in vs if v[1] < y0 - 1.5 or v[3] > y1 + 1.5]
+    keep = [h for h in keep if not any(near(h, v, 1.5) for v in cut)]
+    if not keep:
+        return rules
+    return keep + [v for v in vs if v not in cut]
 
 
 def find_tables(page, stats):
@@ -831,7 +926,7 @@ def find_tables(page, stats):
             (a, ka), (b, kb) = rules[i], rules[j]
             linked = near(a, b, 1.5)
             if not linked and ka == kb == "h":
-                linked = rules_linked(page, a, b)
+                linked = rules_linked(page, a, b, body)
             if linked:
                 parent[find(i)] = find(j)
     groups = {}
@@ -864,9 +959,16 @@ def find_tables(page, stats):
                 best, best_gap = sk, gap
         if best is not None:
             best[2] = True
+            members = trim_skeleton(page, best[1], best[0][1] >= cb[3] - 2)
+            if members is not best[1]:
+                best[0], best[1] = union_all(members), members
             box = best[0]
-            # a table inside one column never takes text from the other column
+            # a table inside one column never takes text from the other column, nor from a
+            # table beside it (on a page whose gutter was not detected)
             col = row_class(box, page.gutter)
+            others = [sk[0] for sk in skeletons if sk is not best and y_overlap(sk[0], box) > 0]
+            lo = max([(o[2] + box[0]) / 2 for o in others if o[2] <= box[0]], default=None)
+            hi = min([(box[2] + o[0]) / 2 for o in others if o[0] >= box[2]], default=None)
             # table text, including row labels that stick out past the rules
             for b in page.blocks:
                 if b.caption:
@@ -875,7 +977,9 @@ def find_tables(page, stats):
                     inside = center_in(r.bbox, expand(best[0], 2))
                     beside = (not b.strong and best[0][1] <= (r.bbox[1] + r.bbox[3]) / 2 <= best[0][3]
                               and x_overlap(r.bbox, expand(best[0], 40, 0)) > 0
-                              and (col == "F" or r.cls == col))
+                              and (col == "F" or r.cls == col)
+                              and (lo is None or r.bbox[0] >= lo) and (hi is None or r.bbox[2] <= hi)
+                              and not any(center_in(r.bbox, expand(o, 2)) for o in others))
                     if inside or beside:
                         box = union(box, r.bbox)
             region = Region("table", cap.caption[1], cap, ink_bbox(page, expand(box, 1)), [])
@@ -1265,6 +1369,9 @@ def classify(pages, stats):
         heads = [b.bbox[1] for b in page.blocks if b.type == "heading" and b.bbox[1] > title.bbox[3]
                  and (NUM_HEADING_RE.match(b.raw_text) or ROMAN_HEADING_RE.match(b.raw_text)
                       or b.raw_text.lower().strip(" .:") in UNNUMBERED_HEADINGS)]
+        # IEEE runs the abstract in ("Abstract—We study ..."), with no heading of its own
+        heads += [b.bbox[1] for b in page.blocks if b.type == "paragraph" and b.bbox[1] > title.bbox[3]
+                  and ABSTRACT_RE.match(b.raw_text)]
         paras = [b.bbox[1] for b in page.blocks if b.type == "paragraph" and b.bbox[1] > title.bbox[3]
                  and is_textlike(b, page, body) and len(b.rows) >= 3]
         limit = min(heads) if heads else (min(paras) if paras else title.bbox[3])
@@ -1387,21 +1494,32 @@ def build_sections(pages, toc):
             continue
         hit.toc_level = level
 
-    sections, ids, after_refs = [], set(), False
+    sections, ids, after_refs, roman = [], set(), False, None
     toc_titles = {_norm(t) for _, t, _ in toc}
     for page in pages:
         for b in page.ordered:
             if b.type != "heading":
                 continue
             text = " ".join(b.raw_text.split())
-            letter_ok = after_refs or _norm(split_heading(text, True)[1]) in toc_titles
-            number, title = split_heading(text, letter_ok)
-            if number:
-                level = number.count(".") + 1
-                sid = "sec-" + number.lower()
+            main = ROMAN_HEADING_RE.match(text)
+            sub = SUBSECTION_RE.match(text) if roman and not after_refs else None
+            if sub and not (main and main.group(2).isupper()):
+                # IEEE subsection "A. Overview" (or "C. Training") under "II. RELATED WORK"
+                number, title = sub.group(1), sub.group(2).strip()
+                level, sid = 2, f"sec-{roman.lower()}.{number.lower()}"
             else:
-                level = b.toc_level or 1
-                sid = "sec-" + _slug(title)
+                letter_ok = after_refs or _norm(split_heading(text, True)[1]) in toc_titles
+                number, title = split_heading(text, letter_ok)
+                if number:
+                    level = number.count(".") + 1
+                    sid = "sec-" + number.lower()
+                else:
+                    level = b.toc_level or 1
+                    sid = "sec-" + _slug(title)
+                if main and number == main.group(1):
+                    roman = number          # lettered headings below it are its subsections
+                elif not number:
+                    roman = None            # an unnumbered heading (ACKNOWLEDGMENT) ends that run
             base, k = sid, 2
             while sid in ids:
                 sid = f"{base}-{k}"
