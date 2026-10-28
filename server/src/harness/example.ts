@@ -49,8 +49,8 @@ export const EXAMPLE_SCHEMA = object({
   },
 });
 
-export const EXAMPLE_TASK = `WORKED EXAMPLES: If you introduce a numerical worked case, supply an "example" instead of repeating a symbolic board. Its assumptions state the illustrative special case and held-fixed quantities; say this naturally in the narration. inputs lists the named numerical starting values. calculations lists the actual arithmetic with numerical literals only and its results. Declare every nontrivial numeric operand as an input or an earlier calculation result (0 and 1 are implicit constants); + - * / ^ and sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max, softmax are supported, no variables or code. Store sufficient calculation precision, but display illustrative values at readable precision (usually 2–3 decimals, or scientific notation for tiny values), with ≈ for rounded equalities. Never fill a formula or label with a floating-point tail. Keep the paper’s reported measurements exact. Non-integer results may be rounded to the precision shown; keep integer results exact.
-Use 2–4 frames, including at least one useful native flow, bars, plot or scene that visually demonstrates the mechanism (not only formula/text cards), each with anchor copied exactly from say and exactly ONE native item named formula, flow, bars, plot or scene (same fields as those boards). Prefer spatial and value transformations over a series of formula cards: changing same-label bars for competing contributions, a flowing input→operation→result path, or a plotted function/parameter sweep. For vector/matrix transformations or an illustration combining plots and moving quantities, choose a scene with stable objects and meaningful position/value changes. Keep semantic labels consistent across states: preserve flow node IDs/order/edges for the same process and formula term labels for the same quantities when substituting values. Reusing those roles lets the live objects transform continuously. Use a formula card when the actual substitution itself is what teaches the mechanism. Show the concrete starting values, then a visibly changed calculation/output or a meaningful before/after comparison. The first frame explicitly shows the declared starting values, including their signs; preserve this input frame while repairing later states. The last shows a computed result explicitly in formula, flow, bars, or scene text/matrices. Bars are nonnegative magnitudes: use a scene, matrix, flow or formula to display signed inputs or results instead of converting their signs. A plot may be an intermediate behavior frame, but axis limits alone do not display an example result. A title change or another highlight on the original symbolic equation is not a new state. Illustrative bars show inputs/intermediate values, not a quality ranking: omit higher_is_better, so no value is falsely labelled best. Keep the same ordered bar labels and the same unit when comparing successive states of the same quantity; different quantities need different units. Use illustrative titles, and never mix invented values with the paper's reported measurements. Formula terms and flow nodes can show concrete substitutions; bars may use the declared inputs and checked results. Each frame begins at its spoken anchor, in increasing order, with enough explanation to read it. Where the cue schema offers board_focus, its cues may name term-1, node-1, bar-1 or curve-1 etc of the frame active at their spoken anchor. Omit example when explaining a source diagram path without invented numerical values. Keep schema details out of say.`;
+export const EXAMPLE_TASK = `WORKED EXAMPLES: If you introduce a numerical worked case, supply an "example" instead of repeating a symbolic board. Its assumptions state the illustrative special case and held-fixed quantities; say this naturally in the narration. inputs lists the named numerical starting values. calculations lists the actual arithmetic with numerical literals only and its results. Declare every nontrivial numeric operand as an input or an earlier calculation result (-1, 0 and 1 are implicit constants); + - * / ^ and sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max, softmax are supported, no variables or code. Prefer readable rounded illustrative results (usually 2–3 decimals, or scientific notation for tiny values), with ≈ for rounded equalities; code retains the exact computed value behind each rounded intermediate reference for later calculations. Never fill a formula or label with a floating-point tail or manually invent eight-digit precision. Keep the paper’s reported measurements exact. Non-integer results may be rounded to the precision shown; keep integer results exact. Superscript/layer indices are notation, not measured quantities: do not turn a symbolic indexed term into a fake scalar calculation.
+Use 2–4 frames, including at least one useful native flow, bars, plot or scene that visually demonstrates the mechanism (not only formula/text cards), each with anchor copied exactly from say and exactly ONE native item named formula, flow, bars, plot or scene (same fields as those boards). Prefer spatial and value transformations over a series of formula cards: changing same-label bars for competing contributions, a flowing input→operation→result path, or a plotted function/parameter sweep. For vector/matrix transformations or an illustration combining plots and moving quantities, choose a scene with stable objects and meaningful position/value changes. For a function example, make its behavior visible with a curve and data-bound sample points or a genuine component transformation. A one-cell matrix around a number followed by formula cards is not a meaningful animation. For quantitative vectors use a shared embedded plot with labeled axes and plotId-bound vectors, preserving the original vector alongside the transformed vector. Keep a stable origin, domain and object IDs across frames; do not replace one isolated arrow with another or silently rescale each state. Keep semantic labels consistent across states: preserve flow node IDs/order/edges for the same process and formula term labels for the same quantities when substituting values. Reusing those roles lets the live objects transform continuously. Use a formula card when the actual substitution itself is what teaches the mechanism. Show the concrete starting values, then a visibly changed calculation/output or a meaningful before/after comparison. The first frame explicitly shows the declared starting values, including their signs; preserve this input frame while repairing later states. The last shows a computed result explicitly in formula, flow, bars, or scene text/matrices. Bars support signed values around a zero baseline; preserve input and result signs. A plot may be an intermediate behavior frame, but axis limits alone do not display an example result. A title change or another highlight on the original symbolic equation is not a new state. Illustrative bars show inputs/intermediate values, not a quality ranking: omit higher_is_better, so no value is falsely labelled best. Keep the same ordered bar labels and the same unit when comparing successive states of the same quantity; different quantities need different units. Use illustrative titles, and never mix invented values with the paper's reported measurements. Formula terms and flow nodes can show concrete substitutions; bars may use the declared inputs and checked results. Each frame begins at its spoken anchor, in increasing order, with enough explanation to read it. Where the cue schema offers board_focus, its cues may name term-1, node-1, bar-1 or curve-1 etc of the frame active at their spoken anchor. Omit example when explaining a source diagram path without invented numerical values. FINAL CONSISTENCY CHECK before responding: read the narration against each frame in order. Every spoken input, sign, vector dimension, operation and result must match the actual displayed objects and checked calculations. When repairing frames, revise say and its anchors too; never preserve stale narration from an earlier example or describe a vector when the frame actually shows unrelated scalar cases. Prefer one coherent transformation with stable quantities over several disconnected demonstrations. Keep schema details out of say.`;
 
 const raw = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const rows = (v: unknown) => (Array.isArray(v) ? v.filter(raw) : []);
@@ -58,6 +58,20 @@ const clean = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').tr
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 // Example arithmetic can legitimately express large operation counts; plot domains keep their own default guard.
 const arithmetic = (source: string) => parseExpression(source, { maxConstant: Number.MAX_VALUE });
+type ExactValues = ReadonlyMap<number, number>;
+/** Carry exact results behind rounded references through a multi-stage example. */
+function resolvedArithmetic(source: string, exact: ExactValues) {
+  const resolve = (node: ReturnType<typeof arithmetic>): ReturnType<typeof arithmetic> => {
+    if ('value' in node) return { value: exact.get(node.value) ?? node.value };
+    if ('args' in node) {
+      if (node.op === 'neg' && 'value' in node.args[0] && exact.has(-node.args[0].value))
+        return { value: exact.get(-node.args[0].value)! };
+      return { ...node, args: node.args.map(resolve) };
+    }
+    return node;
+  };
+  return resolve(arithmetic(source));
+}
 const same = (a: number, b: number) => a === b || Math.abs(a - b) <= 1e-10 * Math.max(Math.abs(a), Math.abs(b));
 const precision = (n: number) => {
   if (Number.isInteger(n)) return Number.EPSILON * Math.abs(n) * 16;
@@ -92,12 +106,25 @@ function visibleText(item: BoardItem): string[] {
   return item.curves.map((c) => c.label);
 }
 function visibleNumbers(item: BoardItem): number[] {
-  const labels = visibleText(item).flatMap((text) =>
-    [...text.matchAll(/(?<![\p{L}\p{N}_])[+−-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?(?![\p{L}\p{N}_])/giu)].map((match) => {
-      const value = Number(match[0].replace('−', '-'));
-      return value < 0 && /[\p{L}\p{N})\]]/u.test(text[(match.index ?? 0) - 1] ?? '') ? -value : value;
-    }),
-  );
+  const labels = visibleText(item)
+    .map((text) =>
+      text
+        .replace(/\b(?:key|head|token|node|component|layer|position)\s+\d+\b/gi, '')
+        .replace(
+          /([+−-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:\\times|\\cdot|[×*])\s*10\s*\^\s*\{?([+−-]?\d+)\}?/g,
+          (_, value, power) => `${value}e${power.replace('−', '-')}`,
+        )
+        .replace(/\\[A-Za-z]+/g, ' ')
+        .replace(/\^\s*(?:\{\(?[+−-]?\d+\)?\}|\([+−-]?\d+\)|[+−-]?\d+)/g, ''),
+    )
+    .flatMap((text) =>
+      [...text.matchAll(/(?<![\p{L}\p{N}_])[+−-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?(?![\p{L}\p{N}_])/giu)].map(
+        (match) => {
+          const value = Number(match[0].replace('−', '-'));
+          return value < 0 && /[\p{L}\p{N})\]]/u.test(text[(match.index ?? 0) - 1] ?? '') ? -value : value;
+        },
+      ),
+    );
   if (item.kind === 'scene')
     return [
       ...item.objects.flatMap((object) => [
@@ -116,18 +143,43 @@ function visibleNumbers(item: BoardItem): number[] {
 /** Read numerical content even if independent layout validation rejected this frame. Never published. */
 function readableFrame(kind: BoardKind, item: Record<string, unknown>): BoardItem {
   if (kind === 'formula') return { kind, latex: clean(item.latex), terms: [] };
-  if (kind === 'flow') return { kind, nodes: rows(item.nodes).map((node) => ({ id: clean(node.id), label: clean(node.label) })), edges: [] };
-  if (kind === 'bars') return { kind, bars: rows(item.bars).map((bar) => ({ label: clean(bar.label), value: finite(bar.value) ? bar.value : NaN })) };
-  if (kind === 'plot') return { kind, curves: rows(item.curves).map((curve) => ({ label: clean(curve.label), expression: '' })), x: [0, 1], y: [0, 1] };
-  return { kind: 'scene', objects: rows(item.objects).map((object) => ({
-    id: clean(object.id), type: 'text', x: 0, y: 0, w: 1, h: 1,
-    text: clean(object.text),
-    values: Array.isArray(object.values) ? object.values.filter(Array.isArray).map((row) => row.filter(finite)) : undefined,
-  })) };
+  if (kind === 'flow')
+    return {
+      kind,
+      nodes: rows(item.nodes).map((node) => ({ id: clean(node.id), label: clean(node.label) })),
+      edges: [],
+    };
+  if (kind === 'bars')
+    return {
+      kind,
+      bars: rows(item.bars).map((bar) => ({ label: clean(bar.label), value: finite(bar.value) ? bar.value : NaN })),
+    };
+  if (kind === 'plot')
+    return {
+      kind,
+      curves: rows(item.curves).map((curve) => ({ label: clean(curve.label), expression: '' })),
+      x: [0, 1],
+      y: [0, 1],
+    };
+  return {
+    kind: 'scene',
+    objects: rows(item.objects).map((object) => ({
+      id: clean(object.id),
+      type: 'text',
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      text: clean(object.text),
+      values: Array.isArray(object.values)
+        ? object.values.filter(Array.isArray).map((row) => row.filter(finite))
+        : undefined,
+    })),
+  };
 }
 
 /** Check literal numerical equalities too, rather than merely accepting that their digits were declared. */
-function displayedCalculationProblems(item: BoardItem): string[] {
+function displayedCalculationProblems(item: BoardItem, exact: ExactValues): string[] {
   const problems: string[] = [];
   for (const source of visibleText(item)) {
     let text = source
@@ -148,7 +200,8 @@ function displayedCalculationProblems(item: BoardItem): string[] {
     // Split only at top level: commas inside max/softmax or tuples belong to
     // their expression, while "8/8=1, 6/8=.75" contains two equations.
     const statements: string[] = [];
-    let depth = 0, start = 0;
+    let depth = 0,
+      start = 0;
     for (let i = 0; i < text.length; i++) {
       if (text[i] === '(' || text[i] === '[') depth++;
       else if (text[i] === ')' || text[i] === ']') depth--;
@@ -166,7 +219,10 @@ function displayedCalculationProblems(item: BoardItem): string[] {
       if (/\[|\\begin\{(?:[bpvV]?matrix|array)\}/.test(statement)) continue;
       const sides = statement.split('=');
       for (let i = 1; i < sides.length; i++) {
-        const right = sides[i].trim().toLowerCase();
+        const right = sides[i]
+          .trim()
+          .toLowerCase()
+          .replace(/^([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)\s+[a-z][a-z ]*$/, '$1');
         // Tuples are not scalar equalities. Their individual values still pass
         // the example's declared-input and checked-result provenance checks.
         if (/^\([^()]*,[^()]*\)$/.test(right)) continue;
@@ -178,6 +234,12 @@ function displayedCalculationProblems(item: BoardItem): string[] {
         )
           continue;
         const left = sides[i - 1].trim().toLowerCase();
+        // A layer/symbol index is not an executable numerical expression.
+        if (
+          /^[a-z\\]/i.test(left) &&
+          !/^(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(/i.test(left)
+        )
+          continue;
         const start = /\b(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(|[+\-]?(?:\d|\.\d)|\(/.exec(
           left,
         );
@@ -188,11 +250,11 @@ function displayedCalculationProblems(item: BoardItem): string[] {
         let problem: string | null;
         if (unknownFunction) problem = 'use a supported explicit numerical function';
         else if (/^[+\-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+\-]?\d+)?$/i.test(right))
-          problem = checkedCalculation(expression, Number(right));
+          problem = checkedCalculation(expression, Number(right), exact);
         else {
           try {
-            const a = arithmetic(expression),
-              b = arithmetic(right);
+            const a = resolvedArithmetic(expression, exact),
+              b = resolvedArithmetic(right, exact);
             const variables = (node: typeof a): boolean =>
               'variable' in node || ('args' in node && node.args.some(variables));
             if (variables(a) || variables(b)) problem = 'show concrete numerical substitutions on both sides';
@@ -218,17 +280,23 @@ const visual = (item: BoardItem) => {
 };
 
 /** No arbitrary expression execution: the existing plot parser provides bounded arithmetic only. */
-export function checkedCalculation(expression: string, result: number): string | null {
+export function checkedCalculation(expression: string, result: number, exact: ExactValues = new Map()): string | null {
   if (!Number.isFinite(result)) return 'result must be finite';
   try {
-    const tree = arithmetic(expression);
+    const tree = resolvedArithmetic(expression, exact);
     const variables = (node: typeof tree): boolean =>
       'variable' in node || ('args' in node && node.args.some(variables));
     if (variables(tree)) return 'use concrete numerical literals, not undeclared x or a';
     const actual = evaluateExpression(tree, 0);
+    // A written rounded substitution is also valid arithmetic. Preserve its
+    // meaning instead of forcing every literal to refer to an earlier alias.
+    const literal = evaluateExpression(arithmetic(expression), 0);
     if (!Number.isFinite(actual)) return 'the calculation has no finite result';
-    const tolerance = Math.max(precision(result), Number.EPSILON * Math.max(1, Math.abs(actual), Math.abs(result)) * 16);
-    return Math.abs(actual - result) <= tolerance
+    const tolerance = Math.max(
+      precision(result),
+      Number.EPSILON * Math.max(1, Math.abs(actual), Math.abs(result)) * 16,
+    );
+    return Math.abs(actual - result) <= tolerance || Math.abs(literal - result) <= tolerance
       ? null
       : `result ${result} does not match ${expression} (approximately ${Number(actual.toPrecision(8))})`;
   } catch {
@@ -285,7 +353,8 @@ export function checkExample(
   if (!calculations.length || calculations.length > 10)
     problems.push('Declare 1–10 concrete calculations and their results.');
   const results: number[] = [];
-  const operands = [0, 1, Math.PI, Math.E, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : []))];
+  const exact = new Map<number, number>();
+  const operands = [-1, 0, 1, Math.PI, Math.E, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : []))];
   for (const [i, c] of calculations.entries()) {
     let literals: number[] = [];
     try {
@@ -307,18 +376,20 @@ export function checkExample(
       problems.push(
         `Example calculation ${i + 1} uses undeclared value ${undeclared}; name it as an input or derive it in an earlier calculation.`,
       );
-    const error = finite(c.result)
-      ? checkedCalculation(clean(c.expression), c.result)
-      : 'result must be finite';
+    const error = finite(c.result) ? checkedCalculation(clean(c.expression), c.result, exact) : 'result must be finite';
     if (error) problems.push(`Example calculation ${i + 1}: ${error}.`);
     else {
       results.push(c.result as number);
       operands.push(c.result as number);
+      const resolved = evaluateExpression(resolvedArithmetic(clean(c.expression), exact), 0);
+      const literal = evaluateExpression(arithmetic(clean(c.expression)), 0);
+      const tolerance = Math.max(precision(c.result as number), Number.EPSILON * Math.max(1, Math.abs(resolved)) * 16);
+      exact.set(c.result as number, Math.abs(resolved - (c.result as number)) <= tolerance ? resolved : literal);
     }
   }
   if (frames.length < 2 || frames.length > 4)
     problems.push('Give 2–4 example frames: actual inputs followed by changed calculation/output or comparison.');
-  const evidence = [...inputs.flatMap((i) => (finite(i.value) ? [i.value] : [])), ...results].join(' ');
+  const evidence = [-1, 0, 1, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : [])), ...results].join(' ');
   const checked: ExampleFrame[] = [];
   const previews: (BoardItem | undefined)[] = [];
   let previousAnchor: number | null = null;
@@ -332,7 +403,7 @@ export function checkExample(
     const itemRaw = frame[kind] as Record<string, unknown>;
     if (kind === 'bars' && itemRaw.higher_is_better !== undefined)
       problems.push(`Example frame ${i + 1}: illustrative values are not a quality ranking; omit higher_is_better.`);
-    const allowedValues = [0, 1, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : [])), ...results];
+    const allowedValues = [-1, 0, 1, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : [])), ...results];
     const roundedBars =
       kind === 'scene'
         ? rows(itemRaw.objects)
@@ -361,7 +432,7 @@ export function checkExample(
       problems.push('Example frame anchors must progress through the narration, never at the same word or backwards.');
     if (at !== null) previousAnchor = at;
     if (preview) {
-      const allowed = [0, 1, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : [])), ...results];
+      const allowed = [-1, 0, 1, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : [])), ...results];
       // In a subtraction, the positive written operand may be the magnitude
       // of a declared negative bias (e.g. x*0.5 - 1.5 for b=-1.5).
       const subtracted = visibleText(preview).flatMap((text) =>
@@ -374,7 +445,7 @@ export function checkExample(
         problems.push(
           `Example frame ${i + 1} displays undeclared value ${unsupported}; show only input values or checked results.`,
         );
-      problems.push(...displayedCalculationProblems(preview).map((p) => `Example frame ${i + 1}: ${p}`));
+      problems.push(...displayedCalculationProblems(preview, exact).map((p) => `Example frame ${i + 1}: ${p}`));
     }
     if (result.item && at !== null) checked.push({ anchor, at, item: result.item });
   }
@@ -384,11 +455,19 @@ export function checkExample(
         (frame) =>
           frame.item.kind !== 'formula' &&
           (frame.item.kind !== 'scene' ||
-            frame.item.objects.some((object) => !['text', 'math'].includes(object.type) && !object.background)),
+            frame.item.objects.some(
+              (object) =>
+                !object.background &&
+                (['plot', 'vector'].includes(object.type) ||
+                  (object.type === 'matrix' && (object.values?.flat().length ?? 0) > 1) ||
+                  (['rect', 'circle'].includes(object.type) &&
+                    frame.item.kind === 'scene' &&
+                    frame.item.objects.some((other) => other.type === 'arrow'))),
+            )),
       )
     )
       problems.push(
-        'A worked example must visually demonstrate the mechanism with at least one flow, bars, plot or substantive scene frame, not only formula cards.',
+        'A worked example must visually demonstrate the mechanism with at least one flow, bars, plot or substantive scene frame, not only formula cards or isolated scalar matrices. For function behavior use a plot with the actual curve and data-bound sample markers; for component transformations show a genuine vector/matrix or a connected operation diagram.',
       );
     if (new Set(checked.map((f) => visual(f.item))).size !== checked.length)
       problems.push(
@@ -396,11 +475,21 @@ export function checkExample(
       );
   }
   if (frames.length) {
-    const first = previews[0], last = previews[frames.length - 1];
+    const first = previews[0],
+      last = previews[frames.length - 1];
     if (first?.kind === 'plot' || last?.kind === 'plot')
-      problems.push('First and final example frames must show concrete inputs/results in formula, flow, bars or scene text/matrices; plot axis bounds alone do not demonstrate a calculation.');
+      problems.push(
+        'First and final example frames must show concrete inputs/results in formula, flow, bars or scene text/matrices; plot axis bounds alone do not demonstrate a calculation.',
+      );
     if (!first || !visibleNumbers(first).some((n) => inputs.some((i) => finite(i.value) && displayed(n, i.value))))
-      problems.push(`The first example frame must visibly contain declared starting values (${inputs.filter((i) => finite(i.value)).map((i) => `${clean(i.label)} = ${i.value}`).join(', ')}). Show these in frame 1 and preserve them while fixing other frames; a symbolic parent formula or later input frame is insufficient.`);
+      problems.push(
+        `The first example frame must visibly contain declared starting values (${inputs
+          .filter((i) => finite(i.value))
+          .map((i) => `${clean(i.label)} = ${i.value}`)
+          .join(
+            ', ',
+          )}). Show these in frame 1 and preserve them while fixing other frames; a symbolic parent formula or later input frame is insufficient.`,
+      );
     if (!last || !visibleNumbers(last).some((n) => results.some((r) => displayed(n, r))))
       problems.push('The final example frame must visibly contain a checked computed result.');
   }

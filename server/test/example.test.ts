@@ -246,21 +246,26 @@ test('parameter lists and subtraction of a declared negative bias remain valid c
   assert.match(checkExample(onlyFormula, say).problems.join(' '), /not only formula cards/);
 });
 
-
 test('example arithmetic permits finite operation counts without loosening plot constants', () => {
   assert.equal(checkedCalculation('32*512^2', 8388608), null);
   assert.equal(checkedCalculation('2147483648/2', 1073741824), null);
   assert.throws(() => parseExpression('2147483648'));
   const example = {
     assumptions: 'Illustrative operation count with sequence length 32 and width 512.',
-    inputs: [{ label: 'Length', value: 32 }, { label: 'Width', value: 512 }],
+    inputs: [
+      { label: 'Length', value: 32 },
+      { label: 'Width', value: 512 },
+    ],
     calculations: [{ expression: '32*512^2', result: 8388608 }],
     frames: [
       { anchor: 'Start with', flow: flow(['Length 32', 'Width 512', 'Compute cost']) },
       { anchor: 'The result', flow: flow(['Operation count 8388608', 'Checked arithmetic', 'Result']) },
     ],
   };
-  assert.deepEqual(checkExample(example, 'Start with the illustrative dimensions. The result is the operation count.').problems, []);
+  assert.deepEqual(
+    checkExample(example, 'Start with the illustrative dimensions. The result is the operation count.').problems,
+    [],
+  );
 });
 
 test('one repair report includes bad layout and missing first input even when later frames are valid', () => {
@@ -268,23 +273,57 @@ test('one repair report includes bad layout and missing first input even when la
   example.frames[0].flow!.nodes[0].label = 'Input';
   example.frames[0].flow!.edges = [];
   const problems = checkExample(example, exampleSay).problems;
-  assert.ok(problems.some((p) => /connect|edge|arrows/i.test(p)), problems.join('\n'));
-  assert.ok(problems.some((p) => /first example frame.*Input = 2/i.test(p)), problems.join('\n'));
+  assert.ok(
+    problems.some((p) => /connect|edge|arrows/i.test(p)),
+    problems.join('\n'),
+  );
+  assert.ok(
+    problems.some((p) => /first example frame.*Input = 2/i.test(p)),
+    problems.join('\n'),
+  );
   assert.ok(!problems.some((p) => /final example frame/.test(p)), problems.join('\n'));
 });
 
 test('progressive comparison accepts a single baseline bar and digits inside model names', () => {
   const say = 'The baseline scores 26.36. The comparison adds 28.4. The gain is 2.04.';
-  const result = checkExample({
-    assumptions: 'Fixed metric and baseline.',
-    inputs: [{label:'baseline',value:26.36},{label:'comparison',value:28.4}],
-    calculations: [{expression:'28.4-26.36',result:2.04}],
-    frames: [
-      {anchor:'The baseline scores',bars:{title:'Baseline',unit:'score',bars:[{label:'ConvS2S Ensemble',value:26.36}]}},
-      {anchor:'The comparison adds',bars:{title:'Comparison',unit:'score',bars:[{label:'ConvS2S Ensemble',value:26.36},{label:'Model2',value:28.4}]}},
-      {anchor:'The gain is',formula:{latex:'28.4-26.36\\approx 2.04',terms:[{latex:'2.04',label:'gain'},{latex:'28.4',label:'comparison'}]}},
-    ],
-  }, say);
+  const result = checkExample(
+    {
+      assumptions: 'Fixed metric and baseline.',
+      inputs: [
+        { label: 'baseline', value: 26.36 },
+        { label: 'comparison', value: 28.4 },
+      ],
+      calculations: [{ expression: '28.4-26.36', result: 2.04 }],
+      frames: [
+        {
+          anchor: 'The baseline scores',
+          bars: { title: 'Baseline', unit: 'score', bars: [{ label: 'ConvS2S Ensemble', value: 26.36 }] },
+        },
+        {
+          anchor: 'The comparison adds',
+          bars: {
+            title: 'Comparison',
+            unit: 'score',
+            bars: [
+              { label: 'ConvS2S Ensemble', value: 26.36 },
+              { label: 'Model2', value: 28.4 },
+            ],
+          },
+        },
+        {
+          anchor: 'The gain is',
+          formula: {
+            latex: '28.4-26.36\\approx 2.04',
+            terms: [
+              { latex: '2.04', label: 'gain' },
+              { latex: '28.4', label: 'comparison' },
+            ],
+          },
+        },
+      ],
+    },
+    say,
+  );
   assert.deepEqual(result.problems, []);
   assert.equal(checkedCalculation('exp(8)/(exp(8)+exp(0))', 0.9996646498695336), null);
   assert.notEqual(checkedCalculation('2+2', 5), null);
@@ -295,19 +334,84 @@ test('comma-separated numeric equations are checked independently without splitt
   const say = exampleSay;
   const frame = example.frames.find((f: any) => f.formula) as any;
   frame.formula.latex = '8/8=1, 6/8=0.75';
-  frame.formula.terms = [{latex:'8/8=1',label:'first'},{latex:'6/8=0.75',label:'second'}];
+  frame.formula.terms = [
+    { latex: '8/8=1', label: 'first' },
+    { latex: '6/8=0.75', label: 'second' },
+  ];
   const problems = checkExample(example, say).problems;
-  assert.equal(problems.some(p => p.includes('Visible calculation')), false);
+  assert.equal(
+    problems.some((p) => p.includes('Visible calculation')),
+    false,
+  );
   frame.formula.latex = '8/8=2, 6/8=0.75';
-  assert.equal(checkExample(example, say).problems.some(p => p.includes('Visible calculation')), true);
+  assert.equal(
+    checkExample(example, say).problems.some((p) => p.includes('Visible calculation')),
+    true,
+  );
 });
 
 test('vector display notation does not enter the scalar checker; explicit calculations still do', () => {
   const example = numericalExample();
   const frame = example.frames.find((f: any) => f.formula) as any;
   frame.formula.latex = '[2,2][1,1]^T=4';
-  frame.formula.terms = [{latex:'[2,2]',label:'vector'},{latex:'4',label:'result'}];
-  assert.equal(checkExample(example, exampleSay).problems.some(p => p.includes('Visible calculation')), false);
+  frame.formula.terms = [
+    { latex: '[2,2]', label: 'vector' },
+    { latex: '4', label: 'result' },
+  ];
+  assert.equal(
+    checkExample(example, exampleSay).problems.some((p) => p.includes('Visible calculation')),
+    false,
+  );
   example.calculations[0].result = 5;
-  assert.equal(checkExample(example, exampleSay).problems.some(p => p.includes('does not match')), true);
+  assert.equal(
+    checkExample(example, exampleSay).problems.some((p) => p.includes('does not match')),
+    true,
+  );
+});
+
+test('rounded intermediate references retain exact computed values across later stages', () => {
+  const value = numericalExample();
+  value.inputs = [{ label: 'logit', value: 2 }];
+  value.calculations = [
+    { expression: 'exp(2)/(exp(2)+1)', result: 0.88079708 },
+    { expression: '1-0.88079708', result: 0.11920292 },
+    { expression: '0.88079708*0.11920292', result: 0.10499359 },
+  ];
+  value.frames[0].flow!.nodes[0].label = 'Input 2';
+  value.frames[1].formula!.latex = '0.88079708*0.11920292\\approx0.10499359';
+  value.frames[1].formula!.terms = [
+    { latex: '0.88079708*0.11920292', label: 'gradient' },
+    { latex: '0.10499359', label: 'result' },
+  ];
+  assert.deepEqual(checkExample(value, exampleSay).problems, []);
+  value.calculations[2].result = 0.15;
+  assert.match(checkExample(value, exampleSay).problems.join(' '), /does not match/);
+});
+
+test('literal rounded substitutions remain valid alongside exact intermediate references', () => {
+  const exact = new Map([
+    [0.82, 0.8175744762],
+    [0.18, 0.1824255238],
+  ]);
+  assert.equal(checkedCalculation('0.82*1+0.18*3', 1.36, exact), null);
+  assert.match(checkedCalculation('0.82*1+0.18*3', 1.5, exact)!, /does not match/);
+});
+
+test('isolated scalar matrices cannot satisfy the requirement to visualize a mechanism', () => {
+  const value = numericalExample();
+  const first = value.frames[0] as any;
+  delete first.flow;
+  first.scene = {
+    title: 'Starting scalar',
+    objects: [{ id: 'input', type: 'matrix', x: 0.2, y: 0.3, w: 0.4, h: 0.3, values: [[2]] }],
+  };
+  assert.match(checkExample(value, exampleSay).problems.join(' '), /isolated scalar matrices/);
+});
+
+test('named component ordinals are labels rather than invented numerical operands', () => {
+  const value = numericalExample();
+  value.frames[0].flow!.nodes[0].label = 'key 3 input 2';
+  assert.deepEqual(checkExample(value, exampleSay).problems, []);
+  value.frames[0].flow!.nodes[0].label = 'key 3 input 7';
+  assert.match(checkExample(value, exampleSay).problems.join(' '), /undeclared value 7/);
 });

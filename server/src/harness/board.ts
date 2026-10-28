@@ -219,7 +219,7 @@ export function checkFormula(
 
 // ---------------------------------------------------------------------------------------------------- bars
 
-const NUMBER = /([-−–+]?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?:\s?([kKMB])(?!\p{L}))?/gu;
+const NUMBER = /([-−–+]?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE]([+-]?\d+))?(?:\s?([kKMB])(?!\p{L}))?/gu;
 const SCALE: Record<string, number> = { k: 1e3, K: 1e3, M: 1e6, B: 1e9 };
 
 /**
@@ -228,6 +228,10 @@ const SCALE: Record<string, number> = { k: 1e3, K: 1e3, M: 1e6, B: 1e9 };
  */
 export function numbersIn(source: string): number[] {
   const out: number[] = [];
+  source = source.replace(
+    /([+−-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:\\times|\\cdot|[×*])\s*10\s*\^\s*\{?([+−-]?\d+)\}?/g,
+    (_, value, power) => `${value}e${power.replace('−', '-')}`,
+  );
   for (const m of source.matchAll(NUMBER)) {
     const before = source[m.index - 1] ?? ' ';
     const sign = m[1] && m[1] !== '+' && !/[\p{L}\p{N})\]]/u.test(before) ? -1 : 1;
@@ -236,14 +240,15 @@ export function numbersIn(source: string): number[] {
     const values = grouped ? [Number(digits.replace(/,/g, ''))] : digits.split(',').filter(Boolean).map(Number);
     if (!grouped && /^\d+,\d+$/.test(digits)) values.push(Number(digits.replace(',', '.')));
     for (const value of values.filter(Number.isFinite)) {
-      out.push(sign * value);
-      if (m[3]) out.push(sign * value * SCALE[m[3]]);
+      const scientific = sign * value * (m[3] === undefined ? 1 : 10 ** Number(m[3]));
+      out.push(scientific);
+      if (m[4]) out.push(scientific * SCALE[m[4]]);
     }
   }
   return out;
 }
 
-const sameNumber = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+const sameNumber = (a: number, b: number) => a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
 /** Citation markers such as [38] or [3, 7], which table rows carry but bar labels do not need. */
 const CITATION = /\s*\[\d+(?:\s*[,–-]\s*\d+)*\]/g;
 
@@ -270,7 +275,6 @@ export function checkBars(raw: unknown, evidence: string): BoardCheck<BarsItem> 
       problems.push(`${name}: the label "${label}" is used twice`);
     const value = b.value;
     if (typeof value !== 'number' || !Number.isFinite(value)) problems.push(`${name}: the value is not a number`);
-    else if (value < 0) problems.push(`${name}: bars show values of 0 or more`);
     else if (!printed.some((n) => sameNumber(n, value)))
       problems.push(`${name}: ${value} does not appear in the evidence; copy numbers exactly as printed`);
     return { label, value: value as number };
@@ -362,8 +366,11 @@ export function checkFlow(raw: unknown): BoardCheck<FlowItem> {
 /** Check a board item of the kind the beat asked for; `evidence` is the text a bars board's numbers must come from. */
 export function sceneTeachingProblem(item: SceneItem): string | null {
   const quantitative = item.objects.some((object) => ['matrix', 'plot', 'vector'].includes(object.type));
-  const relationship = item.objects.some((object) => object.type === 'arrow') && item.objects.length >= 3;
-  return quantitative || relationship ? null : 'A scene must show a meaningful quantitative transformation or spatial relationship, not colored prose or decorative boxes. Use a plot, numeric matrix/vector, or connected objects that explain the mechanism. For a source-table overview, keep grounded PDF cues and omit the board unless an actual comparison adds insight.';
+  const nodes = item.objects.filter((object) => ['rect', 'circle'].includes(object.type) && !object.background);
+  const relationship = item.objects.some((object) => object.type === 'arrow') && nodes.length >= 2;
+  return quantitative || relationship
+    ? null
+    : 'A scene must show a meaningful quantitative transformation or spatial relationship, not colored prose or decorative boxes. Floating text plus tiny arrows is still a text slide. Use a plot, numeric matrix/vector, or at least two actual diagram nodes connected by meaningful arrows. For measured comparisons use bars/plots rather than numbers written in prose. For a source-table overview, keep grounded PDF cues and omit the board unless an actual comparison adds insight.';
 }
 
 export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {

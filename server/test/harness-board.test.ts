@@ -831,3 +831,34 @@ test('measured diagrams repair invalid targeting once and refuse an uncorrected 
   );
   assert.equal(calls, 3, 'two failed repairs are surfaced without a fallback or an unbounded model loop');
 });
+
+test('scientific evidence retains magnitude and does not allow a different tiny value', () => {
+  assert.deepEqual(numbersIn('1.1e-7 and 2.5 × 10^{-9}'), [1.1e-7, 2.5e-9]);
+  assert.ok(checkBars({ bars: [{ label: 'gradient', value: 1.1e-7 }] }, '1.1e-7').item);
+  assert.equal(checkBars({ bars: [{ label: 'gradient', value: 2.5e-10 }] }, '1.1e-10').item, null);
+});
+
+test('signed measured bars retain the evidence signs around the player zero baseline', () => {
+  const checked = checkBars(
+    {
+      bars: [
+        { label: 'Before', value: -2.5 },
+        { label: 'After', value: 1.2 },
+      ],
+    },
+    'Before -2.5; After 1.2',
+  );
+  assert.deepEqual(checked.problems, []);
+  assert.equal(checked.item?.bars[0].value, -2.5);
+  assert.ok(
+    checkBars(
+      {
+        bars: [
+          { label: 'Before', value: -2.5 },
+          { label: 'After', value: 1.2 },
+        ],
+      },
+      'Before 2.5; After 1.2',
+    ).problems.length,
+  );
+});

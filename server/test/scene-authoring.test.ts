@@ -43,22 +43,36 @@ test('Q&A tool schema stays within the provider nesting limit without mutating c
   assert.ok('items' in SCENE_SCHEMA.properties.objects.items.properties.values);
   assert.equal('items' in wire.properties.objects.items.properties.values, false);
   assert.ok(depth(answerSchema(retrieve(doc, { question: 'Explain the operation' }))) <= 10);
-  assert.match(checkBoard('scene', { kind: 'scene', objects: [{
-    id: 'bad', type: 'matrix', x: 0.1, y: 0.1, w: 0.7, h: 0.7, values: [['unsafe']],
-  }] }).problems.join(' '), /numeric|finite|matrix/i);
+  assert.match(
+    checkBoard('scene', {
+      kind: 'scene',
+      objects: [
+        {
+          id: 'bad',
+          type: 'matrix',
+          x: 0.1,
+          y: 0.1,
+          w: 0.7,
+          h: 0.7,
+          values: [['unsafe']],
+        },
+      ],
+    }).problems.join(' '),
+    /numeric|finite|matrix/i,
+  );
 });
 const scene = (value: number, x: number): SceneItem => ({
   kind: 'scene',
-  title: 'Illustrative scalar transformation',
+  title: 'Illustrative component transformation',
   objects: [
-    { id: 'quantity', type: 'matrix', x, y: 0.35, w: 0.2, h: 0.25, values: [[value]], color: 'blue' },
+    { id: 'quantity', type: 'matrix', x, y: 0.35, w: 0.2, h: 0.25, values: [[value, value]], color: 'blue' },
     { id: 'operation', type: 'math', x: 0.45, y: 0.35, w: 0.2, h: 0.25, text: '\\times 2', color: 'orange' },
   ],
 });
 const say =
-  'In this illustrative scalar example the starting value is 2. The operation doubles it, so the result becomes 4 while the quantity moves across the board.';
+  'In this illustrative vector example the starting value is 2 in both components. The operation doubles each component, so the result becomes 4 in both while the quantity moves across the board.';
 const example = () => ({
-  assumptions: 'Illustrative scalar input with a fixed multiplier.',
+  assumptions: 'Illustrative equal vector components with a fixed multiplier.',
   inputs: [{ label: 'Input', value: 2 }],
   calculations: [{ expression: '2*2', result: 4 }],
   frames: [
@@ -113,8 +127,8 @@ test('scene example authoring preserves stable objects, checked values, motion a
   assert.deepEqual(
     frames.map((f) => [f.objects[0].id, f.objects[0].x, f.objects[0].values]),
     [
-      ['quantity', 0.1, [[2]]],
-      ['quantity', 0.75, [[4]]],
+      ['quantity', 0.1, [[2, 2]]],
+      ['quantity', 0.75, [[4, 4]]],
     ],
   );
   assert.equal(step.actions.filter((a) => a.type === 'board_focus').length, 2);
@@ -195,9 +209,33 @@ test('publication checks board focus against the board active at its narrated ti
 });
 
 test('colored prose does not qualify as a visual explanation', () => {
-  const result = checkBoard('scene', {kind:'scene', objects:[
-    {id:'summary',type:'text',x:0.05,y:0.2,w:0.9,h:0.3,text:'Rows contain methods and columns contain metrics.'},
-  ]});
+  const result = checkBoard('scene', {
+    kind: 'scene',
+    objects: [
+      {
+        id: 'summary',
+        type: 'text',
+        x: 0.05,
+        y: 0.2,
+        w: 0.9,
+        h: 0.3,
+        text: 'Rows contain methods and columns contain metrics.',
+      },
+    ],
+  });
   assert.equal(result.item, null);
   assert.match(result.problems.join(' '), /colored prose/);
+});
+
+test('a token arrow cannot turn a prose comparison into a meaningful scene', () => {
+  const result = checkBoard('scene', {
+    kind: 'scene',
+    objects: [
+      { id: 'first', type: 'text', x: 0.1, y: 0.1, w: 0.8, h: 0.2, text: 'Baseline quality' },
+      { id: 'arrow', type: 'arrow', x: 0.5, y: 0.4, w: 0, h: 0.02 },
+      { id: 'second', type: 'text', x: 0.1, y: 0.6, w: 0.8, h: 0.2, text: 'Alternative quality' },
+    ],
+  });
+  assert.equal(result.item, null);
+  assert.match(result.problems.join(' '), /Floating text/);
 });
