@@ -326,3 +326,11 @@ Give it a temp folder inside the repo instead: `mkdir -p .data/tmp && TMPDIR=$PW
   automated run again passed all player suites, 266 server checks (7 existing skips), 61 ingestion checks (1 skip),
   and production build. Source-first tutoring and useful-visual selection apply to future tours and Q&A; quality
   remains a model judgement rather than a promise that every future explanation is perfect.
+
+## Multi-paper visual evaluation (2026-10-29)
+
+- Evaluated Attention, Sticky Routing and Geometry-Aware Multi-Objective Optimization through multiple real Muse runs and targeted repairs. Successful final samples contain 21, 21 and 22 steps with no canonical publication problems. See [VISUAL-EVALUATION.md](VISUAL-EVALUATION.md) for failed attempts, runtimes, reuse accounting and rendered evidence.
+- Harness @20 shares long-paper evidence enums, budgets reasoning plus structured output for complex directions, and checks rounded arithmetic, scientific notation, signed values and component labels without the observed false positives.
+- Stronger visual-selection rules reject prose slides disguised with arrows and isolated scalar matrices as worked visual explanations. Source axes, tradeoffs, stable visual quantities and narration/frame consistency are explicit authoring requirements.
+- Browser review confirmed source component boxes, plot annotations and signed live intermediate values beside the original PDF. These are sampled quality checks; generated pedagogy remains model-dependent and the new reasoning settings are not a demonstrated latency improvement.
+- Final checks: all player suites passed; server 274 passed / 7 existing skips; ingestion 61 passed / 1 existing skip; production build and whitespace checks passed.
