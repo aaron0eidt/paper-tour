@@ -301,3 +301,13 @@ test('comma-separated numeric equations are checked independently without splitt
   frame.formula.latex = '8/8=2, 6/8=0.75';
   assert.equal(checkExample(example, say).problems.some(p => p.includes('Visible calculation')), true);
 });
+
+test('vector display notation does not enter the scalar checker; explicit calculations still do', () => {
+  const example = numericalExample();
+  const frame = example.frames.find((f: any) => f.formula) as any;
+  frame.formula.latex = '[2,2][1,1]^T=4';
+  frame.formula.terms = [{latex:'[2,2]',label:'vector'},{latex:'4',label:'result'}];
+  assert.equal(checkExample(example, exampleSay).problems.some(p => p.includes('Visible calculation')), false);
+  example.calculations[0].result = 5;
+  assert.equal(checkExample(example, exampleSay).problems.some(p => p.includes('does not match')), true);
+});

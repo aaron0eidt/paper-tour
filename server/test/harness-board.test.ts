@@ -471,7 +471,7 @@ test('numbers are read as printed, and bars keep only numbers their evidence pri
   );
   assert.equal(invented.item, null);
   assert.match(invented.problems.join(';'), /bar 3: 99\.9 does not appear in the evidence/);
-  assert.equal(checkBars({ ...TABLE_BARS, bars: [TABLE_BARS.bars[0]] }, evidence).item, null);
+  assert.equal(checkBars({ ...TABLE_BARS, bars: [TABLE_BARS.bars[0]] }, evidence).item?.kind, 'bars');
   assert.deepEqual(checkBars(noBars, evidence), { item: null, problems: [] });
 });
 
@@ -692,7 +692,7 @@ test('bars show numbers from the table cells or the evidence, and are dropped wh
   assert.doesNotMatch(tableBrief, /99\.9/);
   // 99.9 is printed on the page, but not in this result's evidence: one repair, then the step plays without bars.
   const result = step('result-1');
-  assert.equal(requests.filter((r) => r.brief.includes('STEP KIND: result')).length, 2);
+  assert.equal(requests.filter((r) => r.brief.includes('STEP KIND: result')).length, 3);
   assert.deepEqual(types(result), ['focus', 'board_clear', 'highlight']);
 
   // A result may also chart a number that only its cited table prints.
@@ -829,5 +829,5 @@ test('measured diagrams repair invalid targeting once and refuse an uncorrected 
     ),
     /measured geometry/,
   );
-  assert.equal(calls, 2, 'a failed repair is surfaced without a fallback or another model loop');
+  assert.equal(calls, 3, 'two failed repairs are surfaced without a fallback or an unbounded model loop');
 });

@@ -353,7 +353,7 @@ test('a failed repair cannot publish a verbatim fallback from the paper card', a
   await assert.rejects(run, (error) => error instanceof ProcessingError && error.code === 'invalid_tour');
 });
 
-test('deep formula details repair their concrete sequence once and never publish a symbolic-only example', async () => {
+test('deep formula details correct their concrete sequence within two repairs and never publish a symbolic-only example', async () => {
   let attempts = 0;
   const run = (correct: boolean) =>
     new HarnessTourGenerator(
@@ -383,7 +383,7 @@ test('deep formula details repair their concrete sequence once and never publish
     run(false),
     (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
   );
-  assert.equal(attempts, 2);
+  assert.equal(attempts, 3);
 });
 
 test('a fatal beat request records the failed planned item before rejecting the generation', async () => {
@@ -533,5 +533,5 @@ test('a non-formula beat cannot silently remove its numerical example during rep
     generator.generate(input),
     (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
   );
-  assert.equal(attempts, 2);
+  assert.equal(attempts, 3);
 });

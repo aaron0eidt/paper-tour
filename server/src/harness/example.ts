@@ -159,6 +159,11 @@ function displayedCalculationProblems(item: BoardItem): string[] {
     }
     statements.push(text.slice(start));
     for (const statement of statements.flatMap((s) => s.split(';'))) {
+      // Display LaTeX supports vectors/matrices; the scalar expression grammar
+      // intentionally does not. Their numeric inputs/results are checked by
+      // provenance and the explicit calculations, not by parsing display math
+      // as scalar code. Scalar equalities below are still evaluated directly.
+      if (/\[|\\begin\{(?:[bpvV]?matrix|array)\}/.test(statement)) continue;
       const sides = statement.split('=');
       for (let i = 1; i < sides.length; i++) {
         const right = sides[i].trim().toLowerCase();
