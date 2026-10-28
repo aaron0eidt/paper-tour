@@ -10,6 +10,9 @@ const strings = (value: unknown): string[] =>
 /** Human-readable, observable actions only; no generated thoughts or extra provider requests. */
 export function generationProgress(events: GenerationEvent[], status: string) {
   events = uniqueGenerationEvents(events);
+  const attempt = events.map((event) => event.type).lastIndexOf('run.started');
+  if (attempt >= 0) events = events.slice(attempt);
+  const hasBeats = events.some((event) => event.type === 'beat.started');
   const starts = new Map<string, GenerationEvent>();
   const finished = new Set<string>();
   const viewed = new Set<string>();
@@ -25,7 +28,8 @@ export function generationProgress(events: GenerationEvent[], status: string) {
   let latestReset: GenerationEvent | undefined;
   for (const event of events) {
     const call = String(event.data.callId ?? event.id);
-    if (event.type === 'model.completed' && typeof record(event.data.output).say === 'string') drafts.add(call);
+    if (event.type === 'beat.completed') drafts.add(String(event.data.beat ?? call));
+    if (!hasBeats && event.type === 'model.completed' && typeof record(event.data.output).say === 'string') drafts.add(call);
     if (event.type === 'tour.direction' && typeof event.data.steps === 'number') publishedSteps = event.data.steps;
     if (event.type === 'model.started' || event.type === 'tool.started') starts.set(call, event);
     if (['model.completed', 'model.failed', 'tool.completed'].includes(event.type)) finished.add(call);

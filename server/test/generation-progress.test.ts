@@ -72,3 +72,14 @@ test('harness progress distinguishes drafts from published steps and reports par
   events.push(event('4', 'tour.direction', { steps: 12, words: 300, actions: { zoom: 12 } }));
   assert.equal(generationProgress(events, 'ready').steps, 12);
 });
+
+test('retry progress counts completed beats in the current attempt only', () => {
+  const progress = generationProgress([
+    event('1','run.started'), event('2','beat.started',{beat:'old'}), event('3','beat.completed',{beat:'old'}),
+    event('4','run.started'), event('5','beat.started',{beat:'new'}),
+    event('6','model.completed',{callId:'draft',output:{say:'draft'}}),
+    event('7','model.completed',{callId:'repair',output:{say:'repair'}}),
+    event('8','beat.completed',{beat:'new'}),
+  ], 'failed');
+  assert.equal(progress.drafts, 1);
+});

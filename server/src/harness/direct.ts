@@ -280,7 +280,12 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
     properties: {
       plan: strict ? { type: 'string', maxLength: 600 } : { type: 'string' },
       ...Object.fromEntries(
-        (['formula', 'flow', 'bars', 'plot', 'scene'] as const).map((kind) => [kind, strict ? boardSchema(kind) : {}]),
+        (['formula', 'flow', 'bars', 'plot', 'scene'] as const).map((kind) => [kind, strict ? {
+          ...boardSchema(kind),
+          description: kind === 'scene'
+            ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
+            : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,
+        } : {}]),
       ),
       example: strict ? EXAMPLE_SCHEMA : {},
       say: {

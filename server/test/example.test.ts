@@ -289,3 +289,15 @@ test('progressive comparison accepts a single baseline bar and digits inside mod
   assert.equal(checkedCalculation('exp(8)/(exp(8)+exp(0))', 0.9996646498695336), null);
   assert.notEqual(checkedCalculation('2+2', 5), null);
 });
+
+test('comma-separated numeric equations are checked independently without splitting function arguments', () => {
+  const example = numericalExample();
+  const say = exampleSay;
+  const frame = example.frames.find((f: any) => f.formula) as any;
+  frame.formula.latex = '8/8=1, 6/8=0.75';
+  frame.formula.terms = [{latex:'8/8=1',label:'first'},{latex:'6/8=0.75',label:'second'}];
+  const problems = checkExample(example, say).problems;
+  assert.equal(problems.some(p => p.includes('Visible calculation')), false);
+  frame.formula.latex = '8/8=2, 6/8=0.75';
+  assert.equal(checkExample(example, say).problems.some(p => p.includes('Visible calculation')), true);
+});

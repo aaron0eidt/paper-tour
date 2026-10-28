@@ -289,3 +289,15 @@ Give it a temp folder inside the repo instead: `mkdir -p .data/tmp && TMPDIR=$PW
   tolerance while still rejecting wrong results. Comma/LaTeX-separated equalities received an initial correction;
   the unresolved plain-comma case above still needs attention.
 - Production build passes; 10 focused example tests pass. No additional provider acceptance was started.
+
+## Validation repair follow-up (2026-10-28)
+
+- Fixed top-level comma-separated equations while preserving commas inside functions/tuples. The latest saved
+  failed example now passes replay validation. Corrections replace the previous direction instead of retaining
+  an older invalid scene. Every validation problem is sent in the same correction turn; up to two corrections
+  are allowed, without silently dropping required examples.
+- Tool schema descriptions now explicitly prohibit placeholder/unused boards and describe required scene
+  text/matrix content. Harness prompt version is @13.
+- Retry progress and model-call counters use only the latest run; drafted-step counts use completed beats,
+  not every draft/repair response. Server build and 21 focused checks passed. Full provider completion remains
+  unverified; an unrelated active generation was left undisturbed during this fix.

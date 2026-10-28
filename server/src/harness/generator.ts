@@ -311,11 +311,11 @@ export class HarnessTourGenerator implements TourGenerator {
       ];
       let direction: Direction | null = null;
       let requireExample = beat.kind === 'formula' && !!beat.detail;
-      // One repair at most: for an unusable answer, or for a board that failed its checks (the step keeps its first
-      // usable direction either way, without the board if the repair does not fix it).
+      // The model can correct its complete direction twice, with all validation
+      // faults in each reply. Required visuals are never silently discarded.
       for (
         let attempt = 0;
-        attempt < 2 &&
+        attempt < 3 &&
         !(
           direction &&
           !direction.boardProblems?.length &&
@@ -358,35 +358,18 @@ export class HarnessTourGenerator implements TourGenerator {
                 'Explain the mechanism, consequence or intuition in your own words; do not read the source aloud.',
               ]),
             );
-          if (next && (!direction || (!next.boardProblems?.length && !next.exampleProblems?.length))) direction = next;
-          if (next?.exampleProblems?.length) {
+          if (next) direction = next;
+          // Report every fault together. Previously an example error skipped
+          // the board error below, so the only repair never saw the bad scene.
+          const issues = [...(next?.exampleProblems ?? []), ...(next?.visualProblems ?? []), ...(next?.boardProblems ?? [])];
+          if (next && issues.length) {
             await input.onEvent?.('validation.failed', {
-              stage: 'worked_example',
-              beat: beat.id,
-              problems: next.exampleProblems,
-              attempt: attempt + 1,
+              stage: 'direction', beat: beat.id, problems: issues, attempt: attempt + 1,
             });
-            task.push(...repairTurn(completion.value, next.exampleProblems));
+            task.push(...repairTurn(completion.value, issues));
             continue;
           }
-          if (next?.visualProblems?.length) {
-            await input.onEvent?.('validation.failed', {
-              stage: 'visual_grounding',
-              beat: beat.id,
-              problems: next.visualProblems,
-              attempt: attempt + 1,
-            });
-            task.push(...repairTurn(completion.value, next.visualProblems));
-            continue;
-          }
-          if (next?.boardProblems?.length) {
-            await input.onEvent?.('board.rejected', {
-              beat: beat.id,
-              problems: next.boardProblems,
-              attempt: attempt + 1,
-            });
-            task.push(...repairTurn(completion.value, next.boardProblems));
-          } else if (!next)
+          if (!next)
             task.push(
               ...repairTurn(completion.value, [
                 `say must be 25-${options.words} spoken words.`,
@@ -402,7 +385,7 @@ export class HarnessTourGenerator implements TourGenerator {
       if (!direction && requireExample)
         throw new ProcessingError(
           'worked_example_failed',
-          'The worked example could not be authored after one correction; no incomplete example was published.',
+          'The worked example could not be authored after two corrections; no incomplete example was published.',
         );
       if (direction?.boardProblems?.some((problem) => problem.startsWith('scene:')))
         throw new ProcessingError('scene_invalid', direction.boardProblems.join(' '));

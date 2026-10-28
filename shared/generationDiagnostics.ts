@@ -11,7 +11,9 @@ export function uniqueGenerationEvents(events: GenerationEvent[]): GenerationEve
 }
 
 export function generationDiagnostics(input: GenerationEvent[], status = '', now = Date.now()) {
-  const events = uniqueGenerationEvents(input);
+  let events = uniqueGenerationEvents(input);
+  const attempt = events.map((event) => event.type).lastIndexOf('run.started');
+  if (attempt >= 0) events = events.slice(attempt);
   const directionEvent = [...events].reverse().find((event) => event.type === 'tour.direction');
   const direction = directionEvent
     ? {

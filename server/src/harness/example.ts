@@ -145,7 +145,19 @@ function displayedCalculationProblems(item: BoardItem): string[] {
       .replace(/[{}]/g, '')
       .replace(/\\(sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\b/gi, '$1');
     // Comma-separated parameter assignments are separate statements, not chains.
-    const statements = text.split(/[,;]\s*(?=[a-zA-Z][a-zA-Z0-9_]*\s*=)/);
+    // Split only at top level: commas inside max/softmax or tuples belong to
+    // their expression, while "8/8=1, 6/8=.75" contains two equations.
+    const statements: string[] = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '(' || text[i] === '[') depth++;
+      else if (text[i] === ')' || text[i] === ']') depth--;
+      else if (depth === 0 && (text[i] === ',' || text[i] === ';')) {
+        statements.push(text.slice(start, i));
+        start = i + 1;
+      }
+    }
+    statements.push(text.slice(start));
     for (const statement of statements.flatMap((s) => s.split(';'))) {
       const sides = statement.split('=');
       for (let i = 1; i < sides.length; i++) {

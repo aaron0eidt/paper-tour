@@ -3,7 +3,7 @@ import type { BoardKind } from './board';
 import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@12';
+export const HARNESS_VERSION = 'paper-tour-harness@13';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -233,6 +233,7 @@ export function directTask(language: string, brief: string, { actions, board, wo
     brief,
     'NATIVE BOARD CHOICE: all steps may choose one useful top-level formula, flow, bars, plot or scene, regardless of the suggested board below. Function behavior→plot; comparable measured numbers→bars; mechanism stages→flow; symbolic relationships→formula; vector/matrix transformations or combined visual explanations→scene. A scene contains objects with stable id,type,x,y,w,h, optional color/text/values/plot/background. Types text/math/rect/circle/arrow/vector/matrix/plot are native, positions normalized0..1; vectors/arrows use signed endpoint deltas. Use stable IDs and meaningful motion across example frames. To place a vector, arrow or circle on a plot, set plotId to that plot object ID and give x,y and endpoint deltas in its DATA domain; never guess normalized canvas alignment with axes. Unbound shapes use normalized canvas units. Scene matrix values need source evidence or checked example provenance. Keep labels compact and put a shape label in that shape’s own text field instead of overlapping separate foreground objects. A vector/matrix teaching example should transform its actual coordinates or values, not just move a title. Coordinates are layout, never substitute for declaring a numeric value in text or a matrix. Omit an unhelpful board. Use example.frames for a numerical worked transformation; never also supply a top-level board. Paper-result bars must use exact values in the quoted evidence. Plot expressions use the safe functions listed in the example contract, variable x and optional parameter a.',
     EXAMPLE_TASK,
+    'SELF-CORRECTION: a validation reply lists every detected field/problem in your last direction. Return the complete corrected direction, preserving valid narration, assumptions, inputs and frames. Fix all listed problems together. Unused top-level boards must be omitted, including when example.frames supplies the visuals; never add dummy objects to satisfy a schema. A scene text/math object needs its actual nonempty text, and a matrix needs its actual values. If a chosen representation cannot express signed values, use a scene matrix or function plot instead. Do not remove a required example or replace it with prose to evade validation.',
     ...rules.map((rule, i) => `${i + 1}. ${rule}`),
     ...(pen ? [`${example(BOARD_EXAMPLES.pen)} (cues only)`] : []),
     ...(board ? [detail && board === 'formula' ? FORMULA_DETAIL_TASK : BOARD_TASK[board]] : []),
