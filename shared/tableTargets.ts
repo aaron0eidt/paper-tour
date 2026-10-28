@@ -61,3 +61,11 @@ export function clipsTableRow(doc: Doc, target: string, region: Region): boolean
     return boundaries.some((y) => y > block.bbox[1] + inset && y < block.bbox[3] - inset);
   });
 }
+
+/** A table's cells as extracted, one line per text block: the table_text blocks centred inside its box on its page. */
+export function tableLines(doc: Doc, table: DocFigure): string[] {
+  return tableTextBlocks(doc, table)
+    .map((b) => b.text.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 60);
+}

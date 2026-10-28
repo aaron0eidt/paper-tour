@@ -1,8 +1,7 @@
 import { splitWords, type Action, type BoardItem } from '../../../shared/paper';
 import { evaluateExpression, parseExpression } from '../../../shared/plot';
-import { boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
+import { BOARD_KINDS, boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
 
-const KINDS = ['formula', 'flow', 'bars', 'plot', 'scene'] as const;
 export interface ExampleFrame {
   anchor: string;
   at: number;
@@ -43,9 +42,10 @@ export const EXAMPLE_SCHEMA = object({
     type: 'array',
     minItems: 2,
     maxItems: 4,
-    items: object({ anchor: text(80), ...Object.fromEntries(KINDS.map((kind) => [kind, exampleBoardSchema(kind)])) }, [
-      'anchor',
-    ]),
+    items: object(
+      { anchor: text(80), ...Object.fromEntries(BOARD_KINDS.map((kind) => [kind, exampleBoardSchema(kind)])) },
+      ['anchor'],
+    ),
   },
 });
 
@@ -279,29 +279,35 @@ const visual = (item: BoardItem) => {
   return JSON.stringify(body);
 };
 
-/** No arbitrary expression execution: the existing plot parser provides bounded arithmetic only. */
-export function checkedCalculation(expression: string, result: number, exact: ExactValues = new Map()): string | null {
-  if (!Number.isFinite(result)) return 'result must be finite';
+type CalculationCheck = { error: string } | { error: null; value: number };
+
+/** Validate once and carry the same exact value into later calculations. */
+function checkCalculation(expression: string, result: number, exact: ExactValues): CalculationCheck {
+  if (!Number.isFinite(result)) return { error: 'result must be finite' };
   try {
     const tree = resolvedArithmetic(expression, exact);
     const variables = (node: typeof tree): boolean =>
       'variable' in node || ('args' in node && node.args.some(variables));
-    if (variables(tree)) return 'use concrete numerical literals, not undeclared x or a';
+    if (variables(tree)) return { error: 'use concrete numerical literals, not undeclared x or a' };
     const actual = evaluateExpression(tree, 0);
-    // A written rounded substitution is also valid arithmetic. Preserve its
-    // meaning instead of forcing every literal to refer to an earlier alias.
+    // A written rounded substitution can deliberately use the displayed literals.
     const literal = evaluateExpression(arithmetic(expression), 0);
-    if (!Number.isFinite(actual)) return 'the calculation has no finite result';
+    if (!Number.isFinite(actual)) return { error: 'the calculation has no finite result' };
     const tolerance = Math.max(
       precision(result),
       Number.EPSILON * Math.max(1, Math.abs(actual), Math.abs(result)) * 16,
     );
-    return Math.abs(actual - result) <= tolerance || Math.abs(literal - result) <= tolerance
-      ? null
-      : `result ${result} does not match ${expression} (approximately ${Number(actual.toPrecision(8))})`;
+    if (Math.abs(actual - result) <= tolerance) return { error: null, value: actual };
+    if (Math.abs(literal - result) <= tolerance) return { error: null, value: literal };
+    return { error: `result ${result} does not match ${expression} (approximately ${Number(actual.toPrecision(8))})` };
   } catch {
-    return 'use a valid bounded arithmetic expression with concrete numbers and supported functions';
+    return { error: 'use a valid bounded arithmetic expression with concrete numbers and supported functions' };
   }
+}
+
+/** Existing bounded parser only; callers needing a diagnostic do not receive an unchecked number. */
+export function checkedCalculation(expression: string, result: number, exact: ExactValues = new Map()): string | null {
+  return checkCalculation(expression, result, exact).error;
 }
 
 /** Only clear claims of a numerical worked case trigger a required sequence; printed paper results do not. */
@@ -376,15 +382,12 @@ export function checkExample(
       problems.push(
         `Example calculation ${i + 1} uses undeclared value ${undeclared}; name it as an input or derive it in an earlier calculation.`,
       );
-    const error = finite(c.result) ? checkedCalculation(clean(c.expression), c.result, exact) : 'result must be finite';
-    if (error) problems.push(`Example calculation ${i + 1}: ${error}.`);
+    const checked = checkCalculation(clean(c.expression), finite(c.result) ? c.result : NaN, exact);
+    if (checked.error !== null) problems.push(`Example calculation ${i + 1}: ${checked.error}.`);
     else {
       results.push(c.result as number);
       operands.push(c.result as number);
-      const resolved = evaluateExpression(resolvedArithmetic(clean(c.expression), exact), 0);
-      const literal = evaluateExpression(arithmetic(clean(c.expression)), 0);
-      const tolerance = Math.max(precision(c.result as number), Number.EPSILON * Math.max(1, Math.abs(resolved)) * 16);
-      exact.set(c.result as number, Math.abs(resolved - (c.result as number)) <= tolerance ? resolved : literal);
+      exact.set(c.result as number, checked.value);
     }
   }
   if (frames.length < 2 || frames.length > 4)
@@ -394,7 +397,7 @@ export function checkExample(
   const previews: (BoardItem | undefined)[] = [];
   let previousAnchor: number | null = null;
   for (const [i, frame] of frames.entries()) {
-    const kinds = KINDS.filter((kind) => raw(frame[kind]));
+    const kinds = BOARD_KINDS.filter((kind) => raw(frame[kind]));
     if (kinds.length !== 1) {
       problems.push(`Example frame ${i + 1} must contain exactly one formula, flow, bars, plot or scene item.`);
       continue;

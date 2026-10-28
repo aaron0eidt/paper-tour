@@ -1,11 +1,9 @@
-import { SCENE_MAX_OBJECTS } from '../../../shared/scene';
 import { checkExample, claimsNumericExample, EXAMPLE_SCHEMA, type WorkedExample } from './example';
-import { tableTextBlocks } from '../../../shared/tableTargets';
+import { tableTextBlocks, tableLines } from '../../../shared/tableTargets';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
-import type { MuseMessage } from '../muse/client';
 import type { Beat } from './beats';
-import { BOARD_LIMITS, FLOW_NODE_IDS, boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
+import { BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
 import type { DocType } from './doctype';
 import type { DirectOptions } from './prompts';
 import {
@@ -107,39 +105,9 @@ export function regionOf(name: string | undefined): Region | undefined {
   return region ? [...region] : undefined;
 }
 
-/** Part IDs a board_focus cue chooses from: term-1 … for a formula, the flow's node IDs, bar-1 … for bars. */
-export function boardPartIds(kind: BoardKind | undefined): string[] {
-  if (kind === 'flow') return [...FLOW_NODE_IDS];
-  if (kind === 'scene') return Array.from({ length: SCENE_MAX_OBJECTS }, (_, i) => `object-${i + 1}`);
-  if (!kind) return [];
-  if (kind === 'plot') return ['curve-1', 'curve-2', 'curve-3'];
-  const [prefix, most] = kind === 'formula' ? ['term', BOARD_LIMITS.terms[1]] : ['bar', BOARD_LIMITS.bars[1]];
-  return Array.from({ length: most }, (_, i) => `${prefix}-${i + 1}`);
-}
+export { boardPartIds, boardPart } from './board';
 
-/** The index board_focus lights up for a part ID, or -1 when the item has no such part. */
-export function boardPart(item: BoardItem, id: string): number {
-  if (item.kind === 'scene') {
-    const n = Number(/^object-(\d+)$/.exec(id)?.[1]) - 1;
-    return n >= 0 && n < item.objects.length ? n : -1;
-  }
-  if (item.kind === 'plot') {
-    const n = Number(/^curve-(\d+)$/.exec(id)?.[1]) - 1;
-    return n >= 0 && n < item.curves.length ? n : -1;
-  }
-  if (item.kind === 'flow') return item.nodes.findIndex((n) => n.id === id);
-  const [prefix, size] = item.kind === 'formula' ? ['term', item.terms.length] : ['bar', item.bars.length];
-  const n = Number(new RegExp(`^${prefix}-(\\d+)$`).exec(id)?.[1]) - 1;
-  return n >= 0 && n < size ? n : -1;
-}
-
-/** A table's cells as extracted, one line per text block: the table_text blocks centred inside its box on its page. */
-export function tableLines(doc: Doc, table: DocFigure): string[] {
-  return tableTextBlocks(doc, table)
-    .map((b) => b.text.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .slice(0, 60);
-}
+export { tableLines } from '../../../shared/tableTargets';
 
 /** The table a result rests on: one its evidence cites, else the one that repeats most of its distinctive numbers. */
 function resultTable(doc: Doc, evidence: string[], text: string): DocFigure | undefined {
@@ -160,7 +128,7 @@ function resultTable(doc: Doc, evidence: string[], text: string): DocFigure | un
 
 /** Targets on the page the camera shows: a text beat's paragraphs, or a figure with its panels, or an equation. */
 export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
-  const parts = { parts: ['formula', 'flow', 'bars', 'plot', 'scene'].flatMap((k) => boardPartIds(k as BoardKind)) };
+  const parts = { parts: BOARD_KINDS.flatMap(boardPartIds) };
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const quote = (ids: string[]) => ids.map((id) => sentences.get(id)?.text ?? '').filter(Boolean);
   if (beat.target) {
@@ -278,14 +246,27 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
     additionalProperties: false,
     required: ['plan', 'say', 'cues'],
     properties: {
-      plan: strict ? { type: 'string', maxLength: 600, description: 'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.' } : { type: 'string' },
+      plan: strict
+        ? {
+            type: 'string',
+            maxLength: 600,
+            description:
+              'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.',
+          }
+        : { type: 'string' },
       ...Object.fromEntries(
-        (['formula', 'flow', 'bars', 'plot', 'scene'] as const).map((kind) => [kind, strict ? {
-          ...boardSchema(kind),
-          description: kind === 'scene'
-            ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
-            : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,
-        } : {}]),
+        BOARD_KINDS.map((kind) => [
+          kind,
+          strict
+            ? {
+                ...boardSchema(kind),
+                description:
+                  kind === 'scene'
+                    ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
+                    : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,
+              }
+            : {},
+        ]),
       ),
       example: strict ? EXAMPLE_SCHEMA : {},
       say: {
@@ -468,9 +449,10 @@ export function cleanDirection(
     say,
     requireExample || (beat.kind === 'formula' && !!beat.detail) || claimsNumericExample(say),
   );
-  const candidates = (['formula', 'flow', 'bars', 'plot', 'scene'] as const)
-    .filter((kind) => d[kind] !== undefined && d[kind] !== null)
-    .map((kind) => ({ kind, check: checkBoard(kind, d[kind], targets.evidence) }));
+  const candidates = BOARD_KINDS.filter((kind) => d[kind] !== undefined && d[kind] !== null).map((kind) => ({
+    kind,
+    check: checkBoard(kind, d[kind], targets.evidence),
+  }));
   const boards = candidates.filter((c) => c.check.item);
   const boardProblems = candidates.flatMap((c) => c.check.problems.map((p) => `${c.kind}: ${p}`));
   if (boards.length > 1)
@@ -493,18 +475,4 @@ export function cleanDirection(
     boardProblems,
     visualProblems,
   };
-}
-
-/** One repair turn for a board that failed its checks: the exact problems, and the rest of the answer kept. */
-export function boardRepair(previous: unknown, kind: BoardKind, problems: string[]): MuseMessage[] {
-  const empty = kind === 'formula' ? '' : `, or leave "${kind}" empty if the document does not support it`;
-  const content = [
-    `The "${kind}" board cannot be shown:`,
-    ...problems.map((p) => `- ${p}`),
-    `Return the complete answer again with "${kind}" fixed${empty}. Keep "say" and the cues unless they must change.`,
-  ];
-  return [
-    { role: 'assistant', content: JSON.stringify(previous) },
-    { role: 'user', content: content.join('\n') },
-  ];
 }

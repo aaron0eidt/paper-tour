@@ -1,11 +1,10 @@
-import { SCENE_SCHEMA, sceneProblems, type SceneItem } from '../../../shared/scene';
+import { SCENE_SCHEMA, SCENE_MAX_OBJECTS, sceneProblems, type SceneItem } from '../../../shared/scene';
 import { PLOT_SCHEMA, plotProblems } from '../../../shared/plot';
 import katex, { type KatexOptions } from 'katex';
 import type { BoardItem } from '../../../shared/paper';
 
-// Side-board items written by the model (notes/HARNESS.md, "Formula breakdown"): their response schemas and the code
-// checks that decide whether an item is shown. A failed check drops the item with its problems, so the caller can ask
-// for one repair or keep the step without a board.
+// Native visualization contracts: schemas, local checks and focus identities.
+// Validators return actionable diagnostics; the workflow owns model calls and bounded repair attempts.
 
 export type BoardKind = BoardItem['kind'];
 export type FormulaItem = Extract<BoardItem, { kind: 'formula' }>;
@@ -363,7 +362,6 @@ export function checkFlow(raw: unknown): BoardCheck<FlowItem> {
   };
 }
 
-/** Check a board item of the kind the beat asked for; `evidence` is the text a bars board's numbers must come from. */
 export function sceneTeachingProblem(item: SceneItem): string | null {
   const quantitative = item.objects.some((object) => ['matrix', 'plot', 'vector'].includes(object.type));
   const nodes = item.objects.filter((object) => ['rect', 'circle'].includes(object.type) && !object.background);
@@ -373,49 +371,53 @@ export function sceneTeachingProblem(item: SceneItem): string | null {
     : 'A scene must show a meaningful quantitative transformation or spatial relationship, not colored prose or decorative boxes. Floating text plus tiny arrows is still a text slide. Use a plot, numeric matrix/vector, or at least two actual diagram nodes connected by meaningful arrows. For measured comparisons use bars/plots rather than numbers written in prose. For a source-table overview, keep grounded PDF cues and omit the board unless an actual comparison adds insight.';
 }
 
-export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {
-  if (kind === 'scene') {
-    if (raw === undefined) return none();
-    if (!isObj(raw)) return { item: null, problems: sceneProblems(raw) };
-    const item = { ...raw, kind: 'scene' } as unknown as SceneItem;
-    const problems = sceneProblems(item);
-    if (!problems.length) {
-      const teachingProblem = sceneTeachingProblem(item);
-      if (teachingProblem) problems.push(teachingProblem);
-      const printed = [0, 1, ...numbersIn(evidence)];
-      for (const object of item.objects) {
-        if (object.type === 'math' && object.text) {
-          const error = latexError(object.text);
-          if (error) problems.push(`Scene object ${object.id}: ${error}.`);
-        }
-        for (const value of object.values?.flat() ?? [])
-          if (!printed.some((n) => sameNumber(n, value)))
-            problems.push(
-              `Scene object ${object.id}: value ${value} needs quoted evidence or declared illustrative example inputs/calculations.`,
-            );
+/** A scene's structural, pedagogical, math and value-provenance checks. */
+function checkScene(raw: unknown, evidence: string): BoardCheck {
+  if (raw === undefined) return none();
+  if (!isObj(raw)) return { item: null, problems: sceneProblems(raw) };
+  const item = { ...raw, kind: 'scene' } as unknown as SceneItem;
+  const problems = sceneProblems(item);
+  if (!problems.length) {
+    const teachingProblem = sceneTeachingProblem(item);
+    if (teachingProblem) problems.push(teachingProblem);
+    const printed = [0, 1, ...numbersIn(evidence)];
+    for (const object of item.objects) {
+      if (object.type === 'math' && object.text) {
+        const error = latexError(object.text);
+        if (error) problems.push(`Scene object ${object.id}: ${error}.`);
       }
+      for (const value of object.values?.flat() ?? [])
+        if (!printed.some((n) => sameNumber(n, value)))
+          problems.push(
+            `Scene object ${object.id}: value ${value} needs quoted evidence or declared illustrative example inputs/calculations.`,
+          );
     }
-    return { item: problems.length ? null : item, problems };
   }
-  if (kind === 'plot') {
-    const item = isObj(raw) ? { ...raw, kind: 'plot' as const } : raw;
-    const problems = plotProblems(item);
-    return { item: problems.length ? null : (item as BoardItem), problems };
-  }
-  return kind === 'formula' ? checkFormula(raw) : kind === 'bars' ? checkBars(raw, evidence) : checkFlow(raw);
+  return { item: problems.length ? null : item, problems };
 }
 
-/** How many parts board_focus can light up: formula terms, flow nodes or bars. */
-export const boardParts = (item: BoardItem) =>
-  item.kind === 'scene'
-    ? item.objects.length
-    : item.kind === 'plot'
-      ? item.curves.length
-      : item.kind === 'formula'
-        ? item.terms.length
-        : item.kind === 'flow'
-          ? item.nodes.length
-          : item.bars.length;
+function checkPlot(raw: unknown): BoardCheck {
+  const item = isObj(raw) ? { ...raw, kind: 'plot' as const } : raw;
+  const problems = plotProblems(item);
+  return { item: problems.length ? null : (item as BoardItem), problems };
+}
+
+/** Dispatch schema-validated tool data through the same checks in tours, examples and Q&A. */
+export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {
+  return BOARD_TOOLS[kind].check(raw, evidence);
+}
+
+export const boardParts = (item: BoardItem) => BOARD_TOOLS[item.kind].parts(item).length;
+
+/** IDs offered to the model for speech-timed emphasis of a tool's parts. */
+export function boardPartIds(kind: BoardKind | undefined): string[] {
+  return kind ? [...BOARD_TOOLS[kind].focusIds] : [];
+}
+
+/** Resolve the real displayed order, including a reordered flow's original node IDs. */
+export function boardPart(item: BoardItem, id: string): number {
+  return BOARD_TOOLS[item.kind].parts(item).indexOf(id);
+}
 
 // ------------------------------------------------------------------------------------------------- schemas
 
@@ -427,45 +429,46 @@ const object = (properties: Record<string, object>) => ({
   properties,
 });
 
-/** The response schema of one board item the model fills in; every field is required, as constrained decoding wants. */
-export function boardSchema(kind: BoardKind) {
-  if (kind === 'scene') return SCENE_SCHEMA;
-  if (kind === 'plot') return PLOT_SCHEMA;
-  if (kind === 'formula')
-    return object({
-      title: field(BOARD_LIMITS.title, 'What the formula computes, at most 6 words.'),
-      latex: { ...field(400, 'The whole equation in LaTeX that KaTeX renders, without its number.'), minLength: 1 },
-      terms: {
-        type: 'array',
-        minItems: BOARD_LIMITS.terms[0],
-        maxItems: BOARD_LIMITS.terms[1],
-        items: object({
-          latex: {
-            ...field(
-              BOARD_LIMITS.termLatex,
-              'Copied character for character from latex: one symbol or a complete group.',
-            ),
-            minLength: 1,
-          },
-          label: { ...field(BOARD_LIMITS.termLabel, 'What this part means, at most 5 plain words.'), minLength: 1 },
-        }),
-      },
-    });
-  if (kind === 'bars')
-    return object({
-      title: field(BOARD_LIMITS.title, 'What the bars compare, at most 6 words.'),
-      unit: field(BOARD_LIMITS.unit, 'The metric, such as BLEU, % or F1.'),
-      higher_is_better: { type: 'boolean' },
-      bars: {
-        type: 'array',
-        maxItems: BOARD_LIMITS.bars[1],
-        description: '2-6 results for one metric, or empty for no board.',
-        items: object({
-          label: { ...field(BOARD_LIMITS.barLabel, 'The method or setting, at most 4 words.'), minLength: 1 },
-          value: { type: 'number', description: 'Copied exactly as printed in the evidence.' },
-        }),
-      },
-    });
+function formulaSchema() {
+  return object({
+    title: field(BOARD_LIMITS.title, 'What the formula computes, at most 6 words.'),
+    latex: { ...field(400, 'The whole equation in LaTeX that KaTeX renders, without its number.'), minLength: 1 },
+    terms: {
+      type: 'array',
+      minItems: BOARD_LIMITS.terms[0],
+      maxItems: BOARD_LIMITS.terms[1],
+      items: object({
+        latex: {
+          ...field(
+            BOARD_LIMITS.termLatex,
+            'Copied character for character from latex: one symbol or a complete group.',
+          ),
+          minLength: 1,
+        },
+        label: { ...field(BOARD_LIMITS.termLabel, 'What this part means, at most 5 plain words.'), minLength: 1 },
+      }),
+    },
+  });
+}
+
+function barsSchema() {
+  return object({
+    title: field(BOARD_LIMITS.title, 'What the bars compare, at most 6 words.'),
+    unit: field(BOARD_LIMITS.unit, 'The metric, such as BLEU, % or F1.'),
+    higher_is_better: { type: 'boolean' },
+    bars: {
+      type: 'array',
+      maxItems: BOARD_LIMITS.bars[1],
+      description: '2-6 results for one metric, or empty for no board.',
+      items: object({
+        label: { ...field(BOARD_LIMITS.barLabel, 'The method or setting, at most 4 words.'), minLength: 1 },
+        value: { type: 'number', description: 'Copied exactly as printed in the evidence.' },
+      }),
+    },
+  });
+}
+
+function flowSchema() {
   const node = { type: 'string', enum: FLOW_NODE_IDS };
   return object({
     title: field(BOARD_LIMITS.title, 'What the flow shows, at most 6 words.'),
@@ -482,4 +485,53 @@ export function boardSchema(kind: BoardKind) {
       items: object({ from: node, to: node }),
     },
   });
+}
+
+interface BoardTool {
+  schema: () => object;
+  check: (raw: unknown, evidence: string) => BoardCheck;
+  focusIds: readonly string[];
+  parts: (item: BoardItem) => string[];
+}
+const partIds = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => `${prefix}-${i + 1}`);
+
+/** One registration per native visualization. A new BoardItem kind must register all four capabilities. */
+const BOARD_TOOLS = {
+  formula: {
+    schema: formulaSchema,
+    check: (raw) => checkFormula(raw),
+    focusIds: partIds('term', BOARD_LIMITS.terms[1]),
+    parts: (item) => (item.kind === 'formula' ? partIds('term', item.terms.length) : []),
+  },
+  flow: {
+    schema: flowSchema,
+    check: checkFlow,
+    focusIds: FLOW_NODE_IDS,
+    parts: (item) => (item.kind === 'flow' ? item.nodes.map((node) => node.id) : []),
+  },
+  bars: {
+    schema: barsSchema,
+    check: checkBars,
+    focusIds: partIds('bar', BOARD_LIMITS.bars[1]),
+    parts: (item) => (item.kind === 'bars' ? partIds('bar', item.bars.length) : []),
+  },
+  plot: {
+    schema: () => PLOT_SCHEMA,
+    check: checkPlot,
+    focusIds: partIds('curve', PLOT_SCHEMA.properties.curves.maxItems),
+    parts: (item) => (item.kind === 'plot' ? partIds('curve', item.curves.length) : []),
+  },
+  scene: {
+    schema: () => SCENE_SCHEMA,
+    check: checkScene,
+    focusIds: partIds('object', SCENE_MAX_OBJECTS),
+    parts: (item) => (item.kind === 'scene' ? partIds('object', item.objects.length) : []),
+  },
+} satisfies Record<BoardKind, BoardTool>;
+
+export const BOARD_KINDS = Object.freeze(Object.keys(BOARD_TOOLS) as BoardKind[]);
+
+/** Provider schemas stay separate from canonical player validation. */
+export function boardSchema(kind: BoardKind) {
+  return BOARD_TOOLS[kind].schema();
 }
