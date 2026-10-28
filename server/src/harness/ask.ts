@@ -33,7 +33,7 @@ import { BOARD_LIMITS, checkBars, checkFlow, checkFormula, FLOW_NODE_IDS } from 
 import { imageParts, type Effort } from './calls';
 import { REGION_NAMES, regionOf, tableLines } from './direct';
 import { paperBlock, proseSentences } from './paper-block';
-import { SHARED_RULES } from './prompts';
+import { SHARED_RULES, SOURCE_VISUAL_POLICY } from './prompts';
 import {
   BOUNDS_SCHEMA,
   exactBounds,
@@ -425,6 +425,7 @@ export function askInstructions(language: string) {
   return `TASK: answer the learner's question as a short spoken micro-tour in ${JSON.stringify(language)} that points at
 the document while it speaks.
 ${EXAMPLE_TASK}
+${SOURCE_VISUAL_POLICY}
 Actively choose useful live visuals for the answer: a plot for function behavior or parameter changes, bars for comparable quantities, and timed example frames for calculations or transformations. Use native scenes for vectors, matrices and custom visual explanations: positioned objects with stable id,type,x,y,w,h and optional color,text,values,plot,background; object types text/math/rect/circle/arrow/vector/matrix/plot, normalized0..1positions, signed endpoint deltas for arrows/vectors. Bind vector/arrow/circle objects to axes with plotId and data-domain x,y,endpoint deltas; never guess their normalized alignment with an embedded plot. Keep semantic identities across scene frames, make the transformation visible, and avoid foreground collisions. Use them whenever they clarify the answer. Measured source-component cues are sufficient for a straightforward diagram path; avoid decorative motion and duplicate boards.
 Start with the actual PDF equation, figure, table or sentence and choose precise source cues when they suffice. A copied formula must preserve the source and be actively used through term emphasis, substitution or a connected plot. Never fill a sideboard with colorful prose, table descriptions or an input/output flow containing unexplained number pairs. Choose a separate visual only for an important insight that the PDF cues alone cannot show; function behavior calls for a plot, vector transformations for actual components, and meaningful numerical comparisons for charts. A recap or trivial unit conversion does not need another panel.
 1. "answerable": "yes" if the document answers the question, "partly" if it answers part of it, "no" if it does not.
@@ -451,7 +452,7 @@ Start with the actual PDF equation, figure, table or sentence and choose precise
    - "formula" when the question is about an equation: its LaTeX, and 2 to 4 terms, each a separate part with "latex"
      copied exactly from the formula, a "label" of 1 to 4 words and an "anchor" where "say" explains that term.
    - "bars" to compare 2 to 6 numbers copied exactly from the passages or table cells, with their "unit".
-   - "flow" for a process of 3 to 6 stages in order, each "label" at most 3 words.
+   - "flow" only for informative dependencies, branching, feedback or changing values that source annotations cannot show; never for a plain list of stages. Each "label" has at most 3 words.
 6. "followups": two questions of at most 12 words that the learner could ask next. Each goes one step further than this
    answer and the conversation so far, is answered by the document, and was not asked before.
 EXAMPLE OUTPUT for a different document:
