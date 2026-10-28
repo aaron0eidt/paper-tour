@@ -1,4 +1,5 @@
-import { plotProblems } from '../../shared/plot';
+import { plotProblems, type PlotItem } from '../../shared/plot';
+import { sceneProblems } from '../../shared/scene';
 // The side board: checks that a board item can be drawn, and computes what the board draws (term
 // wrapping, flow and bar geometry, easing). Pure, so it can be tested; rendering is in
 // components/Board.tsx.
@@ -30,6 +31,65 @@ export function termColor(term: FormulaTerm, index: number): Color {
   return term.color ?? BOARD_PALETTE[index % BOARD_PALETTE.length];
 }
 
+type BoardFrame = { key: string; item: BoardItem };
+
+function forwardFrame(previous: BoardFrame | null, next: BoardFrame): boolean {
+  if (!previous) return false;
+  const a = /^(\d+):(\d+)$/.exec(previous.key), b = /^(\d+):(\d+)$/.exec(next.key);
+  return !!a && !!b && a[1] === b[1] && Number(a[2]) < Number(b[2]);
+}
+
+/** Preserve a quantity's established colour when the next authored frame omits
+ * it. Explicit choices win; names never carry colours across unrelated steps. */
+export function boardFrameColors(previous: BoardFrame | null, next: BoardFrame): BoardItem {
+  if (!forwardFrame(previous, next) || !previous) return next.item;
+  const before = previous.item, item = next.item;
+  if (before.kind === 'formula' && item.kind === 'formula') {
+    return { ...item, terms: item.terms.map(term => {
+      const index = before.terms.findIndex(old => term.label.trim() ? old.label === term.label : old.latex === term.latex);
+      return term.color || index < 0 ? term : { ...term, color: termColor(before.terms[index], index) };
+    }) };
+  }
+  if (before.kind === 'flow' && item.kind === 'flow') {
+    return { ...item, nodes: item.nodes.map(node => {
+      const color = before.nodes.find(old => old.id === node.id)?.color;
+      return node.color || !color ? node : { ...node, color };
+    }) };
+  }
+  if (before.kind === 'bars' && item.kind === 'bars') {
+    return { ...item, bars: item.bars.map(bar => {
+      const color = before.bars.find(old => old.label === bar.label)?.color;
+      return bar.color || !color ? bar : { ...bar, color };
+    }) };
+  }
+  if (before.kind === 'scene' && item.kind === 'scene') {
+    return { ...item, objects: item.objects.map(object => {
+      const color = before.objects.find(old => old.id === object.id && old.type === object.type)?.color;
+      return object.color || !color ? object : { ...object, color };
+    }) };
+  }
+  return item;
+}
+
+/** These frames update the same rendered objects in place. A different process,
+ * board kind, or seek gets its own presentation rather than a false morph. */
+export function continuousBoardFrame(previous: BoardFrame | null, next: BoardFrame): boolean {
+  if (!forwardFrame(previous, next) || !previous) return false;
+  const before = previous.item, item = next.item;
+  if (before.kind === 'formula' && item.kind === 'formula') {
+    return before.latex === item.latex || item.terms.some(term => before.terms.some(old =>
+      term.label.trim() ? old.label === term.label : old.latex === term.latex));
+  }
+  if (before.kind === 'flow' && item.kind === 'flow') {
+    return before.nodes.length === item.nodes.length && before.nodes.every((node, i) => node.id === item.nodes[i].id) &&
+      JSON.stringify(before.edges) === JSON.stringify(item.edges);
+  }
+  if (before.kind === 'scene' && item.kind === 'scene') {
+    return item.objects.some(object => before.objects.some(old => old.id === object.id && old.type === object.type));
+  }
+  return false;
+}
+
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const color = (c: unknown) => (COLORS.includes(c as string) ? { color: c as Color } : {});
@@ -45,9 +105,13 @@ export function checkBoardItem(raw: unknown, where: string, warn: (message: stri
   const title = text(raw.title) ? { title: raw.title as string } : {};
   const list = (v: unknown) => (Array.isArray(v) ? v.filter(isObj) : []);
   switch (raw.kind) {
+    case 'scene': {
+      const problems = sceneProblems(raw);
+      return problems.length ? fail(problems.join(' ')) : (raw as unknown as BoardItem);
+    }
     case 'plot': {
       const problems = plotProblems(raw);
-      return problems.length ? fail(problems.join(' ')) : raw as unknown as BoardItem;
+      return problems.length ? fail(problems.join(' ')) : (raw as unknown as BoardItem);
     }
     case 'formula': {
       const latex = text(raw.latex);
@@ -65,7 +129,8 @@ export function checkBoardItem(raw: unknown, where: string, warn: (message: stri
       if (nodes.length < 2) return fail('needs at least two boxes');
       const ids = new Set(nodes.map((n) => n.id));
       const edges = (Array.isArray(raw.edges) ? raw.edges : []).filter(
-        (e): e is [string, string] => Array.isArray(e) && e.length === 2 && ids.has(e[0]) && ids.has(e[1]) && e[0] !== e[1],
+        (e): e is [string, string] =>
+          Array.isArray(e) && e.length === 2 && ids.has(e[0]) && ids.has(e[1]) && e[0] !== e[1],
       );
       return { kind: 'flow', ...title, nodes, edges };
     }
@@ -371,7 +436,13 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
       inRank.forEach((ids, r) => {
         const x0 = (width - loops - span[r]) / 2;
         ids.forEach((i, lane) => {
-          nodes[i] = { x: x0 + lane * (w + FLOW_LANE_GAP), y: y + (depth[r] - heights[i]) / 2, w, h: heights[i], lines: lines[i] };
+          nodes[i] = {
+            x: x0 + lane * (w + FLOW_LANE_GAP),
+            y: y + (depth[r] - heights[i]) / 2,
+            w,
+            h: heights[i],
+            lines: lines[i],
+          };
         });
         y += depth[r] + gap;
       });
@@ -465,18 +536,50 @@ export function bestBar(item: BarsItem): number | null {
   return best;
 }
 
-/** Decimal places a value is written with (at most 4), so an animated number ends as reported. */
+/** Only forward frames of one spoken step share a numeric transition. Matching
+ * labels/units identify the same quantities; seeking or changing units does not. */
+export function barFrameSource(previous: { key: string; item: BoardItem } | null, next: { key: string; item: BoardItem }): BarsItem | null {
+  if (!previous || previous.item.kind !== 'bars' || next.item.kind !== 'bars') return null;
+  if (!forwardFrame(previous, next)) return null;
+  const current = next.item;
+  if (!current.unit || previous.item.unit !== current.unit || previous.item.bars.length !== current.bars.length ||
+    previous.item.bars.some((bar, i) => bar.label !== current.bars[i].label)) return null;
+  return previous.item;
+}
+
+export function interpolateBars(from: BarsItem, to: BarsItem, progress: number): BarsItem {
+  const t = Math.max(0, Math.min(1, progress));
+  return { ...to, bars: to.bars.map((bar, i) => ({ ...bar, value: from.bars[i].value + (bar.value - from.bars[i].value) * t })) };
+}
+
+/** A parameter sweep holds the input probe fixed, so only one independent
+ * variable changes. Without a parameter, narration moves the input across x. */
+export function plotCursor(item: PlotItem, progress: number): { x: number; a: number } {
+  const t = Math.max(0, Math.min(1, progress));
+  return {
+    x: item.x[0] + (item.parameter ? 0.5 : t) * (item.x[1] - item.x[0]),
+    a: item.parameter ? item.parameter.from + t * (item.parameter.to - item.parameter.from) : 1,
+  };
+}
+
+/** Preserve short reported precision. Long calculated fractional tails need
+ * only three places; this affects the label, never the stored value/geometry. */
 export function decimalsOf(value: number): number {
   const text = Math.abs(value).toString();
   if (text.includes('e')) return Math.abs(value) < 1 ? 4 : 0;
   const dot = text.indexOf('.');
-  return dot < 0 ? 0 : Math.min(4, text.length - dot - 1);
+  const places = dot < 0 ? 0 : text.length - dot - 1;
+  return places > 6 ? 3 : Math.min(4, places);
 }
 
 /** A value as the board prints it: grouped digits, fixed places, and a % sign when that is the unit. */
 export function formatValue(value: number, places: number, unit?: string): string {
   const rounded = Number(value.toFixed(places)) || 0; // no "-0.0" on the way up from zero
-  const text = rounded.toLocaleString('en-US', { minimumFractionDigits: places, maximumFractionDigits: places });
+  // A nonzero result must never disappear merely because the normal decimal
+  // label has fewer places than its magnitude requires.
+  const text = value !== 0 && rounded === 0
+    ? Number(value.toPrecision(3)).toExponential()
+    : rounded.toLocaleString('en-US', { minimumFractionDigits: places, maximumFractionDigits: places });
   return unit === '%' ? `${text}%` : text;
 }
 
@@ -524,12 +627,16 @@ export function barsLayout(
   labelWidths: number[],
   valueWidths: number[],
   height = Infinity,
+  rangeValues: number[] = [],
 ): BarsLayout {
   const values = item.bars.map((b) => b.value);
-  const lo = Math.min(0, ...values);
-  const hi = Math.max(0, ...values);
+  const domain = [...values, ...rangeValues];
+  const lo = Math.min(0, ...domain);
+  const hi = Math.max(0, ...domain);
   const after = Math.max(0, ...valueWidths.filter((_, i) => values[i] >= 0)) + BAR_VALUE_GAP + BAR_VALUE_SLACK;
-  const before = values.some((v) => v < 0) ? Math.max(...valueWidths.filter((_, i) => values[i] < 0)) + BAR_VALUE_GAP : 0;
+  const before = domain.some((v) => v < 0)
+    ? Math.max(0, ...valueWidths) + BAR_VALUE_GAP
+    : 0;
   const column = Math.max(...labelWidths) + BAR_LABEL_GAP;
   const labelsAbove = width - column - before - after < width * BAR_MIN_TRACK;
   const start = (labelsAbove ? 0 : column) + before;

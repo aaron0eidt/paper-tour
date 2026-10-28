@@ -19,6 +19,30 @@ export interface Completion {
   requestId: string | null;
 }
 
+/** Classify provider failures without retaining their potentially echoed request data. */
+export async function providerFailureReason(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return 'request_rejected';
+  let text = '';
+  const decoder = new TextDecoder();
+  try {
+    while (text.length < 8192) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true }).slice(0, 8192 - text.length);
+    }
+    if (/json schema.*(?:maximum nesting|nesting depth)/is.test(text)) return 'schema_nesting_depth';
+    if (/(?:invalid json schema|invalid schema|schema validation)/i.test(text)) return 'invalid_schema';
+    if (/(?:context length|context window|too many tokens)/i.test(text)) return 'context_length';
+    if (/(?:model not found|unknown model|model does not exist)/i.test(text)) return 'unknown_model';
+    return 'request_rejected';
+  } catch {
+    return 'request_rejected';
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
 /** The provider boundary: no application state, tool execution or persistence lives here. */
 export class MuseClient {
   private readonly endpoint: string;
@@ -158,11 +182,18 @@ export class MuseClient {
       );
     if (response.status >= 500)
       throw new ProcessingError('muse_unavailable', 'Muse is temporarily unavailable. The tour will be retried.', true);
-    if (!response.ok)
+    if (!response.ok) {
+      console.warn(JSON.stringify({
+        event: 'model_request_rejected',
+        status: response.status,
+        schema: name,
+        reason: await providerFailureReason(response),
+      }));
       throw new ProcessingError(
         'muse_request_rejected',
         'Muse could not process this paper. Check the model configuration and retry.',
       );
+    }
     let payload: {
       choices?: { finish_reason?: string; message?: { content?: unknown; refusal?: unknown } }[];
       usage?: {

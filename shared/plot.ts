@@ -37,7 +37,7 @@ const FUNCTIONS: Record<string, [number, number, (...args: number[]) => number]>
 };
 
 /** Bounded arithmetic parser: no properties, assignment, strings, implicit multiplication or executable code. */
-export function parseExpression(source: string): Expr {
+export function parseExpression(source: string, { maxConstant = 1e6 }: { maxConstant?: number } = {}): Expr {
   if (!source || source.length > 200) throw new Error('Expression must contain 1–200 characters.');
   const tokens = source.match(/(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[a-zA-Z_]+|[^\s]/g) ?? [];
   if (tokens.length > 128) throw new Error('Expression is too complex.');
@@ -59,7 +59,7 @@ export function parseExpression(source: string): Expr {
     else if (token === 'pi' || token === 'e') left = { value: token === 'pi' ? Math.PI : Math.E };
     else if (token && /^\d|^\.\d/.test(token)) {
       const value = Number(token);
-      if (!Number.isFinite(value) || Math.abs(value) > 1e6) throw new Error('Numeric constant is too large.');
+      if (!Number.isFinite(value) || Math.abs(value) > maxConstant) throw new Error('Numeric constant is too large.');
       left = { value };
     } else if (token && Object.hasOwn(FUNCTIONS, token)) {
       take('(');

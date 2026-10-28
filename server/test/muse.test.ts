@@ -4,7 +4,7 @@ import type { MuseConfig } from '../src/config';
 import type { Doc } from '../../shared/paper';
 import type { TourGenerationInput, TourImage, TourProgress } from '../src/tour-generator';
 import { ProcessingError } from '../src/errors';
-import { MuseClient } from '../src/muse/client';
+import { MuseClient, providerFailureReason } from '../src/muse/client';
 import { checkImages, paperContext } from '../src/muse/context';
 import { MuseTourGenerator } from '../src/muse/generator';
 import { materializeTour, TourValidationError } from '../src/muse/schema';
@@ -18,6 +18,17 @@ const settings: MuseConfig = {
   language: 'en-US',
   timeoutMs: 1000,
 };
+
+test('provider diagnostics classify schema errors without exposing echoed content', async () => {
+  const secret = 'private-question-and-api-key';
+  const reason = await providerFailureReason(new Response(JSON.stringify({
+    error: { message: `JSON schema exceeds the maximum nesting depth of 10 levels. ${secret}` },
+  })));
+  assert.equal(reason, 'schema_nesting_depth');
+  assert.equal(await providerFailureReason(new Response(secret)), 'request_rejected');
+  assert.equal(await providerFailureReason(new Response('Invalid JSON schema: ' + secret)), 'invalid_schema');
+  assert.equal(await providerFailureReason(new Response('x'.repeat(9000) + 'context length')), 'request_rejected');
+});
 const png =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j0ZkAAAAASUVORK5CYII=';
 const doc: Doc = {

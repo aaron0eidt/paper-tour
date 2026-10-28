@@ -83,16 +83,39 @@ export function recordedCalls(client: MuseClient, input: TourGenerationInput, mo
   return { call, completions };
 }
 
-/** Run tasks with at most `limit` in flight; results keep the input order. */
-export async function pool<T, R>(items: T[], limit: number, task: (item: T, index: number) => Promise<R>) {
+/** Stop assigning work on failure, then drain in-flight tasks before returning.
+ * The optional callback can cancel siblings; their errors never replace the first one.
+ */
+export async function pool<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>,
+  onFailure?: (error: unknown) => void,
+) {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('Pool concurrency must be a positive integer.');
   const results = new Array<R>(items.length);
   let next = 0;
+  let failed = false;
+  let failure: unknown;
   const worker = async () => {
-    while (next < items.length) {
+    while (!failed && next < items.length) {
       const index = next++;
-      results[index] = await task(items[index], index);
+      try {
+        results[index] = await task(items[index], index);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+          try {
+            onFailure?.(error);
+          } catch {
+            /* Preserve the task failure while draining siblings. */
+          }
+        }
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failed) throw failure;
   return results;
 }

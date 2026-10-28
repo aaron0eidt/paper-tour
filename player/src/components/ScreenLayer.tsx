@@ -1,11 +1,13 @@
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { CSSProperties, RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { CSSProperties } from 'react';
 import { project } from '../camera';
-import type { Camera, ScreenRect, View, Viewport } from '../camera';
+import type { Camera, ScreenRect, Viewport } from '../camera';
 import { STROKE } from '../colors';
 import { parseNote } from '../markup';
+import { labelWidths, layoutLabels } from '../labelLayout';
+import type { LabelAnchor, LabelPlacement, MeasuredLabel } from '../labelLayout';
 import type { PenLabelSide, PenSide, SceneLabel, SceneNote } from '../scene';
-import type { Color } from '../types';
+import type { BBox, Color } from '../types';
 
 type Side = 'right' | 'left' | 'top' | 'bottom';
 
@@ -94,27 +96,52 @@ export function penLabelPosition(
  * Notes and box and pen labels live in screen space above the viewport, so they stay readable at
  * any zoom. They are re-projected through the camera on every camera frame.
  */
-export function ScreenLayer({ camera, notes, labels }: { camera: Camera; notes: SceneNote[]; labels: SceneLabel[] }) {
+export function ScreenLayer({ camera, notes, labels, obstacles = [], occlusions = [] }: {
+  camera: Camera;
+  notes: SceneNote[];
+  labels: SceneLabel[];
+  obstacles: BBox[];
+  occlusions?: ScreenRect[];
+}) {
   const view = useSyncExternalStore(camera.subscribe, camera.getView);
   const vp = camera.viewport;
+  const [measurements, setMeasurements] = useState<Record<string, { text: string; sizes: MeasuredLabel[] }>>({});
+  const measure = useCallback((key: string, text: string, sizes: MeasuredLabel[]) => {
+    setMeasurements((current) => {
+      const previous = current[key];
+      if (previous?.text === text && JSON.stringify(previous.sizes) === JSON.stringify(sizes)) return current;
+      return { ...current, [key]: { text, sizes } };
+    });
+  }, []);
+  const sizes = (key: string, text: string) => measurements[key]?.text === text ? measurements[key].sizes : [];
+  // Notes have priority over optional chips. Both participate in the same collision layout.
+  const anchors: LabelAnchor[] = [
+    ...notes.map((note) => ({
+      key: `note:${note.key}`, rect: project(note.rect, view, vp), side: note.side,
+      sizes: sizes(`note:${note.key}`, note.text),
+    })),
+    ...labels.map((label) => {
+      const rect = project(label.rect, view, vp);
+      const point = label.pin && project([label.pin.x, label.pin.y, label.pin.x, label.pin.y], view, vp);
+      const tiny = label.pin && Math.max(rect.right - rect.left, rect.bottom - rect.top) < PEN_MIN_MARK;
+      return {
+        key: `label:${label.key}`, rect,
+        area: label.area && project(label.area, view, vp),
+        pin: label.pin && point ? { ...label.pin, x: point.left, y: point.top } : undefined,
+        sizes: tiny ? [] : sizes(`label:${label.key}`, label.text),
+      };
+    }),
+  ];
+  const placements = layoutLabels(anchors, [...obstacles.map((r) => project(r, view, vp)), ...occlusions], vp);
   return (
     <div className="screen-layer">
-      {labels.map((l) =>
-        l.pin ? (
-          <PenLabel key={l.key} label={l} pin={l.pin} view={view} vp={vp} />
-        ) : (
-          <BoxLabel key={l.key} label={l} view={view} vp={vp} />
-        ),
-      )}
+      {labels.map((label) => (
+        <Annotation key={`label:${label.key}`} id={`label:${label.key}`} text={label.text}
+          label={label} placement={placements.get(`label:${label.key}`)} vp={vp} onMeasure={measure} />
+      ))}
       {notes.map((n) => (
-        <NoteCard
-          key={n.key}
-          note={n}
-          anchor={project(n.rect, view, vp)}
-          destination={project(n.rect, camera.targetView, vp)}
-          userMoved={camera.userMoved}
-          vp={vp}
-        />
+        <Annotation key={`note:${n.key}`} id={`note:${n.key}`} text={n.text} note
+          anchor={project(n.rect, view, vp)} placement={placements.get(`note:${n.key}`)} vp={vp} onMeasure={measure} />
       ))}
     </div>
   );
@@ -142,114 +169,56 @@ export function chooseSide(pref: SceneNote['side'], a: ScreenRect, size: { w: nu
   return SIDES.reduce((best, s) => (room[s] / need[s] > room[best] / need[best] ? s : best));
 }
 
-/** An element's rendered size, measured before paint and kept up to date. */
-function useSize<T extends HTMLElement>(initial: { w: number; h: number }): [RefObject<T>, { w: number; h: number }] {
-  const ref = useRef<T>(null);
-  const [size, setSize] = useState(initial);
+/** One mounted element supplies real font/wrapping measurements at each useful width.
+ * Hidden labels stay measured, but never flash over a figure while layout catches up. */
+function Annotation({ id, text, label, note = false, anchor, placement, vp, onMeasure }: {
+  id: string;
+  text: string;
+  label?: SceneLabel;
+  note?: boolean;
+  anchor?: ScreenRect;
+  placement?: LabelPlacement;
+  vp: Viewport;
+  onMeasure(key: string, text: string, sizes: MeasuredLabel[]): void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const widthOptions = labelWidths(vp.width, note).join(',');
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setSize({ w: el.offsetWidth, h: el.offsetHeight });
+    const measure = () => {
+      const previous = el.style.maxWidth;
+      const sizes = widthOptions.split(',').map(Number).map((maxWidth) => {
+        el.style.maxWidth = `${maxWidth}px`;
+        return { maxWidth, w: el.offsetWidth, h: el.offsetHeight };
+      });
+      el.style.maxWidth = previous;
+      onMeasure(id, text, sizes);
+    };
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, size];
-}
-
-/** A box's label, measured so it stays inside the viewport; hidden, but kept, while its box is off screen. */
-function BoxLabel({ label, view, vp }: { label: SceneLabel; view: View; vp: Viewport }) {
-  const [ref, size] = useSize<HTMLDivElement>({ w: 110, h: LABEL_H });
-  const pos = labelPosition(project(label.rect, view, vp), vp, size.w);
-  return (
-    <div
-      ref={ref}
-      className={`box-label ${pos?.above ? 'above' : 'inside'}`}
-      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, ...chip(label.color), visibility: pos ? undefined : 'hidden' }}
-    >
-      {label.text}
-    </div>
-  );
-}
-
-interface PenLabelProps {
-  label: SceneLabel;
-  pin: NonNullable<SceneLabel['pin']>;
-  view: View;
-  vp: Viewport;
-}
-
-/** A pen mark's label, measured so it can be kept inside the viewport. */
-function PenLabel({ label, pin, view, vp }: PenLabelProps) {
-  const [ref, size] = useSize<HTMLDivElement>({ w: 0, h: LABEL_H });
-  const at = project([pin.x, pin.y, pin.x, pin.y], view, vp);
-  const mark = project(label.rect, view, vp);
-  const center = { x: (mark.left + mark.right) / 2, y: (mark.top + mark.bottom) / 2 };
-  const { left, top } = penLabelPosition(at.left, at.top, pin.side, size, vp, { alt: pin.alt, center });
-  // Stays mounted while its mark is off screen or tiny, so it fades in once rather than on every return.
-  const hidden = !onScreen(mark, vp) || Math.max(mark.right - mark.left, mark.bottom - mark.top) < PEN_MIN_MARK;
-  return (
-    <div
-      ref={ref}
-      className="box-label pen-label"
-      style={{ left, top, ...chip(label.color), visibility: hidden ? 'hidden' : undefined }}
-    >
-      {label.text}
-    </div>
-  );
-}
-
-function placeCard(side: Side, a: ScreenRect, size: { w: number; h: number }, vp: Viewport) {
-  const cx = (a.left + a.right) / 2;
-  const cy = (a.top + a.bottom) / 2;
-  let x = side === 'right' ? a.right + GAP : side === 'left' ? a.left - GAP - size.w : cx - size.w / 2;
-  let y = side === 'bottom' ? a.bottom + GAP : side === 'top' ? a.top - GAP - size.h : cy - size.h / 2;
-  x = clamp(x, EDGE, vp.width - size.w - EDGE);
-  y = clamp(y, EDGE, vp.height - size.h - EDGE);
-
-  // The arrow points at the anchor only while the card really sits on that side of it.
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [id, text, widthOptions, onMeasure]);
+  const side = placement?.side ?? 'top';
+  // A small pointer is useful only while it actually touches the source-facing edge.
+  // There are no extended leader lines across the PDF to compensate for a poor placement.
   const horizontal = side === 'left' || side === 'right';
-  const along = horizontal ? cy - y : cx - x;
-  const length = horizontal ? size.h : size.w;
-  const besides =
-    (side === 'right' && x >= a.right) ||
-    (side === 'left' && x + size.w <= a.left) ||
-    (side === 'bottom' && y >= a.bottom) ||
-    (side === 'top' && y + size.h <= a.top);
-  const arrow = besides && along > 12 && along < length - 12 ? along : null;
-  return { x, y, arrow };
-}
-
-interface NoteProps {
-  note: SceneNote;
-  /** Anchor at the current camera view. */
-  anchor: ScreenRect;
-  /** Anchor at the view the camera is animating to; the side is chosen from this. */
-  destination: ScreenRect;
-  userMoved: boolean;
-  vp: Viewport;
-}
-
-function NoteCard({ note, anchor, destination, userMoved, vp }: NoteProps) {
-  const [ref, size] = useSize<HTMLDivElement>({ w: 280, h: 72 });
-  const sideRef = useRef<Side | null>(null);
-
-  // Pick the side for where the camera is going, so the card does not flip at the end of a move.
-  // While the user pans, keep the current side as long as it fits.
-  const side = chooseSide(note.side, destination, size, vp, userMoved ? sideRef.current : null);
-  sideRef.current = side;
-  const { x, y, arrow } = placeCard(side, anchor, size, vp);
-  // With its anchor off screen the card would sit at the edge pointing at nothing; it stays
-  // mounted (and measured) but hidden.
-  const hidden = !onScreen(anchor, vp);
-
+  const along = placement && anchor ? horizontal
+    ? (anchor.top + anchor.bottom) / 2 - placement.top
+    : (anchor.left + anchor.right) / 2 - placement.left : null;
+  const length = placement && (horizontal ? placement.bottom - placement.top : placement.right - placement.left);
+  const arrow = along !== null && length && along > 12 && along < length - 12 ? along : null;
   return (
-    <div ref={ref} className={`note note-${side}`} style={{ left: x, top: y, visibility: hidden ? 'hidden' : undefined }} role="note">
-      {parseNote(note.text).map((t, i) =>
+    <div ref={ref} className={note ? `note note-${side}` : `box-label${label?.pin ? ' pen-label' : ''}`}
+      style={{ left: placement?.left ?? 0, top: placement?.top ?? 0,
+        maxWidth: placement?.maxWidth ?? labelWidths(vp.width, note)[0],
+        ...(label ? chip(label.color) : {}), visibility: placement ? undefined : 'hidden' }}
+      role={note ? 'note' : undefined} aria-hidden={placement ? undefined : true}>
+      {note ? parseNote(text).map((t, i) =>
         t.kind === 'bold' ? <strong key={i}>{t.text}</strong> : t.kind === 'code' ? <code key={i}>{t.text}</code> : <span key={i}>{t.text}</span>,
-      )}
-      {arrow !== null && <span className="note-arrow" style={side === 'left' || side === 'right' ? { top: arrow } : { left: arrow }} />}
+      ) : text}
+      {note && arrow !== null && <span className="note-arrow" style={horizontal ? { top: arrow } : { left: arrow }} />}
     </div>
   );
 }

@@ -1,4 +1,6 @@
+import { claimsNumericExample } from './example';
 import type { Doc, Step } from '../../../shared/paper';
+import { tourDirection } from '../../../shared/tourDirection';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
 import type { GeneratedTour, TourGenerationInput, TourGenerator, TourImage, TourProgress } from '../tour-generator';
@@ -13,7 +15,6 @@ import { cardProblems, cardSchema, cleanCard, evidencePool, fallbackCard, repair
 import {
   beatBrief,
   beatTargets,
-  boardRepair,
   cleanDirection,
   directOptions,
   directionSchema,
@@ -34,9 +35,10 @@ import {
   type Solution,
 } from './exercise';
 import { paperBlock } from './paper-block';
-import { readsSource } from './insight';
+import { narrationProblems, readsSource, repeatsExplanation } from './insight';
 import { documentLanguage } from './language';
 import { HARNESS_VERSION, SHARED_RULES, cardTask, directTask } from './prompts';
+import { measuredFigureTargets } from './measured-visuals';
 import { pythonVerifier, type LineCheck, type MathVerifier } from './verify';
 
 /**
@@ -76,6 +78,7 @@ export class HarnessTourGenerator implements TourGenerator {
     private readonly preset: Preset = 'standard',
     private readonly transport?: typeof fetch,
     private readonly verifier: MathVerifier = pythonVerifier(),
+    private readonly measureFigure: typeof measuredFigureTargets = measuredFigureTargets,
   ) {
     this.model = config.model;
     this.configured = Boolean(config.apiKey.trim());
@@ -86,7 +89,13 @@ export class HarnessTourGenerator implements TourGenerator {
       throw new ProcessingError('unsupported_model', 'Choose a model that supports paper text and images.');
     return model === this.model
       ? this
-      : new HarnessTourGenerator({ ...this.config, model }, this.preset, this.transport, this.verifier);
+      : new HarnessTourGenerator(
+          { ...this.config, model },
+          this.preset,
+          this.transport,
+          this.verifier,
+          this.measureFigure,
+        );
   }
   async generate(
     input: TourGenerationInput,
@@ -95,7 +104,9 @@ export class HarnessTourGenerator implements TourGenerator {
   ): Promise<GeneratedTour> {
     if (!this.configured)
       throw new ProcessingError('muse_not_configured', 'Tour creation needs a Muse API key on the server.');
+    const siblings = new AbortController();
     const signal = AbortSignal.any([
+      siblings.signal,
       AbortSignal.timeout(this.config.timeoutMs),
       ...(externalSignal ? [externalSignal] : []),
     ]);
@@ -193,7 +204,14 @@ export class HarnessTourGenerator implements TourGenerator {
       docType: plan.type,
       cardSource,
       planSource,
-      beats: beats.map(({ id, kind, arc, target }) => ({ id, kind, arc, ...(target ? { target } : {}) })),
+      beats: beats.map(({ id, kind, arc, target, point, detail }) => ({
+        id,
+        kind,
+        arc,
+        label: point,
+        detail: !!detail,
+        ...(target ? { target } : {}),
+      })),
     });
 
     // C. Direct each beat in parallel: narration plus cues limited to the beat's own targets; an exercise part is
@@ -258,42 +276,116 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       return { steps: unitSteps(unit, best.solution, best.checks, language), solved: true, checks: best.checks };
     };
-    const results = await pool(beats, 6, async (beat): Promise<BeatResult> => {
+    const results: BeatResult[] = new Array(beats.length);
+    const direct = async (beat: Beat): Promise<BeatResult> => {
       if (beat.unit) return teach(beat);
       const targets = beatTargets(beat, doc);
-      const beatSchema = directionSchema(beat, targets);
       const image = beatImage(beat, doc, input.images);
-      const options = directOptions(beat, plan.type);
-      const text = directTask(language, beatBrief(beat, doc, targets), options);
+      if (image && image.kind !== 'page') targets.imaged = image.targetId;
+      if (image?.kind === 'figure') {
+        const started = Date.now();
+        targets.measured = await this.measureFigure(image, signal);
+        await input.onEvent?.('visual.targets', {
+          source: image.targetId,
+          count: targets.measured.length,
+          durationMs: Date.now() - started,
+        });
+      }
+      const beatSchema = directionSchema(beat, targets);
+      const options = directOptions(beat, plan.type, targets);
+      const overviewIndex = beat.detail
+        ? beats.findIndex((b) => !b.detail && b.kind === beat.kind && b.target === beat.target)
+        : -1;
+      const overviewResult = results[overviewIndex];
+      const overview = overviewResult && 'direction' in overviewResult ? overviewResult.direction?.say : undefined;
+      const beatIndex = beats.indexOf(beat);
+      const outline = beats.map((b, i) => `${i + 1}. ${b.point}`).join('\n');
+      const brief =
+        `SOURCE OUTLINE (you write step ${beatIndex + 1}; follow the document structure, do not repeat other steps):\n${outline}\n` +
+        beatBrief(beat, doc, targets) +
+        (overview ? `\nPRECEDING OVERVIEW (already heard; do not repeat):\n${overview}` : '');
+      const text = directTask(language, brief, options);
       const task: MuseMessage[] = [
         ...prefix,
         { role: 'user', content: [{ type: 'text', text }, ...imageParts(image ? [image] : [])] },
       ];
       let direction: Direction | null = null;
+      let requireExample = beat.kind === 'formula' && !!beat.detail;
       // One repair at most: for an unusable answer, or for a board that failed its checks (the step keeps its first
       // usable direction either way, without the board if the repair does not fix it).
-      for (let attempt = 0; attempt < 2 && !(direction && !direction.boardProblems?.length); attempt++) {
+      for (
+        let attempt = 0;
+        attempt < 2 &&
+        !(
+          direction &&
+          !direction.boardProblems?.length &&
+          !direction.visualProblems?.length &&
+          !direction.exampleProblems?.length
+        );
+        attempt++
+      ) {
         try {
           const completion = await call(task, 'beat_direction', beatSchema, 6_000, 'low', signal);
-          const cleaned = cleanDirection(completion.value, beat, targets);
+          const rawSay = (completion.value as { say?: unknown } | null)?.say;
+          requireExample ||=
+            (completion.value as { example?: unknown } | null)?.example !== undefined ||
+            (typeof rawSay === 'string' && claimsNumericExample(rawSay));
+          const corruption = typeof rawSay === 'string' ? narrationProblems(rawSay) : [];
+          const cleaned = corruption.length ? null : cleanDirection(completion.value, beat, targets, requireExample);
+          if (corruption.length) {
+            await input.onEvent?.('validation.failed', {
+              stage: 'narration',
+              beat: beat.id,
+              problems: corruption,
+              attempt: attempt + 1,
+            });
+            task.push(...repairTurn(completion.value, corruption));
+          }
           const copied = cleaned && readsSource(cleaned.say, doc);
-          const next = copied ? null : cleaned;
+          const repeated = cleaned && overview && repeatsExplanation(cleaned.say, overview);
+          const next = copied || repeated ? null : cleaned;
+          if (repeated) {
+            await input.onEvent?.('beat.duplicate', { beat: beat.id, attempt: attempt + 1 });
+            task.push(
+              ...repairTurn(completion.value, [
+                'This repeats the preceding overview. Teach a new worked example, cause-and-effect mechanism or comparison instead; do not rephrase the same symbol definitions.',
+              ]),
+            );
+          }
           if (copied)
             task.push(
               ...repairTurn(completion.value, [
                 'Explain the mechanism, consequence or intuition in your own words; do not read the source aloud.',
               ]),
             );
-          if (next && (!direction || !next.boardProblems?.length)) direction = next;
+          if (next && (!direction || (!next.boardProblems?.length && !next.exampleProblems?.length))) direction = next;
+          if (next?.exampleProblems?.length) {
+            await input.onEvent?.('validation.failed', {
+              stage: 'worked_example',
+              beat: beat.id,
+              problems: next.exampleProblems,
+              attempt: attempt + 1,
+            });
+            task.push(...repairTurn(completion.value, next.exampleProblems));
+            continue;
+          }
+          if (next?.visualProblems?.length) {
+            await input.onEvent?.('validation.failed', {
+              stage: 'visual_grounding',
+              beat: beat.id,
+              problems: next.visualProblems,
+              attempt: attempt + 1,
+            });
+            task.push(...repairTurn(completion.value, next.visualProblems));
+            continue;
+          }
           if (next?.boardProblems?.length) {
             await input.onEvent?.('board.rejected', {
               beat: beat.id,
               problems: next.boardProblems,
               attempt: attempt + 1,
             });
-            const kind =
-              beat.kind === 'formula' && (completion.value as { plot?: unknown } | null)?.plot ? 'plot' : beat.board!;
-            task.push(...boardRepair(completion.value, kind, next.boardProblems));
+            task.push(...repairTurn(completion.value, next.boardProblems));
           } else if (!next)
             task.push(
               ...repairTurn(completion.value, [
@@ -307,10 +399,62 @@ export class HarnessTourGenerator implements TourGenerator {
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
         }
       }
+      if (!direction && requireExample)
+        throw new ProcessingError(
+          'worked_example_failed',
+          'The worked example could not be authored after one correction; no incomplete example was published.',
+        );
+      if (direction?.boardProblems?.some((problem) => problem.startsWith('scene:')))
+        throw new ProcessingError('scene_invalid', direction.boardProblems.join(' '));
+      if (direction?.exampleProblems?.length)
+        throw new ProcessingError('worked_example_failed', direction.exampleProblems.join(' '));
+      if (direction?.visualProblems?.length)
+        throw new ProcessingError('visual_grounding_failed', direction.visualProblems.join(' '));
       await progress('writing', ++directed, beats.length);
-      if (!direction) await input.onEvent?.('beat.fallback', { beat: beat.id });
+      if (!direction) await input.onEvent?.(beat.detail ? 'beat.omitted' : 'beat.fallback', { beat: beat.id });
       return { targets, direction };
-    });
+    };
+    // Detail calls receive their actual overview, not a parallel guess at what it
+    // might say. Independent calls in each stage still share the same worker pool.
+    const write = async ({ beat, index }: { beat: Beat; index: number }) => {
+      const started = Date.now();
+      await input.onEvent?.('beat.started', { beat: beat.id });
+      try {
+        const result = await direct(beat);
+        results[index] = result;
+        const outcome =
+          'steps' in result
+            ? result.solved
+              ? 'directed'
+              : 'fallback'
+            : result.direction
+              ? 'directed'
+              : beat.detail
+                ? 'omitted'
+                : 'fallback';
+        await input.onEvent?.('beat.completed', { beat: beat.id, outcome, durationMs: Date.now() - started });
+      } catch (error) {
+        await input.onEvent?.('beat.failed', {
+          beat: beat.id,
+          code: signal.aborted ? 'cancelled' : error instanceof ProcessingError ? error.code : 'generation_error',
+          durationMs: Date.now() - started,
+        });
+        throw error;
+      }
+    };
+    const indexed = beats.map((beat, index) => ({ beat, index }));
+    await pool(
+      indexed.filter(({ beat }) => !beat.detail),
+      6,
+      write,
+      (error) => siblings.abort(error),
+    );
+    await pool(
+      indexed.filter(({ beat }) => beat.detail),
+      6,
+      write,
+      (error) => siblings.abort(error),
+    );
 
     // F. Assemble and validate in code. A contract's first and last steps say that the tour is no legal advice.
     await progress('validating', beats.length, beats.length);
@@ -318,6 +462,7 @@ export class HarnessTourGenerator implements TourGenerator {
     const steps = beats.map((beat, i) => {
       const result = results[i];
       if ('steps' in result) return result.steps;
+      if (beat.detail && !result.direction) return [];
       const previous = new Set(used);
       const step = beatStep(beat, result.targets, result.direction, doc, used);
       if (!readsSource(step.say, doc)) return [step];
@@ -340,11 +485,18 @@ export class HarnessTourGenerator implements TourGenerator {
       this.preset,
     );
     const directions = results.map((result) => ('direction' in result ? result.direction : null));
-    const problems = [...tourProblems(tour, doc), ...boardProblems(tour)];
+    const problems = [
+      ...tourProblems(tour, doc),
+      ...boardProblems(tour),
+      ...tour.chapters.flatMap((chapter) =>
+        chapter.steps.flatMap((step) => narrationProblems(step.say).map((problem) => `${step.id}: ${problem}`)),
+      ),
+    ];
     if (problems.length) {
       await input.onEvent?.('validation.failed', { stage: 'assemble', problems });
       throw new ProcessingError('invalid_tour', 'The generated tour did not pass document validation.');
     }
+    await input.onEvent?.('tour.direction', tourDirection(tour));
     return {
       tour,
       metadata: {
@@ -361,12 +513,22 @@ export class HarnessTourGenerator implements TourGenerator {
         fallbackBeats: beats
           .filter((_, i) => {
             const result = results[i];
-            return 'solved' in result ? !result.solved : !result.direction;
+            return 'solved' in result ? !result.solved : !beats[i].detail && !result.direction;
           })
+          .map((beat) => beat.id),
+        omittedDetails: beats
+          .filter(
+            (beat, i) =>
+              beat.detail && 'direction' in results[i] && !(results[i] as { direction: Direction | null }).direction,
+          )
           .map((beat) => beat.id),
         boards: {
           shown: directions.flatMap((direction, i) =>
-            direction?.board ? [`${beats[i].id}:${direction.board.kind}`] : [],
+            direction?.example
+              ? direction.example.frames.map((frame, n) => `${beats[i].id}:frame-${n + 1}:${frame.item.kind}`)
+              : direction?.board
+                ? [`${beats[i].id}:${direction.board.kind}`]
+                : [],
           ),
           dropped: directions.flatMap((direction, i) =>
             direction?.boardProblems?.length ? [{ beat: beats[i].id, problems: direction.boardProblems }] : [],

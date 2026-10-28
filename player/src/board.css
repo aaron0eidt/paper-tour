@@ -5,7 +5,7 @@
 /* The stage and the board side by side; where the space is tall or narrow (a phone, a tablet
    upright) the board sits under the stage. Either way the stage keeps at least half the space. */
 .board-split {
-  --board-w: min(clamp(240px, 34cqw, 440px), 50cqw);
+  --board-w: clamp(280px, 38cqw, 680px);
   --board-h: min(clamp(180px, 40cqh, 340px), 50cqh);
   /* The dock moves like the camera (ease-in-out cubic); content lands with a long ease-out
      (EASE_OUT in board.ts). */
@@ -47,7 +47,7 @@
   --board-bg: #11141b;
   --board-raised: #171b24;
   --board-rule: #2c3240;
-  --board-edge: #4a5264;
+  --board-edge: #7b8498;
   --board-bar: #4a5366;
   position: absolute;
   top: 0;
@@ -108,6 +108,18 @@
   animation: board-out 200ms ease forwards;
 }
 
+/* A worked example changes the same objects; it does not replay each panel's
+   initial entrance. Spoken focus and actual value/parameter motion remain. */
+:is(.is-frame-transition, .leaving) .board-head,
+:is(.is-frame-transition, .leaving) .formula-math,
+:is(.is-frame-transition, .leaving) .formula-math .pt-term,
+:is(.is-frame-transition, .leaving) .formula-legend li,
+:is(.is-frame-transition, .leaving) .flow-node,
+:is(.is-frame-transition, .leaving) .flow-edge-line,
+:is(.is-frame-transition, .leaving) .flow-edge-head {
+  animation: none;
+}
+
 .board-head {
   display: flex;
   align-items: baseline;
@@ -164,9 +176,40 @@
 .board-view[data-kind='flow'] .board-body::before,
 .board-view[data-kind='flow'] .board-body::after,
 .board-view[data-kind='bars'] .board-body::before,
-.board-view[data-kind='bars'] .board-body::after {
+.board-view[data-kind='bars'] .board-body::after,
+.board-view[data-kind='scene'] .board-body::before,
+.board-view[data-kind='scene'] .board-body::after {
   display: none;
 }
+
+/* A native scene is one stable mathematical plane. State changes move the same
+   objects; colour identifies quantities instead of decorating transitions. */
+.native-scene { display: grid; flex: 1; min-height: 0; }
+.native-scene > svg { display: block; width: 100%; min-width: 0; max-height: 100%; margin: auto; overflow: visible; }
+.scene-object { color: var(--c); }
+.scene-object-text { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 5px; box-sizing: border-box; font-size: 20px; font-weight: 500; line-height: 1.25; text-align: center; overflow-wrap: anywhere; color: currentColor; }
+.scene-object-text.is-math { font-size: 22px; }
+.scene-object-text .katex { font-size: 1em; }
+.scene-shape { fill: currentColor; fill-opacity: .075; stroke: currentColor; stroke-opacity: .65; stroke-width: 1.5; }
+.scene-object.is-focus .scene-shape { fill-opacity: .15; stroke-opacity: 1; stroke-width: 2.5; }
+.scene-arrow, .scene-arrow-head, .scene-matrix-bracket { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.scene-arrow.is-vector { stroke-width: 3; }
+.scene-object.is-focus .scene-arrow, .scene-object.is-focus .scene-arrow-head, .scene-object.is-focus .scene-matrix-bracket { stroke-width: 3.5; }
+.scene-object.is-background .scene-shape { fill-opacity: .025; stroke-opacity: .35; }
+.scene-object.is-background .scene-arrow { stroke-opacity: .45; }
+.scene-arrow-label, .scene-matrix-label { fill: currentColor; font-size: 17px; font-weight: 500; }
+.scene-matrix-cell { fill: currentColor; fill-opacity: .07; }
+.scene-object.is-focus .scene-matrix-cell { fill-opacity: .16; }
+.scene-object text { fill: currentColor; font-variant-numeric: tabular-nums; }
+.scene-plot-grid { color: var(--muted); font-size: 12px; }
+.scene-plot-grid line { stroke: var(--line); stroke-width: 1; }
+.scene-plot-axis { fill: none; stroke: var(--muted); stroke-width: 1.3; }
+.scene-plot-curve { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.scene-plot-probe { fill: none; stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 4; opacity: .65; }
+.scene-plot-axis-name { display: flex; justify-content: center; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.scene-plot-axis-name .katex, .scene-plot-values .katex { font-size: 1em; }
+.scene-plot-values { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 3px 12px; height: 100%; color: var(--text); font-size: 12px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.scene-plot-values > span { white-space: nowrap; }
 
 @keyframes board-in {
   from {
@@ -195,9 +238,8 @@
   gap: 22px;
 }
 
-/* Colour is computed from three numbers, so the build and the focus never fight over it:
-   --board-lit goes 0 to 1 as a term lights up in the build, --board-on is 1 for the term in
-   focus (lit even before its turn), and --board-dim goes 0 to 1 as a part recedes behind it. */
+/* Focus adds an accent without reducing the contrast of the surrounding equation.
+   --board-lit builds the term colours; --board-on lights a focused term immediately. */
 @property --board-lit {
   syntax: '<number>';
   inherits: false;
@@ -205,12 +247,6 @@
 }
 
 @property --board-on {
-  syntax: '<number>';
-  inherits: false;
-  initial-value: 0;
-}
-
-@property --board-dim {
   syntax: '<number>';
   inherits: false;
   initial-value: 0;
@@ -224,8 +260,7 @@
   scrollbar-width: thin;
   font-size: calc(23px * var(--fit));
   text-align: center;
-  color: color-mix(in srgb, var(--text) calc(100% - var(--board-dim) * 64%), var(--board-bg));
-  transition: --board-dim 460ms ease;
+  color: var(--text);
   animation: board-rise 620ms var(--board-ease-out) 240ms backwards;
 }
 
@@ -246,13 +281,12 @@
    settles into whatever state follows (the keyframe names no end value). */
 .formula-math .pt-term {
   --board-term: color-mix(in srgb, var(--c) calc(max(var(--board-lit), var(--board-on)) * 100%), var(--text));
-  color: color-mix(in srgb, var(--board-term) calc(100% - var(--board-dim) * 62%), var(--board-bg));
+  color: var(--board-term);
   animation:
     term-lit 520ms ease calc(760ms + var(--i, 0) * 460ms) backwards,
     term-glow 1100ms ease-out calc(760ms + var(--i, 0) * 460ms);
   transition:
     --board-on 460ms ease,
-    --board-dim 460ms ease,
     filter 460ms ease;
 }
 
@@ -268,16 +302,10 @@
   }
 }
 
-.formula.has-focus .formula-math,
-.formula.has-focus .pt-term {
-  --board-dim: 1;
-}
-
-/* In focus: the term (with any term inside it) keeps its colour and a soft glow; the rest recedes. */
+/* The current term glows; every other term stays readable for context. */
 .formula.has-focus .pt-term.is-focus,
 .formula.has-focus .pt-term.is-focus .pt-term {
   --board-on: 1;
-  --board-dim: 0;
 }
 
 .formula.has-focus .pt-term.is-focus {
@@ -323,7 +351,6 @@
   padding: 8px 12px;
   border-radius: 10px;
   transition:
-    opacity 360ms ease,
     background-color 360ms ease;
 }
 
@@ -341,19 +368,14 @@ code.formula-symbol {
 .formula-label {
   font-size: 13px;
   line-height: 1.45;
-  color: var(--muted);
+  color: var(--text);
   transition: color 360ms ease;
-}
-
-.formula.has-focus .formula-row {
-  opacity: 0.45;
 }
 
 /* The row in focus lifts off the board, edged in its term's colour. */
 .formula.has-focus .formula-row.is-focus {
-  opacity: 1;
-  background: color-mix(in srgb, var(--c) 6%, var(--board-raised));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 32%, transparent);
+  background: color-mix(in srgb, var(--c) 12%, var(--board-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
 }
 
 .formula-row.is-focus .formula-label {
@@ -406,14 +428,6 @@ code.formula-symbol {
   }
 }
 
-.flow-node-state {
-  transition: opacity 360ms ease;
-}
-
-.flow.has-focus .flow-node:not(.is-focus) .flow-node-state {
-  opacity: 0.42;
-}
-
 .flow-box {
   fill: var(--board-raised);
   stroke: #333a4a;
@@ -451,10 +465,6 @@ code.formula-symbol {
   font-weight: 500;
 }
 
-.flow-edge {
-  transition: opacity 360ms ease;
-}
-
 .flow-edge-line,
 .flow-edge-head {
   fill: none;
@@ -483,10 +493,6 @@ code.formula-symbol {
   2% {
     opacity: 1;
   }
-}
-
-.flow.has-focus .flow-edge:not(.is-lit) {
-  opacity: 0.38;
 }
 
 .flow-edge.is-lit .flow-edge-line,
@@ -526,14 +532,6 @@ code.formula-symbol {
   stroke: var(--board-rule);
   stroke-width: 1;
   shape-rendering: crispEdges;
-}
-
-.bar-state {
-  transition: opacity 360ms ease;
-}
-
-.bars.has-focus .bar:not(.is-focus) .bar-state {
-  opacity: 0.42;
 }
 
 .bar-fill {
@@ -594,13 +592,11 @@ code.formula-symbol {
   }
 }
 
-/* With a term in focus on a short board, the legend keeps only its row, right under the formula. */
+/* Keep all definitions available on short boards too; the body scrolls to the
+   focused row without removing the surrounding explanation. */
 @container board-view (max-height: 380px) {
-  .formula.has-focus .formula-legend li:not(:has(.is-focus)) {
-    display: none;
-  }
-  .formula.has-focus .formula-legend li {
-    animation: board-rise 360ms var(--board-ease-out) backwards;
+  .formula-row {
+    padding-block: 6px;
   }
 }
 
@@ -625,3 +621,40 @@ code.formula-symbol {
 .plot-axis-labels { justify-content: space-between; margin: 0 20px 0 48px; }
 .plot-parameter, .plot-caption { text-align: center; font-size: 11px; color: var(--muted); }
 @keyframes plot-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+
+/* Timed numerical frames keep their existing quantities while values change. */
+.board-view.is-frame-transition .bars-svg { animation: none; }
+.flow-edge-trace {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 0.14 0.86;
+  opacity: 0;
+  animation: flow-transfer 700ms ease-out both;
+}
+@keyframes flow-transfer {
+  0% { stroke-dashoffset: 1; opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+.plot-probe { fill: none; stroke-width: 1; stroke-dasharray: 4 5; opacity: 0.6; }
+.plot-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.plot-values > div {
+  flex: 1 1 95px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--board-rule);
+  border-radius: 8px;
+  background: var(--board-raised);
+  text-align: center;
+}
+.plot-values dt { font-size: 11px; overflow-wrap: anywhere; }
+.plot-values dd { margin: 6px 0 0; font-size: 22px; font-weight: 600; }

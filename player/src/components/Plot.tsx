@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import katex from 'katex';
 import { evaluateExpression, parseExpression, plotSegments, type PlotItem } from '../../../shared/plot';
-import { BOARD_INK, BOARD_PALETTE } from '../board';
+import { BOARD_INK, BOARD_PALETTE, plotCursor } from '../board';
+
+import type { BoardPlayback } from '../engine';
 
 const WIDTH = 480,
   HEIGHT = 300;
@@ -18,36 +20,38 @@ function MathLabel({ text }: { text: string }) {
   return html ? <span dangerouslySetInnerHTML={{ __html: html }} /> : <span>{text}</span>;
 }
 
-export function PlotBoard({ item, focus }: { item: PlotItem; focus: number | null }) {
-  const [progress, setProgress] = useState(() => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0));
+/** Word events own the position; this short tween only smooths the distance
+ * between two observed words. Pausing/seeking immediately shows that exact
+ * position and never leaves an independent sweep running in the background. */
+export function useSpokenProgress(target: number, playing: boolean): number {
+  const [shown, setShown] = useState(target);
+  const current = useRef(target);
   useEffect(() => {
-    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-    let raf = 0,
-      start: number | undefined;
-    const tick = (now: number) => {
-      start ??= now;
-      const value = Math.min(1, (now - start) / 5000);
-      setProgress(value);
-      if (value < 1) raf = requestAnimationFrame(tick);
-    };
-    const begin = () => {
-      cancelAnimationFrame(raf);
-      if (reduced.matches) setProgress(1);
-      else {
-        start = undefined;
-        setProgress(0);
-        raf = requestAnimationFrame(tick);
-      }
-    };
-    begin();
-    reduced.addEventListener('change', begin);
-    return () => {
-      cancelAnimationFrame(raf);
-      reduced.removeEventListener('change', begin);
-    };
-  }, [item]);
+    const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!playing || reduce) {
+      current.current = target;
+      setShown(target);
+      return;
+    }
+    const from = current.current;
+    if (from === target) return;
+    const start = performance.now();
+    let raf = requestAnimationFrame(function tick(now) {
+      const t = Math.min(1, (now - start) / 160);
+      current.current = from + t * (target - from);
+      setShown(current.current);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [target, playing]);
+  return shown;
+}
+
+export function PlotBoard({ item, focus, playback }: { item: PlotItem; focus: number | null; playback: BoardPlayback }) {
+  const progress = useSpokenProgress(playback.progress, playback.playing);
   const trees = useMemo(() => item.curves.map((c) => parseExpression(c.expression)), [item]);
-  const a = item.parameter ? item.parameter.from + progress * (item.parameter.to - item.parameter.from) : 1;
+  const { x: px, a } = plotCursor(item, progress);
+  const outputs = trees.map(tree => evaluateExpression(tree, px, a));
   const x = (v: number) => M.left + ((v - item.x[0]) / (item.x[1] - item.x[0])) * (WIDTH - M.left - M.right);
   const y = (v: number) =>
     HEIGHT - M.bottom - ((v - item.y[0]) / (item.y[1] - item.y[0])) * (HEIGHT - M.top - M.bottom);
@@ -58,7 +62,6 @@ export function PlotBoard({ item, focus }: { item: PlotItem; focus: number | nul
       )
       .join(' '),
   );
-  const px = item.x[0] + progress * (item.x[1] - item.x[0]);
   return (
     <div className="plot">
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={item.title ?? 'Illustrative function plot'}>
@@ -80,13 +83,16 @@ export function PlotBoard({ item, focus }: { item: PlotItem; focus: number | nul
         })}
         <path className="plot-axis" d={`M${M.left},${M.top}V${HEIGHT - M.bottom}H${WIDTH - M.right}`} />
         {item.curves.map((curve, i) => {
-          const py = evaluateExpression(trees[i], px, a);
+          const py = outputs[i];
           const ink = BOARD_INK[curve.color ?? BOARD_PALETTE[i]];
           return (
-            <g key={i} opacity={focus === null || focus === i ? 1 : 0.3} style={{ color: ink }}>
+            <g key={i} opacity={focus === null || focus === i ? 1 : 0.7} style={{ color: ink }}>
               <path className="plot-curve" d={paths[i]} pathLength={1} />
               {Number.isFinite(py) && py >= item.y[0] && py <= item.y[1] && (
-                <circle cx={x(px)} cy={y(py)} r={5} fill={ink} />
+                <>
+                  {(focus === i || (focus === null && i === 0)) && <path className="plot-probe" d={`M${x(px)},${HEIGHT - M.bottom}V${y(py)}H${M.left}`} stroke={ink} />}
+                  <circle cx={x(px)} cy={y(py)} r={5} fill={ink} />
+                </>
               )}
             </g>
           );
@@ -103,7 +109,14 @@ export function PlotBoard({ item, focus }: { item: PlotItem; focus: number | nul
           </li>
         ))}
       </ul>
-      {item.parameter && <p className="plot-parameter">a = {short(a)}</p>}
+      <dl className="plot-values" aria-label="Current illustrative values">
+        <div><dt><MathLabel text={item.x_label ?? 'x'} /></dt><dd>{short(px)}</dd></div>
+        {item.parameter && <div><dt>a</dt><dd>{short(a)}</dd></div>}
+        {item.curves.map((curve, i) => <div key={i} style={{ color: BOARD_INK[curve.color ?? BOARD_PALETTE[i]] }}>
+          <dt><MathLabel text={curve.label} /></dt><dd>{Number.isFinite(outputs[i]) ? short(outputs[i]) : '—'}</dd>
+        </div>)}
+      </dl>
+      {item.parameter && <p className="plot-parameter">Fixed input · parameter a changes with the explanation</p>}
       <p className="plot-caption">Illustrative function · not measured data</p>
     </div>
   );

@@ -1,7 +1,7 @@
 // Engine tests with a fake narrator and fake timers. Run with `npm test` (esbuild bundles this
 // file for Node, no test framework needed).
 
-import { TourEngine, flattenTour } from '../src/engine';
+import { TourEngine, boardPlayback, flattenTour } from '../src/engine';
 import type { EngineState, Timers } from '../src/engine';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from '../src/narration/narrator';
 import { SilentNarrator } from '../src/narration/silent';
@@ -9,7 +9,7 @@ import { chunkWords } from '../src/narration/webSpeech';
 import { parseNote } from '../src/markup';
 import { Resolver, prepareTour } from '../src/resolve';
 import { checkDoc, checkTour } from '../src/validate';
-import type { Doc, Tour } from '../src/types';
+import type { BoardItem, Doc, Tour } from '../src/types';
 
 // ------------------------------------------------------------------ harness
 
@@ -232,6 +232,132 @@ await test('actions fire when narration reaches at_word; skipped words still fir
   eq(keys(engine.getState()), ['0:2', '0:0'], 'after word 3');
   narrator.last.cb.onWord(1); // going backwards is ignored
   eq(engine.getState().word, 3, 'word is monotonic');
+});
+
+await test('a narrated example shows input, intermediate and result frames at their spoken words', () => {
+  const frame = (title: string, value: number): BoardItem => ({ kind: 'formula', title, latex: `x=${value}`,
+    terms: [{ latex: 'x', label: 'Value' }] });
+  const example: Tour = { schema: 'paper-tour/tour@0.1', title: 'Example', paper: 'test', chapters: [{ id: 'c', title: 'C', steps: [
+    { id: 'example', say: 'Input has minus two then rectify it to zero and return result', hold_ms: 0, actions: [
+      { type: 'board', item: frame('Input', -2) },
+      { type: 'board_focus', part: 0, at_word: 1 },
+      { type: 'board', item: frame('Intermediate', 0), at_word: 4 },
+      { type: 'board_focus', part: 0, at_word: 6 },
+      { type: 'board', item: frame('Result', 0), at_word: 8 },
+      { type: 'board_focus', part: 0, at_word: 8 },
+    ] },
+    { id: 'next', say: 'The result remains visible while we explain it.', actions: [] },
+  ] }] };
+  const narrator = new FakeNarrator(), timers = new FakeTimers();
+  const engine = new TourEngine(example, { narrator, timers });
+  const clock = () => boardPlayback(engine.getState(), engine.steps);
+  engine.play();
+  eq([engine.getState().board.item?.title, engine.getState().board.focus, clock()],
+    ['Input', null, { playing: true, progress: 0 }], 'input precedes speech');
+  narrator.last.cb.onWord(1);
+  eq([engine.getState().board.focus, clock().progress], [0, 0.5], 'input uses its own four-word interval');
+  narrator.last.cb.onWord(4);
+  eq([engine.getState().board.item?.title, engine.getState().board.focus], ['Intermediate', null], 'new state clears previous term focus');
+  narrator.last.cb.onWord(6);
+  eq([engine.getState().board.focus, clock().progress], [0, 0.75], 'intermediate has a separate interval');
+  const cancelled = narrator.last;
+  engine.pause();
+  const frozen = clock();
+  timers.tick(10000);
+  cancelled.cb.onWord(10);
+  cancelled.cb.onEnd();
+  eq(clock(), frozen, 'pause and stale callbacks cannot advance an independent animation clock');
+  eq(frozen, { playing: false, progress: 0.75 });
+  engine.play();
+  eq([engine.getState().board.item?.title, engine.getState().board.focus, clock().progress],
+    ['Input', null, 0], 'resume restarts the spoken step and visual example together');
+  narrator.last.cb.onWord(9);
+  eq([engine.getState().board.item?.title, engine.getState().board.focus], ['Result', 0], 'sparse callbacks apply all frames in order and same-word focus follows replacement');
+  narrator.last.cb.onEnd();
+  timers.tick(0);
+  eq([engine.getState().index, engine.getState().board.item?.title, engine.getState().board.focus, clock()],
+    [1, 'Result', null, { playing: false, progress: 1 }], 'retained result is complete and no stale focus leaks into the next step');
+  engine.pause();
+  engine.goTo(0);
+  eq([engine.getState().board.item?.title, engine.getState().board.focus, clock()],
+    ['Result', 0, { playing: false, progress: 1 }], 'silent backward seek reconstructs the completed example');
+  engine.play();
+  eq([engine.getState().board.item?.title, engine.getState().board.focus, clock().progress], ['Input', null, 0], 'playing the sought step starts at its input again');
+  engine.destroy();
+});
+
+await test('plot progress distinguishes pause before speech from a completed silent seek', async () => {
+  const plot: BoardItem = { kind: 'plot', x: [-2, 2], y: [0, 2], curves: [{ expression: 'relu(x)', label: 'ReLU' }] };
+  const example: Tour = { schema: 'paper-tour/tour@0.1', title: 'Plot', paper: 'test', chapters: [{ id: 'c', title: 'C', steps: [
+    { id: 'plot', say: 'Negative inputs map to zero and positive inputs pass through', actions: [{ type: 'board', item: plot }] },
+  ] }] };
+  let ready!: () => void;
+  const narrator = new FakeNarrator();
+  const engine = new TourEngine(example, { narrator, beforeNarration: () => new Promise<void>(resolve => { ready = resolve; }) });
+  engine.play();
+  eq(boardPlayback(engine.getState(), engine.steps), { playing: true, progress: 0 });
+  engine.pause();
+  eq(boardPlayback(engine.getState(), engine.steps), { playing: false, progress: 0 }, 'pause during camera travel stays at the input');
+  ready();
+  await Promise.resolve();
+  eq(narrator.calls.length, 0, 'cancelled camera wait does not start the animation or speech');
+  engine.goTo(0);
+  eq(boardPlayback(engine.getState(), engine.steps), { playing: false, progress: 1 }, 'silent navigation displays the completed plot');
+  engine.destroy();
+});
+
+await test('composed scene states preserve objects and plot bindings across timed focus, pause and seek', () => {
+  const frame = (value: number): BoardItem => ({ kind: 'scene', title: 'Illustrative vector scaling', objects: [
+    { id: 'coordinates', type: 'matrix', x: .05, y: .2, w: .25, h: .4, values: [[value], [value]] },
+    { id: 'plane', type: 'plot', x: .4, y: .1, w: .55, h: .75, background: true,
+      plot: { kind: 'plot', x: [-3, 3], y: [-3, 3], curves: [{ expression: 'x', label: 'Direction' }] } },
+    { id: 'vector', type: 'vector', x: 0, y: 0, w: value, h: value, plotId: 'plane', color: 'blue' },
+  ] });
+  const example: Tour = { schema: 'paper-tour/tour@0.1', title: 'Scene', paper: 'test', chapters: [{ id: 'c', title: 'C', steps: [
+    { id: 'example', say: 'Start with one then double both coordinates to two', actions: [
+      { type: 'board', item: frame(1) },
+      { type: 'board_focus', part: 2, at_word: 1 },
+      { type: 'board', item: frame(2), at_word: 4 },
+      { type: 'board_focus', part: 0, at_word: 6 },
+    ] },
+  ] }] };
+  eq(checkTour(example), [], 'composed scene is accepted by the player contract');
+  const narrator = new FakeNarrator(), timers = new FakeTimers();
+  const engine = new TourEngine(example, { narrator, timers });
+  const current = () => {
+    const board = engine.getState().board;
+    if (board.item?.kind !== 'scene') throw new Error('Scene board disappeared');
+    return [board.item.objects[0].values, board.item.objects[2].w, board.item.objects[2].plotId, board.focus];
+  };
+  engine.play();
+  narrator.last.cb.onWord(1);
+  eq(current(), [[[1], [1]], 1, 'plane', 2], 'focus addresses an object, not a matrix cell');
+  narrator.last.cb.onWord(4);
+  eq(current(), [[[2], [2]], 2, 'plane', null], 'the next authored state changes values and resets focus');
+  const pending = narrator.last;
+  engine.pause();
+  pending.cb.onWord(6);
+  timers.tick(1000);
+  eq(current(), [[[2], [2]], 2, 'plane', null], 'paused state ignores late narration callbacks');
+  eq(boardPlayback(engine.getState(), engine.steps).playing, false);
+  engine.goTo(0);
+  eq(current(), [[[2], [2]], 2, 'plane', 0], 'silent seek reconstructs the complete scene and final focus');
+  eq(boardPlayback(engine.getState(), engine.steps), { playing: false, progress: 1 });
+  engine.play();
+  eq(current(), [[[1], [1]], 1, 'plane', null], 'replay restores the input state without stale focus');
+  engine.destroy();
+});
+
+await test('a board scheduled beyond the final word completes when sparse narration ends', () => {
+  const example = structuredClone(tour);
+  example.chapters[0].steps[0].actions = [{ type: 'board', at_word: 99,
+    item: { kind: 'formula', title: 'Late result', latex: 'x=2', terms: [] } }];
+  const narrator = new FakeNarrator(), timers = new FakeTimers();
+  const engine = new TourEngine(example, { narrator, timers });
+  engine.play();
+  narrator.last.cb.onEnd();
+  eq(boardPlayback(engine.getState(), engine.steps).progress, 1, 'out-of-range legacy timing never produces a negative interval or NaN');
+  engine.destroy();
 });
 
 await test('at_word past the narration fires at the end; advance after hold_ms', () => {
@@ -522,6 +648,21 @@ await test('silent narrator: words in order, one end, cancel stops it', async ()
   h.cancel();
   await new Promise((r) => setTimeout(r, 200));
   eq([ends, seen.length < 3], [1, true], 'cancelled before the end');
+});
+
+await test('removed video boards in saved tours neither open a panel nor block ordinary playback', () => {
+  const legacy = structuredClone(tour);
+  legacy.chapters[0].steps[0].actions = [{ type: 'board', item: { kind: 'animation', spec: {} } } as unknown as import('../src/types').Action];
+  const narrator = new FakeNarrator(), timers = new FakeTimers();
+  const engine = new TourEngine(legacy, { narrator, timers });
+  engine.play();
+  eq(engine.getState().board, { key: null, item: null, focus: null });
+  finishStep(narrator, timers);
+  eq(engine.getState().index, 1);
+  engine.pause();
+  engine.goTo(0);
+  eq(engine.getState().board, { key: null, item: null, focus: null }, 'seeking also skips obsolete video items');
+  engine.destroy();
 });
 
 console.log(results.join('\n'));

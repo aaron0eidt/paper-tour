@@ -164,20 +164,10 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
             <path className="box-stroke" d={roundedRect(b.rect, BOX_RADIUS)} stroke={STROKE[b.color]} pathLength={1} />
           </g>
         ))}
-        {/* A page-white casing under each pen stroke keeps it clear of the lines and letters it
-            crosses: below the spotlight, so it dims with the page, and clipped to the page (a nested
-            svg clips to its box), so it never shows on the stage around it. */}
-        {!!shapes?.pens.length && (
-          <svg width={w} height={h}>
-            {shapes.pens.map((p) => (
-              <PenMark key={p.key} pen={p} casing />
-            ))}
-          </svg>
-        )}
         {/* Drawn last so boxes outside the hole dim like everything else. */}
         {spotlight && (
           <path
-            className="spotlight"
+            className={shapes?.readingSpotlight ? 'spotlight spotlight-reading' : 'spotlight'}
             fillRule="evenodd"
             d={`M0,0H${w}V${h}H0Z ${(shapes?.holes ?? []).map((r) => roundedRect(r, HOLE_RADIUS)).join(' ')}`}
           />
@@ -198,10 +188,10 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
   );
 });
 
-/** One pen stroke, drawn in by its dash; an arrow's head follows its shaft. A casing is the stroke wider, in white. */
-function PenMark({ pen, casing = false }: { pen: PenShape; casing?: boolean }) {
-  const kind = casing ? 'pen-stroke pen-casing' : 'pen-stroke';
-  const stroke = casing ? undefined : STROKE[pen.color];
+/** One pen stroke, drawn in by its dash; the paper remains visible beneath it. */
+function PenMark({ pen }: { pen: PenShape }) {
+  const kind = 'pen-stroke';
+  const stroke = STROKE[pen.color];
   if (pen.kind === 'circle') return <path className={`${kind} pen-loop`} d={pen.d} stroke={stroke} pathLength={1} />;
   const [x, y] = pen.tip;
   const head = { '--pen-head-fit': pen.head.fit, '--pen-head-max': pen.head.max } as CSSProperties;

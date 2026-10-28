@@ -1,4 +1,5 @@
 import { PlotBoard } from './Plot';
+import { SceneBoard } from './SceneBoard';
 // The side board beside the stage: it shows the engine's board item (a formula built term by term,
 // a flow of boxes and arrows, or bars of the paper's numbers) and lights the part in focus. The board
 // opens alongside camera travel; the reader retargets the remaining flight when the stage resizes.
@@ -14,6 +15,10 @@ import {
   EASE_OUT,
   FLOW_LINE,
   barClip,
+  barFrameSource,
+  boardFrameColors,
+  continuousBoardFrame,
+  interpolateBars,
   barPath,
   barsLayout,
   bestBar,
@@ -26,13 +31,17 @@ import {
   wrapTerms,
 } from '../board';
 import type { BarsItem, FlowItem } from '../board';
-import type { BoardState } from '../engine';
+import type { BoardPlayback, BoardState } from '../engine';
 import type { BoardItem } from '../types';
 import '../board.css';
 
 interface Shown {
   key: string;
+  viewKey?: string;
   item: BoardItem;
+  continuous?: boolean;
+  from?: BarsItem;
+  range?: number[];
 }
 
 /** What the dock shows: the current item, and the one it replaces while that fades out. */
@@ -42,14 +51,21 @@ interface Dock {
   leaving: Shown | null;
 }
 
-type DockAction = { type: 'show'; shown: Shown } | { type: 'close' } | { type: 'closed' } | { type: 'left' };
+type DockAction = { type: 'show'; shown: Shown; animate: boolean } | { type: 'close' } | { type: 'closed' } | { type: 'left' };
 
 function dockReducer(dock: Dock, action: DockAction): Dock {
   switch (action.type) {
     case 'show':
       if (dock.current?.key === action.shown.key) return dock.open ? dock : { ...dock, open: true };
-      // A new item replacing a visible one cross-fades; on a closed (or closing) board it just builds.
-      return { open: true, current: action.shown, leaving: dock.open ? dock.current : null };
+      // Related frames keep their colours and rendered objects. Numeric frames
+      // also retain their axis instead of returning to zero.
+      const shown = { ...action.shown, item: boardFrameColors(dock.current, action.shown) };
+      const continuous = action.animate && continuousBoardFrame(dock.current, shown);
+      const from = action.animate ? barFrameSource(dock.current, shown) : null;
+      const range = from ? [...new Set([...(dock.current?.range ?? from.bars.map(bar => bar.value)),
+        ...(shown.item.kind === 'bars' ? shown.item.bars.map(bar => bar.value) : [])])] : undefined;
+      const current = { ...shown, continuous, viewKey: continuous ? dock.current?.viewKey ?? dock.current?.key : shown.key, ...(from ? { from, range } : {}) };
+      return { open: true, current, leaving: dock.open && !from && !continuous ? dock.current : null };
     case 'close':
       return dock.open ? { ...dock, open: false, leaving: null } : dock;
     case 'closed':
@@ -75,17 +91,15 @@ for (const font of ['20px KaTeX_Main', 'italic 20px KaTeX_Math', '20px KaTeX_Siz
  * The stage (children) with the board beside it: right of it where the space is wide, below it
  * where it is tall or narrow. Renders only the stage while the engine's board is empty.
  */
-export function BoardSplit({
-  board,
-  children,
-}: {
-  board: BoardState;
-  children: ReactNode;
-}) {
+export function BoardSplit({ board, playback = { playing: false, progress: 1 }, children }: { board: BoardState; playback?: BoardPlayback; children: ReactNode }) {
   const [dock, dispatch] = useReducer(dockReducer, { open: false, current: null, leaving: null });
 
   useEffect(() => {
-    dispatch(board.item && board.key ? { type: 'show', shown: { key: board.key, item: board.item } } : { type: 'close' });
+    dispatch(
+      board.item && board.key && ['formula', 'flow', 'bars', 'plot', 'scene'].includes(board.item.kind)
+        ? { type: 'show', shown: { key: board.key, item: board.item }, animate: playback.playing }
+        : { type: 'close' },
+    );
   }, [board.key, board.item]);
 
   useEffect(() => {
@@ -109,8 +123,8 @@ export function BoardSplit({
         <div className="board-dock" data-open={dock.open ? '' : undefined}>
           {dock.current && (
             <aside className="board" aria-label="Board" aria-hidden={!dock.open}>
-              {dock.leaving && <BoardView key={dock.leaving.key} item={dock.leaving.item} focus={null} leaving />}
-              <BoardView key={dock.current.key} item={dock.current.item} focus={focus} />
+              {dock.leaving && <BoardView key={`leaving:${dock.leaving.viewKey ?? dock.leaving.key}`} item={dock.leaving.item} focus={null} playback={{ playing: false, progress: 1 }} leaving />}
+              <BoardView key={dock.current.viewKey ?? dock.current.key} item={dock.current.item} focus={focus} playback={playback} from={dock.current.from} range={dock.current.range} continuous={dock.current.continuous} />
             </aside>
           )}
         </div>
@@ -124,16 +138,24 @@ const BoardView = memo(function BoardView({
   item,
   focus,
   leaving,
+  playback,
+  from,
+  range,
+  continuous,
 }: {
   item: BoardItem;
   focus: number | null;
   leaving?: boolean;
+  playback: BoardPlayback;
+  from?: BarsItem;
+  range?: number[];
+  continuous?: boolean;
 }) {
   const unit = item.kind === 'bars' && item.unit && item.unit !== '%' ? item.unit : null;
   const bodyRef = useRef<HTMLDivElement>(null);
   useFocusInView(bodyRef, focus);
   return (
-    <div className={`board-view${leaving ? ' leaving' : ''}`} data-kind={item.kind}>
+    <div className={`board-view${leaving ? ' leaving' : ''}${from || continuous ? ' is-frame-transition' : ''}`} data-kind={item.kind}>
       {(item.title || unit) && (
         <header className="board-head">
           {item.title && <h2 className="board-title">{item.title}</h2>}
@@ -142,9 +164,10 @@ const BoardView = memo(function BoardView({
       )}
       <div className="board-body" ref={bodyRef}>
         {item.kind === 'formula' && <FormulaBoard item={item} focus={focus} />}
-        {item.kind === 'flow' && <FlowBoard item={item} focus={focus} />}
-        {item.kind === 'bars' && <BarsBoard item={item} focus={focus} />}
-        {item.kind === 'plot' && <PlotBoard item={item} focus={focus} />}
+        {item.kind === 'flow' && <FlowBoard item={item} focus={focus} playing={playback.playing} />}
+        {item.kind === 'bars' && <BarsBoard item={item} focus={focus} playback={playback} from={from} range={range} />}
+        {item.kind === 'plot' && <PlotBoard item={item} focus={focus} playback={playback} />}
+        {item.kind === 'scene' && <SceneBoard item={item} focus={focus} playback={playback} />}
       </div>
     </div>
   );
@@ -164,9 +187,23 @@ function useFocusInView(ref: RefObject<HTMLElement>, focus: number | null): void
     const view = body.getBoundingClientRect();
     const margin = 16;
     const shift = (start: number, end: number, from: number, to: number) =>
-      end > to - margin ? Math.min(end - (to - margin), start - (from + margin)) : start < from + margin ? start - (from + margin) : 0;
-    const top = shift(Math.min(...parts.map((r) => r.top)), Math.max(...parts.map((r) => r.bottom)), view.top, view.bottom);
-    const left = shift(Math.min(...parts.map((r) => r.left)), Math.max(...parts.map((r) => r.right)), view.left, view.right);
+      end > to - margin
+        ? Math.min(end - (to - margin), start - (from + margin))
+        : start < from + margin
+          ? start - (from + margin)
+          : 0;
+    const top = shift(
+      Math.min(...parts.map((r) => r.top)),
+      Math.max(...parts.map((r) => r.bottom)),
+      view.top,
+      view.bottom,
+    );
+    const left = shift(
+      Math.min(...parts.map((r) => r.left)),
+      Math.max(...parts.map((r) => r.right)),
+      view.left,
+      view.right,
+    );
     if (top || left) body.scrollBy({ top, left, behavior: reducedMotion() ? 'auto' : 'smooth' });
   }, [ref, focus]);
 }
@@ -221,7 +258,12 @@ const trustTerms = (context: TrustContext) =>
 /** KaTeX HTML for the LaTeX, or null when it does not parse. */
 function tex(latex: string, display: boolean, terms = false): string | null {
   try {
-    return katex.renderToString(latex, { displayMode: display, throwOnError: true, strict: 'ignore', trust: terms && trustTerms });
+    return katex.renderToString(latex, {
+      displayMode: display,
+      throwOnError: true,
+      strict: 'ignore',
+      trust: terms && trustTerms,
+    });
   } catch {
     return null;
   }
@@ -339,7 +381,7 @@ function FormulaBoard({ item, focus }: { item: FormulaItem; focus: number | null
 
 const ACCENT = 'var(--accent)';
 
-function FlowBoard({ item, focus }: { item: FlowItem; focus: number | null }) {
+function FlowBoard({ item, focus, playing }: { item: FlowItem; focus: number | null; playing: boolean }) {
   const [boxRef, box] = useBoxSize<HTMLDivElement>();
   const geometry = useMemo(() => (box ? flowGeometry(item, box, textMeasure(500, 13)) : null), [item, box]);
   const focused = focus !== null && focus < item.nodes.length ? focus : null;
@@ -360,22 +402,30 @@ function FlowBoard({ item, focus }: { item: FlowItem; focus: number | null }) {
         >
           {geometry.edges.map((edge, i) => (
             <g
-              key={`e${i}`}
+              key={`${item.nodes[edge.from].id}:${item.nodes[edge.to].id}:${i}`}
               className={`flow-edge${focused !== null && (edge.from === focused || edge.to === focused) ? ' is-lit' : ''}`}
               style={order(Math.max(edge.from, edge.to))}
             >
               <path className="flow-edge-line" d={edge.d} pathLength={1} />
               <path className="flow-edge-head" d={edge.head} />
+              {edge.to === focused && <path key={`trace-${focused}`} className="flow-edge-trace" d={edge.d} pathLength={1} style={{ animationPlayState: playing ? 'running' : 'paused' }} />}
             </g>
           ))}
           {geometry.nodes.map((node, i) => (
             <g
-              key={`n${i}`}
+              key={item.nodes[i].id}
               className={`flow-node${item.nodes[i].color ? ' has-color' : ''}${i === focused ? ' is-focus' : ''}`}
               style={{ ...ink(inks[i]), ...order(i) }}
             >
               <g className="flow-node-state">
-                <rect className="flow-ring" x={node.x - 4} y={node.y - 4} width={node.w + 8} height={node.h + 8} rx={13} />
+                <rect
+                  className="flow-ring"
+                  x={node.x - 4}
+                  y={node.y - 4}
+                  width={node.w + 8}
+                  height={node.h + 8}
+                  rx={13}
+                />
                 <rect className="flow-box" x={node.x} y={node.y} width={node.w} height={node.h} rx={9} />
                 <text className="flow-label" textAnchor="middle" dominantBaseline="central">
                   {node.lines.map((line, j) => (
@@ -409,25 +459,36 @@ const BADGE = { text: 'Best', gap: 8, padX: 7 };
 const easeOut = cubicBezier(...EASE_OUT);
 
 /** Milliseconds since the bars started growing, ticking until they are done; the end at once under reduced motion. */
-function useBarClock(count: number): number {
-  const end = BAR_FIRST_MS + (count - 1) * BAR_EVERY_MS + BAR_GROW_MS;
-  const [elapsed, setElapsed] = useState(() => (reducedMotion() ? end : 0));
+function useBarClock(count: number, playback: BoardPlayback, changing: boolean): number {
+  const { playing } = playback;
+  const complete = !playing && playback.progress >= 1;
+  const end = changing ? 650 : BAR_FIRST_MS + (count - 1) * BAR_EVERY_MS + BAR_GROW_MS;
+  const [elapsed, setElapsed] = useState(() => (reducedMotion() || !playing ? end : 0));
+  const current = useRef(elapsed);
   useEffect(() => {
-    if (reducedMotion()) return setElapsed(end);
-    const start = performance.now();
+    if (reducedMotion() || complete) {
+      current.current = end;
+      setElapsed(end);
+      return;
+    }
+    if (!playing || current.current >= end) return;
+    const start = performance.now() - current.current;
     let frame = requestAnimationFrame(function tick(now) {
       const t = Math.min(end, now - start);
+      current.current = t;
       setElapsed(t);
       if (t < end) frame = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(frame);
-  }, [end]);
+  }, [end, playing, complete]);
   return elapsed;
 }
 
-function BarsBoard({ item, focus }: { item: BarsItem; focus: number | null }) {
+function BarsBoard({ item, focus, playback, from, range }: { item: BarsItem; focus: number | null; playback: BoardPlayback; from?: BarsItem; range?: number[] }) {
   const [boxRef, box] = useBoxSize<HTMLDivElement>();
-  const elapsed = useBarClock(item.bars.length);
+  const elapsed = useBarClock(item.bars.length, playback, !!from);
+  const transition = from ? easeOut(Math.min(1, elapsed / 650)) : 1;
+  const displayed = useMemo(() => from ? interpolateBars(from, item, transition) : item, [from, item, transition]);
   const best = bestBar(item);
   const focused = focus !== null && focus < item.bars.length ? focus : null;
   const places = useMemo(() => item.bars.map((b) => decimalsOf(b.value)), [item]);
@@ -436,34 +497,45 @@ function BarsBoard({ item, focus }: { item: BarsItem; focus: number | null }) {
     const label = textMeasure(450, 12.5);
     const value = textMeasure(600, 13);
     const badge = textMeasure(600, 10.5)(BADGE.text) + 2 * BADGE.padX;
-    return { label, value, badge, widths: values.map((v) => value(v)) };
-  }, [values]);
+    return { label, value, badge, widths: values.map((v, i) => Math.max(value(v), from ? value(formatValue(from.bars[i].value, decimalsOf(from.bars[i].value), item.unit)) : 0)) };
+  }, [values, from, item.unit]);
   const layout = useMemo(() => {
     if (!box) return null;
     const valueWidths = measured.widths.map((w, i) => w + (i === best ? BADGE.gap + measured.badge : 0));
     const labelWidths = item.bars.map((b) => measured.label(b.label));
-    return barsLayout(item, box.width, labelWidths, valueWidths, box.height);
-  }, [item, box, best, measured]);
+    return barsLayout(displayed, box.width, labelWidths, valueWidths, box.height, range);
+  }, [item, displayed, range, box, best, measured]);
   // One colour for the series; the best bar and the bar in focus stand out in the accent.
   const fill = (i: number) => {
     const own = item.bars[i].color;
     if (own) return BOARD_INK[own];
     return best === null || i === best || i === focused ? ACCENT : 'var(--board-bar)';
   };
-  const label = item.bars.map((b, i) => `${b.label}: ${values[i]}${item.unit && item.unit !== '%' ? ` ${item.unit}` : ''}`).join(', ');
+  const label = item.bars
+    .map((b, i) => `${b.label}: ${values[i]}${item.unit && item.unit !== '%' ? ` ${item.unit}` : ''}`)
+    .join(', ');
 
   return (
     <div className={`bars${focused !== null ? ' has-focus' : ''}`} ref={boxRef}>
       {layout && (
         <svg className="bars-svg" width={layout.width} height={layout.height} role="img" aria-label={label}>
-          <line className="bars-zero" x1={layout.zeroX} x2={layout.zeroX} y1={layout.rows[0].y - 4} y2={layout.height} />
+          <line
+            className="bars-zero"
+            x1={layout.zeroX}
+            x2={layout.zeroX}
+            y1={layout.rows[0].y - 4}
+            y2={layout.height}
+          />
           {layout.rows.map((row, i) => {
-            const positive = item.bars[i].value >= 0;
-            const progress = easeOut(Math.max(0, Math.min(1, (elapsed - BAR_FIRST_MS - i * BAR_EVERY_MS) / BAR_GROW_MS)));
+            const positive = displayed.bars[i].value >= 0;
+            const progress = from ? 1 : easeOut(
+              Math.max(0, Math.min(1, (elapsed - BAR_FIRST_MS - i * BAR_EVERY_MS) / BAR_GROW_MS)),
+            );
             const length = row.x1 - row.x0;
             const ride = (positive ? -1 : 1) * length * (1 - progress);
-            const text = formatValue(item.bars[i].value * progress, places[i], item.unit);
-            const done = progress >= 1;
+            const digits = from && transition < 1 ? Math.max(places[i], decimalsOf(from.bars[i].value)) : places[i];
+            const text = formatValue(displayed.bars[i].value * progress, digits, item.unit);
+            const done = progress >= 1 && transition >= 1;
             return (
               <g key={i} className={`bar${i === focused ? ' is-focus' : ''}`} style={ink(fill(i))}>
                 <g className="bar-state">
@@ -475,7 +547,11 @@ function BarsBoard({ item, focus }: { item: BarsItem; focus: number | null }) {
                     d={barPath(row.x0, row.x1, row.y, positive)}
                     style={{ clipPath: barClip(progress, positive) }}
                   />
-                  <g className="bar-value" transform={`translate(${ride.toFixed(2)} 0)`} opacity={Math.min(1, progress * 4)}>
+                  <g
+                    className="bar-value"
+                    transform={`translate(${ride.toFixed(2)} 0)`}
+                    opacity={Math.min(1, progress * 4)}
+                  >
                     <text
                       x={row.valueX}
                       y={row.y + BAR_THICKNESS / 2}
@@ -506,4 +582,3 @@ function BarsBoard({ item, focus }: { item: BarsItem; focus: number | null }) {
     </div>
   );
 }
-

@@ -190,7 +190,10 @@ export class TourValidationError extends ProcessingError {
   }
 }
 /** Match narration tokens rather than asking the model to count word offsets. */
-export function resolveSpeechAnchors(value: TourDraft): TourDraft {
+export function resolveSpeechAnchors(
+  value: TourDraft,
+  onInvalid?: (stepId: string, phrase: string) => void,
+): TourDraft {
   // Ignore sentence delimiters, but retain meaningful symbols such as C++ and -x.
   const token = (word: string) =>
     word.toLowerCase().replace(/^[\p{Ps}\p{Pe}\p{Pi}\p{Pf}"'.,;:!?]+|[\p{Ps}\p{Pe}\p{Pi}\p{Pf}"'.,;:!?]+$/gu, '');
@@ -208,10 +211,15 @@ export function resolveSpeechAnchors(value: TourDraft): TourDraft {
             const matches = words.flatMap((_, index) =>
               phrase.every((word, offset) => word === words[index + offset]) ? [index] : [],
             );
-            if (!phrase.some(Boolean) || matches.length !== 1)
+            if (!phrase.some(Boolean) || matches.length !== 1) {
+              if (onInvalid) {
+                onInvalid(step.id, at_phrase);
+                return { ...action, at_word: 0 };
+              }
               throw new TourValidationError([
                 `${step.id}: at_phrase ${JSON.stringify(at_phrase)} must occur exactly once in say; copy a longer unique phrase from the narration.`,
               ]);
+            }
             return { ...action, at_word: matches[0] };
           }),
         };

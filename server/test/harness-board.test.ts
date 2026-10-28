@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import type { MuseConfig } from '../src/config';
 import type { Action, BBox, Doc, Step } from '../../shared/paper';
 import type { TourGenerationInput, TourImage } from '../src/tour-generator';
-import { HarnessTourGenerator } from '../src/harness/generator';
+import { HarnessTourGenerator } from './harness-fixture';
 import { planBeats } from '../src/harness/beats';
 import { findAnchor } from '../src/harness/assemble';
 import { checkBars, checkFlow, checkFormula, numbersIn } from '../src/harness/board';
 import { REGION_NAMES, regionOf } from '../src/harness/direct';
 import { BOARD_EXAMPLES } from '../src/harness/prompts';
+import type { MeasuredTarget } from '../src/harness/visual-grounding';
 
 // Pen marks and the side board in the short-tour writer, end to end with a scripted model (no network).
 
@@ -296,7 +297,11 @@ function provider(script: Script, requests: Request[]): typeof fetch {
     const value =
       request.name === 'paper_card'
         ? card
-        : ((kind && script[kind]?.(request.task.includes('board cannot be shown'))) ?? plain(request));
+        : ((kind &&
+            script[kind]?.(
+              request.task.includes('board cannot be shown') || request.task.includes('complete corrected answer'),
+            )) ??
+          plain(request));
     return new Response(
       JSON.stringify({
         choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }],
@@ -306,9 +311,15 @@ function provider(script: Script, requests: Request[]): typeof fetch {
   }) as typeof fetch;
 }
 
-async function generate(script: Script = good) {
+async function generate(script: Script = good, measureFigure?: (image: TourImage) => Promise<MeasuredTarget[]>) {
   const requests: Request[] = [];
-  const result = await new HarnessTourGenerator(settings, 'standard', provider(script, requests)).generate(input);
+  const result = await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider(script, requests),
+    undefined,
+    measureFigure,
+  ).generate(input);
   const steps = result.tour.chapters.flatMap((c) => c.steps);
   return { ...result, steps, requests, step: (id: string) => steps.find((s) => s.id === id)! };
 }
@@ -626,6 +637,7 @@ test('pen marks on a figure map their named region, keep short labels and share 
       color: 'blue',
       at_word: wordOf(FIGURE_SAY, 'planner sits at the top left'),
     },
+    // Legacy authored geometry remains unchanged when no measured catalog is supplied.
     { type: 'circle', target: 'fig1.a', color: 'blue', at_word: wordOf(FIGURE_SAY, 'the first panel holds') },
     // A label longer than four words is left off rather than cut; the box on another beat's table is dropped.
     {
@@ -636,19 +648,13 @@ test('pen marks on a figure map their named region, keep short labels and share 
       at_word: wordOf(FIGURE_SAY, 'the checker waits'),
     },
   ]);
-  // On the evidence table, marks are green like the results.
+  // A coarse half-table estimate is not a grounded row selection.
   const table = step('figure-2');
-  assert.deepEqual(
+  assert.equal(
     table.actions.find((a) => a.type === 'circle'),
-    {
-      type: 'circle',
-      target: 'tab1',
-      region: [0, 0.5, 1, 1],
-      label: 'Tutor rows',
-      color: 'green',
-      at_word: wordOf(TABLE_SAY, 'the full tutor tour'),
-    },
+    undefined,
   );
+  assert.ok(table.actions.some((a) => a.type === 'box' && a.target === 'tab1' && !a.region && !a.label));
 });
 
 test('bars show numbers from the table cells or the evidence, and are dropped when a number is invented', async () => {
@@ -672,11 +678,14 @@ test('bars show numbers from the table cells or the evidence, and are dropped wh
     { type: 'zoom', target: 'tab1' },
     { type: 'board', item: checkBars(TABLE_BARS, 'Plain reading 74.2 Tutor tour 81.5').item },
   ]);
-  assert.deepEqual(table.actions.at(-1), {
-    type: 'board_focus',
-    part: 1,
-    at_word: wordOf(TABLE_SAY, 'reaches 81.5 percent'),
-  });
+  assert.deepEqual(
+    table.actions.find((a) => a.type === 'board_focus' && a.part === 1),
+    {
+      type: 'board_focus',
+      part: 1,
+      at_word: wordOf(TABLE_SAY, 'reaches 81.5 percent'),
+    },
+  );
   // The table's cells reach the brief; text outside the table's box does not.
   const tableBrief = requests.find((r) => r.brief.includes('TABLE 1 [tab1], page'))!.brief;
   assert.match(tableBrief, /Tutor tour \(no pointing\) 77\.0/);
@@ -734,21 +743,32 @@ test('a step without its own board clears the one left on the board, right after
   });
 });
 
-test('the direction schema puts the board before say and offers only the beat’s own parts and regions', async () => {
+test('every direction can choose a useful native board without changing its source target policy', async () => {
   const { requests } = await generate();
   const schema = (kind: Kind) => requests.find((r) => kindOf(r.brief) === kind)!.schema;
   const cue = (kind: Kind) => schema(kind).properties.cues.items.properties;
-  assert.deepEqual(Object.keys(schema('formula').properties), ['plan', 'formula', 'plot', 'say', 'cues']);
+  for (const kind of ['formula', 'figure', 'table', 'method', 'result'] as const) {
+    assert.deepEqual(Object.keys(schema(kind).properties), [
+      'plan',
+      'formula',
+      'flow',
+      'bars',
+      'plot',
+      'scene',
+      'example',
+      'say',
+      'cues',
+    ]);
+    for (const id of ['term-1', 'node-1', 'bar-1', 'curve-1']) assert.ok(cue(kind).target.enum.includes(id));
+  }
   assert.deepEqual(cue('formula').action.enum, ['board_focus']);
-  assert.deepEqual(cue('formula').target.enum, ['term-1', 'term-2', 'term-3', 'term-4', 'term-5', 'term-6', 'curve-1', 'curve-2', 'curve-3']);
-  assert.deepEqual(cue('figure').action.enum, ['arrow', 'circle', 'box']);
-  assert.deepEqual(cue('figure').target.enum.slice(0, 3), ['fig1', 'fig1.a']);
+  assert.deepEqual(cue('figure').action.enum, ['arrow', 'circle', 'box', 'board_focus']);
+  assert.deepEqual(cue('figure').target.enum.slice(0, 2), ['fig1', 'fig1.a']);
   assert.ok(cue('figure').region.enum.includes('bottom-half'));
-  assert.deepEqual(cue('table').target.enum, ['tab1', 'bar-1', 'bar-2', 'bar-3', 'bar-4', 'bar-5', 'bar-6']);
-  assert.deepEqual(Object.keys(schema('result').properties), ['plan', 'bars', 'say', 'cues']);
+  assert.ok(cue('table').target.enum.includes('p2.b4'));
+  assert.deepEqual(cue('table').action.enum, ['box', 'board_focus']);
+  assert.equal(cue('table').region, undefined);
   assert.equal(cue('result').region, undefined);
-  const problem = requests.find((r) => r.brief.includes('STEP KIND: problem'))!.schema;
-  assert.deepEqual(Object.keys(problem.properties), ['plan', 'say', 'cues']);
 });
 
 test('the examples the model is shown pass the same checks as its own answers', () => {
@@ -758,4 +778,56 @@ test('the examples the model is shown pass the same checks as its own answers', 
   assert.deepEqual(checkBars(bars.bars, bars.bars.bars.map((b) => b.value).join(' ')).problems, []);
   assert.deepEqual(checkFlow(flow.flow).problems, []);
   for (const cue of pen) assert.ok((REGION_NAMES as readonly string[]).includes(cue.region), cue.region);
+});
+
+test('measured diagrams repair invalid targeting once and refuse an uncorrected guess', async () => {
+  const measured: MeasuredTarget = {
+    id: 'measured:fig1:1',
+    target: 'fig1',
+    kind: 'component',
+    label: 'Planner',
+    region: [0.12, 0.2, 0.35, 0.3],
+  };
+  const detector = async (image: TourImage) => (image.targetId === 'fig1' ? [measured] : []);
+  let calls = 0;
+  const guessed = {
+    action: 'box',
+    target: 'fig1',
+    bounds: [0, 0, 0.4, 0.4],
+    label: '',
+    anchor: 'planner sits at the top left',
+  };
+  const result = await generate(
+    {
+      ...good,
+      figure: () => ({
+        plan: 'p',
+        say: FIGURE_SAY,
+        cues: [++calls === 1 ? guessed : { action: 'box', target: measured.id, label: '', anchor: guessed.anchor }],
+      }),
+    },
+    detector,
+  );
+  assert.equal(calls, 2);
+  const boxes = result.step('figure-1').actions.filter((a) => a.type === 'box');
+  assert.deepEqual(
+    boxes.map((b) => ({ target: b.target, region: b.region })),
+    [{ target: 'fig1', region: measured.region }],
+  );
+  assert.ok(result.requests.some((r) => r.task.includes('this diagram has measured geometry')));
+  calls = 0;
+  await assert.rejects(
+    generate(
+      {
+        ...good,
+        figure: () => {
+          calls++;
+          return { plan: 'p', say: FIGURE_SAY, cues: [guessed] };
+        },
+      },
+      detector,
+    ),
+    /measured geometry/,
+  );
+  assert.equal(calls, 2, 'a failed repair is surfaced without a fallback or another model loop');
 });

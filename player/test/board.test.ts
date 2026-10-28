@@ -6,6 +6,11 @@ import {
   BOARD_INK,
   BOARD_PALETTE,
   barClip,
+  barFrameSource,
+  boardFrameColors,
+  continuousBoardFrame,
+  interpolateBars,
+  plotCursor,
   barPath,
   barsLayout,
   bestBar,
@@ -21,6 +26,10 @@ import {
   wrapTerms,
 } from '../src/board';
 import type { BarsItem, FlowItem } from '../src/board';
+import type { BoardItem } from '../src/types';
+import type { SceneItem } from '../../shared/scene';
+import { sceneMatrixText } from '../../shared/scene';
+import { interpolateScene, projectSceneObject, sceneArrow, sceneInk, sceneNumber, sceneObjects, sceneTransitionAllowed } from '../src/sceneBoard';
 
 const results: string[] = [];
 let failures = 0;
@@ -318,7 +327,11 @@ test('values print with the places they were reported with', () => {
   eq([28.4, 25.16, 24, 1.234567, 1e-7].map(decimalsOf), [1, 2, 0, 4, 4]);
   eq(formatValue(25.16, 2), '25.16');
   eq(formatValue(1234.5, 1), '1,234.5');
-  eq(formatValue(-0.0001, 1), '0.0', 'no negative zero');
+  eq(formatValue(-0, 1), '0.0', 'no negative zero');
+  eq(formatValue(-0.0001, 1), '-1e-4', 'tiny nonzero values remain visible');
+  eq(formatValue(1.23456e-7, 4), '1.23e-7', 'scientific labels keep useful precision');
+  eq([0.7310585786, 0.2689414214].map(value => formatValue(value, decimalsOf(value))), ['0.731', '0.269'], 'calculated examples do not expose long floating point tails');
+  eq(formatValue(0.1234, decimalsOf(0.1234)), '0.1234', 'short reported paper precision is retained');
   eq(formatValue(12.5, 1, '%'), '12.5%');
   eq(formatValue(12.5, 1, 'BLEU'), '12.5', 'other units are shown once, not per value');
 });
@@ -367,6 +380,111 @@ test('negative bars grow left of zero with their values before the tip', () => {
   eq([gain.x0, loss.x1], [l.zeroX, l.zeroX], 'both start at zero');
   eq([loss.valueAnchor, gain.valueAnchor], ['end', 'start']);
   ok(loss.x0 < l.zeroX && loss.valueX < loss.x0, 'left of zero');
+});
+
+test('only forward frames of the same quantities and units morph their values', () => {
+  const previous = { key: '3:1', item: bleu };
+  const next: BarsItem = { ...bleu, bars: bleu.bars.map(bar => ({ ...bar, value: bar.value / 2 })) };
+  eq(barFrameSource(previous, { key: '3:5', item: next }), bleu, 'same spoken step preserves the numerical source');
+  eq(barFrameSource(previous, { key: '4:1', item: next }), null, 'another step starts independently');
+  eq(barFrameSource(previous, { key: '3:0', item: next }), null, 'backward seek does not interpolate from a future value');
+  eq(barFrameSource(previous, { key: '3:5', item: { ...next, unit: 'probability' } }), null, 'different units never share a scale');
+  eq(barFrameSource({ ...previous, item: { ...bleu, unit: undefined } }, { key: '3:5', item: { ...next, unit: undefined } }), null, 'missing units cannot establish equivalent quantities');
+  eq(barFrameSource(previous, { key: '3:5', item: { ...next, bars: [...next.bars].reverse() } }), null, 'different quantity order is not silently reinterpreted');
+});
+
+test('worked formula and flow frames retain semantic objects without replaying the whole board', () => {
+  const formula: BoardItem = { kind: 'formula', latex: 'x + 1 = y', terms: [{ latex: 'x', label: 'Input' }, { latex: 'y', label: 'Output' }] };
+  const numeric: BoardItem = { kind: 'formula', latex: '2 + 1 = 3', terms: [{ latex: '3', label: 'Output' }, { latex: '2', label: 'Input' }] };
+  const previous = { key: '2:0', item: formula }, next = { key: '2:4', item: numeric };
+  ok(continuousBoardFrame(previous, next), 'substitution continues the same explanation');
+  const colored = boardFrameColors(previous, next);
+  ok(colored.kind === 'formula', 'still a formula');
+  if (colored.kind === 'formula') eq(colored.terms.map(term => term.color), ['orange', 'blue'], 'the role keeps its colour after term reordering');
+  eq(numeric.terms.map(term => term.color), [undefined, undefined], 'authored input is not mutated');
+  const explicit = boardFrameColors(previous, { ...next, item: { ...numeric, terms: [{ latex: '3', label: 'Output', color: 'green' }] } });
+  if (explicit.kind === 'formula') eq(explicit.terms[0].color, 'green', 'authored colour remains authoritative');
+  eq(continuousBoardFrame(next, previous), false, 'backward seek is not an object transformation');
+  eq(continuousBoardFrame(previous, { ...next, key: '3:0' }), false, 'new step does not inherit presentation state');
+  const flow: FlowItem = { kind: 'flow', nodes: [{ id: 'input', label: 'Input x', color: 'blue' }, { id: 'output', label: 'Result', color: 'green' }], edges: [['input', 'output']] };
+  const updated: FlowItem = { ...flow, nodes: [{ id: 'input', label: 'Input 2' }, { id: 'output', label: 'Result 3' }] };
+  ok(continuousBoardFrame({ ...previous, item: flow }, { ...next, item: updated }), 'stable process IDs update in place');
+  const flowColors = boardFrameColors({ ...previous, item: flow }, { ...next, item: updated });
+  if (flowColors.kind === 'flow') eq(flowColors.nodes.map(node => node.color), ['blue', 'green']);
+  eq(continuousBoardFrame({ ...previous, item: flow }, { ...next, item: { ...updated, edges: [['output', 'input']] } }), false, 'changed process order is a different diagram');
+});
+
+test('numerical frames interpolate from the previous value, including negative values', () => {
+  const from: BarsItem = { kind: 'bars', unit: 'units', bars: [{ label: 'A', value: 10 }, { label: 'B', value: -2 }] };
+  const to: BarsItem = { ...from, bars: [{ label: 'A', value: 4 }, { label: 'B', value: 2 }] };
+  eq(interpolateBars(from, to, 0).bars.map(bar => bar.value), [10, -2], 'never restart from zero');
+  eq(interpolateBars(from, to, 0.5).bars.map(bar => bar.value), [7, 0], 'intermediate state is an actual numerical interpolation');
+  eq(interpolateBars(from, to, 1).bars.map(bar => bar.value), [4, 2], 'final authored values remain exact');
+  const domain = [-2, 10, 4, 2];
+  const before = barsLayout(from, 600, [20, 20], [40, 40], 200, domain);
+  const after = barsLayout(to, 600, [20, 20], [40, 40], 200, domain);
+  eq(before.zeroX, after.zeroX, 'axis does not jump as values cross zero');
+  ok(Math.abs((after.rows[0].x1 - after.zeroX) / (before.rows[0].x1 - before.zeroX) - 0.4) < 0.001, '4 remains forty percent of10 on the shared scale');
+});
+
+test('plot cursor follows narrated progress and changes only one independent variable', () => {
+  const item = { kind: 'plot' as const, x: [-2, 6] as [number, number], y: [0, 36] as [number, number], curves: [{ expression: 'x*x', label: 'Output' }] };
+  eq([0, 0.5, 1].map(progress => plotCursor(item, progress)), [{ x: -2, a: 1 }, { x: 2, a: 1 }, { x: 6, a: 1 }]);
+  const parameter = { ...item, parameter: { from: 1, to: 5 } };
+  eq([0, 0.5, 1].map(progress => plotCursor(parameter, progress)), [{ x: 2, a: 1 }, { x: 2, a: 3 }, { x: 2, a: 5 }], 'parameter sweep holds the input fixed');
+  eq(plotCursor(item, -2), plotCursor(item, 0), 'clamped start');
+  eq(plotCursor(item, 4), plotCursor(item, 1), 'clamped end');
+});
+
+test('native scene objects keep identity, coordinates, and actual numeric values between states', () => {
+  const start: SceneItem = { kind: 'scene', objects: [
+    { id: 'matrix', type: 'matrix', x: .1, y: .2, w: .2, h: .3, color: 'blue', values: [[1, 2], [3, 4]] },
+    { id: 'vector', type: 'vector', x: .5, y: .5, w: .2, h: -.2, color: 'orange' },
+  ] };
+  const end: SceneItem = { kind: 'scene', objects: [
+    { ...start.objects[1], w: -.2, h: .3 },
+    { ...start.objects[0], x: .5, values: [[3, 6], [7, 8]] },
+  ] };
+  const before = JSON.stringify(start);
+  const middle = interpolateScene(sceneObjects(start), end, .5);
+  eq(middle.find(object => object.id === 'matrix')?.values, [[2, 4], [5, 6]], 'numbers change with the same matrix object');
+  ok(Math.abs(middle.find(object => object.id === 'matrix')!.x - .3) < 1e-10, 'geometry transforms rather than remounts');
+  eq(middle.find(object => object.id === 'vector')?.w, 0, 'the same vector rotates through its intermediate direction');
+  eq(interpolateScene(sceneObjects(start), end, 1).map(object => object.values), end.objects.map(object => object.values), 'target values stay exact after animation');
+  eq(JSON.stringify(start), before, 'source states remain immutable');
+  eq(sceneInk({ ...start.objects[0], color: undefined }), sceneInk({ ...end.objects[1], color: undefined }), 'default semantic ink follows ID, not array order');
+  const arriving: SceneItem = { kind: 'scene', objects: [{ id: 'result', type: 'text', x: .2, y: .2, w: .5, h: .2, text: 'Result' }] };
+  const fading = interpolateScene(sceneObjects(start), arriving, .25);
+  eq(fading.map(object => object.opacity), [.25, .75, .75], 'added and removed objects have distinct identities');
+  eq(sceneNumber(.7310585786), '0.731', 'matrix labels avoid raw floating point tails');
+  eq([1234,999999,.1234].map(sceneMatrixText), ['1234','999999','0.1234'], 'final reported values stay exact');
+  eq(sceneMatrixText(.7310585786), '≈0.731', 'any rounded matrix value is explicitly approximate');
+});
+
+test('scene vectors use signed endpoints and share the plotted data coordinate system', () => {
+  const item: SceneItem = { kind: 'scene', objects: [
+    { id: 'plane', type: 'plot', x: .1, y: .2, w: .8, h: .6, background: true,
+      plot: { kind: 'plot', x: [-2, 2], y: [-3, 3], curves: [{ expression: 'x', label: 'f' }] } },
+    { id: 'vector', type: 'vector', plotId: 'plane', x: 0, y: 0, w: 2, h: 3 },
+    { id: 'point', type: 'circle', plotId: 'plane', x: -.5, y: -1, w: 1, h: 2 },
+  ] };
+  const vector = projectSceneObject(item.objects[1], item.objects);
+  ok(Math.abs(vector.x - .532) < 1e-9 && Math.abs(vector.y - .464) < 1e-9, 'origin maps to the exact inner axes, including plot margins');
+  ok(Math.abs(vector.x + vector.w - .868) < 1e-9 && Math.abs(vector.y + vector.h - .224) < 1e-9, 'positive data y points upward to the plotted endpoint');
+  const circle = projectSceneObject(item.objects[2], item.objects);
+  ok(circle.w > 0 && circle.h > 0 && circle.y < vector.y, 'bound circle uses screen bounds despite inverted y');
+  const arrow = sceneArrow({ x: .5, y: .5, w: -.3, h: -.2 });
+  ok(arrow.line.startsWith('M300,200L120,120'), 'negative deltas remain negative, not an unsigned bounding box');
+  eq(sceneArrow({ x: .5, y: .5, w: 0, h: 0 }), { line: '', head: '' }, 'a zero vector has no fabricated direction');
+  const changed: SceneItem = { kind: 'scene', objects: [
+    { ...item.objects[0], plot: { ...item.objects[0].plot!, x: [0, 1], y: [0, 1] } },
+    { ...item.objects[1], w: .5, h: .5 },
+    { ...item.objects[2], x: .1, y: .1, w: .1, h: .1 },
+  ] };
+  eq(sceneTransitionAllowed(item.objects, changed), false, 'changing coordinate domains is not treated as a numeric transform');
+  eq(interpolateScene(sceneObjects(item), changed, .5), sceneObjects(changed), 'domain changes show the exact valid target state, never an out-of-domain intermediate vector');
+  const rebound: SceneItem = { kind: 'scene', objects: item.objects.map(object => object.id === 'vector' ? { ...object, plotId: undefined, x: .2, y: .2, w: .1, h: .1 } : object) };
+  eq(sceneTransitionAllowed(item.objects, rebound), false, 'data-space and canvas-space values are never mixed');
 });
 
 // ------------------------------------------------------------------- easing

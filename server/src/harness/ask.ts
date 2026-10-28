@@ -1,8 +1,12 @@
+import { SCENE_SCHEMA } from '../../../shared/scene';
+import { checkExample, claimsNumericExample, exampleActions, EXAMPLE_SCHEMA, EXAMPLE_TASK } from './example';
 import { checkBoard } from './board';
 import { PLOT_SCHEMA } from '../../../shared/plot';
+import { selectedSourceIds, validateSelection, type RegionSelection } from '../../../shared/selection';
+import { selectionImages } from '../selection-image';
 import { responseLanguage } from '../../../shared/languages';
 import { documentLanguage } from './language';
-import { insightStep, readsSource } from './insight';
+import { answerNarrationProblems, insightStep, readsSource } from './insight';
 import { randomUUID } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
@@ -30,6 +34,18 @@ import { imageParts, type Effort } from './calls';
 import { REGION_NAMES, regionOf, tableLines } from './direct';
 import { paperBlock, proseSentences } from './paper-block';
 import { SHARED_RULES } from './prompts';
+import {
+  BOUNDS_SCHEMA,
+  exactBounds,
+  figureFrameText,
+  figureTextTargets,
+  groundedVisualMark,
+  measuredCueTargets,
+  measuredFrameText,
+  visualCueProblems,
+  type MeasuredTarget,
+} from './visual-grounding';
+import { measuredFigureTargets } from './measured-visuals';
 
 // Ask (notes/HARNESS.md): retrieve passages in code, answer in one model call whose cues may only point at them, then
 // turn the answer into canonical tour steps the player inserts as a micro-tour.
@@ -44,6 +60,8 @@ export interface AskRequest {
   question: string;
   responseLanguage?: string;
   tourId?: string;
+  analysisId?: string;
+  selection?: RegionSelection;
   stepId?: string;
   figureId?: string;
   history?: AskTurn[];
@@ -80,6 +98,7 @@ export interface Retrieval {
   tables: { id: string; lines: string[] }[];
   /** Where the camera goes when a step points at nothing. */
   home?: string;
+  measured?: MeasuredTarget[];
 }
 
 const STOP = new Set(
@@ -266,6 +285,11 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
     const k = known(id);
     if (k && !focus.includes(k)) focus.push(k);
   };
+  const selected = request.selection ? selectedSourceIds(doc, request.selection) : [];
+  for (const id of selected) {
+    add(id);
+    blocks.get(id)?.sentences.forEach(add);
+  }
   const evidence = (step ? stepTargets(step) : [])
     .flatMap((id) => blocks.get(id)?.sentences.slice(0, 4) ?? [id])
     .filter((id) => known(id));
@@ -319,7 +343,11 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
   const all = [...focus.map((id) => byId.get(id)!), ...ranked];
   const visuals = all.flatMap((p) =>
     p.kind === 'figure'
-      ? [p.id, ...(figures.get(p.id)?.panels.map((x) => x.id) ?? [])]
+      ? [
+          p.id,
+          ...(figures.get(p.id)?.panels.map((x) => x.id) ?? []),
+          ...(figures.get(p.id) ? figureTextTargets(doc, figures.get(p.id)!).map((b) => b.id) : []),
+        ]
       : p.kind === 'equation'
         ? [p.id]
         : [],
@@ -338,14 +366,22 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
     sentences: all.filter((p) => p.kind === 'sentence').map((p) => p.id),
     visuals: [...new Set(visuals)],
     tables,
-    home: asked ?? namedVisual ?? statement[0] ?? known(evidence[0]) ?? named[0] ?? ranked[0]?.id,
+    home:
+      selected.map(known).find((id) => id && ['figure', 'equation'].includes(byId.get(id)!.kind)) ??
+      selected.map(known).find(Boolean) ??
+      asked ??
+      namedVisual ??
+      statement[0] ??
+      known(evidence[0]) ??
+      named[0] ??
+      ranked[0]?.id,
   };
 }
 
 // ---------------------------------------------------------------- the call
 
 export const CUE_ACTIONS = ['highlight', 'box', 'arrow', 'circle', 'spotlight', 'note'] as const;
-const BOARD_KINDS = ['none', 'formula', 'flow', 'bars', 'plot'] as const;
+const BOARD_KINDS = ['none', 'formula', 'flow', 'bars', 'plot', 'scene'] as const;
 const NO_BOARD = {
   kind: 'none',
   title: '',
@@ -388,9 +424,11 @@ const EXAMPLE = JSON.stringify({
 export function askInstructions(language: string) {
   return `TASK: answer the learner's question as a short spoken micro-tour in ${JSON.stringify(language)} that points at
 the document while it speaks.
+${EXAMPLE_TASK}
+Actively choose useful live visuals for the answer: a plot for function behavior or parameter changes, bars for comparable quantities, and timed example frames for calculations or transformations. Use native scenes for vectors, matrices and custom visual explanations: positioned objects with stable id,type,x,y,w,h and optional color,text,values,plot,background; object types text/math/rect/circle/arrow/vector/matrix/plot, normalized0..1positions, signed endpoint deltas for arrows/vectors. Bind vector/arrow/circle objects to axes with plotId and data-domain x,y,endpoint deltas; never guess their normalized alignment with an embedded plot. Keep semantic identities across scene frames, make the transformation visible, and avoid foreground collisions. Use them whenever they clarify the answer. Measured source-component cues are sufficient for a straightforward diagram path; avoid decorative motion and duplicate boards.
 1. "answerable": "yes" if the document answers the question, "partly" if it answers part of it, "no" if it does not.
-2. Write 1 to 3 steps. The first sentence of the first step answers the question directly. Each "say" has at most 60
-   words in short spoken sentences. Add a step only when the answer has parts, for example the idea, then the formula.
+2. Write 1 to 3 steps. The first sentence of the first step answers the question directly. Each "say" has at most 100
+   words in clear spoken sentences. Explain the intermediate reasoning and meaning of the result; do not compress a mechanism into a list of labels. Add a step only when the answer has parts, for example the idea, then the formula.
 3. Say only what the document supports. Knowledge from outside it is allowed only as background: start that sentence
    with "As background," and point at nothing while saying it. When the document does not answer the question, say so
    plainly, then point at the closest passage.
@@ -398,9 +436,15 @@ the document while it speaks.
    say (at most 2 per step). "box", "arrow" or "circle" marks a figure, panel or equation, with a "label" of at most 4
    words or empty. "spotlight" dims everything else. "note" writes a remark of at most 12 words next to a target.
    "anchor" is 2 to 6 words copied exactly from "say": the cue appears when the voice reaches them. Use 1 to 3 cues per
-   step, on one page or one figure when you can. A question about part of a figure gets a mark on that part: its panel,
-   or an arrow or circle whose "region" says where the part lies in the attached image. "region" is "whole" for every
-   other cue, and always when no image is attached.
+   step, on one page or one figure when you can. For a visible figure component, prefer its listed panel or detected
+   text ID. Otherwise use "bounds": [left,top,right,bottom] between 0 and 1, tightly enclosing that component relative
+   to the chosen TARGET, using the supplied image-frame locations. A text ID encloses the printed words only.
+   Set "region" to "whole" when bounds are supplied; named regions are legacy fallback. Use arrows only for a precise
+   component and circles only for an isolated small part. For larger panels use a box. Leave labels empty when the
+   figure already names the part. A measured component/panel/text ID always uses action "box", even when the learner
+   asks to "highlight" it; action "highlight" is exclusively for sentence IDs. Do not use spotlight or note on a measured
+   ID. Never guess a position from a caption or substitute an overview for a specific component. Selected page crops
+   have a different coordinate frame: no fine figure marks.
 5. For a function intuition you may use board.kind plot and optional board.plot: kind plot, x/y ranges, curves [{expression,label}], optional parameter {from,to}. Safe expressions use x/a, arithmetic and whitelisted sin/cos/tanh/exp/log/sqrt/abs/relu/sigmoid/min/max/softmax(x,0); no code. Explain the mechanism and label it illustrative, never measured data.
 6. The board is optional, at most one item per step; otherwise its "kind" is "none" and the other fields stay empty.
    - "formula" when the question is about an equation: its LaTeX, and 2 to 4 terms, each a separate part with "latex"
@@ -424,6 +468,15 @@ function passageLine(p: Passage, doc: Doc): string {
 /** The task's variable part: the question, the conversation so far, the narration and the retrieved passages. */
 export function askContext(request: AskRequest, retrieval: Retrieval, doc: Doc, step?: Step, image?: TourImage) {
   const lines = [`QUESTION: ${request.question}`];
+  if (request.selection) {
+    const selected = selectedSourceIds(doc, request.selection);
+    lines.push(
+      `SELECTED REGION: page ${request.selection.page}, normalized rectangle ${JSON.stringify(request.selection.rect)}.`,
+      'Two images are attached: the full PDF page for context, followed by an enlarged crop of the selected area. The learner is asking about this crop. The full document text is available above.',
+      `Existing source IDs intersecting the region: ${selected.join(', ') || 'none; explain the visible content without inventing a source ID'}.`,
+      'The selection image identifier is context only, never a cue target. Use existing listed document IDs for highlights and camera movement.',
+    );
+  }
   if (request.history?.length) {
     lines.push('EARLIER IN THIS CONVERSATION (oldest first; the question may build on it):');
     for (const turn of request.history) lines.push(`Q: ${turn.question}`, `A: ${clip(turn.answer, 700)}`);
@@ -439,8 +492,12 @@ export function askContext(request: AskRequest, retrieval: Retrieval, doc: Doc, 
   if (retrieval.ranked.length)
     lines.push('RETRIEVED PASSAGES (best match first):', ...retrieval.ranked.map((p) => passageLine(p, doc)));
   if (!retrieval.focus.length && !retrieval.ranked.length) lines.push('No passage matched the question.');
-  if (image)
+  if (image) {
     lines.push(`The image of ${image.label} [${image.targetId}] is attached. Describe only what is visible or stated.`);
+    const figure = image.kind === 'figure' && !request.selection && doc.figures.find((f) => f.id === image.targetId);
+    if (figure) lines.push(figureFrameText(doc, figure));
+    if (retrieval.measured?.length) lines.push(measuredFrameText(retrieval.measured));
+  }
   lines.push('Point only at the IDs listed here.');
   return lines.join('\n');
 }
@@ -449,6 +506,32 @@ export function askContext(request: AskRequest, retrieval: Retrieval, doc: Doc, 
  * The answer's schema: actions, answerability, regions and board kinds are enums, and cues may only target retrieved
  * IDs. Regions other than "whole" are offered only when the model can see the figure.
  */
+/** Muse caps schema nesting at ten levels. Only the deeply nested scene leaves
+ * are compact on the wire; full scene/plot/matrix validation still runs locally. */
+export function answerProviderSchema<T>(schema: T): T {
+  const copy = structuredClone(schema);
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    const node = value as Record<string, any>;
+    if (node.properties?.kind?.enum?.includes('scene') && node.properties?.objects?.items?.properties) {
+      const properties = node.properties.objects.items.properties;
+      properties.values = { type: 'array', description: 'Matrix rows: arrays of finite numbers, up to 6 by 6.' };
+      properties.plot = {
+        type: 'object',
+        description:
+          'Native plot: kind plot; finite increasing x/y ranges; curves[{expression,label}], optional x_label,y_label,parameter{from,to}; safe math expressions only.',
+      };
+    }
+    Object.values(node).forEach(visit);
+  };
+  visit(copy);
+  return copy;
+}
+
 export function answerSchema(retrieval: Retrieval, regions: readonly string[] = ['whole']) {
   const ids = [...retrieval.sentences, ...retrieval.visuals];
   const text = (maxLength: number, description?: string) => ({
@@ -464,12 +547,28 @@ export function answerSchema(retrieval: Retrieval, regions: readonly string[] = 
   });
   const anchor = text(80, 'A 2-6 word phrase copied exactly from say.');
   const cue = object({
-    action: { type: 'string', enum: CUE_ACTIONS },
+    action: {
+      type: 'string',
+      enum: retrieval.measured?.some((t) => t.kind !== 'text')
+        ? CUE_ACTIONS.filter((a) => a !== 'arrow' && a !== 'circle' && a !== 'spotlight')
+        : CUE_ACTIONS,
+    },
     target: ids.length ? { type: 'string', enum: ids } : { type: 'string', maxLength: 0 },
-    region: { type: 'string', enum: regions, description: 'arrow or circle: where the part is in the attached image.' },
+    region: {
+      type: 'string',
+      enum: retrieval.measured?.some((t) => t.kind !== 'text') ? ['whole'] : regions,
+      description: 'Measured targets use whole; otherwise legacy relative region.',
+    },
     label: text(100, 'box, arrow or circle: at most 4 words or empty; note: its text, at most 12 words.'),
     anchor,
   });
+  if (regions.length > 1 && !retrieval.measured?.some((t) => t.kind !== 'text')) cue.properties.bounds = BOUNDS_SCHEMA;
+  if (retrieval.measured?.length)
+    cue.properties.members = {
+      type: 'array',
+      maxItems: 4,
+      items: { type: 'string', enum: retrieval.measured.map((t) => t.id) },
+    };
   const limits = BOARD_LIMITS;
   const parts = (max: number, item: object) => ({ type: 'array', maxItems: max, items: item });
   const board = object({
@@ -486,26 +585,36 @@ export function answerSchema(retrieval: Retrieval, regions: readonly string[] = 
     higher_is_better: { type: 'boolean' },
   });
   board.properties.plot = PLOT_SCHEMA;
-  return object({
-    plan: text(600),
-    answerable: { type: 'string', enum: ANSWERABLE },
-    steps: {
-      type: 'array',
-      minItems: 1,
-      maxItems: 3,
-      items: object({
-        say: { type: 'string', minLength: 1, maxLength: 480, description: 'At most 60 spoken words.' },
-        cues: { type: 'array', maxItems: ids.length ? 4 : 0, items: cue },
-        board,
-      }),
+  board.properties.scene = SCENE_SCHEMA;
+  const step = object({
+    say: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 900,
+      description: 'At most 100 spoken words; enough reasoning to understand the mechanism.',
     },
-    followups: { type: 'array', minItems: 2, maxItems: 2, items: text(120) },
+    cues: { type: 'array', maxItems: ids.length ? 4 : 0, items: cue },
+    board,
   });
+  step.properties.example = EXAMPLE_SCHEMA;
+  return answerProviderSchema(
+    object({
+      plan: text(600),
+      answerable: { type: 'string', enum: ANSWERABLE },
+      steps: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 3,
+        items: step,
+      },
+      followups: { type: 'array', minItems: 2, maxItems: 2, items: text(120) },
+    }),
+  );
 }
 
 // ------------------------------------------------------------ conversion
 
-const MAX_WORDS = 60;
+const MAX_WORDS = 100;
 /** One pen for answers: boxes, arrows and circles in the pink of a tutor's pen, apart from the tour's own marks. */
 const PEN: Record<'box' | 'arrow' | 'circle', Color> = { box: 'pink', arrow: 'pink', circle: 'pink' };
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -548,7 +657,7 @@ function plain(text: string): string {
     .trim();
 }
 
-/** At most 60 words, cut after the last whole sentence when that keeps enough of it. */
+/** At most 100 words, cut after the last whole sentence when that keeps enough of it. */
 export function spoken(text: string): string {
   const say = plain(text);
   const words = splitWords(say);
@@ -579,6 +688,12 @@ export function boardFromAnswer(
   evidence: string,
 ): { item: BoardItem; focus: (number | null)[] } | null {
   if (!isRaw(raw)) return null;
+  if (raw.kind === 'scene') {
+    const { item } = checkBoard('scene', raw.scene ?? raw, evidence);
+    return item && item.kind === 'scene'
+      ? { item, focus: item.objects.map((object) => (object.text ? anchorAt(say, object.text) : null)) }
+      : null;
+  }
   if (raw.kind === 'plot') {
     const { item } = checkBoard('plot', raw.plot ?? raw);
     return item && item.kind === 'plot' ? { item, focus: item.curves.map((c) => anchorAt(say, c.label)) } : null;
@@ -619,6 +734,8 @@ export interface AnswerContext {
   evidence: string;
   /** The figure whose image the model saw: only marks on it may point at a region. */
   imaged?: string;
+  /** Once an answer starts a numerical example, its correction must retain a visible example. */
+  requireExample?: boolean;
 }
 
 /** What the camera does to show an element, and which view it is in (one page of text, one figure, one equation). */
@@ -627,7 +744,11 @@ type View = { key: string; camera: CameraAction };
 function viewer(doc: Doc): (id: string) => View | null {
   const pages = new Map([...doc.sentences, ...doc.sections].map((s) => [s.id, s.page]));
   const figureOf = new Map(
-    doc.figures.flatMap((f) => [[f.id, f.id] as const, ...f.panels.map((p) => [p.id, f.id] as const)]),
+    doc.figures.flatMap((f) => [
+      [f.id, f.id] as const,
+      ...f.panels.map((p) => [p.id, f.id] as const),
+      ...figureTextTargets(doc, f).map((b) => [b.id, f.id] as const),
+    ]),
   );
   const equations = new Set(doc.equations.map((e) => e.id));
   return (id) => {
@@ -659,11 +780,20 @@ function toStep(
   const visuals = new Set(context.retrieval.visuals);
   const timing = (at: number) => (at > 0 ? { at_word: Math.min(at, words - 1) } : {});
   const cues = list(raw.cues)
+    .flatMap((c) => {
+      const measured = measuredCueTargets(str(c.target), c.members, context.retrieval.measured ?? []);
+      return measured.length
+        ? measured.map((t) => ({ ...c, target: t.target, bounds: t.region, region: 'whole', measured: true }))
+        : [c];
+    })
     .map((c) => ({
       action: str(c.action),
+      measured: c.measured === true,
       target: str(c.target),
       region: str(c.region),
+      bounds: c.bounds,
       label: str(c.label),
+      found: anchorAt(say, str(c.anchor)),
       at: anchorAt(say, str(c.anchor)) ?? 0,
     }))
     .filter((c) =>
@@ -686,10 +816,17 @@ function toStep(
     moves++;
     return true;
   };
+  // A measured diagram is the teaching surface for this step. Supporting
+  // prose remains evidence; its highlight must not move the camera off the diagram.
+  const diagram = cues.find((cue) => cue.measured && cue.found !== null);
+  if (diagram) look(diagram.target, 0);
   let highlights = 0;
   for (const cue of cues) {
+    if (['box', 'arrow', 'circle'].includes(cue.action) && cue.found === null) continue;
     if (cue.action === 'highlight' && (highlights >= 2 || highlighted.has(cue.target))) continue;
-    if (!look(cue.target, cue.at)) continue;
+    const supportingText =
+      diagram && ['highlight', 'note'].includes(cue.action) && view(cue.target)?.key !== view(diagram.target)?.key;
+    if (!supportingText && !look(cue.target, cue.at)) continue;
     const when = timing(cue.at);
     if (cue.action === 'highlight') {
       highlights++;
@@ -698,24 +835,30 @@ function toStep(
     } else if (cue.action === 'note')
       actions.push({ type: 'note', anchor: cue.target, text: firstWords(cue.label, 12).slice(0, 140), ...when });
     else if (cue.action === 'spotlight') actions.push({ type: 'spotlight', target: cue.target, ...when });
-    else if (cue.action === 'box')
-      actions.push({ type: 'box', target: cue.target, color: PEN.box, ...markLabel(cue.label), ...when });
-    else if (cue.action === 'arrow' || cue.action === 'circle') {
-      // A part of the figure only when the model saw that figure; otherwise the mark goes around the whole target.
-      const seen = context.imaged && view(cue.target)?.key === `figure:${context.imaged}`;
-      const region = seen ? regionOf(cue.region) : undefined;
+    else if (cue.action === 'box' || cue.action === 'arrow' || cue.action === 'circle') {
+      const invalid = cue.bounds !== undefined && !exactBounds(cue.bounds);
+      const grounded = groundedVisualMark(
+        context.doc,
+        cue.target,
+        invalid ? 'box' : cue.action,
+        cue.bounds !== undefined ? exactBounds(cue.bounds) : regionOf(cue.region),
+        invalid ? '' : cue.label,
+        context.imaged,
+      );
       actions.push({
-        type: cue.action,
+        type: grounded.action,
         target: cue.target,
-        ...(region ? { region } : {}),
-        color: PEN[cue.action],
-        ...markLabel(cue.label),
+        ...(grounded.region ? { region: grounded.region } : {}),
+        color: PEN[grounded.action],
+        ...markLabel(grounded.label),
         ...when,
       });
     }
   }
   if (!moves && first && context.retrieval.home) look(context.retrieval.home, 0);
-  const board = boardFromAnswer(raw.board, say, context.evidence);
+  const example = checkExample(raw.example, say).example;
+  const board = example ? null : boardFromAnswer(raw.board, say, context.evidence);
+  if (example) actions.push(...exampleActions(example));
   if (board) {
     const focus = board.focus.flatMap((at, part) =>
       at === null ? [] : [{ type: 'board_focus' as const, part, ...timing(at) }],
@@ -765,6 +908,7 @@ function followups(raw: unknown, context: AnswerContext): string[] {
 /** The model's answer as checked tour steps, or null when no step survives. */
 export function buildAnswer(value: unknown, context: AnswerContext): AskAnswer | null {
   if (!isRaw(value)) return null;
+  if (answerVisualProblems(value, context).length) return null;
   const view = viewer(context.doc);
   const highlighted = new Set<string>();
   const prefix = `ask-${randomUUID().slice(0, 8)}`;
@@ -779,8 +923,35 @@ export function buildAnswer(value: unknown, context: AnswerContext): AskAnswer |
   return { answerable, steps: valid, followups: followups(value.followups, context) };
 }
 
+/** Measured actions must survive conversion exactly; bad action/anchor requests a model correction. */
+export function answerVisualProblems(value: unknown, context: AnswerContext): string[] {
+  if (!isRaw(value)) return [];
+  const steps = list(value.steps);
+  if (context.requireExample && !steps.some((step) => step.example !== undefined))
+    return [
+      'The answer started a numerical worked example and needs example frames. Correct its visible example frames instead of removing the example or replacing it with narration alone.',
+    ];
+  return steps.flatMap((step, index) => {
+    const problems = visualCueProblems(step.cues, context.imaged, context.retrieval.measured);
+    if (isRaw(step.board) && step.board.kind === 'scene')
+      problems.push(...checkBoard('scene', step.board.scene ?? step.board, context.evidence).problems);
+    const say = spoken(str(step.say));
+    problems.push(...checkExample(step.example, say, claimsNumericExample(say)).problems);
+    for (const cue of list(step.cues)) {
+      const measured = measuredCueTargets(str(cue.target), cue.members, context.retrieval.measured ?? []);
+      if (measured.length && anchorAt(say, str(cue.anchor)) === null)
+        problems.push(
+          'A measured mark needs an anchor copied from the spoken explanation; choose words that are actually spoken in this step.',
+        );
+    }
+    return problems.map((problem) => `Step ${index + 1}: ${problem}`);
+  });
+}
+
 const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused']);
-const ASK_TIMEOUT_MS = 75_000;
+// A checked multi-frame visual answer can need one correction. Keep a bounded
+// request deadline without aborting ordinary scene authoring before it returns.
+const ASK_TIMEOUT_MS = 180_000;
 /** Low effort first; medium once when the first answer cannot answer or is unusable. Budgets include reasoning. */
 const ATTEMPTS: { effort: Effort; maxTokens: number }[] = [
   { effort: 'low', maxTokens: 6_000 },
@@ -795,8 +966,11 @@ export interface AskInput {
   tour?: Tour;
   /** The crop of the figure asked about, when it was cheap to load. */
   image?: TourImage;
+  /** Full-page context and crop rendered from the original PDF for a region question. */
+  images?: TourImage[];
   language: string;
   signal?: AbortSignal;
+  measureFigure?: typeof measuredFigureTargets;
 }
 
 /**
@@ -805,18 +979,37 @@ export interface AskInput {
  */
 export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnswer; completions: Completion[] }> {
   const { client, doc, request } = input;
+  if (request.selection) validateSelection(request.selection, doc);
   const step = findStep(input.tour, request.stepId);
   const retrieval = retrieve(doc, request, step);
+  const signal = AbortSignal.any([AbortSignal.timeout(ASK_TIMEOUT_MS), ...(input.signal ? [input.signal] : [])]);
+  if (input.image?.kind === 'figure' && !request.selection) {
+    retrieval.measured = await (input.measureFigure ?? measuredFigureTargets)(input.image, signal);
+    retrieval.visuals.push(...retrieval.measured.map((t) => t.id));
+  }
   const language = responseLanguage(request.responseLanguage)
     ? request.responseLanguage
     : (input.tour?.voices?.host?.lang ?? documentLanguage(doc, input.language));
-  const task = `${askInstructions(language)}\nKeep quotations in the original document language. Explain them in the answer language.\n\n${askContext(request, retrieval, doc, step, input.image)}`;
+  const authoringRules = [
+    'The say fields contain only explanations addressed to the learner.',
+    'Never narrate schema, rendering instructions or authoring rules.',
+  ];
+  const task = `${askInstructions(language)}\n${authoringRules.join(' ')}\nKeep quotations in the original document language. Explain them in the answer language.\n\n${askContext(request, retrieval, doc, step, input.image)}`;
   const messages: MuseMessage[] = [
     { role: 'developer', content: SHARED_RULES },
     { role: 'user', content: `<DOCUMENT>\n${paperBlock(doc)}\n</DOCUMENT>` },
-    { role: 'user', content: [{ type: 'text', text: task }, ...imageParts(input.image ? [input.image] : [])] },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: task },
+        ...imageParts([...(input.images ?? []), ...(input.image ? [input.image] : [])]),
+      ],
+    },
   ];
-  const schema = answerSchema(retrieval, input.image ? REGION_NAMES : ['whole']);
+  const schema = answerSchema(
+    retrieval,
+    input.image?.kind === 'figure' && !request.selection ? REGION_NAMES : ['whole'],
+  );
   const context: AnswerContext = {
     doc,
     retrieval,
@@ -827,9 +1020,8 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       .map((p) => p.text)
       .concat(retrieval.tables.flatMap((t) => t.lines))
       .join('\n'),
-    imaged: input.image?.targetId,
+    imaged: request.selection || input.image?.kind !== 'figure' ? undefined : input.image.targetId,
   };
-  const signal = AbortSignal.any([AbortSignal.timeout(ASK_TIMEOUT_MS), ...(input.signal ? [input.signal] : [])]);
   const completions: Completion[] = [];
   let answer: AskAnswer | null = null;
   for (const { effort, maxTokens } of ATTEMPTS) {
@@ -853,6 +1045,28 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       if (effort !== 'low' || !(error instanceof ProcessingError && MODEL_FAULTS.has(error.code))) throw error;
       continue;
     }
+    context.requireExample ||=
+      isRaw(value) &&
+      list(value.steps).some((step) => step.example !== undefined || claimsNumericExample(spoken(str(step.say))));
+    const visualProblems = answerVisualProblems(value, context);
+    if (visualProblems.length) {
+      console.warn(
+        JSON.stringify({
+          event: 'answer_visual_repair',
+          documentId: input.documentId,
+          attempt: completions.length,
+          problems: visualProblems,
+        }),
+      );
+      messages.push(
+        { role: 'assistant', content: JSON.stringify(value) },
+        {
+          role: 'user',
+          content: `Correct the visual targeting or worked example below. Keep valid evidence; correct the narration if example values or steps must change: ${[...new Set(visualProblems)].join(' ')}`,
+        },
+      );
+      continue;
+    }
     const candidate = buildAnswer(value, context);
     if (candidate?.steps.some((step) => readsSource(step.say, doc))) {
       messages.push(
@@ -865,10 +1079,38 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       );
       continue;
     }
+    const narrationProblems = candidate ? answerNarrationProblems(candidate.steps, authoringRules) : [];
+    if (narrationProblems.length) {
+      console.warn(
+        JSON.stringify({ event: 'answer_narration_repair', documentId: input.documentId, problems: narrationProblems }),
+      );
+      messages.push(
+        { role: 'assistant', content: JSON.stringify(value) },
+        {
+          role: 'user',
+          content: `Repair the answer: ${narrationProblems.join(' ')} Keep valid evidence and useful native boards. Return one coherent explanation without repeating steps or speaking internal instructions.`,
+        },
+      );
+      continue;
+    }
     answer = candidate ?? answer;
     if (answer && answer.answerable !== 'no') break;
   }
   if (!answer) throw new ProcessingError('muse_invalid_response', 'The model returned no usable answer.');
+  console.log(
+    JSON.stringify({
+      event: 'answer_visuals',
+      documentId: input.documentId,
+      measuredTargets: retrieval.measured?.length ?? 0,
+      steps: answer.steps.map((step) => ({
+        id: step.id,
+        actions: step.actions.reduce<Record<string, number>>((counts, action) => {
+          counts[action.type] = (counts[action.type] ?? 0) + 1;
+          return counts;
+        }, {}),
+      })),
+    }),
+  );
   if (responseLanguage(request.responseLanguage)) answer = { ...answer, language };
   return { answer, completions };
 }
@@ -1018,4 +1260,19 @@ export async function demoImage(
   } catch {
     return undefined;
   }
+}
+
+/** A region question in local demos uses the same verified PDF renderer as signed-in documents. */
+export async function demoSelectionImages(
+  paper: string,
+  doc: Doc,
+  selection: RegionSelection,
+  root = DEMO_ROOT,
+  signal?: AbortSignal,
+): Promise<TourImage[]> {
+  const file = DEMO_PAPER.test(paper) ? await demoFile(root, paper, 'paper.pdf') : null;
+  if (!file || (await stat(file)).size > DEMO_MAX_BYTES)
+    throw new HttpError(409, 'source_unavailable', 'The original PDF is unavailable for this selection.');
+  const local = { download: () => readFile(file) };
+  return selectionImages(local, file, doc, selection, signal);
 }

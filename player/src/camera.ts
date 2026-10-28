@@ -65,6 +65,17 @@ export function focusView(rect: BBox, page: PageBox, layout: Layout, vp: Viewpor
   return clampView({ cx: page.x + page.width / 2, cy, s }, layout, vp);
 }
 
+/** Refit the visible page when a side panel changes the available width. The
+ * current vertical reading anchor survives; an old manual/detail zoom does not.
+ */
+export function fitWidthView(view: View, layout: Layout, vp: Viewport): View {
+  const distance = (page: PageBox) => Math.max(page.y - view.cy, view.cy - page.y - page.height, 0);
+  const page = layout.pages.reduce<PageBox | undefined>((nearest, candidate) =>
+    !nearest || distance(candidate) < distance(nearest) ? candidate : nearest, undefined);
+  if (!page) return clampView(view, layout, vp);
+  return clampView({ cx: page.x + page.width / 2, cy: view.cy, s: readingScale(page.width, vp) }, layout, vp);
+}
+
 /** Fit the rect plus padding (a fraction of its size on each side) into the viewport. */
 export function zoomView(rect: BBox, padding: number, layout: Layout, vp: Viewport): View {
   const w = Math.max(1, rect[2] - rect[0]);
@@ -80,13 +91,15 @@ export function initialView(layout: Layout, vp: Viewport): View {
   return focusView([p.x, p.y, p.x + p.width, p.y + p.height], p, layout, vp);
 }
 
-export function cameraView(action: CameraAction, resolver: Resolver, layout: Layout, vp: Viewport): View | null {
+export function cameraView(action: CameraAction, resolver: Resolver, layout: Layout, vp: Viewport, options: { fitWidth?: boolean } = {}): View | null {
   const groups = action.type === 'zoom' ? resolver.resolveTarget(action.target, action.region) : resolver.resolve(action.target);
   const target = groups && stageRect(layout, groups);
   const page = target && layout.pages[target.page - 1];
   // A target on a page the layout does not have cannot be framed.
   if (!target || !page) return null;
-  if (action.type === 'focus') return focusView(target.rect, page, layout, vp);
+  // Text focus keeps the page legible in context. Deliberate zoom commands can
+  // inspect detail, except while a side explanation needs the full paper width.
+  if (action.type === 'focus' || options.fitWidth) return focusView(target.rect, page, layout, vp);
   return zoomView(target.rect, action.padding ?? DEFAULT_ZOOM_PADDING, layout, vp);
 }
 
@@ -95,6 +108,11 @@ export function project(r: BBox, v: View, vp: Viewport): ScreenRect {
   const x = (sx: number) => (sx - v.cx) * v.s + vp.width / 2;
   const y = (sy: number) => (sy - v.cy) * v.s + vp.height / 2;
   return { left: x(r[0]), top: y(r[1]), right: x(r[2]), bottom: y(r[3]) };
+}
+
+/** Viewport pixels back to the same stage coordinates used by PDF overlays. */
+export function unproject(x: number, y: number, v: View, vp: Viewport): [number, number] {
+  return [v.cx + (x - vp.width / 2) / v.s, v.cy + (y - vp.height / 2) / v.s];
 }
 
 export function transformOf(v: View, vp: Viewport): string {

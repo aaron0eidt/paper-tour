@@ -1,3 +1,4 @@
+import { SCENE_SCHEMA, sceneProblems, type SceneItem } from '../../../shared/scene';
 import { PLOT_SCHEMA, plotProblems } from '../../../shared/plot';
 import katex, { type KatexOptions } from 'katex';
 import type { BoardItem } from '../../../shared/paper';
@@ -24,7 +25,7 @@ export const BOARD_LIMITS = {
   termLatex: 200,
   termLabelWords: 7,
   termLabel: 48,
-  bars: [2, 6],
+  bars: [1, 6],
   barLabelWords: 4,
   barLabel: 32,
   unit: 12,
@@ -360,17 +361,46 @@ export function checkFlow(raw: unknown): BoardCheck<FlowItem> {
 
 /** Check a board item of the kind the beat asked for; `evidence` is the text a bars board's numbers must come from. */
 export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {
+  if (kind === 'scene') {
+    if (raw === undefined) return none();
+    if (!isObj(raw)) return { item: null, problems: sceneProblems(raw) };
+    const item = { ...raw, kind: 'scene' } as unknown as SceneItem;
+    const problems = sceneProblems(item);
+    if (!problems.length) {
+      const printed = [0, 1, ...numbersIn(evidence)];
+      for (const object of item.objects) {
+        if (object.type === 'math' && object.text) {
+          const error = latexError(object.text);
+          if (error) problems.push(`Scene object ${object.id}: ${error}.`);
+        }
+        for (const value of object.values?.flat() ?? [])
+          if (!printed.some((n) => sameNumber(n, value)))
+            problems.push(
+              `Scene object ${object.id}: value ${value} needs quoted evidence or declared illustrative example inputs/calculations.`,
+            );
+      }
+    }
+    return { item: problems.length ? null : item, problems };
+  }
   if (kind === 'plot') {
     const item = isObj(raw) ? { ...raw, kind: 'plot' as const } : raw;
     const problems = plotProblems(item);
-    return { item: problems.length ? null : item as BoardItem, problems };
+    return { item: problems.length ? null : (item as BoardItem), problems };
   }
   return kind === 'formula' ? checkFormula(raw) : kind === 'bars' ? checkBars(raw, evidence) : checkFlow(raw);
 }
 
 /** How many parts board_focus can light up: formula terms, flow nodes or bars. */
 export const boardParts = (item: BoardItem) =>
-  item.kind === 'plot' ? item.curves.length : item.kind === 'formula' ? item.terms.length : item.kind === 'flow' ? item.nodes.length : item.bars.length;
+  item.kind === 'scene'
+    ? item.objects.length
+    : item.kind === 'plot'
+      ? item.curves.length
+      : item.kind === 'formula'
+        ? item.terms.length
+        : item.kind === 'flow'
+          ? item.nodes.length
+          : item.bars.length;
 
 // ------------------------------------------------------------------------------------------------- schemas
 
@@ -384,6 +414,7 @@ const object = (properties: Record<string, object>) => ({
 
 /** The response schema of one board item the model fills in; every field is required, as constrained decoding wants. */
 export function boardSchema(kind: BoardKind) {
+  if (kind === 'scene') return SCENE_SCHEMA;
   if (kind === 'plot') return PLOT_SCHEMA;
   if (kind === 'formula')
     return object({
