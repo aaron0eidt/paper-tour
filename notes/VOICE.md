@@ -6,8 +6,8 @@ Frage an den Antwortwriter. **Back to the tour** stellt die ursprüngliche Tour 
 Mikrofontaste oder erneutes Drücken bricht die Aufnahme/Transkription ab. Bei verweigertem Mikrofon oder Abbruch
 vor dem Transkript läuft eine zuvor spielende Tour weiter. Texteingabe bleibt verfügbar.
 
-Die Aufnahme endet nach spätestens 30 Sekunden. Der Browser dekodiert sein Aufnahmeformat, mischt auf Mono und
-erzeugt PCM16-WAV mit 16 kHz. Der Server akzeptiert ausschließlich dieses begrenzte Format (maximal 960044 Bytes).
+Die Aufnahme läuft bis zum Loslassen oder Abbrechen. Der Browser dekodiert sein Aufnahmeformat, mischt auf Mono und
+erzeugt PCM16-WAV mit 16 kHz. Der Server prüft dieses Audioformat ohne eine feste Aufnahmezeit oder Audio-Größengrenze.
 Mikrofonspuren, Timer und Requests werden bei Abbruch und Dokumentwechsel freigegeben. Mikrofone brauchen localhost
 oder HTTPS; der Browser muss MediaRecorder und AudioContext unterstützen.
 
@@ -22,10 +22,10 @@ oder HTTPS; der Browser muss MediaRecorder und AudioContext unterstützen.
   `model: muse-voice-transcribe-1.0`, `audioEncoding: WAV`, `mode: PUSH_TO_TALK`) und `audio` (WAV-Datei).
   Die Implementierung folgt [Meta Speech to Text](https://dev.meta.ai/docs/speech-to-text) und der
   [Transcribe-Referenz](https://dev.meta.ai/docs/api-reference/voice/transcribe).
-- 45 Sekunden Timeout; ein laufender Sprachrequest pro Nutzer. Upstream-Fehlertexte werden nicht durchgereicht.
+- Kein festes Transkriptions-Timeout; Abbruch und Verbindungsende beenden den Request. Ein laufender Sprachrequest pro Nutzer. Upstream-Fehlertexte werden nicht durchgereicht.
 
 Die Transkription ist ein separater, potenziell kostenpflichtiger Provideraufruf. In diesem Air-Lauf wurde keiner
-ausgeführt. Tests prüfen Multipart, Audioformat, Authentifizierung, Limits und Fehler mit Fake-Transporten. Der
+ausgeführt. Tests prüfen Multipart, Audioformat, Authentifizierung, lange Aufnahmen, lange Transkripte und Fehler mit Fake-Transporten. Der
 Browser prüft eine echte MediaRecorder-Aufnahme mit synthetischem Mikrofon; seine Serverantwort wird simuliert.
 Erkennungsqualität, echtes Mikrofon und Muse-Latenz sind damit nicht beurteilt.
 

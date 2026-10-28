@@ -32,6 +32,13 @@ export const SendIcon = () => (
   </Line>
 );
 
+export const MicrophoneIcon = () => (
+  <Line size={17}>
+    <rect x="9" y="3" width="6" height="12" rx="3" />
+    <path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M9 21h6" />
+  </Line>
+);
+
 /** Stop, inside a ring that turns while the answer is being written. */
 export const StopIcon = () => (
   <>
@@ -66,3 +73,11 @@ export const AlertIcon = () => (
     <path d="M12 7.6v5M12 16.2h.01" />
   </Line>
 );
+
+export const RegionIcon = () => (
+  <Line size={17}>
+    <path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m13-5v4a1 1 0 0 1-1 1h-4" />
+    <rect x="7" y="7" width="10" height="10" rx="1.5" strokeDasharray="2 3" />
+  </Line>
+);
+export const PauseIcon = () => <Line size={13}><path d="M9 6v12M15 6v12" strokeWidth="3" /></Line>;

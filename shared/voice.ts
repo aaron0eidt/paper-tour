@@ -1,10 +1,8 @@
-/** Fixed, bounded browser-to-server audio contract: mono PCM16 WAV at 16 kHz, at most 30 seconds. */
+/** Browser-to-server audio format: mono PCM16 WAV at 16 kHz. */
 export const VOICE_RATE = 16000;
-export const VOICE_SECONDS = 30;
-export const VOICE_MAX_BYTES = 44 + VOICE_RATE * VOICE_SECONDS * 2;
 export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
   if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 192000) throw new Error('Invalid audio rate.');
-  const count = Math.min(VOICE_RATE * VOICE_SECONDS, Math.floor((samples.length * VOICE_RATE) / sampleRate));
+  const count = Math.floor((samples.length * VOICE_RATE) / sampleRate);
   const bytes = new Uint8Array(44 + count * 2),
     view = new DataView(bytes.buffer);
   const text = (at: number, s: string) => [...s].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
@@ -32,7 +30,7 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array
   return bytes;
 }
 export function validWav(bytes: Uint8Array): boolean {
-  if (bytes.length <= 44 || bytes.length > VOICE_MAX_BYTES || bytes.length % 2) return false;
+  if (bytes.length <= 44 || bytes.length % 2) return false;
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const text = (at: number, n: number) => String.fromCharCode(...bytes.slice(at, at + n));
   return (

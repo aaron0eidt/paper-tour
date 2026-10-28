@@ -10,7 +10,7 @@ export async function transcribe(
   signal?: AbortSignal,
 ): Promise<{ transcript: string }> {
   if (!validWav(audio))
-    throw new HttpError(400, 'invalid_audio', 'Record up to 30 seconds of mono PCM16 audio at 16 kHz.');
+    throw new HttpError(400, 'invalid_audio', 'Send a valid mono PCM16 WAV recording at 16 kHz.');
   if (!config.apiKey.trim())
     throw new HttpError(503, 'voice_not_configured', 'Voice input needs a Meta connection in Profile & Settings.');
   const url = new URL(config.baseUrl);
@@ -38,7 +38,7 @@ export async function transcribe(
       redirect: 'error',
       headers: { Authorization: `Bearer ${config.apiKey}`, Accept: 'application/json' },
       body,
-      signal: AbortSignal.any([AbortSignal.timeout(45000), ...(signal ? [signal] : [])]),
+      signal,
     });
   } catch {
     throw new HttpError(
@@ -56,12 +56,10 @@ export async function transcribe(
         : 'Transcription is unavailable. Try again in a moment.',
     );
   const result = await response.json().catch(() => null);
-  if (typeof result?.transcript !== 'string' || result.transcript.length > 20000)
+  if (typeof result?.transcript !== 'string')
     throw new HttpError(502, 'invalid_transcript', 'No readable transcript came back.');
   const transcript = result.transcript.replace(/\s+/g, ' ').trim();
   if (!transcript)
     throw new HttpError(422, 'empty_transcript', 'No speech was detected. Hold the microphone button and try again.');
-  if (transcript.length > 500)
-    throw new HttpError(422, 'long_transcript', 'That question is too long. Try a shorter recording.');
   return { transcript };
 }

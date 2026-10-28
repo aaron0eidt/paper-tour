@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { encodeWav, VOICE_SECONDS } from '../../../shared/voice';
+import { encodeWav } from '../../../shared/voice';
 import { apiRequest, ApiRequestError } from '../library/client';
 import type { AskSource } from './api';
 
@@ -25,8 +25,8 @@ export async function transcribeQuestion(source: AskSource, wav: Uint8Array, sig
       );
     result = data;
   }
-  if (!result || typeof result.transcript !== 'string' || !result.transcript.trim() || result.transcript.length > 500)
-    throw new Error('No usable transcript came back. Try a shorter question.');
+  if (!result || typeof result.transcript !== 'string' || !result.transcript.trim())
+    throw new Error('No usable transcript came back. Try recording again.');
   return result.transcript;
 }
 
@@ -35,7 +35,6 @@ type Recording = {
   stream: MediaStream;
   chunks: Blob[];
   cancelled: boolean;
-  timer?: ReturnType<typeof setTimeout>;
 };
 export function useVoiceInput(
   source: AskSource,
@@ -55,7 +54,6 @@ export function useVoiceInput(
     current.current = null;
     if (r) {
       r.cancelled = true;
-      clearTimeout(r.timer);
       if (r.recorder.state !== 'inactive') r.recorder.stop();
       r.stream.getTracks().forEach((t) => t.stop());
     }
@@ -79,7 +77,6 @@ export function useVoiceInput(
       if (phase === 'permission') cancel();
       return;
     }
-    clearTimeout(r.timer);
     if (r.recorder.state !== 'inactive') r.recorder.stop();
     r.stream.getTracks().forEach((t) => t.stop());
   };
@@ -110,7 +107,6 @@ export function useVoiceInput(
       };
       recorder.onstop = async () => {
         current.current = null;
-        clearTimeout(r.timer);
         r.stream.getTracks().forEach((t) => t.stop());
         if (r.cancelled || token !== generation.current) return;
         setPhase('transcribing');
@@ -146,10 +142,6 @@ export function useVoiceInput(
       };
       recorder.start();
       setPhase('recording');
-      r.timer = setTimeout(() => {
-        if (recorder.state !== 'inactive') recorder.stop();
-        r.stream.getTracks().forEach((t) => t.stop());
-      }, VOICE_SECONDS * 1000);
     } catch {
       stream?.getTracks().forEach((t) => t.stop());
       if (token === generation.current) {
