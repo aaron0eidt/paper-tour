@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { tourDirection } from '../../../shared/tourDirection';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { QueryResultRow } from 'pg';
 import type { Config } from '../config';
@@ -28,6 +29,11 @@ import {
 } from './tools';
 import { preparedVisuals, hydrateImages } from './visuals';
 import { scheduleAgent } from './store';
+import { replayHistory, historyCoversCheckpoint } from './history';
+import { checkProgress } from './progress';
+import { workflowDirective } from './workflow';
+import { strictVisualObservationTool } from './strict-tools';
+const WIRE_TOOLS = AGENT_TOOLS.map(strictVisualObservationTool);
 
 export class PaperAgent {
   constructor(
@@ -98,7 +104,7 @@ export class PaperAgent {
     );
     for (const run of rows) await this.db.transaction((tx) => scheduleAgent(tx, this.enqueue, run.id, run.document_id));
   }
-  private task(run: QueryResultRow, checkpoint = false): ResponseItem[] {
+  private task(run: QueryResultRow, checkpoint = false, replay = false): ResponseItem[] {
     const rules = writingInstructions(this.config.muse.language, run.doc).replace(
       'Return the structured draft only.',
       'Save chapters with tools and call finish_tour when complete.',
@@ -110,7 +116,7 @@ export class PaperAgent {
         content: [
           {
             type: 'input_text',
-            text: `TOUR TASK. Use the paper context already loaded. ${rules}\nSource IDs for view_visuals: ${JSON.stringify(paperManifest(run.doc))}.\n${checkpoint ? 'Resume from this verified checkpoint. Images from an earlier context section must be requested again if needed.' : 'Previously verified observations and any saved work:'}\n${JSON.stringify(run.state)}`,
+            text: `TOUR TASK. Use the paper context already loaded. ${rules}\nSource IDs for view_visuals: ${JSON.stringify(paperManifest(run.doc))}.\n${checkpoint ? 'Resume from this verified checkpoint. Images from an earlier context section must be requested again if needed.' : 'Previously verified observations and any saved work:'}\n${JSON.stringify(replay ? { title: run.state.title, plan: run.state.plan, savedChapters: Object.keys(run.state.chapters), observedSources: Object.keys(run.state.observations) } : { ...run.state, loopWatch: undefined })}\nPrioritize missing observations and chapters. Do not request visual sources already delivered in this context just to repair tool arguments. Batch independent source reads. Once an observation is saved, use it to write the tour rather than reading the same source again.`,
           },
         ],
       },
@@ -142,6 +148,7 @@ export class PaperAgent {
         if (!run) return;
       }
       const started = Date.now();
+      const stateBefore = structuredClone(run.state) as RunState;
       try {
         if (run.status === 'pausing') return await this.pause(run, 'Paused by user');
         const access = await this.settings.resolveMuse(run.owner_id, run.model);
@@ -152,6 +159,10 @@ export class PaperAgent {
           .update(access.version + ':' + access.config.apiKey)
           .digest('hex');
         const record = generationRecorder(this.db.pool, run.generation_id, access.config.apiKey, run.id);
+        await record('turn.started', {
+          step: run.turn_index,
+          queueWaitMs: Math.max(0, started - new Date(run.updated_at).getTime()),
+        });
         if (walkthroughGoals(run.doc).requiredPages.length > MAX_CONTENT_PAGES)
           return await this.pause(run, 'This paper exceeds the supported content-page limit.');
         const limits = this.config.agent ?? { maxTurns: 64, maxOutputTokens: 128000, maxRuntimeMs: 1200000 };
@@ -180,7 +191,7 @@ export class PaperAgent {
           .update(
             JSON.stringify({
               instructions: AGENT_INSTRUCTIONS,
-              tools: AGENT_TOOLS,
+              tools: WIRE_TOOLS,
               writingVersion: PROMPT_VERSION,
               language: this.config.muse.language,
               reasoning: 'medium',
@@ -207,7 +218,7 @@ export class PaperAgent {
                   writingVersion: PROMPT_VERSION,
                   instructions: AGENT_INSTRUCTIONS,
                   language: this.config.muse.language,
-                  tools: AGENT_TOOLS,
+                  tools: WIRE_TOOLS,
                   context,
                 }),
               )
@@ -300,6 +311,17 @@ export class PaperAgent {
             }
             if (!input.length) input = this.task(run);
           }
+          if (phase === 'run' && Object.keys(run.state.loopWatch ?? {}).length)
+            input.push({
+              type: 'message',
+              role: 'user',
+              content: [
+                {
+                  type: 'input_text',
+                  text: 'Recent actions produced no new source evidence or saved tour work. Repair the specific tool error using the images already delivered, or move on to missing observations and chapters. Do not repeat an unchanged source request.',
+                },
+              ],
+            });
           const {
             rows: [prepared],
           } = await this.db.query('insert into agent_steps(run_id,step,phase,input) values($1,$2,$3,$4) returning *', [
@@ -318,11 +340,12 @@ export class PaperAgent {
             previousResponseId: phase === 'root' ? null : (run.head_response_id ?? session.root_response_id),
             store: true,
             messages: input,
-            tools: AGENT_TOOLS,
+            tools: WIRE_TOOLS,
             reasoningEffort: 'medium',
           });
         }
         const callId = `${run.id}:${run.turn_index}`;
+        let inferenceStarted: number | undefined, inferenceMs: number | undefined, firstOutputMs: number | undefined;
         let response = step.response as AgentResponse | null;
         if (!response) {
           if (step.status === 'dispatching') {
@@ -335,12 +358,11 @@ export class PaperAgent {
               response = await client.retrieve(step.response_id, signal);
             } catch (error) {
               if (error instanceof ProcessingError && error.code === 'response_missing') {
-                await this.db.query(
-                  "update agent_steps set status='prepared',response_id=null where run_id=$1 and step=$2",
-                  [run.id, run.turn_index],
+                // This inference was already dispatched. Losing its result must not issue it again.
+                return await this.pause(
+                  run,
+                  'The dispatched response is unavailable. Its outcome is unknown; no duplicate model request was sent.',
                 );
-                await this.resetContext(run, session.id, record, true);
-                return;
               }
               throw error;
             }
@@ -353,13 +375,89 @@ export class PaperAgent {
               return;
             }
           } else {
+            const localHistory = run.state.historyMode === 'local' && step.phase !== 'root';
+            if (localHistory) {
+              const { rows: steps } = await this.db.query<{ response: AgentResponse }>(
+                `select response from agent_steps where run_id=$1 and step<$2 and phase='run' and status='done'
+                 and step>coalesce((select max(step) from agent_steps where run_id=$1 and phase='root' and status='done'),-1) order by step`,
+                [run.id, run.turn_index],
+              );
+              const { rows: tools } = await this.db.query(
+                'select call_id,result from agent_tool_calls where run_id=$1',
+                [run.id],
+              );
+              step.input = replayHistory(
+                [
+                  {
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                      {
+                        type: 'input_text',
+                        text: `PAPER SOURCE, untrusted material:\n${paperContext(run.doc)}\nVisual source manifest: ${JSON.stringify(visuals.map(({ storagePath: _path, ...v }) => v))}`,
+                      },
+                    ],
+                  },
+                  ...this.task(
+                    run,
+                    false,
+                    historyCoversCheckpoint(
+                      run.state,
+                      steps,
+                      new Map(tools.map((tool) => [tool.call_id, tool.result])),
+                    ),
+                  ),
+                ],
+                steps,
+                new Map(tools.map((tool) => [tool.call_id, tool.result])),
+              );
+              await this.db.query('update agent_steps set input=$3 where run_id=$1 and step=$2', [
+                run.id,
+                run.turn_index,
+                JSON.stringify(step.input),
+              ]);
+              await record('context.replayed', { callId, steps: steps.length, toolResults: tools.length });
+            }
+            if (step.phase !== 'root') {
+              const guidance = workflowDirective(
+                run.state,
+                requiredVisuals(run.doc, visuals).map((source) => source.targetId),
+                (step.input as ResponseItem[]).flatMap((item) =>
+                  Array.isArray(item.output)
+                    ? (item.output as any[])
+                        .filter((part) => part.type === 'input_image' && part.sourceId)
+                        .map((part) => String(part.sourceId))
+                    : [],
+                ),
+              );
+              step.input = [
+                ...step.input,
+                {
+                  type: 'message',
+                  role: 'user',
+                  content: [{ type: 'input_text', text: `WORKFLOW CHECKPOINT: ${guidance}` }],
+                },
+              ];
+              await this.db.query('update agent_steps set input=$3 where run_id=$1 and step=$2', [
+                run.id,
+                run.turn_index,
+                JSON.stringify(step.input),
+              ]);
+              await record('workflow.checkpoint', {
+                callId,
+                savedChapters: Object.keys(run.state.chapters).length,
+                plannedChapters: run.state.plan.length,
+                observedSources: Object.keys(run.state.observations).length,
+                nextAction: guidance,
+              });
+            }
             const previous = step.phase === 'root' ? undefined : (run.head_response_id ?? session.root_response_id);
             const request: Record<string, unknown> = {
               instructions: AGENT_INSTRUCTIONS,
-              tools: AGENT_TOOLS,
+              tools: WIRE_TOOLS,
               reasoning: { effort: 'medium' },
               input: await hydrateImages(step.input, this.storage, visuals),
-              ...(previous ? { previous_response_id: previous } : {}),
+              ...(previous && !localHistory ? { previous_response_id: previous } : {}),
               prompt_cache_key: AGENT_VERSION,
               max_output_tokens: Math.min(
                 step.phase === 'root' ? 4096 : 16384,
@@ -373,21 +471,36 @@ export class PaperAgent {
               tokens = await client.count(request, signal);
             } catch (error) {
               if (error instanceof ProcessingError && error.code === 'response_missing') {
-                await this.resetContext(run, session.id, record, true);
+                if (localHistory) throw error;
+                await this.useLocalHistory(run, record);
                 return;
               }
               throw error;
             }
             if (tokens + Number(request.max_output_tokens) > Math.floor(1048576 * 0.8)) {
+              if (localHistory)
+                return await this.pause(
+                  run,
+                  'The locally restored conversation exceeds the context budget. Saved work is retained.',
+                );
               if (
                 step.phase === 'root' ||
                 step.input.some((i: any) => JSON.stringify(i).includes('Resume from this verified checkpoint.'))
               )
                 return await this.pause(run, 'The full paper and verified checkpoint exceed the context budget.');
-              await this.resetContext(run, session.id, record, false);
+              await this.resetContext(run, session.id);
               return;
             }
             await record('context.measured', { callId, inputTokens: tokens });
+            // Record the final input after local replay and workflow guidance, with
+            // stored source references rather than hydrated image data.
+            await record('model.prepared', {
+              callId,
+              messages: step.input,
+              previousResponseId: request.previous_response_id ?? null,
+              historyMode: localHistory ? 'local' : 'provider',
+              tools: WIRE_TOOLS,
+            });
             const beforeDispatch = await this.load(run.id);
             if (!beforeDispatch || ['cancelled', 'paused'].includes(beforeDispatch.status)) return;
             if (beforeDispatch.status === 'pausing') return await this.pause(run, 'Paused by user');
@@ -395,21 +508,38 @@ export class PaperAgent {
               run.id,
               run.turn_index,
             ]);
-            response = await client.create(
-              request,
-              {
-                created: async (id) => {
-                  await this.db.query('update agent_steps set response_id=$3 where run_id=$1 and step=$2', [
-                    run.id,
-                    run.turn_index,
-                    id,
-                  ]);
-                  await record('response.created', { callId, responseId: id });
+            try {
+              inferenceStarted = Date.now();
+              response = await client.create(
+                request,
+                {
+                  created: async (id) => {
+                    await this.db.query('update agent_steps set response_id=$3 where run_id=$1 and step=$2', [
+                      run.id,
+                      run.turn_index,
+                      id,
+                    ]);
+                    await record('response.created', { callId, responseId: id });
+                  },
+                  delta: async (delta) => {
+                    firstOutputMs ??= Date.now() - inferenceStarted!;
+                    await record('model.delta', { callId, delta });
+                  },
+                  toolStarted: async (toolCallId, name) => {
+                    firstOutputMs ??= Date.now() - inferenceStarted!;
+                    await record('model.tool.started', { callId, toolCallId, name });
+                  },
                 },
-                delta: async (delta) => record('model.delta', { callId, delta }),
-              },
-              signal,
-            );
+                signal,
+              );
+              inferenceMs = Date.now() - inferenceStarted;
+            } catch (error) {
+              if (!localHistory && error instanceof ProcessingError && error.code === 'response_missing') {
+                await this.useLocalHistory(run, record);
+                return;
+              }
+              throw error;
+            }
           }
           const received = response;
           await this.db.transaction(async (tx) => {
@@ -434,6 +564,15 @@ export class PaperAgent {
               output: received.output.filter((item) => item.type !== 'reasoning'),
               ...(usage ? { usage } : { usageUnavailable: true }),
               durationMs: Date.now() - started,
+              ...(inferenceStarted !== undefined && inferenceMs !== undefined
+                ? {
+                    timing: {
+                      preparationMs: inferenceStarted - started,
+                      inferenceMs,
+                      ...(firstOutputMs !== undefined ? { firstOutputMs } : {}),
+                    },
+                  }
+                : {}),
             });
           });
         }
@@ -450,7 +589,7 @@ export class PaperAgent {
         );
         if (Object.keys(delivered).length)
           await this.db.query(
-            "update agent_runs set state=jsonb_set(state,'{delivered}',coalesce(state->'delivered','{}'::jsonb) || $2::jsonb) where id=$1",
+            "update agent_runs set state=jsonb_set(jsonb_set(state,'{delivered}',coalesce(state->'delivered','{}'::jsonb) || $2::jsonb),'{presented}',coalesce(state->'presented','{}'::jsonb) || $2::jsonb) where id=$1",
             [run.id, JSON.stringify(delivered)],
           );
         const latestRun = await this.load(run.id);
@@ -482,13 +621,40 @@ export class PaperAgent {
             if (await this.tool(run, scope, call, record)) return;
           }
         }
+        const toolCalls = response.output.filter((item) => item.type === 'function_call');
+        const { rows: toolResults } = await this.db.query(
+          'select call_id,result from agent_tool_calls where run_id=$1 and call_id=any($2::text[])',
+          [run.id, toolCalls.map((call) => String(call.call_id))],
+        );
+        const failedCalls = new Set(
+          toolResults
+            .filter((tool) => {
+              try {
+                return tool.result.output?.some(
+                  (part: any) => part.type === 'input_text' && JSON.parse(part.text)?.error,
+                );
+              } catch {
+                return false;
+              }
+            })
+            .map((tool) => String(tool.call_id)),
+        );
         await this.db.transaction(async (tx) => {
           const {
             rows: [latest],
-          } = await tx.query('select status from agent_runs where id=$1 for update', [run.id]);
+          } = await tx.query('select status,state from agent_runs where id=$1 for update', [run.id]);
           if (['cancelled', 'completed'].includes(latest?.status)) return;
+          const progress =
+            step.phase === 'root'
+              ? { counts: {}, repeated: [] }
+              : checkProgress(stateBefore, latest.state, toolCalls, failedCalls);
+          await tx.query("update agent_runs set state=jsonb_set(state,'{loopWatch}',$2::jsonb) where id=$1", [
+            run.id,
+            JSON.stringify(progress.counts),
+          ]);
           await tx.query("update agent_steps set status='done' where run_id=$1 and step=$2", [run.id, run.turn_index]);
-          const paused = latest.status === 'pausing';
+          const stalled = progress.repeated.length > 0;
+          const paused = latest.status === 'pausing' || stalled;
           await tx.query(
             'update agent_runs set head_response_id=$2,turn_index=turn_index+1,status=$3,updated_at=now() where id=$1',
             [run.id, response!.id, paused ? 'paused' : 'queued'],
@@ -497,6 +663,16 @@ export class PaperAgent {
             run.generation_id,
             paused ? 'paused' : 'generating',
           ]);
+          if (stalled) {
+            const reason = `no_progress: ${progress.repeated.join(', ')} repeated without new source evidence or saved tour work. Progress is saved; review the failed action before resuming.`;
+            await tx.query('update agent_runs set reason=$2 where id=$1', [run.id, reason]);
+            await generationRecorder(
+              tx,
+              run.generation_id,
+              '',
+              run.id,
+            )('run.paused', { reason, repeatedActions: progress.repeated });
+          }
           if (!paused) await scheduleAgent(tx, this.enqueue, run.id, run.document_id);
         });
       } catch (error) {
@@ -533,17 +709,39 @@ export class PaperAgent {
       }
     });
   }
-  private async resetContext(
-    run: QueryResultRow,
-    sessionId: string,
-    record: ReturnType<typeof generationRecorder>,
-    missing: boolean,
-  ) {
+  private async useLocalHistory(run: QueryResultRow, record: ReturnType<typeof generationRecorder>) {
+    await this.db.transaction(async (tx) => {
+      const {
+        rows: [current],
+      } = await tx.query('select status from agent_runs where id=$1 for update', [run.id]);
+      if (!current || ['cancelled', 'completed', 'paused'].includes(current.status)) return;
+      const paused = current.status === 'pausing';
+      // Only a request explicitly rejected before inference can return to prepared.
+      await tx.query("update agent_steps set status='prepared' where run_id=$1 and step=$2 and response_id is null", [
+        run.id,
+        run.turn_index,
+      ]);
+      await tx.query(
+        "update agent_runs set state=jsonb_set(state,'{historyMode}','\"local\"'::jsonb),status=$2,updated_at=now() where id=$1",
+        [run.id, paused ? 'paused' : 'queued'],
+      );
+      await tx.query('update tour_generations set status=$2,updated_at=now() where id=$1', [
+        run.generation_id,
+        paused ? 'paused' : 'generating',
+      ]);
+      if (!paused) await scheduleAgent(tx, this.enqueue, run.id, run.document_id);
+    });
+    await record('context.fallback', {
+      reason: 'provider_history_unavailable',
+      mode: 'local',
+      savedWorkPreserved: true,
+    });
+  }
+  private async resetContext(run: QueryResultRow, sessionId: string) {
     const state = run.state as RunState;
     state.presented = {};
     state.delivered = {};
     await this.db.transaction(async (tx) => {
-      if (missing) await tx.query('update paper_sessions set root_response_id=null where id=$1', [sessionId]);
       const {
         rows: [session],
       } = await tx.query('select root_response_id from paper_sessions where id=$1', [sessionId]);
@@ -556,21 +754,19 @@ export class PaperAgent {
         session.root_response_id,
         JSON.stringify(state),
       ]);
-      if (!missing)
-        await tx.query("insert into agent_steps(run_id,step,phase,input) values($1,$2,'run',$3)", [
-          run.id,
-          run.turn_index,
-          JSON.stringify(this.task({ ...run, state }, true)),
-        ]);
+      await tx.query("insert into agent_steps(run_id,step,phase,input) values($1,$2,'run',$3)", [
+        run.id,
+        run.turn_index,
+        JSON.stringify(this.task({ ...run, state }, true)),
+      ]);
       await generationRecorder(
         tx,
         run.generation_id,
         '',
         run.id,
-      )('context.reset', { reason: missing ? 'provider_history_unavailable' : 'context_budget', checkpoint: true });
+      )('context.reset', { reason: 'context_budget', checkpoint: true });
       await scheduleAgent(tx, this.enqueue, run.id, run.document_id);
     });
-    void record;
   }
   private async tool(
     run: QueryResultRow,
@@ -590,6 +786,7 @@ export class PaperAgent {
     } catch {
       args = null;
     }
+    const toolStarted = Date.now();
     await record('tool.started', { callId, name, arguments: args });
     let readResult: Awaited<ReturnType<typeof executeTool>> | undefined;
     if (['search_paper', 'read_elements'].includes(name)) {
@@ -670,6 +867,7 @@ export class PaperAgent {
         callId,
         name,
         output: result.output,
+        durationMs: Date.now() - toolStarted,
         ...(result.images ? { images: result.images.map(({ storagePath: _path, ...v }) => v) } : {}),
       });
       if (result.finished) {
@@ -703,6 +901,12 @@ export class PaperAgent {
           [run.id],
         );
         await tx.query("update agent_steps set status='done' where run_id=$1 and step=$2", [run.id, run.turn_index]);
+        await generationRecorder(
+          tx,
+          run.generation_id,
+          '',
+          run.id,
+        )('tour.direction', tourDirection(result.finished.tour));
         await generationRecorder(tx, run.generation_id, '', run.id)('run.completed', { tourId: tour.id });
         await tx.query('update documents set updated_at=now() where id=$1', [scope.documentId]);
         return true;

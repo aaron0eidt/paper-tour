@@ -326,7 +326,9 @@ export class AnalysisWorker {
         ]);
         const kept = new Set([document.upload_path, ...assets.map((a) => a.storage_path)]);
         const all = await this.storage.list(`${document.owner_id}/${document.id}`);
-        await this.storage.remove(all.filter((path) => !kept.has(path)));
+        // Keep archived media from the retired renderer until the document itself is deleted.
+        const archivedMediaPrefix = `${document.owner_id}/${document.id}/animations/`;
+        await this.storage.remove(all.filter((path) => !kept.has(path) && !path.startsWith(archivedMediaPrefix)));
       });
   }
 }

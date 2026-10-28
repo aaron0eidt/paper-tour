@@ -91,7 +91,8 @@ test('Responses streams text, tool arguments and stored response IDs with real u
   const events = [
     { type: 'response.created', response: { id: 'r1' } },
     { type: 'response.function_call_arguments.delta', delta: '{"ids":' },
-    { type: 'response.output_text.delta', delta: '["fig1"]}' },
+    { type: 'response.output_item.added', item: { type: 'function_call', call_id: 'tool1', name: 'view_visuals' } },
+    { type: 'response.output_text.delta', delta: 'Inspecting the figure.' },
     { type: 'response.completed', response: result('r1', [call('view_visuals', { ids: ['fig1'] })]) },
   ];
   const requests: any[] = [];
@@ -118,7 +119,7 @@ test('Responses streams text, tool arguments and stored response IDs with real u
     },
   );
   assert.deepEqual(observer.ids, ['r1']);
-  assert.equal(observer.deltas.join(''), '{"ids":["fig1"]}');
+  assert.equal(observer.deltas.join(''), 'Inspecting the figure.');
   assert.equal(requests[0].max_output_tokens, undefined);
   assert.equal(requests[1].previous_response_id, 'root');
   assert.equal(requests[1].store, true);
@@ -159,6 +160,41 @@ test('tool sources require an image delivered in a previous turn', async () => {
     /Inspect/,
   );
   await assert.rejects(() => executeTool(scope, state, 'view_visuals', { ids: ['foreign'] }), /Unknown/);
+});
+
+test('JSON-encoded chapters retain all validation and save without a model retry', async () => {
+  const state: RunState = {
+    plan: [{ id: chapter.id, title: chapter.title }],
+    chapters: {},
+    observations: {},
+    presented: {},
+  };
+  const scope = {
+    owner: 'x',
+    documentId: 'x',
+    analysisId: 'x',
+    doc,
+    visuals: [],
+    language: 'en',
+    service: {} as DocumentService,
+  };
+  const saved = await executeTool(scope, state, 'upsert_tour_chapter', { chapter: JSON.stringify(chapter) });
+  assert.equal(saved.state.chapters.results.steps.length, 1);
+  assert.deepEqual(state.chapters, {});
+  const mistimed = structuredClone(chapter) as any;
+  mistimed.steps[0].actions[0] = { type: 'zoom', target: 'fig1', at_phrase: 'absent words' };
+  const repaired = await executeTool(scope, state, 'upsert_tour_chapter', { chapter: mistimed });
+  assert.equal(repaired.state.chapters.results.steps[0].actions[0].at_word, 0);
+  assert.equal((repaired.output as any).timingAdjustments.length, 1);
+
+  await assert.rejects(() => executeTool(scope, state, 'upsert_tour_chapter', { chapter: '{bad' }), /malformed/);
+  await assert.rejects(
+    () =>
+      executeTool(scope, state, 'upsert_tour_chapter', {
+        chapter: JSON.stringify({ ...chapter, steps: [{ ...chapter.steps[0], source: 'invented' }] }),
+      }),
+    (error: any) => error.problems?.some((problem: string) => problem.includes('unknown document element')),
+  );
 });
 
 test(
@@ -249,7 +285,7 @@ test(
             'plan-' + counter,
           ),
         ];
-      else if (b.input.some((i: any) => i.call_id.startsWith('view-')))
+      else if (b.input.some((i: any) => i.call_id?.startsWith('view-')))
         output = [
           call(
             'record_visual_observations',
@@ -390,6 +426,159 @@ test(
         await agent.turn(f.run);
         assert.equal(requests.at(-1).previous_response_id, root);
         assert.match(JSON.stringify(requests.at(-1).input), /Resume from this verified checkpoint/);
+      });
+      for (const rejectAt of ['count', 'create'] as const) {
+        await t.test(
+          `missing provider history during ${rejectAt} replays committed tools and preserves visual evidence`,
+          async () => {
+            const f = await fixture();
+            await agent.turn(f.run); // Source root.
+            await agent.turn(f.run); // View visuals and save plan.
+            const before = (await db.query('select state from agent_runs where id=$1', [f.run])).rows[0].state;
+            const accepted: any[] = [];
+            const missing = () =>
+              new Response(JSON.stringify({ error: { code: 'response_not_found', param: 'previous_response_id' } }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' },
+              });
+            const fallbackTransport: typeof fetch = async (url, init) => {
+              const body = init?.body ? JSON.parse(String(init.body)) : {};
+              if (String(url).endsWith('/input_tokens'))
+                return body.previous_response_id && rejectAt === 'count' ? missing() : json({ input_tokens: 10000 });
+              if (body.previous_response_id) return missing();
+              accepted.push(body);
+              assert.match(JSON.stringify(body.input), /data:image\/(jpeg|png);base64/);
+              assert(body.input.some((item: any) => item.type === 'function_call' && item.name === 'view_visuals'));
+              assert(body.input.some((item: any) => item.type === 'function_call_output'));
+              const output =
+                accepted.length === 1
+                  ? [
+                      call(
+                        'record_visual_observations',
+                        {
+                          observations: ['page1', 'fig1'].map((sourceId) => ({
+                            sourceId,
+                            description: 'Blue bar is larger.',
+                            readable: true,
+                            uncertainties: [],
+                            components: [],
+                          })),
+                        },
+                        'local-observe',
+                      ),
+                      call('upsert_tour_chapter', { chapter }, 'local-chapter'),
+                    ]
+                  : [call('finish_tour', {}, 'local-finish')];
+              return json(result('local-' + accepted.length, output));
+            };
+            const fallback = new PaperAgent(
+              db,
+              storage,
+              { ...c, muse: { ...muse, timeoutMs: 15000 } },
+              enqueue,
+              settings,
+              images,
+              fallbackTransport,
+            );
+            await fallback.turn(f.run); // Explicit history rejection; no inference accepted.
+            const recovered = (await db.query('select state,status from agent_runs where id=$1', [f.run])).rows[0];
+            assert.equal(recovered.state.historyMode, 'local');
+            assert.deepEqual(recovered.state.presented, before.presented);
+            assert.deepEqual(recovered.state.plan, before.plan);
+            assert.equal(recovered.status, 'queued');
+            assert.equal(accepted.length, 0);
+            await fallback.turn(f.run);
+            const saved = (await db.query('select state from agent_runs where id=$1', [f.run])).rows[0].state;
+            assert.equal(Object.keys(saved.observations).length, 2);
+            assert.equal(Object.keys(saved.chapters).length, 1);
+            await fallback.turn(f.run);
+            assert.equal((await service.agentRun(owner, f.id, f.run)).status, 'completed');
+            assert.equal(accepted.length, 2);
+            assert.equal(
+              (await db.query('select count(*) from tours where generation_id=$1', [f.g.id])).rows[0].count,
+              '1',
+            );
+            const trace = await service.activity(owner, f.id, f.g.id, '0');
+            assert.equal(
+              trace.events.filter((e) => e.type === 'tool.started' && e.data.name === 'view_visuals').length,
+              1,
+            );
+            assert.equal(trace.events.filter((e) => e.type === 'context.reset').length, 0);
+            assert(trace.events.some((e) => e.type === 'context.fallback'));
+            const preparedRequest = trace.events.find(
+              (event) => event.type === 'model.prepared' && event.data.historyMode === 'local',
+            );
+            assert(preparedRequest, 'Record the actual local request after replay');
+            assert.equal(preparedRequest.data.previousResponseId, null);
+            const recordedInput = JSON.stringify(preparedRequest.data.messages);
+            assert.match(recordedInput, /WORKFLOW CHECKPOINT/);
+            assert.match(recordedInput, /storagePath/);
+            assert(!recordedInput.includes('data:image/'), 'Keep hydrated image payloads out of diagnostics');
+            assert(Array.isArray(preparedRequest.data.tools));
+          },
+        );
+      }
+      await t.test('a missing result for an already dispatched response pauses without another POST', async () => {
+        const f = await fixture();
+        mode = 'disconnect';
+        await agent.turn(f.run);
+        mode = 'normal';
+        const posts = requests.length;
+        await service.controlAgent(owner, f.id, f.run, 'resume');
+        const retrieveMissing: typeof fetch = async (_url, init) => {
+          assert.equal(init?.body, undefined);
+          return new Response(JSON.stringify({ error: { code: 'response_not_found' } }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        };
+        await new PaperAgent(
+          db,
+          storage,
+          { ...c, muse: { ...muse, timeoutMs: 15000 } },
+          enqueue,
+          settings,
+          images,
+          retrieveMissing,
+        ).turn(f.run);
+        const stopped = await service.agentRun(owner, f.id, f.run);
+        assert.equal(stopped.status, 'paused');
+        assert.match(stopped.reason!, /outcome is unknown/);
+        assert.equal(requests.length, posts);
+        const step = (await db.query('select status,response_id from agent_steps where run_id=$1 and step=0', [f.run]))
+          .rows[0];
+        assert.equal(step.response_id, 'stored');
+        assert.equal(step.status, 'dispatching');
+      });
+      await t.test('repeated unchanged tool actions pause and explicit resume resets the guard', async () => {
+        const f = await fixture();
+        await agent.turn(f.run);
+        await agent.turn(f.run);
+        let calls = 0;
+        const loopingTransport: typeof fetch = async (url) => {
+          if (String(url).endsWith('/input_tokens')) return json({ input_tokens: 10000 });
+          calls++;
+          return json(
+            result('loop-response-' + calls, [call('search_paper', { query: 'blue bar' }, 'loop-search-' + calls)]),
+          );
+        };
+        const looping = new PaperAgent(db, storage, c, enqueue, settings, images, loopingTransport);
+        for (let i = 0; i < 6; i++) {
+          await looping.turn(f.run);
+          if ((await service.agentRun(owner, f.id, f.run)).status === 'paused') break;
+        }
+        const stopped = await service.agentRun(owner, f.id, f.run);
+        assert.equal(stopped.status, 'paused');
+        assert.match(stopped.reason!, /^no_progress:/);
+        assert.equal(calls, 4); // First turn delivered new images, then three ineffective repetitions.
+        const state = (await db.query('select state from agent_runs where id=$1', [f.run])).rows[0].state;
+        assert.equal(state.plan.length, 1);
+        await looping.turn(f.run);
+        assert.equal(calls, 4);
+        await service.controlAgent(owner, f.id, f.run, 'resume');
+        await looping.turn(f.run);
+        assert.equal(calls, 5);
+        assert.notEqual((await service.agentRun(owner, f.id, f.run)).status, 'paused');
       });
       await t.test('credential rotation pauses before dispatch and explicitly starts a fresh session', async () => {
         const f = await fixture();

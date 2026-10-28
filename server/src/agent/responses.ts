@@ -22,6 +22,7 @@ export interface AgentResponse {
 export interface ResponseObserver {
   created(id: string): Promise<void>;
   delta(text: string): Promise<void>;
+  toolStarted?(id: string, name: string): Promise<void>;
 }
 export const responseUsage = (response: AgentResponse): TokenUsage => {
   const count = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : 0);
@@ -156,10 +157,9 @@ export class ResponsesClient {
           throw new ProcessingError('response_limit', 'The response stream exceeded its limit.');
         const event = JSON.parse(text);
         if (event.type === 'response.created') await observer.created(String(event.response.id));
-        if (
-          ['response.output_text.delta', 'response.function_call_arguments.delta'].includes(event.type) &&
-          typeof event.delta === 'string'
-        ) {
+        if (event.type === 'response.output_item.added' && event.item?.type === 'function_call')
+          await observer.toolStarted?.(String(event.item.call_id), String(event.item.name));
+        if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
           pending += event.delta;
           if (pending.length >= 4096 || Date.now() - flushed >= 500) {
             await observer.delta(pending);
