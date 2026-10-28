@@ -427,7 +427,7 @@
   .reader-app .controls { display: flex; min-height: 58px; padding: 4px 10px; gap: 8px; }
   .reader-app .narration { flex: 1; min-width: 0; max-height: 38px; }
   .reader-app .transport, .reader-app .settings { flex: none; }
-  .reader-app .ask-lane { padding-block: 4px; }
+  .reader-app .ask-lane { bottom: max(6px, env(safe-area-inset-bottom)); }
   .reader-app .ask-tray-clip { max-height: 58px; }
   .reader-app .sidebar-head { padding: 8px 12px; }
   .reader-app .reader-tabs { margin-bottom: 6px; }

@@ -4,6 +4,7 @@
 import { apiRequest, ApiRequestError } from '../library/client';
 import { responseLanguage } from '../../../shared/languages';
 import type { Step } from '../types';
+import type { RegionSelection } from './regionSelection';
 
 /** One earlier exchange; follow-up questions build on it. */
 export interface AskTurn {
@@ -15,9 +16,11 @@ export interface AskRequest {
   question: string;
   responseLanguage?: string;
   tourId?: string;
+  analysisId?: string;
   stepId?: string;
   /** The figure, panel or equation the learner is looking at. */
   figureId?: string;
+  selection?: RegionSelection;
   /** Up to four earlier exchanges, oldest first. */
   history?: AskTurn[];
 }
@@ -37,18 +40,19 @@ export interface AskAnswer {
  */
 export type AskSource = { documentId: string } | { paper: string };
 
-export const MAX_QUESTION = 500;
 export const MAX_HISTORY = 4;
 /** The server gives up after 75 seconds; the browser waits a little longer for its reply. */
 const WAIT_MS = 90_000;
 const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 export async function askQuestion(source: AskSource, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
-  const body: AskRequest = { question: request.question.trim().slice(0, MAX_QUESTION) };
+  const body: AskRequest = { question: request.question.trim() };
   if (responseLanguage(request.responseLanguage)) body.responseLanguage = request.responseLanguage;
   if (request.tourId) body.tourId = request.tourId;
+  if (request.analysisId) body.analysisId = request.analysisId;
   if (request.stepId) body.stepId = request.stepId;
   if (request.figureId) body.figureId = request.figureId;
+  if (request.selection) body.selection = request.selection;
   if (request.history?.length) body.history = request.history.slice(-MAX_HISTORY);
   const init = {
     method: 'POST',

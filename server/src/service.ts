@@ -1,4 +1,6 @@
 import { transcribe } from './muse/transcribe';
+import { SelectionError, validateSelection } from '../../shared/selection';
+import { selectionImages } from './selection-image';
 import { generationRecorder } from './activity';
 import { agentSummary, scheduleAgent } from './agent/store';
 import type { AgentRun } from '../../shared/agent';
@@ -33,6 +35,7 @@ import {
   askError,
   askModel,
   demoImage,
+  demoSelectionImages,
   DEMO_ROOT,
   figureImage,
   loadDemo,
@@ -43,7 +46,13 @@ import { MuseClient } from './muse/client';
 
 export type Enqueue = (
   kind: 'analyze' | 'delete' | 'generate_tour' | 'agent_turn',
-  data: { documentId: string; analysisId?: string; generationId?: string; agentRunId?: string; wakeIndex?: number },
+  data: {
+    documentId: string;
+    analysisId?: string;
+    generationId?: string;
+    agentRunId?: string;
+    wakeIndex?: number;
+  },
   db?: Db,
 ) => Promise<void>;
 type Row = QueryResultRow;
@@ -178,6 +187,8 @@ export class DocumentService implements Library {
             run.generation_id,
           ]);
       } else if (['paused', 'failed', 'pausing'].includes(run.status)) {
+        if (run.reason?.startsWith('no_progress:'))
+          await tx.query("update agent_runs set state=state-'loopWatch' where id=$1", [runId]);
         if (['credentials_changed', 'context_changed'].includes(run.reason)) {
           await generationRecorder(
             tx,
@@ -617,7 +628,7 @@ export class DocumentService implements Library {
     const settings = this.askSettings();
     const asked = askedRequest(request);
     const document = await this.owned(owner, id);
-    let analysisId: string | null = document.current_analysis_id;
+    let analysisId: string | null = asked.analysisId ?? document.current_analysis_id;
     let tour: Tour | undefined;
     if (request.tourId) {
       const {
@@ -629,6 +640,8 @@ export class DocumentService implements Library {
       if (!row) missing();
       // The tour's own analysis, so the answer points at the IDs the tour on screen uses.
       tour = row.script as Tour;
+      if (asked.analysisId && asked.analysisId !== row.analysis_id)
+        throw new HttpError(400, 'analysis_mismatch', 'The selected tour belongs to a different document analysis.');
       analysisId = row.analysis_id;
     }
     const {
@@ -641,15 +654,24 @@ export class DocumentService implements Library {
       : { rows: [] };
     if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
     const doc = analysis.doc as Doc;
+    validateAskedSelection(asked, doc);
     const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
     return this.answer(owner, {
       documentId: id,
+      analysisId: analysis.id,
       doc,
       tour,
       request: asked,
       model,
       muse: async () => (await settings.resolveMuse(owner, model)).config,
-      image: () => figureImage(this.db.pool, this.storage, analysis.id, doc, asked.figureId),
+      image: () =>
+        asked.selection
+          ? Promise.resolve(undefined)
+          : figureImage(this.db.pool, this.storage, analysis.id, doc, asked.figureId),
+      images: () =>
+        asked.selection
+          ? selectionImages(this.storage, document.upload_path, doc, asked.selection, signal)
+          : Promise.resolve([]),
       signal,
     });
   }
@@ -661,6 +683,7 @@ export class DocumentService implements Library {
     const settings = this.askSettings();
     const asked = askedRequest(request);
     const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
+    validateAskedSelection(asked, demo.doc);
     const model = askModel(settings.base.model, false, this.tourModel);
     return this.answer('demo', {
       documentId: paper,
@@ -669,7 +692,12 @@ export class DocumentService implements Library {
       request: asked,
       model,
       muse: async () => ({ ...settings.base, model }),
-      image: () => demoImage(paper, demo.doc, asked.figureId, this.demoRoot),
+      image: () =>
+        asked.selection ? Promise.resolve(undefined) : demoImage(paper, demo.doc, asked.figureId, this.demoRoot),
+      images: () =>
+        asked.selection
+          ? demoSelectionImages(paper, demo.doc, asked.selection, this.demoRoot, signal)
+          : Promise.resolve([]),
       signal,
       demo: true,
     });
@@ -701,12 +729,14 @@ export class DocumentService implements Library {
     key: string,
     input: {
       documentId: string;
+      analysisId?: string;
       doc: Doc;
       tour?: Tour;
       request: AskRequest;
       model: string;
       muse(): Promise<MuseConfig>;
       image(): Promise<TourImage | undefined>;
+      images(): Promise<TourImage[]>;
       signal?: AbortSignal;
       demo?: boolean;
     },
@@ -716,7 +746,7 @@ export class DocumentService implements Library {
     this.asking.set(key, active + 1);
     const started = Date.now();
     try {
-      const [config, image] = await Promise.all([input.muse(), input.image()]);
+      const [config, image, images] = await Promise.all([input.muse(), input.image(), input.images()]);
       if (!config.apiKey) throw askError(new ProcessingError('muse_not_configured', 'No Meta API key.'), input.demo);
       const { answer, completions } = await answerQuestion({
         client: new MuseClient(config, this.askSettings().transport),
@@ -725,6 +755,7 @@ export class DocumentService implements Library {
         request: input.request,
         tour: input.tour,
         image,
+        images,
         language: input.tour?.voices?.host?.lang ?? config.language,
         signal: input.signal,
       });
@@ -735,12 +766,21 @@ export class DocumentService implements Library {
           model: input.model,
           answerable: answer.answerable,
           steps: answer.steps.length,
+          selectedPage: input.request.selection?.page,
+          visualInputs: images.length + (image ? 1 : 0),
           modelCalls: completions.length,
           durationMs: Date.now() - started,
         }),
       );
       return answer;
     } catch (error) {
+      console.warn(JSON.stringify({
+        event: 'question_failed',
+        ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
+        code: error instanceof ProcessingError || error instanceof HttpError ? error.code : 'unknown',
+        durationMs: Date.now() - started,
+        cancelled: input.signal?.aborted === true,
+      }));
       throw askError(error, input.demo);
     } finally {
       const left = (this.asking.get(key) ?? 1) - 1;
@@ -760,4 +800,14 @@ function askedRequest(request: AskRequest): AskRequest {
     .filter((turn) => turn.question && turn.answer)
     .slice(-4);
   return { ...request, question, history };
+}
+
+function validateAskedSelection(request: AskRequest, doc: Doc): void {
+  if (request.selection === undefined) return;
+  try {
+    request.selection = validateSelection(request.selection, doc);
+  } catch (error) {
+    if (error instanceof SelectionError) throw new HttpError(400, 'invalid_selection', error.message);
+    throw error;
+  }
 }
