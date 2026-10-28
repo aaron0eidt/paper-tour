@@ -24,6 +24,10 @@ import { apiRequest, ApiRequestError, getSupabase } from './library/client';
 import type { DocumentManifest, ReaderState, SearchHit } from '../../shared/contracts';
 import type { OverlayEntry } from './engine';
 import { positionFromView, viewFromPosition } from './readerState';
+import { AskPanel } from './ask/AskPanel';
+import type { AskContext } from './ask/AskPanel';
+import { answerTour, visualShown } from './ask/answer';
+import type { AskAnswer, AskSource } from './ask/api';
 import './reader.css';
 
 interface Params {
@@ -54,6 +58,15 @@ const IDLE: EngineState = {
 };
 const EMPTY_SCENE: Scene = { pages: new Map(), spotlight: false, notes: [], labels: [] };
 const noSubscribe = () => () => {};
+const idleState = () => IDLE;
+
+/** Where the tour was when a question set it aside, so "Back to the tour" can bring it back exactly. */
+interface Away {
+  /** The target the camera showed, framed again for the stage size at return; null after a manual pan or zoom. */
+  framed: { cmd: CameraCommand; view: View } | null;
+  view: View;
+  playing: boolean;
+}
 
 function debugIndex(doc: Doc): Map<number, DebugPage> {
   const pages = new Map<number, DebugPage>();
@@ -235,7 +248,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       readerMounted.current = false;
       // Also release an accepted PDF whose React update never committed before unmount.
       const latest = loadedRef.current?.pdf;
-      setTimeout(() => { if (!readerMounted.current) retirePdf(latest); }, 0);
+      setTimeout(() => {
+        if (!readerMounted.current) retirePdf(latest);
+      }, 0);
     };
   }, []);
 
@@ -252,18 +267,21 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const problems = useMemo(() => [...(loaded?.problems ?? []), ...(prepared?.problems ?? [])], [loaded, prepared]);
   const debugPages = useMemo(() => (loaded?.doc ? debugIndex(loaded.doc) : new Map<number, DebugPage>()), [loaded]);
 
-  const narrator = useCallback(
-    (isMuted: boolean) =>
-      createNarrator({
-        baseUrl: loaded?.baseUrl ?? '/',
-        muted: isMuted,
-        forceSilent: params.silent,
-        voiceId: browserVoices.selectedVoiceId,
-      }),
-    [loaded, params.silent, browserVoices.selectedVoiceId],
+  // One narrator for the tour and its answers, so both speak with the same voice.
+  const baseUrl = loaded?.baseUrl ?? '/';
+  const narrator = useMemo(
+    () => createNarrator({ baseUrl, muted, forceSilent: params.silent, voiceId: browserVoices.selectedVoiceId }),
+    [baseUrl, muted, params.silent, browserVoices.selectedVoiceId],
   );
 
-  const state = useSyncExternalStore(engine?.subscribe ?? noSubscribe, engine?.getState ?? (() => IDLE));
+  // A question sets the tour aside and its answer plays as a second tour on the same narrator, camera, pen and board;
+  // the stage, the board and the control bar show whichever is playing, the sidebar always the tour.
+  const [answer, setAnswer] = useState<TourEngine | null>(null);
+  const [away, setAway] = useState<Away | null>(null);
+  const mainState = useSyncExternalStore(engine?.subscribe ?? noSubscribe, engine?.getState ?? idleState);
+  const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
+  const state = answer ? answerState : mainState;
+  const active = answer ?? engine;
 
   const scene = useMemo(
     () => (resolver && layout ? buildScene([...state.overlays, ...selection], resolver, layout) : EMPTY_SCENE),
@@ -313,8 +331,112 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       setEngine(null);
     };
   }, [prepared, camera, frame]);
-  useEffect(() => engine?.setNarrator(narrator(muted)), [engine, narrator, muted]);
+  useEffect(() => engine?.setNarrator(narrator), [engine, narrator]);
   useEffect(() => engine?.setRate(speed * params.rate), [engine, speed, params.rate]);
+  useEffect(() => answer?.setNarrator(narrator), [answer, narrator]);
+  useEffect(() => answer?.setRate(speed * params.rate), [answer, speed, params.rate]);
+
+  // The latest of what the ask handlers read, since an answer arrives after the reader has rendered again.
+  const now = useRef({ engine, answer, away, prepared, resolver, frame, narrator, rate: speed * params.rate });
+  now.current = { engine, answer, away, prepared, resolver, frame, narrator, rate: speed * params.rate };
+
+  const dropAnswer = useCallback(() => {
+    now.current.answer?.destroy();
+    now.current.answer = null;
+    setAnswer(null);
+  }, []);
+  // A new tour (or none) ends any answer about the old one.
+  useEffect(() => {
+    dropAnswer();
+    setAway(null);
+  }, [prepared, dropAnswer]);
+  useEffect(() => () => now.current.answer?.destroy(), []);
+
+  /** Where the learner is: the tour step, and the figure, panel or equation the camera still shows. */
+  const askContext = useCallback((): AskContext => {
+    const { engine: main, resolver: ids } = now.current;
+    const tour = main?.getState();
+    const last = framed.current;
+    const shown = last && camera.targetView === last.view ? last.cmd.action : null;
+    return {
+      stepId: tour && tour.status !== 'idle' ? main?.steps[tour.index]?.step.id : undefined,
+      figureId: ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
+    };
+  }, [camera]);
+
+  // A question pauses whatever plays; the first one of a conversation remembers where the tour was.
+  const setAside = useCallback(() => {
+    const { engine: main, answer: playing, away: was } = now.current;
+    playing?.pause();
+    if (!was) {
+      const last = framed.current;
+      const next: Away = {
+        framed: last && camera.targetView === last.view ? last : null,
+        view: camera.targetView,
+        playing: main?.getState().status === 'playing',
+      };
+      now.current.away = next;
+      setAway(next);
+    }
+    main?.pause();
+  }, [camera]);
+
+  const onAnswer = useCallback(
+    (reply: AskAnswer, question: string) => {
+      const { engine: main, prepared: tour, resolver: ids, narrator: voice, rate } = now.current;
+      if (!ids) return;
+      const speaker = main?.steps[main.getState().index]?.step.speaker;
+      const script = prepareTour(answerTour(reply, question, tour?.tour ?? null, speaker), ids).tour;
+      dropAnswer();
+      // Also when a new tour arrived meanwhile or the learner pressed play: an answer always has a way back.
+      setAside();
+      const e = new TourEngine(script, {
+        narrator: voice,
+        fallbackNarrator: new SilentNarrator(),
+        rate,
+        beforeNarration: (signal) => camera.whenSettled(signal),
+      });
+      // An answer step without a camera move keeps the view; it never jumps back to the first page.
+      let lastCamera = 0;
+      e.subscribe(() => {
+        const command = e.getState().camera;
+        if (command.seq === lastCamera) return;
+        lastCamera = command.seq;
+        if (command.action) now.current.frame(command, false);
+      });
+      now.current.answer = e;
+      setAnswer(e);
+      setSelection([]);
+      e.play();
+    },
+    [camera, dropAnswer, setAside],
+  );
+
+  // Back to the tour: the answer goes, and the tour returns as it was: its marks and board (it only paused), the
+  // camera on what it showed, and playing again if it was.
+  const backToTour = useCallback(() => {
+    const { engine: main, away: was, frame: show } = now.current;
+    dropAnswer();
+    now.current.away = null;
+    setAway(null);
+    if (!was) return;
+    if (was.playing && main) main.play();
+    else if (was.framed) show(was.framed.cmd, false);
+    else {
+      framed.current = null;
+      camera.animateTo(was.view);
+    }
+  }, [camera, dropAnswer]);
+  // A question stopped before its answer came changes nothing, unless an earlier answer is still on screen.
+  const onAskCancelled = useCallback(() => {
+    if (!now.current.answer) backToTour();
+  }, [backToTour]);
+  // Leaving the answer for somewhere else in the tour: no need to restore the view first.
+  const leaveAnswer = useCallback(() => {
+    dropAnswer();
+    now.current.away = null;
+    setAway(null);
+  }, [dropAnswer]);
 
   const onViewportChange = useCallback(() => {
     if (!layout) return;
@@ -374,11 +496,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const pendingSave = useRef<ReturnType<typeof setTimeout>>();
   const tourCheckpoint = useRef({
     tourId: selectedTourId,
-    stepId: state.status === 'idle' ? null : (engine?.steps[state.index]?.step.id ?? null),
+    stepId: mainState.status === 'idle' ? null : (engine?.steps[mainState.index]?.step.id ?? null),
   });
   tourCheckpoint.current = {
     tourId: selectedTourId,
-    stepId: state.status === 'idle' ? null : (engine?.steps[state.index]?.step.id ?? null),
+    stepId: mainState.status === 'idle' ? null : (engine?.steps[mainState.index]?.step.id ?? null),
   };
   useEffect(() => {
     if (!layout) return;
@@ -407,7 +529,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     checkpointRef.current = value;
     clearTimeout(pendingSave.current);
     pendingSave.current = setTimeout(() => void saveRef.current(value), 1000);
-  }, [state.index, state.status, selectedTourId, layout, camera]);
+  }, [mainState.index, mainState.status, selectedTourId, layout, camera]);
   useEffect(() => {
     const flush = () => {
       if (!checkpointRef.current || !documentId || !accessTokenRef.current) return;
@@ -440,7 +562,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const navigateTo = useCallback(
     (id: string, kind?: string) => {
       if (!resolver || !layout) return;
-      engine?.pause();
+      active?.pause();
       const action = { type: 'focus' as const, target: id };
       frame({ seq: 1, key: id, action }, false);
       const overlay =
@@ -449,7 +571,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           : { type: 'box' as const, target: id, color: 'blue' as const };
       setSelection([{ key: `selection:${id}`, step: -1, action: overlay, persist: false }]);
     },
-    [resolver, layout, engine, frame],
+    [resolver, layout, active, frame],
   );
 
   useEffect(() => {
@@ -497,26 +619,27 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   useEffect(() => () => camera.destroy(), [camera]);
 
-  // Keyboard: Space play/pause, arrows step, D toggles the ID overlay.
+  // Keyboard: Space play/pause, arrows step (through an answer while one plays), D toggles the ID overlay. Nothing
+  // fires while the learner types, in the ask bar or any other field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isInteractive(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === ' ') {
         e.preventDefault();
-        engine?.toggle();
+        active?.toggle();
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        engine?.next();
+        active?.next();
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        engine?.prev();
+        active?.prev();
       } else if (e.key === 'd' || e.key === 'D') {
         setDebug((d) => !d);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [engine]);
+  }, [active]);
 
   const onCopyId = useCallback((id: string) => {
     void copyText(id);
@@ -539,7 +662,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (!layout) return;
     const p = layout.pages[Math.max(0, Math.min(layout.pages.length - 1, page - 1))];
     if (!p) return;
-    engine?.pause();
+    active?.pause();
     camera.animateTo({
       cx: p.x + p.width / 2,
       cy: p.y + camera.viewport.height / camera.getView().s / 2,
@@ -547,10 +670,15 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     });
   };
   const back = () => {
-    engine?.pause();
+    active?.pause();
     if (checkpointRef.current) void save(checkpointRef.current).finally(onBack);
     else onBack();
   };
+  // Asking is open wherever there is a document to ask about: a library document by its ID, a demo by its folder.
+  const askSource = useMemo<AskSource>(
+    () => (documentId ? { documentId } : { paper: params.paper }),
+    [documentId, params.paper],
+  );
   const documentNavigation = (
     <div className="document-navigation">
       <label className="reader-search">
@@ -626,6 +754,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               onOpenTour={
                 tab === 'document'
                   ? (tourId) => {
+                      leaveAnswer();
                       engine?.pause();
                       setSelection([]);
                       setActiveTour(tourId);
@@ -665,10 +794,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       <Sidebar
         tour={tab === 'tour' ? (prepared?.tour ?? null) : null}
         steps={steps}
-        state={state}
+        state={mainState}
         docTitle={manifest?.document.title ?? loaded?.doc?.source.title}
         onJump={(i) => {
           setSelection([]);
+          leaveAnswer();
           engine?.goTo(i);
         }}
         header={
@@ -690,8 +820,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 Saved tour
                 <select
                   title={manifest.tours.find((tour) => tour.id === manifest.selectedTour?.id)?.title}
-                value={manifest.selectedTour?.id ?? ''}
+                  value={manifest.selectedTour?.id ?? ''}
                   onChange={(event) => {
+                    leaveAnswer();
                     engine?.pause();
                     setSelection([]);
                     savedPosition.current = null;
@@ -759,7 +890,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               aria-label="Zoom out"
               title="Zoom out"
               onClick={() => {
-                engine?.pause();
+                active?.pause();
                 camera.zoomAt(1 / 1.2, camera.viewport.width / 2, camera.viewport.height / 2);
               }}
             >
@@ -780,7 +911,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               onBlur={(event) => {
                 const value = Number(event.currentTarget.value);
                 if (Number.isFinite(value) && value >= 10 && value <= 600) {
-                  engine?.pause();
+                  active?.pause();
                   camera.zoomAt(
                     value / 100 / camera.getView().s,
                     camera.viewport.width / 2,
@@ -795,7 +926,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               aria-label="Zoom in"
               title="Zoom in"
               onClick={() => {
-                engine?.pause();
+                active?.pause();
                 camera.zoomAt(1.2, camera.viewport.width / 2, camera.viewport.height / 2);
               }}
             >
@@ -842,15 +973,35 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         </div>
         {layout ? (
           <BoardSplit board={state.board} camera={camera}>
-            <Stage
-              pdf={loaded?.pdf ?? null}
-              layout={layout}
-              camera={camera}
-              scene={scene}
-              debugPages={debug ? debugPages : null}
-              onViewportChange={onViewportChange}
-              onCopyId={onCopyId}
-            />
+            <div className="ask-stage">
+              <Stage
+                pdf={loaded?.pdf ?? null}
+                layout={layout}
+                camera={camera}
+                scene={scene}
+                debugPages={debug ? debugPages : null}
+                onViewportChange={onViewportChange}
+                onCopyId={onCopyId}
+              />
+              {loaded?.doc && (
+                <div className="ask-lane">
+                  <AskPanel
+                    className="ask-dock"
+                    source={askSource}
+                    tourId={documentId ? selectedTourId : null}
+                    context={askContext}
+                    suggestions={prepared?.tour.suggested_questions}
+                    ended={mainState.status === 'ended'}
+                    away={!!away}
+                    answering={answerState.status === 'playing'}
+                    onAsk={setAside}
+                    onAnswer={onAnswer}
+                    onCancel={onAskCancelled}
+                    onResume={backToTour}
+                  />
+                </div>
+              )}
+            </div>
           </BoardSplit>
         ) : (
           <div className="viewport loading">{fatal ? `Could not load the paper: ${fatal}` : 'Loading paper…'}</div>
@@ -877,25 +1028,25 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           </div>
         )}
 
-        {prepared?.tour && (
+        {active && (
           <ControlBar
-            steps={steps}
+            steps={active.steps}
             state={state}
             speed={speed}
             muted={muted || params.silent}
             onToggle={() => {
               setSelection([]);
-              engine?.toggle();
+              active.toggle();
             }}
-            onPrev={() => engine?.prev()}
-            onNext={() => engine?.next()}
+            onPrev={() => active.prev()}
+            onNext={() => active.next()}
             onSpeed={setSpeed}
             onMute={setMuted}
             voices={browserVoices.voices}
             voicesLoading={browserVoices.loading}
             selectedVoiceId={browserVoices.selectedVoiceId}
             onVoiceChange={browserVoices.setSelectedVoiceId}
-            voiceConfig={prepared.tour.voices?.[steps[state.index]?.step.speaker ?? 'host']}
+            voiceConfig={active.tour.voices?.[active.steps[state.index]?.step.speaker ?? 'host']}
           />
         )}
       </main>

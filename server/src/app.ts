@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
@@ -9,7 +9,7 @@ import type { Library } from './service';
 import type { ReaderState } from '../../shared/contracts';
 import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
-import type { AskRequest } from './harness/ask';
+import { DEMO_PAPER, type AskAnswer, type AskRequest } from './harness/ask';
 
 const uuid = { type: 'string', format: 'uuid' };
 const documentParams = {
@@ -28,6 +28,21 @@ const objectBody = (properties: Record<string, unknown>, required: string[]) => 
   properties,
   required,
 });
+const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
+const askBody = objectBody(
+  {
+    question: text(500),
+    tourId: uuid,
+    stepId: text(200),
+    figureId: text(100),
+    history: {
+      type: 'array',
+      maxItems: 4,
+      items: objectBody({ question: text(500), answer: text(2000) }, ['question', 'answer']),
+    },
+  },
+  ['question'],
+);
 interface Options {
   service: Library;
   authenticate(token: string): Promise<string | null>;
@@ -35,6 +50,40 @@ interface Options {
   spaDir?: string;
   logger?: boolean;
   settings?: SettingsService;
+  /** Questions about demo papers without signing in; defaults to demoAllowed() for this process. */
+  demo?: boolean;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+/**
+ * Demo papers can be asked about without signing in, on the server's own Meta key, only in local development: not in
+ * production, and with the API listening on a loopback address (config.ts defaults HOST to 127.0.0.1).
+ */
+export function demoAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV !== 'production' && LOOPBACK_HOSTS.has((env.HOST ?? '127.0.0.1').trim().toLowerCase());
+}
+
+/** A request from this machine, addressed to a local name (which also turns away DNS rebinding). */
+function fromLocalhost(request: { socket: { remoteAddress?: string }; headers: { host?: string } }): boolean {
+  const address = request.socket.remoteAddress ?? '';
+  const local = address === '::1' || /^(?:::ffff:)?127\.\d+\.\d+\.\d+$/.test(address);
+  const host = (request.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+  return local && LOOPBACK_HOSTS.has(host);
+}
+
+/** Run a model call that stops when the learner cancels or leaves. */
+async function whileConnected<T>(reply: FastifyReply, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const cancel = () => {
+    if (!reply.raw.writableFinished) controller.abort();
+  };
+  reply.raw.once('close', cancel);
+  try {
+    return await run(controller.signal);
+  } finally {
+    reply.raw.off('close', cancel);
+  }
 }
 export async function createApp(options: Options) {
   const app = Fastify({
@@ -413,46 +462,47 @@ export async function createApp(options: Options) {
         },
         async (req) => service.figure(owner(req), req.params.id, req.query.analysisId, req.params.elementId),
       );
-      const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
       api.post<{ Params: { id: string }; Body: AskRequest }>(
         '/documents/:id/ask',
-        {
-          schema: {
-            params: documentParams,
-            body: objectBody(
-              {
-                question: text(500),
-                tourId: uuid,
-                stepId: text(200),
-                figureId: text(100),
-                history: {
-                  type: 'array',
-                  maxItems: 4,
-                  items: objectBody({ question: text(500), answer: text(2000) }, ['question', 'answer']),
-                },
-              },
-              ['question'],
-            ),
-          },
-        },
-        async (req, reply) => {
-          if (!service.ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
-          // A learner who cancels or leaves stops the model call too.
-          const controller = new AbortController();
-          const cancel = () => {
-            if (!reply.raw.writableFinished) controller.abort();
-          };
-          reply.raw.once('close', cancel);
-          try {
-            return await service.ask(owner(req), req.params.id, req.body, controller.signal);
-          } finally {
-            reply.raw.off('close', cancel);
-          }
+        { schema: { params: documentParams, body: askBody } },
+        async (req, reply): Promise<AskAnswer> => {
+          const ask = service.ask?.bind(service);
+          if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
+          return whileConnected(reply, (signal) => ask(owner(req), req.params.id, req.body, signal));
         },
       );
     },
     { prefix: '/api' },
   );
+  // Demo papers (demo/<paper>/) are not in anyone's library, so this route has no sign-in: it exists only in local
+  // development, answers only this machine, and reads only folders under demo/ (harness/ask.ts, loadDemo).
+  if (options.demo ?? demoAllowed())
+    await app.register(
+      async (demo) => {
+        demo.addHook('onRequest', async (request) => {
+          if (!fromLocalhost(request)) throw new HttpError(404, 'not_found', 'Endpoint not found.');
+        });
+        demo.post<{ Params: { paper: string }; Body: AskRequest }>(
+          '/:paper/ask',
+          {
+            schema: {
+              params: {
+                type: 'object',
+                required: ['paper'],
+                properties: { paper: { type: 'string', pattern: DEMO_PAPER.source } },
+              },
+              body: askBody,
+            },
+          },
+          async (req, reply): Promise<AskAnswer> => {
+            const ask = options.service.demoAsk?.bind(options.service);
+            if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
+            return whileConnected(reply, (signal) => ask(req.params.paper, req.body, signal));
+          },
+        );
+      },
+      { prefix: '/api/demo' },
+    );
   if (options.spaDir && existsSync(resolve(options.spaDir, 'index.html'))) {
     await app.register(fastifyStatic, {
       root: resolve(options.spaDir),

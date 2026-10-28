@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFile, realpath, stat } from 'node:fs/promises';
+import { resolve, sep } from 'node:path';
 import {
   splitWords,
   type Action,
@@ -9,6 +11,7 @@ import {
   type Step,
   type Tour,
 } from '../../../shared/paper';
+import { ROOT } from '../config';
 import type { Db } from '../db';
 import { HttpError, ProcessingError } from '../errors';
 import type { Completion, MuseClient, MuseMessage } from '../muse/client';
@@ -17,9 +20,9 @@ import { OFFICIAL_MODELS } from '../muse/pricing';
 import type { FileStorage } from '../storage';
 import type { TourImage } from '../tour-generator';
 import { findAnchor, tourProblems } from './assemble';
-import { BOARD_LIMITS, checkFormula } from './board';
+import { BOARD_LIMITS, checkBars, checkFlow, checkFormula, FLOW_NODE_IDS } from './board';
 import { imageParts, type Effort } from './calls';
-import { REGION_NAMES, regionOf } from './direct';
+import { REGION_NAMES, regionOf, tableLines } from './direct';
 import { paperBlock, proseSentences } from './paper-block';
 import { SHARED_RULES } from './prompts';
 
@@ -66,6 +69,8 @@ export interface Retrieval {
   sentences: string[];
   /** Figures, tables, their panels and equations. */
   visuals: string[];
+  /** The extracted cells of the tables in focus, so an answer can quote and chart their numbers. */
+  tables: { id: string; lines: string[] }[];
   /** Where the camera goes when a step points at nothing. */
   home?: string;
 }
@@ -122,6 +127,9 @@ export function bm25(docs: string[][], query: Map<string, number>, k1 = 1.2, b =
 
 const figureName = (f: Doc['figures'][number]) => `${f.kind === 'table' ? 'Table' : 'Figure'} ${f.number}`;
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+/** "Figure 3: caption", whether or not the extracted caption starts with its own "Fig. 3." or "Table III:". */
+const captioned = (f: Doc['figures'][number]) =>
+  `${figureName(f)}: ${f.caption.replace(/^\s*(?:fig(?:ure)?|tab(?:le)?)\b\.?\s*(?:\d[\w.]*|[ivxlc]+\b)\s*[:.]?\s*/i, '')}`;
 
 /** Everything a question can be matched against, with the text BM25 searches (equations also by their surrounding sentences). */
 function corpus(doc: Doc): { passage: Passage; search: string }[] {
@@ -130,7 +138,7 @@ function corpus(doc: Doc): { passage: Passage; search: string }[] {
     search: s.text,
   }));
   for (const f of doc.figures) {
-    const text = `${figureName(f)}: ${f.caption}`;
+    const text = captioned(f);
     out.push({ passage: { id: f.id, kind: 'figure', page: f.page, text }, search: text });
   }
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
@@ -172,6 +180,29 @@ export function namedElements(doc: Doc, question: string): string[] {
   return [...new Set(ids)];
 }
 
+const TASK =
+  /\b(?:exercises?|tasks?|problems?|questions?|aufgaben?|übung(?:en)?|uebung(?:en)?)\s*([a-z]?\d+(?:\.\d+)*)(?:\s*[.(]?\s*([a-z]|[ivx]+)\s*\)?(?![\p{L}\d]))?/giu;
+
+/** The blocks of an exercise sheet's task or part that the question names: "task 2b", "Aufgabe 1 (a)", "exercise 3.c". */
+export function namedExercise(doc: Doc, question: string): string[] {
+  const tasks = doc.exercises ?? [];
+  const blocks: string[] = [];
+  type Part = NonNullable<Doc['exercises']>[number]['parts'][number];
+  const find = (parts: Part[], label: string): Part | undefined => {
+    for (const part of parts) {
+      const found = part.label.toLowerCase() === label ? part : find(part.parts ?? [], label);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  for (const m of tasks.length ? question.matchAll(TASK) : []) {
+    const task = tasks.find((t) => t.number.toLowerCase() === m[1].toLowerCase());
+    const part = task && m[2] ? find(task.parts, m[2].toLowerCase()) : undefined;
+    if (task) blocks.push(...(part ?? task).blocks);
+  }
+  return [...new Set(blocks)];
+}
+
 /** Every element a tour step points at or moves the camera to. */
 function stepTargets(step: Step): string[] {
   return step.actions.flatMap((a) =>
@@ -184,6 +215,14 @@ export function findStep(tour: Tour | undefined, stepId: string | undefined): St
 }
 
 const RANKED = 12;
+const TABLE_LINES = 40;
+/** Words that point back at the conversation: the question builds on the previous exchange. */
+const REFERRING = /\b(?:it|its|this|that|these|those|they|them|their|there|he|she|his|her|es|das|dies|diese[rsmn]?)\b/i;
+/** A sentence whose first words refer back to the one before it. */
+const ANAPHORIC = /^(?:\S+\s+){0,4}?(?:this|that|these|those|it|its|such|they|thus|hence)\b/i;
+/** A question for a number: how many, how long, what size. */
+const QUANTITY =
+  /\b(?:how (?:many|much|big|large|long|small|fast|often|far|high|low|deep|wide)|what (?:value|size|number|percentage|amount|score)|wie (?:viele?|groß|lange?|hoch|oft|weit))\b/i;
 // Short section titles win BM25's length normalisation too easily; they are context, not answers.
 const KIND_WEIGHT: Record<Passage['kind'], number> = { sentence: 1, figure: 1, equation: 1, section: 0.6 };
 const KIND_CAP: Record<Passage['kind'], number> = { sentence: RANKED, figure: 3, equation: 3, section: 2 };
@@ -197,8 +236,13 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
   const weigh = (text: string | undefined, weight: number) => {
     for (const t of searchTerms(text ?? '')) query.set(t, Math.max(query.get(t) ?? 0, weight));
   };
-  weigh(request.question, 1);
-  weigh(request.history?.at(-1)?.question, 0.5);
+  // A follow-up also searches with the exchange it builds on, more so when it refers back to it ("how big is it?").
+  // "How long" asks for a number: "long" is not what the question is about.
+  const refers = REFERRING.test(request.question);
+  const quantity = QUANTITY.test(request.question);
+  weigh(request.question.replace(QUANTITY, ' '), 1);
+  weigh(request.history?.at(-1)?.question, refers ? 0.9 : 0.5);
+  weigh(request.history?.at(-1)?.answer, refers ? 0.4 : 0.25);
   weigh(step?.say, 0.25);
   const items = corpus(doc);
   const byId = new Map(items.map((item) => [item.passage.id, item.passage]));
@@ -230,14 +274,22 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
   }
   const named = namedElements(doc, request.question);
   named.forEach(add);
+  // A task or part of an exercise sheet the question names: the start of its statement.
+  const statement = namedExercise(doc, request.question)
+    .flatMap((id) => blocks.get(id)?.sentences ?? [])
+    .filter((id) => known(id))
+    .slice(0, 4);
+  statement.forEach(add);
 
   const scores = bm25(
     items.map((i) => searchTerms(i.search)),
     query,
   );
+  // A question for a quantity ("how many heads?") prefers passages that print numbers.
+  const weight = (p: Passage) => KIND_WEIGHT[p.kind] * (quantity && /\d/.test(p.text) ? 1.5 : 1);
   const taken = new Map<Passage['kind'], number>();
-  const ranked = items
-    .map((item, i) => ({ passage: item.passage, score: scores[i] * KIND_WEIGHT[item.passage.kind], i }))
+  const best = items
+    .map((item, i) => ({ passage: item.passage, score: scores[i] * weight(item.passage), i }))
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .filter(({ passage }) => {
@@ -247,8 +299,15 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
       return true;
     })
     .slice(0, RANKED)
-    .map((r) => r.passage)
-    .filter((p) => !focus.includes(p.id));
+    .map((r) => r.passage);
+  // A sentence that opens by referring back ("To counteract this effect, …") comes with the sentence before it.
+  const before = (p: Passage) => {
+    const at = p.kind === 'sentence' && ANAPHORIC.test(p.text) ? position.get(p.id) : undefined;
+    return at ? [byId.get(order[at - 1])!] : [];
+  };
+  const ranked = [...new Map(best.flatMap((p) => [...before(p), p]).map((p) => [p.id, p])).values()].filter(
+    (p) => !focus.includes(p.id),
+  );
 
   const all = [...focus.map((id) => byId.get(id)!), ...ranked];
   const visuals = all.flatMap((p) =>
@@ -259,12 +318,20 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
         : [],
   );
   const namedVisual = named.find((id) => byId.get(id)?.kind !== 'section');
+  const tables = focus
+    .flatMap((id) => {
+      const table = figures.get(id);
+      return table?.kind === 'table' ? [{ id, lines: tableLines(doc, table).slice(0, TABLE_LINES) }] : [];
+    })
+    .filter((t) => t.lines.length)
+    .slice(0, 2);
   return {
     focus: focus.map((id) => byId.get(id)!),
     ranked,
     sentences: all.filter((p) => p.kind === 'sentence').map((p) => p.id),
     visuals: [...new Set(visuals)],
-    home: asked ?? namedVisual ?? known(evidence[0]) ?? named[0] ?? ranked[0]?.id,
+    tables,
+    home: asked ?? namedVisual ?? statement[0] ?? known(evidence[0]) ?? named[0] ?? ranked[0]?.id,
   };
 }
 
@@ -320,18 +387,20 @@ the document while it speaks.
 3. Say only what the document supports. Knowledge from outside it is allowed only as background: start that sentence
    with "As background," and point at nothing while saying it. When the document does not answer the question, say so
    plainly, then point at the closest passage.
-4. Cues point at a listed ID while you speak. "highlight" marks a sentence that states what you say (at most 2 per
-   step). "box", "arrow" or "circle" marks a figure, panel or equation, with a "label" of at most 4 words or empty.
-   "spotlight" dims everything else. "note" writes a remark of at most 12 words next to a target. "anchor" is 2 to 6
-   words copied exactly from "say": the cue appears when the voice reaches them. Use 1 to 3 cues per step, on one page
-   or one figure when you can. For an arrow or circle on the figure whose image is attached, "region" says where the
-   part lies in that image; otherwise, and for every other cue, "region" is "whole".
+4. Cues point at a listed ID while you speak; never say an ID aloud. "highlight" marks a sentence that states what you
+   say (at most 2 per step). "box", "arrow" or "circle" marks a figure, panel or equation, with a "label" of at most 4
+   words or empty. "spotlight" dims everything else. "note" writes a remark of at most 12 words next to a target.
+   "anchor" is 2 to 6 words copied exactly from "say": the cue appears when the voice reaches them. Use 1 to 3 cues per
+   step, on one page or one figure when you can. A question about part of a figure gets a mark on that part: its panel,
+   or an arrow or circle whose "region" says where the part lies in the attached image. "region" is "whole" for every
+   other cue, and always when no image is attached.
 5. The board is optional, at most one item per step; otherwise its "kind" is "none" and the other fields stay empty.
    - "formula" when the question is about an equation: its LaTeX, and 2 to 4 terms, each a separate part with "latex"
      copied exactly from the formula, a "label" of 1 to 4 words and an "anchor" where "say" explains that term.
-   - "bars" to compare 2 to 6 numbers that appear in the passages, with their "unit".
+   - "bars" to compare 2 to 6 numbers copied exactly from the passages or table cells, with their "unit".
    - "flow" for a process of 3 to 6 stages in order, each "label" at most 3 words.
-6. "followups": two short questions, at most 12 words each, that the learner could ask next and the document answers.
+6. "followups": two questions of at most 12 words that the learner could ask next. Each goes one step further than this
+   answer and the conversation so far, is answered by the document, and was not asked before.
 EXAMPLE OUTPUT for a different document:
 ${EXAMPLE}`;
 }
@@ -357,6 +426,8 @@ export function askContext(request: AskRequest, retrieval: Retrieval, doc: Doc, 
       'IN FOCUS (on screen, asked about or named in the question):',
       ...retrieval.focus.map((p) => passageLine(p, doc)),
     );
+  for (const table of retrieval.tables)
+    lines.push(`CELLS OF [${table.id}] (extracted, one line per block):`, ...table.lines);
   if (retrieval.ranked.length)
     lines.push('RETRIEVED PASSAGES (best match first):', ...retrieval.ranked.map((p) => passageLine(p, doc)));
   if (!retrieval.focus.length && !retrieval.ranked.length) lines.push('No passage matched the question.');
@@ -426,8 +497,8 @@ export function answerSchema(retrieval: Retrieval, regions: readonly string[] = 
 // ------------------------------------------------------------ conversion
 
 const MAX_WORDS = 60;
-/** Pen colours: boxes as in tours, arrows and circles in the pink of a tutor's pen. */
-const PEN: Record<'box' | 'arrow' | 'circle', Color> = { box: 'orange', arrow: 'pink', circle: 'pink' };
+/** One pen for answers: boxes, arrows and circles in the pink of a tutor's pen, apart from the tour's own marks. */
+const PEN: Record<'box' | 'arrow' | 'circle', Color> = { box: 'pink', arrow: 'pink', circle: 'pink' };
 const SHA256 = /^[0-9a-f]{64}$/;
 
 type Raw = Record<string, unknown>;
@@ -445,12 +516,16 @@ const SPOKEN_COMMANDS: Record<string, string> = {
   right: '',
 };
 
+/** Element IDs a model sometimes cites in its narration: "[p3.s12]", "(fig2.a)", "eq1". */
+const SPOKEN_ID = /\s*[[(]?\b(?:p\d+\.[sb]\d+|(?:fig|tab)\d+(?:\.[a-z])?|eq\d+|sec-\d+(?:\.\d+)*|page\d+)\b[\])]?/g;
+
 /**
- * Text as the voice should read it: no markdown or LaTeX remnants ("$\sqrt{d_k}$" becomes "square root of d k"),
- * while prices and names such as "$5" or "C#" stay.
+ * Text as the voice should read it: no element IDs, markdown or LaTeX remnants ("$\sqrt{d_k}$" becomes "square root of
+ * d k"), while prices and names such as "$5" or "C#" stay.
  */
 function plain(text: string): string {
   return text
+    .replace(SPOKEN_ID, '')
     .replace(/\$([^$]+)\$/g, '$1')
     .replace(
       /\\([a-zA-Z]+)/g,
@@ -483,28 +558,19 @@ function markLabel(label: string): { label?: string } {
   return text && splitWords(text).length <= 4 && text.length <= 40 ? { label: text } : {};
 }
 
-/** Numbers written in a text, as magnitudes ("1,024", "28.4", "95%"). */
-export function numbersIn(text: string): number[] {
-  return (text.match(/\d+(?:,\d{3})*(?:\.\d+)?/g) ?? [])
-    .map((n) => Number(n.replace(/,/g, '')))
-    .filter(Number.isFinite);
-}
-
 /**
- * A board item from the model's flat board, or null when it is "none" or unusable. A formula must pass the board's
- * own check (KaTeX renders it, terms are exact separate parts of it), bars must use numbers from the passages, a flow
- * needs three stages. Each part carries the word where `say` explains it, for board_focus.
+ * A board item from the model's flat board, or null when it is "none" or fails the board's own checks, which the tour
+ * writer uses too: a formula that KaTeX renders with terms that are exact separate parts of it, bars of numbers printed
+ * in `evidence` (the text the model was shown), a flow of 3 or more stages; labels too long are refused, not cut. Each
+ * part carries the word where `say` explains it, for board_focus.
  */
 export function boardFromAnswer(
   raw: unknown,
   say: string,
-  numbers: number[],
+  evidence: string,
 ): { item: BoardItem; focus: (number | null)[] } | null {
   if (!isRaw(raw)) return null;
-  const title = str(raw.title).slice(0, BOARD_LIMITS.title);
-  const titled = title ? { title } : {};
   const at = (part: Raw | undefined) => (part ? anchorAt(say, str(part.anchor)) : null);
-  const short = (v: unknown, words: number, chars: number) => firstWords(str(v), words).slice(0, chars);
   if (raw.kind === 'formula') {
     const { item } = checkFormula(raw);
     // Each checked term keeps the anchor of the term it came from, matched by its LaTeX ignoring spaces.
@@ -514,44 +580,18 @@ export function boardFromAnswer(
     return item ? { item, focus: item.terms.map((t) => at(source(t.latex))) } : null;
   }
   if (raw.kind === 'flow') {
-    const nodes = list(raw.nodes)
-      .map((n) => ({ label: short(n.label, BOARD_LIMITS.nodeLabelWords, BOARD_LIMITS.nodeLabel), at: at(n) }))
-      .filter((n) => n.label)
-      .slice(0, BOARD_LIMITS.nodes[1]);
-    if (nodes.length < BOARD_LIMITS.nodes[0]) return null;
-    const id = (i: number) => `node-${i + 1}`;
-    return {
-      item: {
-        kind: 'flow',
-        ...titled,
-        nodes: nodes.map((n, i) => ({ id: id(i), label: n.label })),
-        edges: nodes.slice(1).map((_, i): [string, string] => [id(i), id(i + 1)]),
-      },
-      focus: nodes.map((n) => n.at),
-    };
+    // The stages in the order given, each leading to the next.
+    const given = list(raw.nodes);
+    const nodes = given.map((n, i) => ({ id: FLOW_NODE_IDS[i] ?? `node-${i + 1}`, label: n.label }));
+    const edges = nodes.slice(1).map((n, i) => [nodes[i].id, n.id]);
+    const { item } = checkFlow({ title: raw.title, nodes, edges });
+    return item ? { item, focus: item.nodes.map((n) => at(given[nodes.findIndex((m) => m.id === n.id)])) } : null;
   }
   if (raw.kind === 'bars') {
-    // Only the document's own numbers: each value must be written in the passages the model was given.
-    const reported = (v: unknown): v is number =>
-      typeof v === 'number' && Number.isFinite(v) && numbers.some((n) => Math.abs(n - Math.abs(v)) < 1e-9);
-    const bars = list(raw.bars)
-      .flatMap((b) => {
-        const label = short(b.label, BOARD_LIMITS.barLabelWords, BOARD_LIMITS.barLabel);
-        return label && reported(b.value) ? [{ label, value: b.value, at: at(b) }] : [];
-      })
-      .slice(0, BOARD_LIMITS.bars[1]);
-    if (bars.length < BOARD_LIMITS.bars[0]) return null;
-    const unit = str(raw.unit).slice(0, BOARD_LIMITS.unit);
-    return {
-      item: {
-        kind: 'bars',
-        ...titled,
-        ...(unit ? { unit } : {}),
-        ...(typeof raw.higher_is_better === 'boolean' ? { higher_is_better: raw.higher_is_better } : {}),
-        bars: bars.map(({ label, value }) => ({ label, value })),
-      },
-      focus: bars.map((b) => b.at),
-    };
+    const given = list(raw.bars);
+    const bars = given.map((b) => ({ label: b.label, value: b.value }));
+    const { item } = checkBars({ ...raw, bars }, evidence);
+    return item ? { item, focus: given.map(at) } : null;
   }
   return null;
 }
@@ -562,8 +602,8 @@ export interface AnswerContext {
   documentId: string;
   question: string;
   history: AskTurn[];
-  /** Numbers a bars board may show: those written in the passages the model was given. */
-  numbers: number[];
+  /** The text the model was given (passages and table cells): a bars board may only show numbers printed in it. */
+  evidence: string;
   /** The figure whose image the model saw: only marks on it may point at a region. */
   imaged?: string;
 }
@@ -662,7 +702,7 @@ function toStep(
     }
   }
   if (!moves && first && context.retrieval.home) look(context.retrieval.home, 0);
-  const board = boardFromAnswer(raw.board, say, context.numbers);
+  const board = boardFromAnswer(raw.board, say, context.evidence);
   if (board) {
     const focus = board.focus.flatMap((at, part) =>
       at === null ? [] : [{ type: 'board_focus' as const, part, ...timing(at) }],
@@ -767,7 +807,10 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
     documentId: input.documentId,
     question: request.question,
     history: request.history ?? [],
-    numbers: numbersIn([...retrieval.focus, ...retrieval.ranked].map((p) => p.text).join('\n')),
+    evidence: [...retrieval.focus, ...retrieval.ranked]
+      .map((p) => p.text)
+      .concat(retrieval.tables.flatMap((t) => t.lines))
+      .join('\n'),
     imaged: input.image?.targetId,
   };
   const signal = AbortSignal.any([AbortSignal.timeout(ASK_TIMEOUT_MS), ...(input.signal ? [input.signal] : [])]);
@@ -811,14 +854,16 @@ export function askModel(model: unknown, allowTraining: boolean, fallback: strin
   return known?.tourCompatible && (allowTraining || !known.contributor) ? id : fallback;
 }
 
-/** Model failures in plain words for the learner; a key problem points to the settings. */
-export function askError(error: unknown): unknown {
+/** Model failures in plain words for the learner; a key problem points to the settings, or for demos to the .env. */
+export function askError(error: unknown, demo = false): unknown {
   if (!(error instanceof ProcessingError)) return error;
   if (['muse_not_configured', 'muse_auth_failed'].includes(error.code))
     return new HttpError(
       409,
       'model_not_configured',
-      'Check your Meta API key under Profile & Settings, then ask again.',
+      demo
+        ? 'Demo questions use the server’s Meta API key: set MODEL_API_KEY in the root .env.'
+        : 'Check your Meta API key under Profile & Settings, then ask again.',
     );
   if (error.code === 'muse_rate_limited')
     return new HttpError(429, 'model_busy', 'The model is busy right now. Ask again in a moment.');
@@ -832,6 +877,16 @@ export function askError(error: unknown): unknown {
 const IMAGE_WAIT_MS = 2_500;
 const IMAGE_MAX_BYTES = 1_500_000;
 
+/** The figure (or the figure of the panel) asked about. */
+const figureOf = (doc: Doc, id?: string) =>
+  id ? doc.figures.find((f) => f.id === id || f.panels.some((p) => p.id === id)) : undefined;
+
+function imageOf(figure: Doc['figures'][number], data: Buffer | null, jpeg: boolean): TourImage | undefined {
+  if (!data || data.length > IMAGE_MAX_BYTES) return undefined;
+  const dataUrl = `data:image/${jpeg ? 'jpeg' : 'png'};base64,${data.toString('base64')}`;
+  return { targetId: figure.id, kind: figure.kind, page: figure.page, label: figureName(figure), dataUrl };
+}
+
 /** The crop of the figure asked about, only when it is small and arrives quickly; otherwise the caption is enough. */
 export async function figureImage(
   db: Db,
@@ -840,9 +895,7 @@ export async function figureImage(
   doc: Doc,
   figureId?: string,
 ): Promise<TourImage | undefined> {
-  const figure = figureId
-    ? doc.figures.find((f) => f.id === figureId || f.panels.some((p) => p.id === figureId))
-    : undefined;
+  const figure = figureOf(doc, figureId);
   if (!figure) return undefined;
   try {
     const {
@@ -856,10 +909,83 @@ export async function figureImage(
       storage.download(asset.storage_path),
       new Promise<null>((resolve) => setTimeout(resolve, IMAGE_WAIT_MS, null).unref()),
     ]);
-    if (!data || data.length > IMAGE_MAX_BYTES) return undefined;
-    const type = asset.content_type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
-    const dataUrl = `data:${type};base64,${data.toString('base64')}`;
-    return { targetId: figure.id, kind: figure.kind, page: figure.page, label: figureName(figure), dataUrl };
+    return imageOf(figure, data, asset.content_type === 'image/jpeg');
+  } catch {
+    return undefined;
+  }
+}
+
+// ------------------------------------------------------------- demo papers
+
+/** Demo papers live in demo/<paper>/ (doc.json, tour.json, figures/), as the player serves them in development. */
+export const DEMO_ROOT = resolve(ROOT, 'demo');
+/** A demo folder name: letters, digits, "_", "." and "-", not starting with a dot and without "..". */
+export const DEMO_PAPER = /^(?!.*\.\.)\w[\w.-]{0,79}$/;
+const DEMO_MAX_BYTES = 32 * 1024 * 1024;
+
+export interface DemoPaper {
+  doc: Doc;
+  tour?: Tour;
+}
+
+/** A file inside the demo root once links are followed (demo folders link to each other's files), else null. */
+async function demoFile(root: string, ...path: string[]): Promise<string | null> {
+  try {
+    const base = await realpath(root);
+    const file = await realpath(resolve(base, ...path));
+    return file.startsWith(`${base}${sep}`) && (await stat(file)).isFile() ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+async function demoJson(file: string | null): Promise<unknown> {
+  try {
+    return file && (await stat(file)).size <= DEMO_MAX_BYTES ? JSON.parse(await readFile(file, 'utf8')) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const isDoc = (v: unknown): v is Doc =>
+  isRaw(v) &&
+  v.schema === 'paper-tour/doc@0.1' &&
+  isRaw(v.source) &&
+  ['pages', 'sections', 'blocks', 'sentences', 'figures', 'equations'].every((key) => Array.isArray(v[key]));
+const isTour = (v: unknown): v is Tour =>
+  isRaw(v) &&
+  Array.isArray(v.chapters) &&
+  v.chapters.every(
+    (c) =>
+      isRaw(c) &&
+      Array.isArray(c.steps) &&
+      c.steps.every((s) => isRaw(s) && typeof s.say === 'string' && Array.isArray(s.actions)),
+  );
+
+/** A demo paper's doc.json and, when it has a usable one, its tour.json; null for a bad name or no doc.json. */
+export async function loadDemo(paper: string, root = DEMO_ROOT): Promise<DemoPaper | null> {
+  if (!DEMO_PAPER.test(paper)) return null;
+  const doc = await demoJson(await demoFile(root, paper, 'doc.json'));
+  if (!isDoc(doc)) return null;
+  const tour = await demoJson(await demoFile(root, paper, 'tour.json'));
+  return isTour(tour) ? { doc, tour } : { doc };
+}
+
+/** The crop of the demo figure asked about, from the paper folder the player shows it from. */
+export async function demoImage(
+  paper: string,
+  doc: Doc,
+  figureId?: string,
+  root = DEMO_ROOT,
+): Promise<TourImage | undefined> {
+  const figure = figureOf(doc, figureId);
+  const type = /\.(png|jpe?g)$/i.exec(figure?.image ?? '')?.[1].toLowerCase();
+  if (!figure || !type || !DEMO_PAPER.test(paper)) return undefined;
+  const file = await demoFile(root, paper, figure.image);
+  try {
+    return file && (await stat(file)).size <= IMAGE_MAX_BYTES
+      ? imageOf(figure, await readFile(file), type !== 'png')
+      : undefined;
   } catch {
     return undefined;
   }

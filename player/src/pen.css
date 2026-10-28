@@ -1,15 +1,28 @@
 /* Pen marks: arrows and circles drawn on the page like a tutor's pen (geometry in scene.ts). */
 
+.layer-fx,
+.layer-pen {
+  /* The stage scales the page by --zoom, so strokes are sized in screen pixels: a touch bolder
+     when zoomed in on a figure, whose own lines are bolder there too. */
+  --pen-w: calc(clamp(2.5px, 1.9px + 0.35px * var(--zoom, 1), 3.25px) * var(--inv-zoom, 1));
+  --pen-halo: calc(1.5px * var(--inv-zoom, 1));
+}
+
 .pen-stroke {
   fill: none;
-  /* The stage scales the page by --zoom, so this stays the same width on screen. */
-  stroke-width: calc(2.5px * var(--inv-zoom, 1));
+  stroke-width: var(--pen-w);
   stroke-linecap: round;
   stroke-linejoin: round;
   /* With pathLength="1": one dash as long as the path, pulled in from behind a longer gap. */
   stroke-dasharray: 1 2;
   stroke-dashoffset: 1;
   animation: pen-draw 460ms cubic-bezier(0.3, 0.55, 0.3, 1) forwards;
+}
+
+/* The casing: the same stroke in page white, wider, drawn in step with it underneath. */
+.pen-casing {
+  stroke: #fff;
+  stroke-width: calc(var(--pen-w) + 2 * var(--pen-halo));
 }
 
 .pen-loop {
@@ -28,10 +41,14 @@
   transform-box: view-box;
   transform-origin: 0 0;
   transform: scale(var(--head));
-  stroke-width: calc(2.5px * var(--inv-zoom, 1) / var(--head));
+  stroke-width: calc(var(--pen-w) / var(--head));
   animation-duration: 170ms;
   animation-delay: 430ms;
   animation-timing-function: cubic-bezier(0.2, 0.6, 0.35, 1);
+}
+
+.pen-head.pen-casing {
+  stroke-width: calc((var(--pen-w) + 2 * var(--pen-halo)) / var(--head));
 }
 
 @keyframes pen-draw {
@@ -42,13 +59,13 @@
 
 /* Labels (in the screen layer) appear once their stroke is drawn. */
 .box-label.pen-label {
-  animation: pen-label-in 240ms ease-out 560ms both;
+  animation: pen-label-in 260ms cubic-bezier(0.2, 0.7, 0.3, 1) 520ms both;
 }
 
 @keyframes pen-label-in {
   from {
     opacity: 0;
-    transform: translateY(2px);
+    transform: translateY(3px) scale(0.96);
   }
 }
 

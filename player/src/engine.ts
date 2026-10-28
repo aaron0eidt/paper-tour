@@ -202,8 +202,9 @@ export class TourEngine {
     else this.showStep(i);
   }
 
-  /** Swap the narrator (e.g. mute). A playing step restarts with the new one. */
+  /** Swap the narrator (e.g. mute). A playing step restarts with the new one; the same narrator again changes nothing. */
   setNarrator(narrator: Narrator): void {
+    if (narrator === this.narrator) return;
     this.narrator = narrator;
     if (this.status === 'playing') this.startStep(this.index);
   }

@@ -13,14 +13,45 @@
   pointer-events: auto;
 }
 
-/* Optional placement: floating over the bottom of a positioned container, e.g. above the control bar. */
+/* The reader's stage over the ask bar's lane; together they take the stage's place beside the board. */
+.ask-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ask-stage > .viewport {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The bar's own lane under the page, so it never covers what the tour points at; the tray opens upwards over the
+   stage only while it is in use. */
+.ask-lane {
+  position: relative;
+  z-index: 18;
+  flex: none;
+  height: 62px;
+  background: var(--stage-bg);
+}
+
+/* Docked to the bottom of a positioned container: a compact pill until it is used, then a wide card. */
 .ask.ask-dock {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: var(--ask-dock-bottom, 16px);
+  bottom: var(--ask-dock-bottom, 8px);
   z-index: 18;
-  width: min(680px, calc(100% - 32px));
+  width: min(360px, calc(100% - 32px));
+  transition: width 320ms var(--ask-ease);
+}
+
+.ask.ask-dock.expanded {
+  width: min(640px, calc(100% - 32px));
 }
 
 .ask-card {
@@ -39,7 +70,8 @@
 }
 
 .ask-card.focused,
-.ask-card.busy {
+.ask-card.busy,
+.ask-card.away {
   border-color: rgba(126, 166, 255, 0.42);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
@@ -85,8 +117,19 @@
   padding: 12px 12px 4px;
 }
 
+/* The status on the left, what to do next on the right; they stack when the card is narrow. */
+.ask-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
 .ask-status {
   display: flex;
+  flex: 1 1 220px;
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
@@ -97,6 +140,61 @@
   line-height: 18px;
   color: var(--muted);
   animation: ask-rise 240ms var(--ask-ease) both;
+}
+
+.ask-status.invite {
+  color: var(--text);
+}
+
+.ask-status.invite .ask-spark {
+  margin: 1px 0 0;
+  width: 14px;
+  height: 14px;
+}
+
+.ask-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  animation: ask-rise 260ms var(--ask-ease) 60ms both;
+}
+
+.ask-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.ask-action:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.ask-action.resume {
+  padding: 0 12px 0 10px;
+  border-radius: 999px;
+  background: rgba(126, 166, 255, 0.14);
+  color: var(--accent);
+}
+
+.ask-action.resume:hover {
+  background: rgba(126, 166, 255, 0.22);
+  color: #b4cbff;
 }
 
 /* Icons sit on the first line when a message wraps. */
@@ -119,25 +217,6 @@
 
 .ask-status.failed svg {
   color: var(--error);
-}
-
-.ask-retry {
-  flex: none;
-  align-self: center;
-  margin-left: auto;
-  padding: 3px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--accent);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 140ms ease;
-}
-
-.ask-retry:hover {
-  background: rgba(126, 166, 255, 0.1);
 }
 
 /* "Thinking": a soft light passes over the word. The light starts and ends outside the word, so the loop has no seam. */
@@ -193,17 +272,7 @@
   color: var(--text);
 }
 
-.ask-chip.resume {
-  border-color: rgba(126, 166, 255, 0.35);
-  background: rgba(126, 166, 255, 0.1);
-  color: var(--accent);
-}
-
-.ask-chip.resume:hover {
-  background: rgba(126, 166, 255, 0.16);
-}
-
-.ask-chip svg {
+.ask-action svg {
   flex: none;
 }
 
@@ -350,7 +419,8 @@
 }
 
 @media (max-width: 860px) {
-  .ask.ask-dock {
+  .ask.ask-dock,
+  .ask.ask-dock.expanded {
     width: calc(100% - 24px);
   }
   .ask-kbd {
@@ -365,11 +435,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ask.ask-dock,
   .ask-tray,
   .ask-tray-clip {
     transition: none;
   }
   .ask-status,
+  .ask-actions,
   .ask-chip,
   .ask-ring {
     animation: none;

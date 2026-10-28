@@ -169,11 +169,35 @@ test('a flow runs down a tall board and across a wide one', () => {
 });
 
 test('a flow that does not fit is scaled down, never up, and never below readable', () => {
-  const g = flowGeometry(chain(4), { width: 300, height: 230 }, measure);
+  // A fork, which cannot wind into rows like a chain.
+  const fork: FlowItem = { kind: 'flow', nodes: chain(4).nodes, edges: [['n0', 'n1'], ['n1', 'n2'], ['n1', 'n3']] };
+  const g = flowGeometry(fork, { width: 200, height: 160 }, measure);
   ok(g.scale < 1 && g.scale >= 0.8, `scale ${g.scale}`);
-  ok(g.width * g.scale <= 300.01 && g.height * g.scale <= 230.01, 'fits');
+  ok(g.width * g.scale <= 200.01 && g.height * g.scale <= 160.01, 'fits');
   eq(flowGeometry(chain(10), { width: 200, height: 200 }, measure).scale, 0.8, 'scrolls instead');
   eq(flowGeometry(chain(2), { width: 1000, height: 1000 }, measure).scale, 1, 'never up');
+});
+
+test('a chain too long for a short, wide board winds into rows instead of shrinking', () => {
+  const g = flowGeometry(chain(6), { width: 390, height: 200 }, measure);
+  eq(g.scale, 1, 'no shrinking');
+  const rows = [...new Set(g.nodes.map((n) => n.y))];
+  eq(rows.length, 2, 'two rows');
+  const [top, bottom] = [g.nodes.slice(0, 3), g.nodes.slice(3)];
+  ok(top.every((n, i) => i === 0 || n.x > top[i - 1].x), 'the first row runs left to right');
+  ok(bottom.every((n, i) => i === 0 || n.x < bottom[i - 1].x), 'the second runs back');
+  eq(bottom[0].x, top[2].x, 'the turn goes straight down');
+  ok(g.nodes.every((n) => n.x >= 0 && n.y >= 0 && n.x + n.w <= g.width && n.y + n.h <= g.height), 'inside');
+  ok(g.width <= 390 && g.height <= 200, 'fits');
+  // Its arrows: along the first row, down at the turn, and back along the second.
+  const heads = g.edges.map((e) => e.head.match(/-?\d+(\.\d+)?/g)!.map(Number));
+  const dir = (h: number[]) => (h[2] > h[0] && h[2] > h[4] ? 'right' : h[2] < h[0] && h[2] < h[4] ? 'left' : 'down');
+  eq(heads.map(dir), ['right', 'right', 'down', 'left', 'left']);
+  // A board that fits the chain either way keeps it straight, and so does a branching flow.
+  eq(flowGeometry(chain(6), { width: 380, height: 700 }, measure).nodes.every((n, _, all) => n.x === all[0].x), true);
+  const edges = [['n0', 'n1'], ['n0', 'n2'], ['n1', 'n3'], ['n3', 'n4'], ['n4', 'n5']] as [string, string][];
+  const branch: FlowItem = { kind: 'flow', nodes: chain(6).nodes, edges };
+  ok(new Set(flowGeometry(branch, { width: 390, height: 200 }, measure).nodes.map((n) => n.y)).size !== 2, 'not wound');
 });
 
 test('a back edge loops beside the boxes instead of through them', () => {
@@ -185,12 +209,61 @@ test('a back edge loops beside the boxes instead of through them', () => {
   ok(Math.max(...xs) <= g.width, 'within the drawing');
 });
 
+/** Points along a path of M, C and L commands. */
+function trace(d: string): [number, number][] {
+  const n = d.match(/-?\d+(\.\d+)?/g)!.map(Number);
+  const pts: [number, number][] = [];
+  let [x, y] = [n[0], n[1]];
+  let i = 2;
+  for (const c of d.replace(/[^MCL]/g, '').slice(1)) {
+    if (c === 'L') {
+      pts.push([(x = n[i]), (y = n[i + 1])]);
+      i += 2;
+      continue;
+    }
+    for (let s = 0; s <= 20; s++) {
+      const t = s / 20;
+      const u = 1 - t;
+      const b = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+      const at = (p0: number, k: number) => b[0] * p0 + b[1] * n[i + k] + b[2] * n[i + k + 2] + b[3] * n[i + k + 4];
+      pts.push([at(x, 0), at(y, 1)]);
+    }
+    [x, y] = [n[i + 4], n[i + 5]];
+    i += 6;
+  }
+  return pts;
+}
+
+test('a loop back passes outside every box on its way, also in a wider rank', () => {
+  // A training loop: the model feeds the loss and the predictions side by side, and the
+  // gradients loop back to the model past both.
+  const item: FlowItem = {
+    kind: 'flow',
+    nodes: ['data', 'model', 'loss', 'grad', 'pred'].map((id) => ({ id, label: id })),
+    edges: [['data', 'model'], ['model', 'loss'], ['loss', 'grad'], ['grad', 'model'], ['model', 'pred']],
+  };
+  for (const box of [{ width: 380, height: 640 }, { width: 900, height: 240 }]) {
+    const g = flowGeometry(item, box, measure);
+    const back = trace(g.edges[3].d).slice(3, -3); // its middle, clear of the ends at its boxes
+    const hits = g.nodes.filter((n) => back.some(([x, y]) => x > n.x && x < n.x + n.w && y > n.y && y < n.y + n.h));
+    eq(hits.length, 0, `${g.vertical ? 'down' : 'across'}: boxes crossed`);
+    ok(back.every(([x, y]) => x <= g.width && y <= g.height), 'within the drawing');
+  }
+  // Listed against the flow, two boxes share a rank: the arrow goes straight across.
+  const twin: FlowItem = { kind: 'flow', nodes: chain(2).nodes, edges: [['n1', 'n0']] };
+  const g = flowGeometry(twin, { width: 380, height: 640 }, measure);
+  ok(/^M[\d. ]+L[\d. ]+$/.test(g.edges[0].d), `straight: ${g.edges[0].d}`);
+});
+
 test('labels wrap by words and end in an ellipsis when they run out of lines', () => {
   eq(wrapLabel('Linear + softmax', 200, measure), ['Linear + softmax']);
   eq(wrapLabel('Multi-head attention block', 100, measure), ['Multi-head', 'attention', 'block']);
   const long = wrapLabel('one two three four five six seven', 40, measure, 2);
   eq(long.length, 2, 'two lines');
   ok(long[1].endsWith('…') && measure(long[1]) <= 40, `ellipsis: ${long[1]}`);
+  // A cut label keeps as much as fits with its ellipsis: 'Transform…' is exactly 70px here.
+  eq([fitText('ByteNet', 100, measure), fitText('Transformer (big)', 70, measure)], ['ByteNet', 'Transform…']);
+  eq(fitText('Transformer (big)', 69, measure), 'Transfor…', 'one pixel less, one letter less');
 });
 
 // ----------------------------------------------------------------- formulas
@@ -258,7 +331,8 @@ test('bars share a zero line; labels go above them on a narrow board', () => {
   eq([narrow.labelsAbove, wide.labelsAbove], [true, false]);
   for (const l of [narrow, wide]) {
     ok(l.rows.every((r) => r.x0 === l.zeroX && r.x1 > r.x0), 'from the zero line');
-    ok(Math.abs(l.rows[0].x1 + 8 + values[0] - l.width) < 0.01, 'the longest bar leaves room for its value');
+    const spare = l.width - (l.rows[0].x1 + 8 + values[0]);
+    ok(spare >= 1 && spare <= 3, `the longest bar leaves room for its value, and a little more (${spare})`);
     ok(l.rows[1].x1 < l.rows[0].x1 && l.rows[2].x1 < l.rows[1].x1, 'ordered by value');
   }
 });
@@ -270,7 +344,20 @@ test('a bar has a rounded tip away from zero and a square base on it', () => {
   eq(barPath(5, 5, 0, true), '', 'no length, no bar');
   eq(barClip(0.25, true), 'inset(0 75.00% 0 0 round 0 4px 4px 0)');
   eq(barClip(2, false), 'inset(0 0 0 0.00% round 4px 0 0 4px)', 'clamped');
-  eq([fitText('ByteNet', 100, measure), fitText('Transformer (big)', 70, measure)], ['ByteNet', 'Transfo…']);
+});
+
+test('on a short board the rows close up, but never tighter than they can be read', () => {
+  const labels = bleu.bars.map((b) => measure(b.label));
+  const values = [40, 32, 36];
+  for (const width of [340, 800]) {
+    const roomy = barsLayout(bleu, width, labels, values);
+    const short = barsLayout(bleu, width, labels, values, roomy.height - 12);
+    const tiny = barsLayout(bleu, width, labels, values, 40);
+    ok(short.height <= roomy.height - 12 + 0.01, `${width}: fits the shorter board (${short.height})`);
+    const pitch = (l: typeof roomy) => l.rows[1].y - l.rows[0].y;
+    ok(pitch(tiny) >= (roomy.labelsAbove ? 40 : 26) && pitch(tiny) < pitch(short), `${width}: a floor on the pitch`);
+    eq(barsLayout(bleu, width, labels, values, 2000).height, roomy.height, `${width}: never looser than roomy`);
+  }
 });
 
 test('negative bars grow left of zero with their values before the tip', () => {

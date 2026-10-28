@@ -3,6 +3,7 @@ import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
 import type { MuseMessage } from '../muse/client';
 import type { Beat } from './beats';
 import { BOARD_LIMITS, FLOW_NODE_IDS, boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
+import type { DocType } from './doctype';
 import type { DirectOptions } from './prompts';
 
 export const CUE_ACTIONS = ['highlight', 'box', 'spotlight', 'note', 'arrow', 'circle', 'board_focus'] as const;
@@ -146,11 +147,16 @@ export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
   }
   const first = sentences.get(beat.evidence[0]);
   const page = first?.page ?? 1;
-  const blocks = new Set(beat.evidence.map((id) => sentences.get(id)).filter((s) => s?.page === page).map((s) => s!.block));
+  const blocks = new Set(
+    beat.evidence
+      .map((id) => sentences.get(id))
+      .filter((s) => s?.page === page)
+      .map((s) => s!.block),
+  );
   const ids = doc.blocks.filter((b) => blocks.has(b.id)).flatMap((b) => b.sentences);
   const targets = { page, sentences: ids.slice(0, 60), visuals: [], ...parts };
   if (beat.board !== 'bars') return targets;
-  const quoted = quote(beat.evidence);
+  const quoted = quote([...new Set([...beat.evidence, ...(beat.boardEvidence ?? [])])]);
   const table = resultTable(doc, beat.evidence, quoted.join('\n'));
   return {
     ...targets,
@@ -179,9 +185,14 @@ function cueTargets(actions: CueAction[], targets: BeatTargets): string[] {
 /** Spoken words a beat aims for; the code accepts up to 70 (90 for the takeaway). */
 const sayWords = (beat: Beat) => (beat.kind === 'takeaway' ? 65 : beat.kind === 'formula' ? 55 : 45);
 
-/** What the beat's task offers the model: its cue actions, its board and the spoken length it aims for. */
-export function directOptions(beat: Beat): DirectOptions {
-  return { actions: actionsFor(beat), ...(beat.board ? { board: beat.board } : {}), words: sayWords(beat) };
+/** What the beat's task offers the model: its cue actions, its board, the spoken length it aims for and its tone. */
+export function directOptions(beat: Beat, type?: DocType): DirectOptions {
+  return {
+    actions: actionsFor(beat),
+    ...(beat.board ? { board: beat.board } : {}),
+    words: sayWords(beat),
+    ...(type ? { type } : {}),
+  };
 }
 
 /**
@@ -220,7 +231,11 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
             : ['action', 'target', 'anchor'],
           properties: {
             action: strict ? { type: 'string', enum: actions } : { type: 'string' },
-            target: !strict ? { type: 'string' } : ids.length ? { type: 'string', enum: ids } : { type: 'string', maxLength: 0 },
+            target: !strict
+              ? { type: 'string' }
+              : ids.length
+                ? { type: 'string', enum: ids }
+                : { type: 'string', maxLength: 0 },
             ...(pen || !strict ? { region } : {}),
             label: {
               type: 'string',
@@ -238,8 +253,14 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
 /** The beat's task text: the point to make and the local evidence, quoted from the document. */
 export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
-  const quote = (ids: string[]) => ids.map((id) => sentences.get(id)).filter(Boolean).map((s) => `[${s!.id}] ${s!.text}`);
-  const lines = [`STEP KIND: ${beat.kind}${beat.detail ? ' (a closer look at one important detail)' : ''}`, `POINT TO MAKE: ${beat.point}`];
+  const quote = (ids: string[]) =>
+    ids
+      .map((id) => sentences.get(id))
+      .filter(Boolean)
+      .map((s) => `[${s!.id}] ${s!.text}`);
+  const lines = [`STEP KIND: ${beat.kind}${beat.detail ? ' (a closer look at one important detail)' : ''}`];
+  if (beat.role) lines.push(`THIS STEP OF THE TOUR: ${beat.role}`);
+  lines.push(`POINT TO MAKE: ${beat.point}`);
   const figure = doc.figures.find((f) => f.id === beat.target);
   const equation = doc.equations.find((e) => e.id === beat.target);
   const cells = (table: DocFigure) => [
@@ -248,7 +269,8 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
   ];
   if (figure) {
     lines.push(`${figure.kind.toUpperCase()} ${figure.number} [${figure.id}], page ${figure.page}: ${figure.caption}`);
-    if (figure.panels.length) lines.push(`PANELS: ${figure.panels.map((p) => `${p.id}${p.label ? ` (${p.label})` : ''}`).join(', ')}`);
+    if (figure.panels.length)
+      lines.push(`PANELS: ${figure.panels.map((p) => `${p.id}${p.label ? ` (${p.label})` : ''}`).join(', ')}`);
     lines.push('CITED BY:', ...quote(figure.referenced_by.slice(0, 4)));
     if (figure.kind === 'table') lines.push(...cells(figure));
     lines.push('The image of this figure is attached. Describe only what is visible or stated.');
@@ -261,10 +283,16 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
     lines.push(`Page ${equation.page} is attached: read the typeset equation (${equation.number}) there.`);
   } else {
     lines.push('EVIDENCE:', ...quote(beat.evidence));
+    const more = (beat.boardEvidence ?? []).filter((id) => !beat.evidence.includes(id));
+    if (more.length) lines.push('MORE NUMBERS FOR THE BARS ONLY (other steps speak about them):', ...quote(more));
     const table = doc.figures.find((f) => f.id === targets.table);
     if (table) lines.push(...cells(table));
-    lines.push(`OTHER SENTENCES YOU MAY HIGHLIGHT: ${targets.sentences.filter((id) => !beat.evidence.includes(id)).join(', ') || 'none'}`);
+    lines.push(
+      `OTHER SENTENCES YOU MAY HIGHLIGHT: ${targets.sentences.filter((id) => !beat.evidence.includes(id)).join(', ') || 'none'}`,
+    );
+    if (beat.page) lines.push(`Page ${beat.page} is attached: read the formula there.`);
   }
+  lines.push(...(beat.notes ?? []));
   if (beat.kind === 'takeaway')
     lines.push(
       'This is the last step. End by inviting the learner to ask a question, and mention one of these:',

@@ -154,6 +154,7 @@ const images: TourImage[] = [
 const input: TourGenerationInput = { documentId: 'doc-test', analysisId: 'analysis-test', doc, images };
 const card = {
   plan: 'p',
+  doc_type: 'research_paper' as const,
   title: 'Tutoring with pointers',
   chapter_titles: {
     problem: 'Problem',

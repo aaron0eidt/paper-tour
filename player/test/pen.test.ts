@@ -1,6 +1,5 @@
-// Pen geometry tests: arrows and circles from scene.ts, and where their labels go. Run with:
-// esbuild test/pen.test.ts --bundle --platform=node --format=esm --outdir=node_modules/.cache/pen-test
-// && node node_modules/.cache/pen-test/pen.test.js
+// Pen geometry tests: arrows and circles from scene.ts, and where their labels go. Run with
+// `npm test` (esbuild bundles this file for Node, no test framework needed).
 
 import { TourEngine } from '../src/engine';
 import { layoutPages } from '../src/layout';
@@ -150,6 +149,22 @@ await test('inside a figure, arrows start at its nearest edge and stay near it',
   pointsInto(c, figure, c.side);
 });
 
+await test('an auto arrow keeps its tail and label off the marks drawn before it', () => {
+  const figure: BBox = [100, 100, 500, 300];
+  const left: BBox = [100, 100, 290, 300];
+  const right: BBox = [310, 100, 500, 300];
+  // Into the gap between the panels, where the loop around the left one already is: from outside instead.
+  eq(penArrow('q', 'blue', right, PAGE, figure).side, 'left', 'without marks');
+  const loop = penCircle('l', 'pink', left);
+  const a = penArrow('q', 'blue', right, PAGE, figure, 'auto', [loop.bounds]);
+  ok(a.side !== 'left', `with the loop: ${a.side}`);
+  const [x, y] = a.tail;
+  ok(!(x > loop.bounds[0] && x < loop.bounds[2] && y > loop.bounds[1] && y < loop.bounds[3]), 'tail off the loop');
+  pointsInto(a, right, a.side);
+  // An explicit side is kept, mark or not.
+  eq(penArrow('q', 'blue', right, PAGE, figure, 'left', [loop.bounds]).side, 'left', 'explicit');
+});
+
 await test('text arrows come in from the margin', () => {
   // A sentence ending near the right of its column [108, 504].
   const column: BBox = [108, 0, 504, 792];
@@ -191,6 +206,23 @@ await test('circles enclose their region with padding, without ballooning', () =
       const gap = Math.min(...end.map(([x, y]) => Math.hypot(x - sx, y - sy)));
       ok(gap > 1 && gap < 6, `end passes ${gap.toFixed(1)}pt from the start`);
     }
+  }
+});
+
+await test('a loop around a line or an equation hugs it above and below', () => {
+  const clearance = (r: BBox, key: string) => {
+    const loop = sample(penCircle(key, 'blue', r).d);
+    const ys = loop.map(([, y]) => y);
+    const xs = loop.map(([x]) => x);
+    return { above: r[1] - Math.min(...ys), below: Math.max(...ys) - r[3], ends: Math.max(...xs) - r[2] };
+  };
+  for (const key of ['0:0', '7:3', 'x']) {
+    // Lines of text sit about 12pt apart: the loop must not run through the ones around it.
+    const line = clearance([108, 300, 504, 311], key);
+    ok(line.above < 8 && line.below < 8, `around a line: ${line.above.toFixed(1)} and ${line.below.toFixed(1)}`);
+    const equation = clearance([220, 465, 390, 491], key);
+    ok(equation.above < 10 && equation.below < 10, `around an equation: ${equation.above.toFixed(1)} above`);
+    ok(equation.ends < 30, `the white space at its ends takes the rest: ${equation.ends.toFixed(1)}`);
   }
 });
 
@@ -314,11 +346,20 @@ await test('pen labels sit beside their point and inside the viewport', () => {
     [400, 2],
   ]) {
     for (const side of ['left', 'right', 'top', 'bottom', 'upper-right'] as const) {
-      const p = penLabelPosition(x, y, side, size, vp);
-      const within = p.left >= 0 && p.top >= 0 && p.left + size.w <= vp.width && p.top + size.h <= vp.height;
-      ok(within, `inside at ${x},${y} ${side}`);
+      for (const more of [{}, { alt: 'top' as const, center: { x: 300, y: 300 } }]) {
+        const p = penLabelPosition(x, y, side, size, vp, more);
+        const within = p.left >= 0 && p.top >= 0 && p.left + size.w <= vp.width && p.top + size.h <= vp.height;
+        ok(within, `inside at ${x},${y} ${side}`);
+      }
     }
   }
+  // A tail near the left edge: the label moves above it instead of being pushed back over it.
+  const edge = penLabelPosition(40, 300, 'left', size, vp, { alt: 'top' });
+  ok(edge.top + size.h < 300 && Math.abs(edge.left + size.w / 2 - 40) < 31, 'above the tail at the edge');
+  eq(penLabelPosition(400, 300, 'left', size, vp, { alt: 'top' }), left, 'the first side when it fits');
+  // A circle near the right edge: its label takes the upper-left corner.
+  const corner = penLabelPosition(760, 200, 'upper-right', size, vp, { center: { x: 700, y: 260 } });
+  ok(corner.left + size.w < 640 + 1 && corner.top + size.h < 200, `upper left of the loop: ${JSON.stringify(corner)}`);
 });
 
 console.log(results.join('\n'));

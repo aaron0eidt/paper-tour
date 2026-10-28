@@ -66,9 +66,15 @@ const SWAP_MS = 280;
 
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+// KaTeX loads a font only once a formula uses it; ask for the common ones up front, so the first
+// formula is measured and fitted in its own fonts rather than refitted when they arrive.
+for (const font of ['20px KaTeX_Main', 'italic 20px KaTeX_Math', '20px KaTeX_Size1', '20px KaTeX_Size2']) {
+  void document.fonts?.load(font).catch(() => undefined);
+}
+
 /**
- * The stage (children) with the board beside it: right of it on wide screens, below it on narrow
- * ones. Renders only the stage while the engine's board is empty.
+ * The stage (children) with the board beside it: right of it where the space is wide, below it
+ * where it is tall or narrow. Renders only the stage while the engine's board is empty.
  */
 export function BoardSplit({
   board,
@@ -103,16 +109,19 @@ export function BoardSplit({
   }, [dock.leaving]);
 
   const focus = dock.current && board.key === dock.current.key ? board.focus : null;
+  // The split is the container its own shape is queried on (board.css); the frame inside it lays out.
   return (
     <div className="board-split">
-      {children}
-      <div className="board-dock" data-open={dock.open ? '' : undefined}>
-        {dock.current && (
-          <aside className="board" aria-label="Board" aria-hidden={!dock.open}>
-            {dock.leaving && <BoardView key={dock.leaving.key} item={dock.leaving.item} focus={null} leaving />}
-            <BoardView key={dock.current.key} item={dock.current.item} focus={focus} />
-          </aside>
-        )}
+      <div className="board-frame">
+        {children}
+        <div className="board-dock" data-open={dock.open ? '' : undefined}>
+          {dock.current && (
+            <aside className="board" aria-label="Board" aria-hidden={!dock.open}>
+              {dock.leaving && <BoardView key={dock.leaving.key} item={dock.leaving.item} focus={null} leaving />}
+              <BoardView key={dock.current.key} item={dock.current.item} focus={focus} />
+            </aside>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -439,7 +448,8 @@ function BarsBoard({ item, focus }: { item: BarsItem; focus: number | null }) {
   const layout = useMemo(() => {
     if (!box) return null;
     const valueWidths = measured.widths.map((w, i) => w + (i === best ? BADGE.gap + measured.badge : 0));
-    return barsLayout(item, box.width, item.bars.map((b) => measured.label(b.label)), valueWidths);
+    const labelWidths = item.bars.map((b) => measured.label(b.label));
+    return barsLayout(item, box.width, labelWidths, valueWidths, box.height);
   }, [item, box, best, measured]);
   // One colour for the series; the best bar and the bar in focus stand out in the accent.
   const fill = (i: number) => {

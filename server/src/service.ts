@@ -21,11 +21,23 @@ import type { ModelCatalog } from '../../shared/models';
 import type { MetaModelCatalog } from './muse/models';
 import { isContributorModel } from './muse/models';
 import { Database, type Db } from './db';
-import { HttpError, missing } from './errors';
+import { HttpError, missing, ProcessingError } from './errors';
 import { BUCKET, type FileStorage } from './storage';
 import { ensureTourGeneration, generationSummary } from './tour-worker';
+import type { TourImage } from './tour-generator';
+import type { MuseConfig } from './config';
 import type { SettingsService } from './settings';
-import { answerQuestion, askError, askModel, figureImage, type AskAnswer, type AskRequest } from './harness/ask';
+import {
+  answerQuestion,
+  askError,
+  askModel,
+  demoImage,
+  DEMO_ROOT,
+  figureImage,
+  loadDemo,
+  type AskAnswer,
+  type AskRequest,
+} from './harness/ask';
 import { MuseClient } from './muse/client';
 
 export type Enqueue = (
@@ -69,6 +81,8 @@ export interface Library {
   elements(owner: string, id: string, analysisId: string | undefined, ids: string[]): Promise<IndexedElement[]>;
   figure(owner: string, id: string, analysisId: string | undefined, elementId: string): Promise<FigureContext>;
   ask?(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
+  /** Local development only: a question about demo/<paper>/ without an account (see app.ts). */
+  demoAsk?(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
 }
 
 export class DocumentService implements Library {
@@ -591,13 +605,14 @@ export class DocumentService implements Library {
       imageUrl: asset ? await this.storage.sign(asset.storage_path) : null,
     };
   }
-  /** Questions in flight per owner: each one is a paid model call. */
+  /** Questions in flight per owner, and for all demo papers together: each one is a paid model call. */
   private readonly asking = new Map<string, number>();
+  /** Where demo papers are read from (demo/ in the repository); tests point it at a temporary folder. */
+  demoRoot = DEMO_ROOT;
   /** A question about one of the owner's documents, answered as a short micro-tour (harness/ask.ts). */
   async ask(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
-    if (!this.settings) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
-    const question = request.question.trim();
-    if (!question) throw new HttpError(400, 'invalid_question', 'Type a question first.');
+    const settings = this.askSettings();
+    const asked = askedRequest(request);
     const document = await this.owned(owner, id);
     let analysisId: string | null = document.current_analysis_id;
     let tour: Tour | undefined;
@@ -622,42 +637,81 @@ export class DocumentService implements Library {
         )
       : { rows: [] };
     if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
-    const active = this.asking.get(owner) ?? 0;
-    if (active >= 2) throw new HttpError(429, 'too_many_questions', 'Wait for the current answer, then ask again.');
-    this.asking.set(owner, active + 1);
-    const started = Date.now();
+    const doc = analysis.doc as Doc;
     const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
+    return this.answer(owner, {
+      documentId: id,
+      doc,
+      tour,
+      request: asked,
+      model,
+      muse: async () => (await settings.resolveMuse(owner, model)).config,
+      image: () => figureImage(this.db.pool, this.storage, analysis.id, doc, asked.figureId),
+      signal,
+    });
+  }
+  /**
+   * A question about a demo paper (demo/<paper>/) without an account, on the server's own Meta key and model. Only
+   * local development exposes it (app.ts).
+   */
+  async demoAsk(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
+    const settings = this.askSettings();
+    const asked = askedRequest(request);
+    const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
+    const model = askModel(settings.base.model, false, this.tourModel);
+    return this.answer('demo', {
+      documentId: paper,
+      doc: demo.doc,
+      tour: demo.tour,
+      request: asked,
+      model,
+      muse: async () => ({ ...settings.base, model }),
+      image: () => demoImage(paper, demo.doc, asked.figureId, this.demoRoot),
+      signal,
+      demo: true,
+    });
+  }
+  private askSettings(): SettingsService {
+    if (!this.settings) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
+    return this.settings;
+  }
+  /** Answer under a limit of two questions in flight per key, and log what it cost in calls and time. */
+  private async answer(
+    key: string,
+    input: {
+      documentId: string;
+      doc: Doc;
+      tour?: Tour;
+      request: AskRequest;
+      model: string;
+      muse(): Promise<MuseConfig>;
+      image(): Promise<TourImage | undefined>;
+      signal?: AbortSignal;
+      demo?: boolean;
+    },
+  ): Promise<AskAnswer> {
+    const active = this.asking.get(key) ?? 0;
+    if (active >= 2) throw new HttpError(429, 'too_many_questions', 'Wait for the current answer, then ask again.');
+    this.asking.set(key, active + 1);
+    const started = Date.now();
     try {
-      const doc = analysis.doc as Doc;
-      const [muse, image] = await Promise.all([
-        this.settings.resolveMuse(owner, model),
-        figureImage(this.db.pool, this.storage, analysis.id, doc, request.figureId),
-      ]);
-      if (!muse.config.apiKey)
-        throw new HttpError(
-          409,
-          'model_not_configured',
-          'Connect a Meta API key under Profile & Settings to ask questions.',
-        );
-      const history = (request.history ?? [])
-        .map((turn) => ({ question: turn.question.trim(), answer: turn.answer.trim() }))
-        .filter((turn) => turn.question && turn.answer)
-        .slice(-4);
+      const [config, image] = await Promise.all([input.muse(), input.image()]);
+      if (!config.apiKey) throw askError(new ProcessingError('muse_not_configured', 'No Meta API key.'), input.demo);
       const { answer, completions } = await answerQuestion({
-        client: new MuseClient(muse.config, this.settings.transport),
-        doc,
-        documentId: id,
-        request: { ...request, question, history },
-        tour,
+        client: new MuseClient(config, this.askSettings().transport),
+        doc: input.doc,
+        documentId: input.documentId,
+        request: input.request,
+        tour: input.tour,
         image,
-        language: tour?.voices?.host?.lang ?? muse.config.language,
-        signal,
+        language: input.tour?.voices?.host?.lang ?? config.language,
+        signal: input.signal,
       });
       console.log(
         JSON.stringify({
           event: 'question_answered',
-          documentId: id,
-          model,
+          ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
+          model: input.model,
           answerable: answer.answerable,
           steps: answer.steps.length,
           modelCalls: completions.length,
@@ -666,11 +720,23 @@ export class DocumentService implements Library {
       );
       return answer;
     } catch (error) {
-      throw askError(error);
+      throw askError(error, input.demo);
     } finally {
-      const left = (this.asking.get(owner) ?? 1) - 1;
-      if (left > 0) this.asking.set(owner, left);
-      else this.asking.delete(owner);
+      const left = (this.asking.get(key) ?? 1) - 1;
+      if (left > 0) this.asking.set(key, left);
+      else this.asking.delete(key);
     }
   }
+}
+
+/** The question and the conversation before it on one line each; an empty question is refused. */
+function askedRequest(request: AskRequest): AskRequest {
+  const line = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const question = line(request.question);
+  if (!question) throw new HttpError(400, 'invalid_question', 'Type a question first.');
+  const history = (request.history ?? [])
+    .map((turn) => ({ question: line(turn.question), answer: line(turn.answer) }))
+    .filter((turn) => turn.question && turn.answer)
+    .slice(-4);
+  return { ...request, question, history };
 }

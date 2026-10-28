@@ -30,6 +30,8 @@ export interface PenArrowShape {
    * so the label covers less of it.
    */
   labelSide: PenSide;
+  /** The other of those two sides, for a label that does not fit on screen at the first. */
+  labelAlt: PenSide;
   tail: Point;
   tip: Point;
   /** The shaft, a gentle curve from the tail to the tip, in page points. */
@@ -84,8 +86,11 @@ export interface SceneLabel {
   color: Color;
   /** A box label's box; for a pen label the bounds of its mark. In stage coordinates. */
   rect: BBox;
-  /** Pen labels only: the stage point the label hangs from and the side of it the label sits on. */
-  pin?: { x: number; y: number; side: PenLabelSide };
+  /**
+   * Pen labels only: the stage point the label hangs from, the side of it the label sits on, and
+   * for an arrow the side it takes when it does not fit there.
+   */
+  pin?: { x: number; y: number; side: PenLabelSide; alt?: PenSide };
 }
 
 export interface Scene {
@@ -181,15 +186,18 @@ interface ArrowFit {
 
 /** A tail deeper than this inside its area gets its label above or below it rather than beyond it. */
 const DEEP_TAIL = 12;
+/** About how far a label reaches past its tail, in page points, when checking for other marks there. */
+const LABEL_ROOM = 16;
 
 /**
  * Where an arrow comes from and how long it is. `area` is the figure or text column the target
  * sits in, and `reach(len)` the room an arrow of that length needs. With auto, sides that keep
- * the arrow within the area's surroundings come first; then the side whose tail sits least deep
- * inside the area, so the tail and its label sit at its edge rather than over its content; then
- * the most room on the page, where room beyond what the arrow needs counts the same; ties go
- * left, right, top, bottom. An explicit side that does not fit on the page gives way to the
- * opposite side, if that fits.
+ * the arrow within the area's surroundings (the camera's frame) come first, at full length before
+ * shortened, and in each group sides whose tail stays clear of the marks in `avoid`; then the side
+ * whose tail sits least deep inside the area, so the tail and its label sit at its edge rather
+ * than over its content; then the most room on the page, where room beyond what the arrow needs
+ * counts the same; ties go left, right, top, bottom. An explicit side that does not fit on the
+ * page gives way to the opposite side, if that fits.
  */
 function fitArrow(
   region: BBox,
@@ -198,6 +206,7 @@ function fitArrow(
   from: PenSide | 'auto',
   want: number,
   reach: (len: number) => number,
+  avoid: BBox[] = [],
 ): ArrowFit {
   const frame: BBox | null = area && [
     Math.max(page[0], area[0] - AREA_MARGIN * (area[2] - area[0])),
@@ -211,12 +220,20 @@ function fitArrow(
   const shortest = Math.max(ARROW_MIN, 0.75 * want);
   const fit = (side: PenSide) => {
     const framed = inFrame[side] >= reach(shortest);
-    const room = framed ? inFrame[side] : onPage[side];
+    // Room in the area's surroundings for at least the shortest arrow, so it stays in view.
+    const near = inFrame[side] >= reach(ARROW_MIN);
+    const room = near ? inFrame[side] : onPage[side];
     // The longest arrow that fits: reach is linear in the length.
     const len = clamp((room - reach(0)) / (reach(1) - reach(0)), ARROW_MIN, want);
     const depth = inArea ? Math.max(0, inArea[side] - reach(len)) : 0;
-    const fits = framed || onPage[side] >= reach(ARROW_MIN);
-    return { side, len, box: framed && frame ? frame : page, framed, depth, fits };
+    const fits = near || onPage[side] >= reach(ARROW_MIN);
+    // Where the tail (and the label just beyond it) would land, near enough: straight out from the target.
+    const [ox, oy] = OUTWARD[side];
+    const out = reach(len) + LABEL_ROOM;
+    const x = ox ? (ox < 0 ? region[0] : region[2]) + ox * out : (region[0] + region[2]) / 2;
+    const y = oy ? (oy < 0 ? region[1] : region[3]) + oy * out : (region[1] + region[3]) / 2;
+    const clear = !avoid.some((r) => x > r[0] && x < r[2] && y > r[1] && y < r[3]);
+    return { side, len, box: near && frame ? frame : page, framed, near, depth, fits, clear };
   };
 
   if (from !== 'auto') {
@@ -225,9 +242,18 @@ function fitArrow(
     return given.fits || !other.fits ? given : other;
   }
   const all = SIDE_ORDER.map(fit);
-  const framed = all.filter((f) => f.framed);
-  const fitting = all.filter((f) => f.fits);
-  const pool = framed.length ? framed : fitting.length ? fitting : all;
+  const pick = (ok: (f: (typeof all)[number]) => boolean) => all.filter(ok);
+  // Staying near the area (in the camera's frame) matters most, then keeping off other marks,
+  // then a full-length arrow.
+  const pool = [
+    pick((f) => f.clear && f.framed),
+    pick((f) => f.clear && f.near),
+    pick((f) => f.framed),
+    pick((f) => f.near),
+    pick((f) => f.clear && f.fits),
+    pick((f) => f.fits),
+    all,
+  ].find((p) => p.length)!;
   const pageRoom = (f: (typeof all)[number]) => Math.min(onPage[f.side], reach(want));
   return pool.reduce((best, f) => {
     const deeper = Math.round(f.depth) - Math.round(best.depth);
@@ -238,8 +264,9 @@ function fitArrow(
 
 /**
  * An arrow pointing at `region` (page points) from outside it, its tail on the page and near the
- * edge of `area`, the figure or text column the target sits in. The shaft comes in at a slight
- * angle and bends so that it meets the target nearly head-on.
+ * edge of `area`, the figure or text column the target sits in, and when it can, away from the
+ * marks already drawn there (`avoid`). The shaft comes in at a slight angle and bends so that it
+ * meets the target nearly head-on.
  */
 export function penArrow(
   key: string,
@@ -248,6 +275,7 @@ export function penArrow(
   page: BBox,
   area: BBox | null,
   from: ArrowAction['from'] = 'auto',
+  avoid: BBox[] = [],
 ): PenArrowShape {
   const rand = penRandom(key);
   const slant = (16 + 8 * rand()) * DEG;
@@ -260,7 +288,7 @@ export function penArrow(
   const want = clamp(0.45 * Math.sqrt(w * h), 34, ARROW_MAX);
   // The room an arrow of length len needs: the gap, its run along the side, and the edge margin.
   const reach = (len: number) => ARROW_GAP + len * Math.cos(slant) + PEN_EDGE;
-  const { side, len, box, depth } = fitArrow(region, page, area, from ?? 'auto', want, reach);
+  const { side, len, box, depth } = fitArrow(region, page, area, from ?? 'auto', want, reach, avoid);
 
   const [ox, oy] = OUTWARD[side];
   const cx = (region[0] + region[2]) / 2;
@@ -279,8 +307,8 @@ export function penArrow(
   const inside = ([x, y]: Point) =>
     x >= box[0] + PEN_EDGE && x <= box[2] - PEN_EDGE && y >= box[1] + PEN_EDGE && y <= box[3] - PEN_EDGE;
   const tail = tailFor(across.find((p) => inside(tailFor(p))) ?? across[0]);
-  const labelSide: PenSide =
-    depth < DEEP_TAIL ? side : ox ? (tail[1] < tip[1] ? 'top' : 'bottom') : tail[0] < tip[0] ? 'left' : 'right';
+  const lean: PenSide = ox ? (tail[1] < tip[1] ? 'top' : 'bottom') : tail[0] < tip[0] ? 'left' : 'right';
+  const labelSide = depth < DEEP_TAIL ? side : lean;
 
   // Bow the shaft to the side that turns its end towards the target.
   const mid: Point = [(tail[0] + tip[0]) / 2, (tail[1] + tip[1]) / 2];
@@ -308,6 +336,7 @@ export function penArrow(
     color,
     side,
     labelSide,
+    labelAlt: labelSide === side ? lean : side,
     tail,
     tip,
     d: `M${pt(tail)}Q${pt(control)} ${pt(tip)}`,
@@ -334,7 +363,7 @@ export function penCircle(key: string, color: Color, region: BBox): PenCircleSha
   const rand = penRandom(key);
   const start = (-115 + 20 * (rand() - 0.5)) * DEG;
   const lap = rand();
-  const offset = 2 + rand(); // how far outside its start the end passes, in page points
+  const offset = 1.3 + 0.7 * rand(); // how far outside its start the end passes, in page points
   const w2 = 0.008 + 0.006 * rand();
   const p2 = 2 * Math.PI * rand();
   const w3 = 0.003 + 0.004 * rand();
@@ -343,11 +372,16 @@ export function penCircle(key: string, color: Color, region: BBox): PenCircleSha
   const a = Math.max(4, (region[2] - region[0]) / 2 + CIRCLE_PAD);
   const b = Math.max(4, (region[3] - region[1]) / 2 + CIRCLE_PAD);
   const mean = Math.sqrt(a * b);
-  const k = 0.07 * clamp((mean - 25) / 120, 0, 1);
+  // How flat (or tall) the target is: 0 for a square up to 1 from about 5:1 on.
+  const flat = clamp((Math.max(a, b) / Math.min(a, b) - 1.6) / 3, 0, 1);
+  // Large and flat targets get a squarer loop, so it hugs them rather than bulging into the
+  // lines of text above and below an equation or a sentence.
+  const k = Math.min(0.1, 0.1 * clamp((mean - 25) / 120, 0, 1) + 0.08 * flat);
   // A flat target gets a loop that clears its long sides less than its ends (and a tall one the
   // other way round): around a line or an equation the white space lies at the ends.
-  const ka = Math.sqrt(a / mean);
-  const kb = Math.sqrt(b / mean);
+  const split = 0.5 + 0.35 * flat;
+  const ka = (a / mean) ** split;
+  const kb = (b / mean) ** split;
   // An ellipse with a touch of third harmonic (k), which squares it off; convex for k < 1/9.
   const shape = (t: number): Point => [Math.cos(t) - k * Math.cos(3 * t), Math.sin(t) + k * Math.sin(3 * t)];
   const slopeOf = (t: number): Point => [-Math.sin(t) + 3 * k * Math.sin(3 * t), Math.cos(t) + 3 * k * Math.cos(3 * t)];
@@ -377,7 +411,7 @@ export function penCircle(key: string, color: Color, region: BBox): PenCircleSha
   const cx = (region[0] + region[2]) / 2;
   const cy = (region[1] + region[3]) / 2;
   // Big loops overlap their start by a smaller angle, so the doubled stretch stays short.
-  const sweep = 2 * Math.PI + (18 + 14 * lap) * DEG * clamp(Math.sqrt(40 / Math.sqrt(rx * ry)), 0.5, 1);
+  const sweep = 2 * Math.PI + (14 + 10 * lap) * DEG * clamp(Math.sqrt(40 / Math.sqrt(rx * ry)), 0.5, 1);
 
   // s runs from 0 to 1 along the stroke. Late in the lap the stroke eases outwards along its
   // normal, passing `offset` outside its start.
@@ -507,18 +541,22 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
         if (!g || !box) break;
         const color = a.color ?? DEFAULT_COLOR;
         const region = unionRect(g.rects);
-        const area = a.type === 'arrow' ? areaOf(resolver, a.target, box.height) : null;
+        const shapes = page(g.page);
+        const sheet: BBox = [0, 0, box.width, box.height];
+        // An arrow keeps its tail and label off the marks drawn before it on the page.
+        const drawn = [...shapes.pens.map((p) => p.bounds), ...shapes.boxes.map((b) => b.rect)];
         const pen =
           a.type === 'arrow'
-            ? penArrow(key, color, region, [0, 0, box.width, box.height], area, a.from)
+            ? penArrow(key, color, region, sheet, areaOf(resolver, a.target, box.height), a.from, drawn)
             : penCircle(key, color, region);
-        page(g.page).pens.push(pen);
+        shapes.pens.push(pen);
         if (a.label) {
           const [x, y] = pen.kind === 'arrow' ? pen.tail : pen.labelAt;
           const [sx, sy] = toStage(layout, g.page, [x, y, x, y]);
-          const side = pen.kind === 'arrow' ? pen.labelSide : 'upper-right';
+          const pin =
+            pen.kind === 'arrow' ? { side: pen.labelSide, alt: pen.labelAlt } : { side: 'upper-right' as const };
           const rect = toStage(layout, g.page, pen.bounds);
-          scene.labels.push({ key, text: a.label, color, rect, pin: { x: sx, y: sy, side } });
+          scene.labels.push({ key, text: a.label, color, rect, pin: { x: sx, y: sy, ...pin } });
         }
         break;
       }

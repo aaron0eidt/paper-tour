@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Action, BBox, Doc, Step, Tour } from '../../shared/paper';
-import { createApp } from '../src/app';
+import { createApp, demoAllowed } from '../src/app';
 import type { MuseConfig } from '../src/config';
 import type { Database } from '../src/db';
 import { HttpError, ProcessingError } from '../src/errors';
@@ -15,6 +18,8 @@ import {
   askError,
   askModel,
   boardFromAnswer,
+  demoImage,
+  loadDemo,
   retrieve,
   spoken,
   type AskRequest,
@@ -50,7 +55,12 @@ const sentence = (id: string) => ({
   text: texts[id],
   rects: [rect],
 });
-const block = (id: string, type: 'heading' | 'paragraph' | 'equation', sentences: string[], section: string) => ({
+const block = (
+  id: string,
+  type: 'heading' | 'paragraph' | 'equation' | 'table_text',
+  sentences: string[],
+  section: string,
+) => ({
   id,
   page: Number(id[1]),
   type,
@@ -83,6 +93,12 @@ const doc: Doc = {
     block('p2.b4', 'paragraph', ['p2.s3', 'p2.s4'], 'sec-3.2'),
     block('p3.b1', 'heading', [], 'sec-6'),
     block('p3.b2', 'paragraph', ['p3.s1', 'p3.s2', 'p3.s3'], 'sec-6'),
+    // The cells of Table 2, inside its box.
+    ...['Model EN-DE EN-FR', 'Big 28.4 41.8', 'Base 27.3 38.1'].map((text, i) => ({
+      ...block(`p3.b${i + 3}`, 'table_text', [], 'sec-6'),
+      bbox: [10, 310 + 25 * i, 390, 330 + 25 * i] as BBox,
+      text,
+    })),
   ],
   sentences: Object.keys(texts).map(sentence),
   figures: [
@@ -197,9 +213,26 @@ const highlighted = (step: Step) => step.actions.flatMap((a) => (a.type === 'hig
 test('retrieval ranks the passage that answers the question first', () => {
   assert.equal(retrieve(doc, { question: 'What BLEU score does the big model reach?' }).ranked[0].id, 'p3.s1');
   const scale = retrieve(doc, { question: 'Why do they scale the dot products by the square root of d_k?' });
-  assert.equal(scale.ranked[0].id, 'p2.s4');
+  assert.deepEqual(
+    scale.ranked.slice(0, 2).map((p) => p.id),
+    ['p2.s3', 'p2.s4'],
+    'the best match ("To counteract this effect, …") comes with the sentence that says what the effect is',
+  );
   assert.ok(scale.visuals.includes('eq1'), 'the equation is matched through the sentences around it');
   assert.ok(!scale.sentences.includes('p1.s1'));
+});
+
+test('a question for a number prefers passages that print one, and "how long" is not about length', () => {
+  const ranked = retrieve(doc, {
+    question: 'How long does the big model train, and how many BLEU does it get?',
+  }).ranked;
+  assert.equal(ranked[0].id, 'p3.s1');
+  // Extracted captions often start with their own label; the model reads it once.
+  const labelled = { ...doc, figures: doc.figures.map((f) => ({ ...f, caption: `Fig. ${f.number}. ${f.caption}` })) };
+  assert.equal(
+    retrieve(labelled, { question: 'What does Figure 1 show?' }).focus[0].text,
+    'Figure 1: The Transformer model architecture with its encoder and decoder stacks.',
+  );
 });
 
 test('retrieval adds the current step’s evidence with its neighbours, and elements the question names', () => {
@@ -299,7 +332,7 @@ test('a formula board is kept only when it passes the board check, with its term
       { latex: '\\sqrt{d_k}', label: 'scale', anchor: 'square root of' },
     ]),
     say,
-    [],
+    '',
   );
   assert.equal(good?.item.kind, 'formula');
   assert.deepEqual(good?.item.kind === 'formula' ? good.item.terms.map((t) => t.latex) : [], ['QK^T', '\\sqrt{d_k}']);
@@ -308,13 +341,13 @@ test('a formula board is kept only when it passes the board check, with its term
     { latex: 'QK^T', label: 'scores', anchor: '' },
     { latex: '\\sqrt{d}', label: 'scale', anchor: '' },
   ]);
-  assert.equal(boardFromAnswer(notInFormula, say, []), null);
+  assert.equal(boardFromAnswer(notInFormula, say, ''), null);
   const broken = formula('\\frac{QK^T}{\\sqrt{d_k}', [
     { latex: 'QK^T', label: 'scores', anchor: '' },
     { latex: '\\sqrt{d_k}', label: 'scale', anchor: '' },
   ]);
-  assert.equal(boardFromAnswer(broken, say, []), null);
-  assert.equal(boardFromAnswer(NO_BOARD, say, []), null);
+  assert.equal(boardFromAnswer(broken, say, ''), null);
+  assert.equal(boardFromAnswer(NO_BOARD, say, ''), null);
 });
 
 test('a valid board becomes board and board_focus actions; an invalid one leaves the step without a board', async () => {
@@ -355,15 +388,17 @@ test('a valid board becomes board and board_focus actions; an invalid one leaves
   assert.deepEqual(types(plain), ['zoom', 'box']);
 });
 
-test('bars keep only numbers written in the retrieved passages', () => {
-  const bars = (values: number[]) => ({
+test('bars keep only numbers printed in what the model was shown, and long labels are refused, not cut', () => {
+  const bars = (values: number[], labels = ['Big', 'Base']) => ({
     ...NO_BOARD,
     kind: 'bars',
     unit: 'BLEU',
-    bars: values.map((value, i) => ({ label: i ? 'Base' : 'Big', value, anchor: '' })),
+    bars: values.map((value, i) => ({ label: labels[i], value, anchor: i ? 'the base' : 'The big' })),
   });
-  const numbers = [28.4, 27.3, 2014];
-  assert.deepEqual(boardFromAnswer(bars([28.4, 27.3]), 'Big beats base.', numbers)?.item, {
+  const evidence = 'The big model reaches 28.4 BLEU, the base model 27.3 BLEU (WMT 2014).';
+  const say = 'The big model beats the base one.';
+  const board = boardFromAnswer(bars([28.4, 27.3]), say, evidence);
+  assert.deepEqual(board?.item, {
     kind: 'bars',
     unit: 'BLEU',
     higher_is_better: true,
@@ -372,7 +407,35 @@ test('bars keep only numbers written in the retrieved passages', () => {
       { label: 'Base', value: 27.3 },
     ],
   });
-  assert.equal(boardFromAnswer(bars([28.4, 31.7]), 'Big beats base.', numbers), null);
+  assert.deepEqual(board?.focus, [0, 4]);
+  assert.equal(boardFromAnswer(bars([28.4, 31.7]), say, evidence), null, 'an invented number');
+  assert.equal(boardFromAnswer(bars([28.4, 27.3], ['Big', 'The base model with six layers']), say, evidence), null);
+});
+
+test('a flow runs through its stages in order, lighting each as the voice names it', () => {
+  const say = 'Tokens are embedded, attend to each other, then pass a feed-forward layer.';
+  const flow = (labels: string[]) => ({
+    ...NO_BOARD,
+    kind: 'flow',
+    title: 'One encoder layer',
+    nodes: labels.map((label, i) => ({ label, anchor: ['are embedded', 'attend to each', 'feed-forward layer'][i] })),
+  });
+  const board = boardFromAnswer(flow(['Embed', 'Self-attention', 'Feed-forward']), say, '');
+  assert.deepEqual(board?.item, {
+    kind: 'flow',
+    title: 'One encoder layer',
+    nodes: [
+      { id: 'node-1', label: 'Embed' },
+      { id: 'node-2', label: 'Self-attention' },
+      { id: 'node-3', label: 'Feed-forward' },
+    ],
+    edges: [
+      ['node-1', 'node-2'],
+      ['node-2', 'node-3'],
+    ],
+  });
+  assert.deepEqual(board?.focus, [1, 3, 10]);
+  assert.equal(boardFromAnswer(flow(['Embed', 'Attend']), say, ''), null, 'two stages are not a flow');
 });
 
 test('pen marks point at a region only on the figure the model saw, and long labels are left off', async () => {
@@ -442,6 +505,93 @@ test('narration is cleaned for the voice and kept to 60 words, cut after a whole
   // A first sentence too long to cut after is cut at 60 words and closed with a full stop.
   const rambling = spoken(Array(70).fill('word').join(' '));
   assert.equal(rambling, `${Array(60).fill('word').join(' ')}.`);
+});
+
+test('a task or part of an exercise sheet the question names comes into focus', () => {
+  const sheet: Doc = {
+    ...doc,
+    exercises: [
+      {
+        id: 'ex1',
+        number: '1',
+        page: 2,
+        block: 'p2.b1',
+        blocks: ['p2.b1', 'p2.b2', 'p2.b4'],
+        parts: [
+          { id: 'ex1.a', label: 'a', page: 2, blocks: ['p2.b2'] },
+          { id: 'ex1.b', label: 'b', page: 2, blocks: ['p2.b4'] },
+        ],
+      },
+    ],
+  };
+  for (const question of ['How do I start task 1b?', 'Wie fange ich Aufgabe 1 (b) an?', 'Exercise 1.b: what is asked?'])
+    assert.deepEqual(
+      retrieve(sheet, { question }).focus.map((p) => p.id),
+      ['p2.s3', 'p2.s4'],
+      question,
+    );
+  assert.equal(retrieve(sheet, { question: 'What is task 1 about?' }).home, 'p2.s1');
+  assert.deepEqual(retrieve(sheet, { question: 'Is task 2 harder?' }).focus, [], 'no task 2 on this sheet');
+});
+
+test('the narration never reads element IDs aloud', () => {
+  assert.equal(
+    spoken('The scale keeps the softmax soft [p2.s4], as Equation one shows (eq1).'),
+    'The scale keeps the softmax soft, as Equation one shows.',
+  );
+});
+
+test('a follow-up searches with the exchange it builds on', () => {
+  const question = 'And why does that slow learning?';
+  assert.deepEqual(retrieve(doc, { question }).ranked, [], 'alone, the follow-up matches nothing');
+  const history = [
+    {
+      question: 'Why scale the dot products?',
+      answer: 'Without the scale, large dot products push the softmax into regions with tiny gradients.',
+    },
+  ];
+  const ranked = retrieve(doc, { question, history }).ranked.map((p) => p.id);
+  assert.ok(ranked.slice(0, 2).includes('p2.s3'), ranked.join(', '));
+});
+
+test('a table in focus brings its cells, and a bars board may chart numbers from them', async () => {
+  let task = '';
+  const say =
+    'Table two compares the big and the base model. On English to French the big model reaches the higher score.';
+  const { answer } = await ask({ question: 'What does Table 2 compare?' }, (r) => {
+    task = r.task;
+    return {
+      plan: 'p',
+      answerable: 'yes',
+      steps: [
+        {
+          say,
+          cues: [
+            { action: 'box', target: 'tab2', region: 'whole', label: 'BLEU scores', anchor: 'Table two compares' },
+          ],
+          board: {
+            ...NO_BOARD,
+            kind: 'bars',
+            title: 'BLEU on English-French',
+            unit: 'BLEU',
+            bars: [
+              { label: 'Big', value: 41.8, anchor: 'the big model reaches' },
+              { label: 'Base', value: 38.1, anchor: 'the base model' },
+            ],
+          },
+        },
+      ],
+      followups: [],
+    };
+  });
+  assert.ok(task.includes('CELLS OF [tab2]') && task.includes('Big 28.4 41.8'), task);
+  const [step] = answer.steps;
+  assert.deepEqual(types(step), ['zoom', 'board', 'board_focus', 'board_focus', 'box']);
+  const board = step.actions.find((a) => a.type === 'board');
+  assert.deepEqual(board?.type === 'board' && board.item.kind === 'bars' ? board.item.bars : [], [
+    { label: 'Big', value: 41.8 },
+    { label: 'Base', value: 38.1 },
+  ]);
 });
 
 test('an answer that says it cannot answer is retried once at medium effort', async () => {
@@ -580,5 +730,148 @@ test('only the document’s owner may ask, and the answer comes back as steps', 
     assert.equal((await post('owner', { question: '   ' })).json().error.code, 'invalid_question');
   } finally {
     await app.close();
+  }
+});
+
+// ------------------------------------------------------------ demo papers
+
+/** A demo root like demo/: a paper, a paper that links to its files, and one whose doc.json links outside the root. */
+async function demoFolders() {
+  const root = await mkdtemp(join(tmpdir(), 'paper-tour-demo-'));
+  const outside = await mkdtemp(join(tmpdir(), 'paper-tour-outside-'));
+  await mkdir(join(root, 'paper', 'figures'), { recursive: true });
+  await writeFile(join(root, 'paper', 'doc.json'), JSON.stringify(doc));
+  await writeFile(join(root, 'paper', 'tour.json'), JSON.stringify(tour));
+  await writeFile(join(root, 'paper', 'figures', 'fig1.png'), Buffer.from('89504e470d0a1a0a', 'hex'));
+  await mkdir(join(root, 'linked'));
+  await symlink('../paper/doc.json', join(root, 'linked', 'doc.json'));
+  await writeFile(join(outside, 'doc.json'), JSON.stringify(doc));
+  await mkdir(join(root, 'escape'));
+  await symlink(join(outside, 'doc.json'), join(root, 'escape', 'doc.json'));
+  return {
+    root,
+    async remove() {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    },
+  };
+}
+
+/** The library with only what demo questions use: the server's own Meta settings, never the database or storage. */
+function demoLibrary(model: (r: Request) => unknown, root: string, apiKey = settings.apiKey) {
+  const never = async () => {
+    throw new Error('Demo questions never touch the database.');
+  };
+  const db = { query: never, pool: { query: never } } as unknown as Database;
+  const muse = { base: { ...settings, apiKey }, transport: provider(model) } as unknown as SettingsService;
+  const service = new DocumentService(
+    db,
+    {} as FileStorage,
+    async () => {},
+    26214400,
+    'muse-spark-1.3',
+    undefined,
+    muse,
+  );
+  service.demoRoot = root;
+  return service;
+}
+
+test('demo papers load only from folders inside the demo root', async () => {
+  const demo = await demoFolders();
+  try {
+    assert.equal((await loadDemo('paper', demo.root))?.tour?.title, 'A tour');
+    const linked = await loadDemo('linked', demo.root);
+    assert.equal(linked?.doc.source.title, doc.source.title, 'a link to another demo folder is fine');
+    assert.equal(linked?.tour, undefined);
+    for (const name of ['escape', 'missing', '..', '../paper', 'paper/../paper', '.hidden', ''])
+      assert.equal(await loadDemo(name, demo.root), null, name);
+    const image = await demoImage('paper', doc, 'fig1.a', demo.root);
+    assert.equal(image?.targetId, 'fig1');
+    assert.ok(image?.dataUrl.startsWith('data:image/png;base64,'));
+    const escaping = { ...doc, figures: [{ ...doc.figures[0], image: '../escape/doc.json' }] };
+    assert.equal(await demoImage('paper', escaping, 'fig1', demo.root), undefined);
+  } finally {
+    await demo.remove();
+  }
+});
+
+test('asking needs a sign-in, and demo questions exist only in local development', async () => {
+  assert.equal(demoAllowed({}), true, 'config.ts listens on 127.0.0.1 by default');
+  assert.equal(demoAllowed({ HOST: 'localhost', NODE_ENV: 'development' }), true);
+  assert.equal(demoAllowed({ NODE_ENV: 'production' }), false);
+  assert.equal(demoAllowed({ HOST: '0.0.0.0' }), false, 'a server reachable from other machines');
+  const app = await createApp({ service: library(() => ({})), authenticate: async () => null, demo: false });
+  try {
+    const anonymous = await app.inject({
+      method: 'POST',
+      url: `/api/documents/${DOCUMENT}/ask`,
+      payload: { question: 'Why scale the dot products?' },
+    });
+    assert.equal(anonymous.statusCode, 401);
+    const demo = await app.inject({ method: 'POST', url: '/api/demo/paper/ask', payload: { question: 'Why?' } });
+    assert.equal(demo.statusCode, 404);
+  } finally {
+    await app.close();
+  }
+});
+
+test('demo questions read demo/<paper>/ with the server’s key, answer only this machine and refuse other paths', async () => {
+  const demo = await demoFolders();
+  let task = '';
+  const model = (r: Request) => {
+    task = r.task;
+    return {
+      plan: 'p',
+      answerable: 'yes',
+      steps: [
+        {
+          say: SCALE_SAY,
+          cues: [{ action: 'highlight', target: 'p2.s4', region: 'whole', label: '', anchor: 'The authors scale' }],
+          board: NO_BOARD,
+        },
+      ],
+      followups: ['What is d_k?', 'Does scaling change the results?'],
+    };
+  };
+  const app = await createApp({ service: demoLibrary(model, demo.root), authenticate: async () => null, demo: true });
+  const question = { question: 'Why scale the dot products?', stepId: 'method-1' };
+  const post = (url: string, extra: { remoteAddress?: string; headers?: Record<string, string> } = {}) =>
+    app.inject({ method: 'POST', url, payload: question, ...extra });
+  try {
+    const answered = await post('/api/demo/paper/ask');
+    assert.equal(answered.statusCode, 200, answered.body);
+    assert.deepEqual(answered.json().steps[0].actions[0], { type: 'focus', target: 'p2.s4' });
+    assert.ok(task.includes('THE TOUR WAS SAYING: Attention compares'), 'the demo tour gives the step');
+    task = '';
+    assert.equal((await post('/api/demo/missing/ask')).statusCode, 404);
+    assert.equal((await post('/api/demo/escape/ask')).statusCode, 404);
+    for (const url of ['/api/demo/..%2F..%2Fserver/ask', '/api/demo/.hidden/ask', '/api/demo/a..b/ask'])
+      assert.equal((await post(url)).statusCode, 400, url);
+    // A dot-dot segment never reaches the route at all.
+    assert.equal((await post('/api/demo/%2E%2E/ask')).statusCode, 404);
+    assert.equal((await post('/api/demo/paper/ask', { remoteAddress: '10.0.0.7' })).statusCode, 404);
+    assert.equal((await post('/api/demo/paper/ask', { headers: { host: 'rebound.example:5174' } })).statusCode, 404);
+    assert.equal(task, '', 'no refused request reached the model');
+  } finally {
+    await app.close();
+    await demo.remove();
+  }
+});
+
+test('a demo question without a server key says where the key goes', async () => {
+  const demo = await demoFolders();
+  const app = await createApp({
+    service: demoLibrary(() => assert.fail('no model call without a key'), demo.root, ''),
+    authenticate: async () => null,
+    demo: true,
+  });
+  try {
+    const response = await app.inject({ method: 'POST', url: '/api/demo/paper/ask', payload: { question: 'Why?' } });
+    assert.equal(response.statusCode, 409);
+    assert.match(response.json().error.message, /MODEL_API_KEY/);
+  } finally {
+    await app.close();
+    await demo.remove();
   }
 });

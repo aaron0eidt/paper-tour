@@ -27,10 +27,22 @@ const texts: Record<string, string> = {
   'p2.s3': 'However, messy layouts can still confuse the ingestion.',
   'p2.s4': 'In conclusion, short tours that point teach better.',
 };
-const sentence = (id: string) => ({ id, page: Number(id[1]), block: `p${id[1]}.b2`, text: texts[id], rects: [[0, 0, 100, 10]] as [number, number, number, number][] });
+const sentence = (id: string) => ({
+  id,
+  page: Number(id[1]),
+  block: `p${id[1]}.b2`,
+  text: texts[id],
+  rects: [[0, 0, 100, 10]] as [number, number, number, number][],
+});
 const doc: Doc = {
   schema: 'paper-tour/doc@0.1',
-  source: { file: 'paper.pdf', sha256: 'b'.repeat(64), num_pages: 2, generator: 'test', title: 'Tutoring with pointers' },
+  source: {
+    file: 'paper.pdf',
+    sha256: 'b'.repeat(64),
+    num_pages: 2,
+    generator: 'test',
+    title: 'Tutoring with pointers',
+  },
   pages: [
     { n: 1, width: 600, height: 800 },
     { n: 2, width: 600, height: 800 },
@@ -40,16 +52,60 @@ const doc: Doc = {
     { id: 'sec-2', number: '2', title: 'Method', level: 1, page: 2, block: 'p2.b1' },
   ],
   blocks: [
-    { id: 'p1.b1', page: 1, type: 'heading', bbox: [0, 0, 100, 10], text: '1 Introduction', section: 'sec-1', sentences: [] },
-    { id: 'p1.b2', page: 1, type: 'paragraph', bbox: [0, 20, 500, 120], text: '', section: 'sec-1', sentences: ['p1.s1', 'p1.s2', 'p1.s3', 'p1.s4'] },
+    {
+      id: 'p1.b1',
+      page: 1,
+      type: 'heading',
+      bbox: [0, 0, 100, 10],
+      text: '1 Introduction',
+      section: 'sec-1',
+      sentences: [],
+    },
+    {
+      id: 'p1.b2',
+      page: 1,
+      type: 'paragraph',
+      bbox: [0, 20, 500, 120],
+      text: '',
+      section: 'sec-1',
+      sentences: ['p1.s1', 'p1.s2', 'p1.s3', 'p1.s4'],
+    },
     { id: 'p2.b1', page: 2, type: 'heading', bbox: [0, 0, 100, 10], text: '2 Method', section: 'sec-2', sentences: [] },
-    { id: 'p2.b2', page: 2, type: 'paragraph', bbox: [0, 20, 500, 120], text: '', section: 'sec-2', sentences: ['p2.s1', 'p2.s2', 'p2.s3', 'p2.s4'] },
+    {
+      id: 'p2.b2',
+      page: 2,
+      type: 'paragraph',
+      bbox: [0, 20, 500, 120],
+      text: '',
+      section: 'sec-2',
+      sentences: ['p2.s1', 'p2.s2', 'p2.s3', 'p2.s4'],
+    },
     { id: 'p2.b3', page: 2, type: 'equation', bbox: [0, 130, 300, 150], text: 'y = softmax(QK)V', sentences: [] },
   ],
   sentences: Object.keys(texts).map(sentence),
   figures: [
-    { id: 'fig1', kind: 'figure', number: '1', page: 1, bbox: [0, 200, 400, 500], caption: 'The pipeline', image: 'figures/fig1.png', panels: [{ id: 'fig1.a', bbox: [0, 200, 200, 500], label: '(a)' }], referenced_by: ['p1.s4'] },
-    { id: 'tab1', kind: 'table', number: '1', page: 2, bbox: [0, 300, 400, 400], caption: 'Accuracy results', image: 'figures/tab1.png', panels: [], referenced_by: ['p2.s2'] },
+    {
+      id: 'fig1',
+      kind: 'figure',
+      number: '1',
+      page: 1,
+      bbox: [0, 200, 400, 500],
+      caption: 'The pipeline',
+      image: 'figures/fig1.png',
+      panels: [{ id: 'fig1.a', bbox: [0, 200, 200, 500], label: '(a)' }],
+      referenced_by: ['p1.s4'],
+    },
+    {
+      id: 'tab1',
+      kind: 'table',
+      number: '1',
+      page: 2,
+      bbox: [0, 300, 400, 400],
+      caption: 'Accuracy results',
+      image: 'figures/tab1.png',
+      panels: [],
+      referenced_by: ['p2.s2'],
+    },
   ],
   equations: [{ id: 'eq1', number: '1', page: 2, bbox: [0, 130, 300, 150], block: 'p2.b3', text: 'y = softmax(QK)V' }],
 };
@@ -62,8 +118,16 @@ const images: TourImage[] = [
 const input: TourGenerationInput = { documentId: 'doc-test', analysisId: 'analysis-test', doc, images };
 const card = {
   plan: 'p',
+  doc_type: 'research_paper' as const,
   title: 'Tutoring with pointers',
-  chapter_titles: { problem: 'Problem', idea: 'Idea', method: 'How it works', evidence: 'Evidence', limits: 'Limits', takeaway: 'Takeaway' },
+  chapter_titles: {
+    problem: 'Problem',
+    idea: 'Idea',
+    method: 'How it works',
+    evidence: 'Evidence',
+    limits: 'Limits',
+    takeaway: 'Takeaway',
+  },
   problem: { text: 'Reading papers alone is hard.', evidence: ['p1.s1'] },
   key_idea: { text: 'A tutor points at the page while it explains.', evidence: ['p1.s2'] },
   method_steps: [
@@ -80,7 +144,8 @@ const card = {
   takeaway: { text: 'Short tours that point teach better.', evidence: ['p2.s4'] },
   suggested_questions: ['Why IDs?', 'How short is a tour?', 'What still fails?'],
 };
-const SAY = 'This step explains the point clearly so that a student can follow every part of it while the page moves along.';
+const SAY =
+  'This step explains the point clearly so that a student can follow every part of it while the page moves along.';
 
 function reply(value: unknown, status = 200) {
   return new Response(
@@ -96,9 +161,14 @@ function provider(fn: (request: Request) => Response | unknown): typeof fetch {
   return (async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     // The whole conversation, so a repair turn still shows which beat it repairs.
-    const text = (content: any) => (typeof content === 'string' ? content : content.map((p: any) => p.text ?? '').join('\n'));
+    const text = (content: any) =>
+      typeof content === 'string' ? content : content.map((p: any) => p.text ?? '').join('\n');
     const task = body.messages.map((m: any) => text(m.content)).join('\n');
-    const result = fn({ name: body.response_format.json_schema.name, schema: body.response_format.json_schema.schema, task });
+    const result = fn({
+      name: body.response_format.json_schema.name,
+      schema: body.response_format.json_schema.schema,
+      task,
+    });
     return result instanceof Response ? result : reply(result);
   }) as typeof fetch;
 }
@@ -114,7 +184,11 @@ const steps = (tour: { chapters: { steps: Step[] }[] }) => tour.chapters.flatMap
 
 test('a standard tour follows the argument in a handful of steps and ends with questions', async () => {
   const names: string[] = [];
-  const generator = new HarnessTourGenerator(settings, 'standard', provider((r) => (names.push(r.name), goodModel(r))));
+  const generator = new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider((r) => (names.push(r.name), goodModel(r))),
+  );
   const { tour, metadata } = await generator.generate(input);
   const all = steps(tour);
   assert.ok(all.length >= 6 && all.length <= 12, `${all.length} steps`);
@@ -173,7 +247,10 @@ test('cues outside the beat are dropped, the rest of the step is kept', async ()
   );
   const problem = steps((await generator.generate(input)).tour)[0];
   const highlights = problem.actions.filter((a) => a.type === 'highlight');
-  assert.deepEqual(highlights.map((a) => (a.type === 'highlight' ? a.targets : [])), [['p1.s1']]);
+  assert.deepEqual(
+    highlights.map((a) => (a.type === 'highlight' ? a.targets : [])),
+    [['p1.s1']],
+  );
   assert.ok(!problem.actions.some((a) => a.type === 'box'));
 });
 

@@ -1,6 +1,7 @@
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { Doc, DocSentence } from '../../../shared/paper';
 import type { MuseMessage } from '../muse/client';
+import { DOC_TYPES, guessType, type DocType } from './doctype';
 import { proseSentences } from './paper-block';
 
 export interface CardItem {
@@ -15,6 +16,8 @@ export const ARCS = ['problem', 'idea', 'method', 'evidence', 'limits', 'takeawa
 export type Arc = (typeof ARCS)[number];
 export interface PaperCard {
   plan: string;
+  /** What kind of document this is; it chooses the tour's arc, tone and board use. */
+  doc_type: DocType;
   title: string;
   chapter_titles: Record<Arc, string>;
   problem: CardItem;
@@ -43,7 +46,8 @@ const CLAIM_RE =
 export function evidencePool(doc: Doc, max = 900): DocSentence[] {
   const prose = proseSentences(doc);
   if (prose.length <= max) return prose;
-  const score = (s: DocSentence, i: number) => (i < 80 ? 2 : 0) + (CLAIM_RE.test(s.text) ? 1 : 0) + (/\d/.test(s.text) ? 1 : 0);
+  const score = (s: DocSentence, i: number) =>
+    (i < 80 ? 2 : 0) + (CLAIM_RE.test(s.text) ? 1 : 0) + (/\d/.test(s.text) ? 1 : 0);
   const keep = new Set(
     prose
       .map((s, i) => ({ s, k: score(s, i), i }))
@@ -83,11 +87,23 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
     type: 'object',
     additionalProperties: false,
     required: [
-      'plan', 'title', 'chapter_titles', 'problem', 'key_idea', 'method_steps', 'key_figures', 'key_formulas',
-      'results', 'limitations', 'takeaway', 'suggested_questions',
+      'plan',
+      'doc_type',
+      'title',
+      'chapter_titles',
+      'problem',
+      'key_idea',
+      'method_steps',
+      'key_figures',
+      'key_formulas',
+      'results',
+      'limitations',
+      'takeaway',
+      'suggested_questions',
     ],
     properties: {
       plan: { type: 'string', maxLength: 1200 },
+      doc_type: { type: 'string', enum: DOC_TYPES },
       title: short,
       chapter_titles: {
         type: 'object',
@@ -98,12 +114,23 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
       problem: item,
       key_idea: item,
       method_steps: { type: 'array', minItems: 1, maxItems: 4, items: item },
-      key_figures: ref(doc.figures.map((f) => f.id), 3),
-      key_formulas: ref(doc.equations.map((e) => e.id), 2),
+      key_figures: ref(
+        doc.figures.map((f) => f.id),
+        3,
+      ),
+      key_formulas: ref(
+        doc.equations.map((e) => e.id),
+        2,
+      ),
       results: { type: 'array', maxItems: 3, items: item },
       limitations: { type: 'array', maxItems: 2, items: item },
       takeaway: item,
-      suggested_questions: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'string', minLength: 1, maxLength: 160 } },
+      suggested_questions: {
+        type: 'array',
+        minItems: 3,
+        maxItems: 3,
+        items: { type: 'string', minLength: 1, maxLength: 160 },
+      },
     },
   };
 }
@@ -131,11 +158,17 @@ export function repairTurn(previous: unknown, problems: string[]): MuseMessage[]
 export function fallbackCard(doc: Doc): PaperCard {
   const prose = proseSentences(doc);
   const pick = (re: RegExp, from = 0) => prose.slice(from).find((s) => re.test(s.text)) ?? prose[from] ?? prose[0];
-  const one = (s: DocSentence | undefined): CardItem => ({ text: s?.text.slice(0, 300) ?? '', evidence: s ? [s.id] : [] });
+  const one = (s: DocSentence | undefined): CardItem => ({
+    text: s?.text.slice(0, 300) ?? '',
+    evidence: s ? [s.id] : [],
+  });
   const idea = pick(/\b(we (propose|introduce|present)|in this (paper|work))/i);
-  const conclusion = prose.length ? pick(/\b(conclu|in summary|we (have )?(shown|presented))/i, Math.floor(prose.length * 0.7)) : undefined;
+  const conclusion = prose.length
+    ? pick(/\b(conclu|in summary|we (have )?(shown|presented))/i, Math.floor(prose.length * 0.7))
+    : undefined;
   return {
     plan: 'fallback',
+    doc_type: guessType(doc),
     title: (doc.source.title ?? 'A guided tour').slice(0, 80),
     chapter_titles: { ...DEFAULT_CHAPTERS },
     problem: one(prose[0]),
@@ -155,12 +188,16 @@ export function cleanCard(card: PaperCard, doc: Doc): PaperCard {
   const sentences = new Set(doc.sentences.map((s) => s.id));
   const figures = new Set(doc.figures.map((f) => f.id));
   const equations = new Set(doc.equations.map((e) => e.id));
-  const item = (i: CardItem): CardItem => ({ text: i.text.trim(), evidence: [...new Set(i.evidence)].filter((id) => sentences.has(id)) });
+  const item = (i: CardItem): CardItem => ({
+    text: i.text.trim(),
+    evidence: [...new Set(i.evidence)].filter((id) => sentences.has(id)),
+  });
   const items = (list: CardItem[]) => list.map(item).filter((i) => i.text && i.evidence.length);
   const refs = (list: CardRef[], known: Set<string>) =>
     list.filter((r, i) => known.has(r.id) && list.findIndex((o) => o.id === r.id) === i);
   return {
     ...card,
+    doc_type: DOC_TYPES.includes(card.doc_type) ? card.doc_type : guessType(doc),
     chapter_titles: { ...DEFAULT_CHAPTERS, ...card.chapter_titles },
     problem: item(card.problem),
     key_idea: item(card.key_idea),
@@ -170,6 +207,9 @@ export function cleanCard(card: PaperCard, doc: Doc): PaperCard {
     results: items(card.results),
     limitations: items(card.limitations),
     takeaway: item(card.takeaway),
-    suggested_questions: card.suggested_questions.map((q) => q.trim()).filter(Boolean).slice(0, 3),
+    suggested_questions: card.suggested_questions
+      .map((q) => q.trim())
+      .filter(Boolean)
+      .slice(0, 3),
   };
 }

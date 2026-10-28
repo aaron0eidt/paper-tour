@@ -13,9 +13,9 @@ import {
 } from '../../../shared/paper';
 import { ROOT } from '../config';
 import { indexElements } from '../elements';
-import type { Beat, BeatKind, Preset } from './beats';
+import type { Beat, BeatKind, Preset, TourPlan } from './beats';
 import { boardParts } from './board';
-import { ARCS, type PaperCard } from './card';
+import type { PaperCard } from './card';
 import { boardPart, regionOf, type BeatTargets, type Direction } from './direct';
 
 /** At most this many marks (boxes, arrows, circles) on one figure: one or two that name the parts beat many boxes. */
@@ -34,6 +34,9 @@ const COLORS: Record<BeatKind, Color> = {
   result: 'green',
   limitation: 'orange',
   takeaway: 'yellow',
+  overview: 'yellow',
+  point: 'blue',
+  exercise: 'blue',
 };
 
 /**
@@ -81,13 +84,21 @@ function elementName(beat: Beat, doc: Doc): string {
 }
 
 /** One tour step from a beat and its direction; without a direction, the card's own words with a single pointer. */
-export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction | null, doc: Doc, used: Set<string>): Step {
+export function beatStep(
+  beat: Beat,
+  targets: BeatTargets,
+  direction: Direction | null,
+  doc: Doc,
+  used: Set<string>,
+): Step {
   const name = elementName(beat, doc);
   const say = direction?.say ?? (name ? `Let's look at ${name}. ${beat.point}` : beat.point);
   const words = splitWords(say).length;
   const color = markColor(beat);
   const board = direction?.board;
-  const actions: Action[] = [beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: beat.evidence[0] }];
+  const actions: Action[] = [
+    beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: beat.evidence[0] },
+  ];
   // The board item appears with the step; a formula step also outlines its equation on the page.
   if (board) actions.push({ type: 'board', item: board });
   if (beat.kind === 'formula' && beat.target) actions.push({ type: 'box', target: beat.target, color });
@@ -103,7 +114,7 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
       if (highlights >= 2 || used.has(cue.target)) continue;
       highlights++;
       used.add(cue.target);
-      actions.push({ type: 'highlight', targets: [cue.target], color: COLORS[beat.kind], ...timing });
+      actions.push({ type: 'highlight', targets: [cue.target], color: beat.tint ?? COLORS[beat.kind], ...timing });
     } else if (cue.action === 'board_focus') {
       // A part lights up when the narration names it: never without its board or anchor, nor twice in a row or at once.
       const part = board ? boardPart(board, cue.target) : -1;
@@ -131,7 +142,7 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
     const first = beat.evidence.find((id) => !used.has(id) && targets.sentences.includes(id));
     if (first) {
       used.add(first);
-      actions.push({ type: 'highlight', targets: [first], color: COLORS[beat.kind] });
+      actions.push({ type: 'highlight', targets: [first], color: beat.tint ?? COLORS[beat.kind] });
     }
   }
   const marked = actions.some((a) => ['box', 'arrow', 'circle', 'spotlight', 'note'].includes(a.type));
@@ -155,27 +166,51 @@ function boardSettler() {
   };
 }
 
+/**
+ * A sentence the tour opens and closes with, such as a contract's "this is not legal advice": it leads the first step,
+ * whose cues move on by its words, and ends the last.
+ */
+export function frameSteps(steps: Step[][], frame: string): Step[][] {
+  const out = steps.map((list) => [...list]);
+  const firstBeat = out.findIndex((list) => list.length);
+  if (firstBeat < 0 || !frame.trim()) return out;
+  const shift = splitWords(frame).length;
+  const first = out[firstBeat][0];
+  out[firstBeat][0] = {
+    ...first,
+    say: `${frame} ${first.say}`,
+    actions: first.actions.map((a) => (isCamera(a) ? a : { ...a, at_word: (a.at_word ?? 0) + shift })),
+  };
+  const lastBeat = out.length - 1 - [...out].reverse().findIndex((list) => list.length);
+  const last = out[lastBeat].at(-1)!;
+  out[lastBeat][out[lastBeat].length - 1] = { ...last, say: `${last.say} ${frame}` };
+  return out;
+}
+
+/** The tour from its plan: each chapter's steps in order (an exercise beat gives several), with board hygiene. */
 export function assembleTour(
   card: PaperCard,
-  beats: Beat[],
-  steps: Step[],
+  plan: TourPlan,
+  steps: Step[][],
   doc: Doc,
   documentId: string,
   language: string,
   preset: Preset,
 ): Tour {
   const settle = boardSettler();
-  const chapters = ARCS.map((arc) => ({
-    id: arc,
-    title: card.chapter_titles[arc],
-    steps: beats.flatMap((beat, i) => (beat.arc === arc ? [settle(steps[i])] : [])),
-  })).filter((chapter) => chapter.steps.length);
+  const chapters = plan.chapters
+    .map((chapter) => ({
+      id: chapter.id,
+      title: chapter.title,
+      steps: plan.beats.flatMap((beat, i) => (beat.arc === chapter.id ? steps[i].map(settle) : [])),
+    }))
+    .filter((chapter) => chapter.steps.length);
   return {
     schema: 'paper-tour/tour@0.1',
     title: card.title,
     paper: documentId,
     doc_sha256: doc.source.sha256,
-    level: 'grad',
+    level: plan.type === 'research_paper' ? 'grad' : 'intro',
     voices: { host: { lang: language, rate: 1 } },
     chapters,
     preset,
@@ -198,9 +233,17 @@ export function tourProblems(tour: Tour, doc: Doc): string[] {
   for (const step of tour.chapters.flatMap((c) => c.steps)) {
     const words = splitWords(step.say).length;
     for (const action of step.actions) {
-      const used = 'target' in action ? [action.target] : 'targets' in action ? action.targets : 'anchor' in action ? [action.anchor] : [];
+      const used =
+        'target' in action
+          ? [action.target]
+          : 'targets' in action
+            ? action.targets
+            : 'anchor' in action
+              ? [action.anchor]
+              : [];
       for (const id of used) if (!ids.has(id)) problems.push(`${step.id}: unknown element ${id}`);
-      if (action.at_word !== undefined && action.at_word >= words) problems.push(`${step.id}: at_word past the narration`);
+      if (action.at_word !== undefined && action.at_word >= words)
+        problems.push(`${step.id}: at_word past the narration`);
       const region = 'region' in action ? action.region : undefined;
       if (region && !(region[2] > region[0] && region[3] > region[1])) problems.push(`${step.id}: region without area`);
     }

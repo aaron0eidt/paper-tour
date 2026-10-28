@@ -286,6 +286,70 @@ class ExerciseTests(unittest.TestCase):
         self.assertIn("(5 Punkte)", [self.text(i) for i in ex["blocks"]])
         self.assert_valid()
 
+    def test_points_wrapped_onto_the_next_line(self):
+        """"(2 Punkte)" broken after its number, as a justified line often breaks it."""
+        def page(p):
+            write(p, 72, 80, "Übungsblatt 2", size=16, font="tibo")
+            write(p, 72, 120, "Aufgabe 1 (4 Punkte)", size=11, font="tibo")
+            write(p, 72, 138, "Gegeben ist die Gleichung 3x - 7 = 2x + 5.")
+            write(p, 72, 156, "a) Lösen Sie die Gleichung nach x auf. (2 Punkte)")
+            write(p, 72, 174, "b) Machen Sie die Probe, indem Sie Ihr Ergebnis in beide Seiten der Gleichung (2")
+            write(p, 86, 188, "Punkte)")
+        doc = self.ingest(page)
+        self.assertEqual([(p["id"], p.get("points")) for p in doc["exercises"][0]["parts"]], [("ex1.a", 2), ("ex1.b", 2)])
+        self.assert_valid()
+
+    def test_a_bracketed_title_makes_the_rest_of_the_line_the_statement(self):
+        """"Problem 2. (Simplifying, 4 points) Simplify the expression" above a display formula: the title is
+        "Simplifying", and "Simplify the expression" is where the statement starts."""
+        def page(p):
+            write(p, 72, 80, "Homework 5", size=16, font="tibo")
+            for k, line in enumerate(("Hand in your solutions at the start of the lecture on Monday, written clearly and",
+                                      "in full sentences. Show every step of your work and justify each of your answers,",
+                                      "since answers without a justification receive no credit, even when they are right.")):
+                write(p, 72, 100 + 14 * k, line)
+            run_in(p, 72, 160, "Problem 1.", "(Derivatives, 6 points) Let f(x) = x^3 - 6x^2 + 9x + 1 for every real")
+            write(p, 72, 174, "number x, and write f' for its derivative, which exists everywhere on the real line.")
+            write(p, 80, 192, "(a) Compute the derivative of f.")
+            run_in(p, 72, 222, "Problem 2.", "(Simplifying, 4 points) Simplify the expression")
+            write(p, 250, 244, "(x^2 - 9) / (x - 3)")
+            write(p, 72, 266, "for x other than 3, and evaluate the result at x = 5.")
+        doc = self.ingest(page)
+        self.assertEqual([(e["id"], e.get("title"), e.get("points")) for e in doc["exercises"]],
+                         [("ex1", "Derivatives", 6), ("ex2", "Simplifying", 4)])
+        self.assertTrue(self.text(doc["exercises"][1]["block"]).startswith("Problem 2. (Simplifying, 4 points) Simplify"))
+        self.assert_valid()
+
+    def test_task_labels_in_a_lecture_are_no_tasks(self):
+        """A lecture on transfer learning labels the sides of each diagram "Task 1" and "Task 2": a number twice on
+        one page, or three times in a document, is a label. A problem set's bare "Problem 1", "Problem 2" stay."""
+        def diagram(p):
+            write(p, 72, 80, "Transfer learning", size=20, font="tibo")
+            for y in (160, 320):
+                write(p, 90, y, "Task 1", size=14, font="tibo")
+                write(p, 90, y + 18, "Source domain")
+                write(p, 330, y, "Task 2", size=14, font="tibo")
+                write(p, 330, y + 18, "Target domain")
+
+        def summary(p):
+            write(p, 72, 80, "Settings", size=20, font="tibo")
+            for i, (y, text) in enumerate(((150, "Same inputs, new labels"), (230, "New inputs, same labels"),
+                                           (310, "Both change"))):
+                write(p, 90, y, f"Task {i + 1}", size=14, font="tibo")
+                write(p, 90, y + 18, text)
+
+        path = self.build(diagram, summary, name="lecture")
+        self.assertNotIn('"exercises"', self.run_ingest(path))
+
+        def problems(p):
+            write(p, 72, 80, "Problem Set 2", size=18)
+            write(p, 72, 130, "Problem 1", size=12, font="tibo")
+            write(p, 72, 150, "Show that the sum of two even numbers is even.")
+            write(p, 72, 190, "Problem 2", size=12, font="tibo")
+            write(p, 72, 210, "Find all real x with x^2 = 4.")
+        doc = self.ingest(problems, name="problems")
+        self.assertEqual([e["id"] for e in doc["exercises"]], ["ex1", "ex2"])
+
     def test_task_across_a_page_break(self):
         def first(p):
             write(p, 72, 40, "Analysis I - Blatt 2", size=9)

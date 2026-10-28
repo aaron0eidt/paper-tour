@@ -271,8 +271,18 @@ function arrowHead(tipX: number, tipY: number, ux: number, uy: number): string {
   return `M${pt(bx + px, by + py)} L${pt(tipX, tipY)} L${pt(bx - px, by - py)}`;
 }
 
-/** A forward edge leaves the source's far side for the target's near side; a back edge loops beside both. */
-function edgePath(a: FlowNodeBox, b: FlowNodeBox, vertical: boolean, forward: boolean): Omit<FlowEdgePath, 'from' | 'to'> {
+/**
+ * A forward edge leaves the source's far side for the target's near side; a back edge loops beside
+ * both, out past `clear`: the furthest right (or, across the board, the lowest) edge of the boxes
+ * in the ranks it passes, so it never runs through one of them.
+ */
+function edgePath(
+  a: FlowNodeBox,
+  b: FlowNodeBox,
+  vertical: boolean,
+  forward: boolean,
+  clear = -Infinity,
+): Omit<FlowEdgePath, 'from' | 'to'> {
   if (forward && vertical) {
     const [sx, sy, ex, ey] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y - FLOW_GAP];
     const k = Math.max(10, (ey - sy) / 2);
@@ -283,20 +293,48 @@ function edgePath(a: FlowNodeBox, b: FlowNodeBox, vertical: boolean, forward: bo
     const k = Math.max(10, (ex - sx) / 2);
     return { d: `M${pt(sx, sy)} C${pt(sx + k, sy)} ${pt(ex - k, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 1, 0) };
   }
+  // Both handles at one offset C: the curve's furthest point, at its middle, is (s + e) / 8 + 0.75 C,
+  // which is set to lie FLOW_LOOP * 0.75 beyond the boxes it passes.
+  const handle = (s: number, e: number, edge: number) => (Math.max(s, e, edge) + 0.75 * FLOW_LOOP - (s + e) / 8) / 0.75;
   if (vertical) {
     const [sx, sy, ex, ey] = [a.x + a.w, a.y + a.h / 2, b.x + b.w + FLOW_GAP, b.y + b.h / 2];
-    const loop = FLOW_LOOP + Math.max(0, sx - ex);
-    return { d: `M${pt(sx, sy)} C${pt(sx + loop, sy)} ${pt(ex + loop, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, -1, 0) };
+    const c = handle(sx, ex, clear);
+    return { d: `M${pt(sx, sy)} C${pt(c, sy)} ${pt(c, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, -1, 0) };
   }
   const [sx, sy, ex, ey] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y + b.h + FLOW_GAP];
-  const loop = FLOW_LOOP + Math.max(0, sy - ey);
-  return { d: `M${pt(sx, sy)} C${pt(sx, sy + loop)} ${pt(ex, ey + loop)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, -1) };
+  const c = handle(sy, ey, clear);
+  return { d: `M${pt(sx, sy)} C${pt(sx, c)} ${pt(ex, c)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, -1) };
+}
+
+/**
+ * An edge between two boxes of one rank (listed against the flow, so flowLayout could not put a
+ * rank between them): straight across the gap between their lanes.
+ */
+function laneEdge(a: FlowNodeBox, b: FlowNodeBox, vertical: boolean): Omit<FlowEdgePath, 'from' | 'to'> {
+  if (vertical) {
+    const right = b.x > a.x;
+    const [sx, ex] = right ? [a.x + a.w, b.x - FLOW_GAP] : [a.x, b.x + b.w + FLOW_GAP];
+    const [sy, ey] = [a.y + a.h / 2, b.y + b.h / 2];
+    return { d: `M${pt(sx, sy)} L${pt(ex, ey)}`, head: arrowHead(ex, ey, right ? 1 : -1, 0) };
+  }
+  const down = b.y > a.y;
+  const [sx, ex] = [a.x + a.w / 2, b.x + b.w / 2];
+  const [sy, ey] = down ? [a.y + a.h, b.y - FLOW_GAP] : [a.y, b.y + b.h + FLOW_GAP];
+  return { d: `M${pt(sx, sy)} L${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, down ? 1 : -1) };
+}
+
+/** A forward edge running right to left: from the source's left side to the target's right side. */
+function leftwardEdge(a: FlowNodeBox, b: FlowNodeBox): Omit<FlowEdgePath, 'from' | 'to'> {
+  const [sx, sy, ex, ey] = [a.x, a.y + a.h / 2, b.x + b.w + FLOW_GAP, b.y + b.h / 2];
+  const k = Math.max(10, (sx - ex) / 2);
+  return { d: `M${pt(sx, sy)} C${pt(sx - k, sy)} ${pt(ex + k, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, -1, 0) };
 }
 
 /**
  * Where a flow's boxes and arrows go in a board of `box` px: ranks from flowLayout run along the
  * board's long side, so a tall side panel stacks them and a wide one lines them up. Both ways are
  * laid out and the one that needs less shrinking wins; when both fit, the one shaped like the board.
+ * A chain that fits neither way (a short, wide board under the stage) winds into rows instead.
  */
 export function flowGeometry(item: FlowItem, box: { width: number; height: number }, measure: Measure): FlowGeometry {
   const place = flowLayout(item);
@@ -307,7 +345,8 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
   const lines = item.nodes.map((n) => wrapLabel(n.label, w - 2 * FLOW_PAD.x, measure));
   const heights = lines.map((l) => l.length * FLOW_LINE + 2 * FLOW_PAD.y);
   const forward = item.edges.map(([a, b]) => place[index.get(b)!][0] > place[index.get(a)!][0]);
-  const loops = forward.some((f) => !f) ? FLOW_LOOP : 0;
+  // Room beside the boxes for edges that loop back to an earlier rank.
+  const loops = item.edges.some(([a, b]) => place[index.get(b)!][0] < place[index.get(a)!][0]) ? FLOW_LOOP : 0;
 
   const build = (vertical: boolean): FlowGeometry => {
     const nodes: FlowNodeBox[] = new Array(item.nodes.length);
@@ -347,15 +386,64 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
     const edges = item.edges.map(([a, b], e) => {
       const from = index.get(a)!;
       const to = index.get(b)!;
-      return { from, to, ...edgePath(nodes[from], nodes[to], vertical, forward[e]) };
+      const [lo, hi] = [place[to][0], place[from][0]];
+      if (lo === hi) return { from, to, ...laneEdge(nodes[from], nodes[to], vertical) };
+      // The boxes a back edge passes: those in its ranks, which may stand wider than its own two.
+      const passed = nodes.filter((_, i) => place[i][0] >= lo && place[i][0] <= hi);
+      const clear = Math.max(...passed.map((n) => (vertical ? n.x + n.w : n.y + n.h)));
+      return { from, to, ...edgePath(nodes[from], nodes[to], vertical, forward[e], clear) };
     });
     const scale = Math.min(1, box.width / width, box.height / height);
     return { width, height, scale, vertical, nodes, edges };
   };
 
+  // A chain (one box per rank, each arrow to the next) can also wind down the board in rows of
+  // `per` boxes, left to right, then right to left below, like a path down a page.
+  const wind = (per: number): FlowGeometry => {
+    const [gapX, gapY] = [FLOW_RANK_GAP.horizontal[0], FLOW_RANK_GAP.vertical[0]];
+    const rows = Array.from({ length: Math.ceil(ranks / per) }, (_, r) =>
+      inRank.slice(r * per, r * per + per).map(([i]) => i),
+    );
+    const rowH = rows.map((ids) => Math.max(...ids.map((i) => heights[i])));
+    const width = per * w + (per - 1) * gapX + 2 * FLOW_MARGIN;
+    const height = rowH.reduce((s, d) => s + d, 0) + (rows.length - 1) * gapY + 2 * FLOW_MARGIN;
+    const nodes: FlowNodeBox[] = new Array(item.nodes.length);
+    let y = FLOW_MARGIN;
+    rows.forEach((ids, r) => {
+      ids.forEach((i, c) => {
+        const x = FLOW_MARGIN + (r % 2 ? per - 1 - c : c) * (w + gapX);
+        nodes[i] = { x, y: y + (rowH[r] - heights[i]) / 2, w, h: heights[i], lines: lines[i] };
+      });
+      y += rowH[r] + gapY;
+    });
+    const edges = item.edges.map(([a, b]) => {
+      const [from, to] = [index.get(a)!, index.get(b)!];
+      const row = Math.floor(place[from][0] / per);
+      // Down at the end of a row (the next box is right below), else along the row's direction.
+      const path =
+        row !== Math.floor(place[to][0] / per)
+          ? edgePath(nodes[from], nodes[to], true, true)
+          : row % 2
+            ? leftwardEdge(nodes[from], nodes[to])
+            : edgePath(nodes[from], nodes[to], false, true);
+      return { from, to, ...path };
+    });
+    return { width, height, scale: Math.min(1, box.width / width, box.height / height), vertical: true, nodes, edges };
+  };
+
   const v = build(true);
   const h = build(false);
-  const best = Math.abs(v.scale - h.scale) > 0.001 ? (v.scale > h.scale ? v : h) : box.height >= box.width ? v : h;
+  let best = Math.abs(v.scale - h.scale) > 0.001 ? (v.scale > h.scale ? v : h) : box.height >= box.width ? v : h;
+  const chain =
+    inRank.every((ids) => ids.length === 1) &&
+    item.edges.every(([a, b]) => place[index.get(b)!][0] === place[index.get(a)!][0] + 1);
+  // Winding only when it clearly beats shrinking, and with the fewest turns that does.
+  if (chain && best.scale < 1) {
+    for (let per = ranks - 1; per >= 2; per--) {
+      const wound = wind(per);
+      if (wound.scale > best.scale + 0.04) best = wound;
+    }
+  }
   // Labels stay readable: a flow that would shrink further scrolls on the board instead.
   return { ...best, scale: Math.max(FLOW_MIN_SCALE, best.scale) };
 }
@@ -411,21 +499,31 @@ export interface BarsLayout {
 
 /** Bars are this thick: thin marks, with air between rows. */
 export const BAR_THICKNESS = 12;
-const BAR_PITCH = { beside: 34, above: 50 };
+// Row pitch [tightest, roomiest]: rows close up towards the tightest on a short board.
+const BAR_PITCH = { beside: [26, 34], above: [40, 50] };
 const BAR_LABEL_GAP = 14;
 const BAR_VALUE_GAP = 8;
+// Room past the longest value for its last glyph's overhang, so the board never clips or scrolls it.
+const BAR_VALUE_SLACK = 2;
 // Beside a label column the bars must keep this share of the width, else the labels go above them.
 const BAR_MIN_TRACK = 0.55;
 
 /**
- * Horizontal bars from a shared zero line, in a board `width` px wide. `labelWidths` and
- * `valueWidths` are the measured texts (a value's width includes its badge, if it has one).
+ * Horizontal bars from a shared zero line, in a board `width` px wide and, when given, `height`
+ * px tall. `labelWidths` and `valueWidths` are the measured texts (a value's width includes its
+ * badge, if it has one).
  */
-export function barsLayout(item: BarsItem, width: number, labelWidths: number[], valueWidths: number[]): BarsLayout {
+export function barsLayout(
+  item: BarsItem,
+  width: number,
+  labelWidths: number[],
+  valueWidths: number[],
+  height = Infinity,
+): BarsLayout {
   const values = item.bars.map((b) => b.value);
   const lo = Math.min(0, ...values);
   const hi = Math.max(0, ...values);
-  const after = Math.max(0, ...valueWidths.filter((_, i) => values[i] >= 0)) + BAR_VALUE_GAP;
+  const after = Math.max(0, ...valueWidths.filter((_, i) => values[i] >= 0)) + BAR_VALUE_GAP + BAR_VALUE_SLACK;
   const before = values.some((v) => v < 0) ? Math.max(...valueWidths.filter((_, i) => values[i] < 0)) + BAR_VALUE_GAP : 0;
   const column = Math.max(...labelWidths) + BAR_LABEL_GAP;
   const labelsAbove = width - column - before - after < width * BAR_MIN_TRACK;
@@ -433,8 +531,9 @@ export function barsLayout(item: BarsItem, width: number, labelWidths: number[],
   const end = Math.max(start + 1, width - after);
   const x = (v: number) => start + ((v - lo) / (hi - lo || 1)) * (end - start);
   const zeroX = x(0);
-  const pitch = labelsAbove ? BAR_PITCH.above : BAR_PITCH.beside;
   const top = labelsAbove ? 22 : 0;
+  const [tight, roomy] = labelsAbove ? BAR_PITCH.above : BAR_PITCH.beside;
+  const pitch = clamp((height - top - BAR_THICKNESS - 2) / Math.max(1, values.length - 1), tight, roomy);
   const rows = values.map((v, i): BarRow => {
     const y = top + i * pitch;
     const tip = x(v);

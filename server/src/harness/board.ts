@@ -176,9 +176,13 @@ function placeTerm(latex: string, bounds: boolean[], placed: Span[], term: strin
 /**
  * A formula the board builds term by term: KaTeX renders the LaTeX, every term is a complete symbol or group copied
  * from it that the board can colour (it may sit inside another term, never cut across one), and labels are short.
- * Colours stay unset, so the player's palette applies. Reusable for any board formula, such as one in an answer.
+ * Colours stay unset, so the player's palette applies. Reusable for any board formula, such as one in an answer; a
+ * line of a worked solution may light up a single term (`minTerms`).
  */
-export function checkFormula(raw: unknown): BoardCheck<FormulaItem> {
+export function checkFormula(
+  raw: unknown,
+  { minTerms = BOARD_LIMITS.terms[0] }: { minTerms?: number } = {},
+): BoardCheck<FormulaItem> {
   if (!isObj(raw)) return none();
   const latex = tidyLatex(raw.latex);
   const given = rows(raw.terms);
@@ -186,7 +190,7 @@ export function checkFormula(raw: unknown): BoardCheck<FormulaItem> {
   const problems: string[] = [];
   const error = latex ? (latex.length > 400 ? 'it is longer than 400 characters' : latexError(latex)) : 'it is empty';
   if (error) problems.push(`latex cannot be rendered: ${error}`);
-  const [fewest, most] = BOARD_LIMITS.terms;
+  const [fewest, most] = [minTerms, BOARD_LIMITS.terms[1]];
   if (given.length < fewest) problems.push(`give ${fewest} to ${most} terms`);
   const terms = given.slice(0, most).map((t) => ({ latex: locate(latex, text(t.latex)), label: text(t.label) }));
   const bounds = tokenBounds(latex);

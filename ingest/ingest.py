@@ -1959,7 +1959,10 @@ def task_heading(row, page, stats, paper_like):
     n = sum(w.nchars for w in rest_words)
     math = sum(w.math * w.nchars for w in rest_words) / n if n else 0.0
     short = row.bbox[2] < page.cols[row.cls][1] - 3 * row.size
-    title_like = (0 < len(core.split()) <= 8 and core[:1].isupper() and core[-1:] not in ".:;,!?"
+    # a title in the heading's own brackets ("Problem 2. (Simplifying, 4 points) Simplify ...") makes the rest
+    # of the line the statement
+    named = any(POINTS_RE.sub("", g).strip(" ,;") for g in split_groups(head)[1])
+    title_like = (not named and 0 < len(core.split()) <= 8 and core[:1].isupper() and core[-1:] not in ".:;,!?"
                   and not re.search(r"[:=]", core) and core.split()[0].lower() not in STATEMENT_WORDS and math < 0.2)
     own_line = not rest or all_bold(row) or large or (short and (title_like or points_only(core) is not None))
     plain, groups = split_groups(head + " " + rest if own_line else head)
@@ -1982,12 +1985,29 @@ def task_heading(row, page, stats, paper_like):
             "own_line": own_line, "score": score, "strong": kw_bold or large or points is not None}
 
 
+def label_words(found):
+    """Keywords that label things rather than tasks here: "Task 1" and "Task 2" on the source and target sides of
+    each diagram of a lecture. A task keyword never repeats a number on one page, nor prints one number three
+    times; the sheet words ("Aufgabe", "Exercise") and headings with points are always tasks."""
+    seen, out = Counter(), set()
+    for b, _, head in found:
+        kw = head["keyword"].lower()
+        if head["points"] is None and not kw.endswith(SHEET_WORDS):
+            seen[kw, b.page, head["number"]] += 1
+    numbers = Counter((kw, num) for kw, _, num in seen.elements())
+    for (kw, _, num), n in seen.items():
+        if n > 1 or numbers[kw, num] >= 3:
+            out.add(kw)
+    return out
+
+
 def mark_task_heads(pages, stats):
     """Set row.task on every task heading; True when the document is an exercise sheet.
 
     Runs before classification, which keeps task headings out of the title and the author lines. A
     heading inside a paragraph needs bold or larger type or points; in a document with an abstract or
-    references, "Problem", "Task" and "Question" also need points."""
+    references, "Problem", "Task" and "Question" also need points, and anywhere they need them when they
+    label several things (label_words)."""
     paper_like = any(r.horizontal and (ABSTRACT_RE.match(r.text)
                                        or r.text.strip().lower().rstrip(".:") in PAPER_HEADINGS)
                      for page in pages for r in page.rows)
@@ -2009,6 +2029,7 @@ def mark_task_heads(pages, stats):
         if (not others or all(f[2]["keyword"].lower() != kw for f in others)
                 or first[1].size > max(f[1].size for f in others) + 0.5):
             found.remove(first)
+    found = [f for f in found if f[2]["points"] is not None or f[2]["keyword"].lower() not in label_words(found)]
     for _, r, head in found:
         r.task = head
     return bool(found)
@@ -2161,8 +2182,9 @@ def settle_points(task, pages):
     by_page = {p.n: p for p in pages}
 
     def stated(lines):
-        for row, page in lines:
-            text = row.text
+        for row, page, before in lines:
+            # "(2" may end the line before: "... einsetzen. (2" / "Punkte)"
+            text = row.text if before is None else before.text + " " + row.text
             if text.endswith((")", "]")):
                 pts = points_only(text[text.rfind("(" if text.endswith(")") else "["):])
                 if pts is not None:
@@ -2172,19 +2194,22 @@ def settle_points(task, pages):
                 return pts
         return None
 
+    def last_line(block):
+        return block.rows[-1], block.page, block.rows[-2] if len(block.rows) > 1 else None
+
     def visit(part):
         for sub in part["parts"]:
             visit(sub)
         if part["points"] is None:
-            lines = [(part["row"], part["blocks"][0].page)]
+            lines = [(part["row"], part["blocks"][0].page, None)]
             if not part["parts"]:
-                lines.append((part["blocks"][-1].rows[-1], part["blocks"][-1].page))
+                lines.append(last_line(part["blocks"][-1]))
             part["points"] = stated(lines)
 
     for part in task["parts"]:
         visit(part)
     if task["head"]["points"] is None and not task["parts"]:
-        task["head"]["points"] = stated([(task["blocks"][-1].rows[-1], task["blocks"][-1].page)])
+        task["head"]["points"] = stated([last_line(task["blocks"][-1])])
 
 
 def exercise_records(tasks):
