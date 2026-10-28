@@ -47,9 +47,9 @@ steps. Its weak points are listed in [STATUS.md](STATUS.md) and are the first it
   `mkdir -p .data/tmp && TMPDIR=$PWD/.data/tmp npm run supabase:start`. Then `npm run dev` runs the web app (5174), the
   API (3001) and the worker. The worker does not reload on changes: restart `npm run dev` after server changes.
 - **Settings in the root `.env`** (see `.env.example`): `MODEL_API_KEY` for a shared Meta key (or add your own in
-  Profile & Settings), `TOUR_WRITER=harness` (the short-tour writer; `muse` brings back the earlier page-by-page
-  writer), `TOUR_PRESET=standard` (`quick`, `standard`, `deep`), `PAPER_AGENT_ENABLED=false` (Nikolas's agent, which
-  walks every page).
+  Profile & Settings), `TOUR_PRESET` (`quick`, `standard` or `deep`; the default is `deep`) and
+  `PAPER_AGENT_ENABLED=false` (Nikolas's agent, which walks every page). The earlier page-by-page writer and its
+  `TOUR_WRITER` setting are retired.
 - **A tour without the app:** ingest a PDF, then write the tour with the same generator the worker uses (real API
   calls, so it needs `MODEL_API_KEY`):
 
@@ -72,7 +72,7 @@ steps. Its weak points are listed in [STATUS.md](STATUS.md) and are the first it
 | `ingest/` | Python (PyMuPDF): `ingest.py` turns a PDF into doc.json (IDs and coordinates for sentences, blocks, sections, figures, panels, equations, exercise tasks); `process.py` runs it for uploads; `tour_assets.py` renders page and figure images; `verify_math.py` checks solution lines; `validate.py`, `outline.py`, `check_tour.py` are tools |
 | `schema/`, `shared/paper.ts` | The two contracts: doc.json and tour.json. A tour names elements by ID and never contains coordinates |
 | `server/src/harness/` | The short-tour writer. `generator.ts` runs the stages: understand the document (`card.ts`, `doctype.ts`), plan beats in code (`beats.ts`, `arcs.ts`, `exercise.ts`), direct every beat in parallel with small calls whose targets are limited to that beat (`direct.ts`, `prompts.ts`), assemble and validate in code (`assemble.ts`, `board.ts`). `ask.ts` answers questions |
-| `server/src/` | API routes (`app.ts`, `service.ts`; asking is `POST /api/documents/:id/ask`, plus `POST /api/demo/:paper/ask` in local development only), the worker, the Muse client (`muse/client.ts`), Nikolas's earlier writer (`muse/`) and agent (`agent/`) |
+| `server/src/` | API routes (`app.ts`, `service.ts`; asking is `POST /api/documents/:id/ask`, plus `POST /api/demo/:paper/ask` in local development only), the worker, model calls through the Vercel AI SDK (`ai/`, `generation/`, `muse/client.ts`) and Nikolas's agent (`agent/`) |
 | `player/src/` | The reader: `Reader.tsx`, the tour engine (`engine.ts`, with a board channel), target resolution and checks (`resolve.ts`), pen marks (`scene.ts`, `components/PageView.tsx`, `ScreenLayer.tsx`), the side board (`components/Board.tsx`, `board.ts`), asking (`ask/`), the library (`library/`) |
 | `notes/` | Plan, harness, status, use cases, names, and the review of the scaffold |
 
@@ -124,5 +124,5 @@ non-Meta services (a text-to-speech with word timings, a local OCR library) are 
 
 ## Working together
 
-Aaron sometimes has an AI assistant working on the repository too. Agree with him which part each of you takes, so two
-people (or agents) never edit the same files at the same time, and say in STATUS.md what you changed.
+Aaron sometimes has an AI assistant working on the repository too, so agree on who takes which part: two people (or
+agents) should never edit the same files at the same time. Say in STATUS.md what you changed.

@@ -12,7 +12,7 @@ import type { TourImage } from './src/tour-generator';
 import type { Doc } from '../shared/paper';
 
 const [preset = 'standard', out, folderArg = '../demo/attention', idArg, language] = process.argv.slice(2);
-if (!out) throw new Error('usage: scripts-local-run-harness.ts <preset> <out> [folder] [document id] [language]');
+if (!out) throw new Error('usage: run-tour.ts <preset> <out> [folder] [document id] [language]');
 const folder = resolve(folderArg);
 const doc = JSON.parse(readFileSync(resolve(folder, 'doc.json'), 'utf8')) as Doc;
 const pdf = resolve(folder, doc.source.file);

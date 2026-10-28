@@ -231,8 +231,8 @@ findings were confirmed and 2 refuted. All of them, with evidence and suggested 
 - **Short tours (done):** `server/src/harness/` replaces the page-by-page writer: a paper card, a beat plan by preset
   (quick about 6 steps, standard 10-12, deep up to 22, never more than 30), parallel beat direction, assembly and
   validation in code. Default via `TOUR_WRITER=harness`; `PAPER_AGENT_ENABLED` now defaults to false. A real standard
-  tour of the demo paper: 23 s, 11 steps, about $0.20. Run it locally with `server/scripts-local-run-harness.ts`
-  (git-excluded) and view it at `?paper=attention-short` (git-excluded folder).
+  tour of the demo paper: 23 s, 11 steps, about $0.20. Run it locally with `server/run-tour.ts` and view it at
+  `?paper=attention-short` (a local folder, set up as described below).
 - **Contract (done):** pen actions `arrow` and `circle`, and a side board (`board` with formula, flow or bars,
   `board_focus`, `board_clear`), in schema/tour.schema.json and shared/paper.ts; the engine tracks the board.
 - **Pen and board (done, 10-28):** hand-drawn arrows and circles on the page; a side board with a KaTeX formula
@@ -249,13 +249,13 @@ findings were confirmed and 2 refuted. All of them, with evidence and suggested 
 - **Checks:** player tsc and `npm test` (all suites), server tsc and tests (124 pass, 6 database tests skipped),
   ingest unittest, validate.py, and the re-ingested demo doc.json byte-identical.
 - **First unedited Attention run (10-28 09:57, real Meta API, the same generator as uploads):** 11 steps in 33 s,
-  12 model calls, no fallback beats. Watch it at http://localhost:5174/?paper=attention-short (git-excluded folder;
-  regenerate with `cd server && node --import tsx scripts-local-run-harness.ts standard <out> ../demo/attention
-  attention-short`, then copy `<out>/tour.json` into `demo/attention-short/`). Good: concise steps, highlights
-  everywhere, the formula built term by term with each term lit, results as bars, three good questions. Weak: pen
-  labels repeat names the figure already shows ("Encoder stack"), both figure steps redraw their figure as a flow
-  on the board, every method step uses a flow, no function plots yet, and the open ask panel covers the bottom of
-  the page.
+  12 model calls, no fallback beats. Watch it at http://localhost:5174/?paper=attention-short, a git-excluded folder
+  that links to the paper.pdf, doc.json and figures/ of `demo/attention/`. To regenerate it, run
+  `cd server && node --import tsx run-tour.ts standard <out> ../demo/attention attention-short` and copy
+  `<out>/tour.json` into `demo/attention-short/`. Good: concise steps, highlights everywhere, the formula built term
+  by term with each term lit, results as bars, three good questions. Weak: pen labels repeat names the figure
+  already shows ("Encoder stack"), both figure steps redraw their figure as a flow on the board, every method step
+  uses a flow, no function plots yet, and the open ask panel covers the bottom of the page.
 - **Test documents (local only, never commit):** 13 PDFs with a manifest in the session scratchpad
   (`.../scratchpad/night/docs/MANIFEST.md`): three CC BY arXiv papers (IEEE robotics, physics, biology), three maths
   sheets, MIT slides, two UK tenancy agreements, two versions of Google's terms, a German data-protection letter and
