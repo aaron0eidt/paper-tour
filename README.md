@@ -58,7 +58,8 @@ Player keys: `Space` play/pause, `←`/`→` previous/next step, `D` toggles the
 element in that mode to copy its ID). URL options: `?paper=<folder>`, `?silent=1` for timed narration
 without speech, `?rate=4` to run faster while testing. `npm test` in `player/` runs the engine tests.
 
-The plan, the current status and the open review findings are in `notes/`.
+New to the project? Start with [notes/HANDOFF.md](notes/HANDOFF.md): what the app does today, how to run it, how the
+parts fit together and what to build next. The plan, the current status and the review findings are in `notes/`.
 
 ## The contracts
 
