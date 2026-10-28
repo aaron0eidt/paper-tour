@@ -39,29 +39,45 @@ findings were confirmed and 2 refuted. All of them, with evidence and suggested 
   (git-excluded) and view it at `?paper=attention-short` (git-excluded folder).
 - **Contract (done):** pen actions `arrow` and `circle`, and a side board (`board` with formula, flow or bars,
   `board_focus`, `board_clear`), in schema/tour.schema.json and shared/paper.ts; the engine tracks the board.
-- **Built by five parallel agents, stopped before their reviews to save usage** (all type checks, server tests,
-  ingest tests and the demo identity check pass; one player test fails):
-  - Pen: arrows and circles drawn on the page (scene.ts, PageView.tsx, ScreenLayer.tsx, pen.css, test/pen.test.ts,
-    not yet in `npm test`). Test tour: `?paper=pen-test` (git-excluded folder).
-  - Board: KaTeX formula built term by term, flow and bars (components/Board.tsx, board.ts, board.css), placed by
-    Reader.tsx. `player/test/board.test.ts` fails on "a bar has a rounded tip away from zero and a square base on it",
-    which also stops the later player tests in the chain. Test tour: `?paper=board-test`.
-  - Writer: formula, flow and bars boards and pen cues in the harness (server/src/harness/board.ts and others,
-    test/harness-board.test.ts). Not yet run against the real API.
-  - Ask: `server/src/harness/ask.ts`, a route in app.ts/service.ts, test/ask.test.ts, and `player/src/ask/`
-    (AskPanel, api). Not yet wired into Reader.tsx.
-  - Exercises: exercise-sheet structure in doc.json (ingest.py, validate.py, outline.py, doc schema, shared/paper.ts,
-    test_exercises.py); papers ingest exactly as before.
-- None of the agents' work has been reviewed. Review each stream's diff before building on it.
+- **Pen and board (done, 10-28):** hand-drawn arrows and circles on the page; a side board with a KaTeX formula
+  built term by term, flows and bars, beside the page (below it on narrow screens). Test tours: `?paper=pen-test`
+  and `?paper=board-test` (git-excluded folders).
+- **Asking (done, 10-28):** the ask bar under the page; a question pauses the tour, the answer plays as a short
+  second tour on the same narrator, camera, pen and board, then "Back to the tour" or "Ask another"; suggested
+  questions at the end and follow-ups that use the history. Demo papers use `POST /api/demo/:paper/ask`, which
+  exists only in local development and answers only loopback requests.
+- **Document types (done, 10-28):** the card classifies the document (paper, exercise sheet, lecture, contract,
+  letter, other) and each type gets its own arc and tone. Exercise sheets are solved part by part, each line checked
+  numerically by `ingest/verify_math.py`, and unchecked lines are marked. Writer test runs: German sheet 19 steps,
+  lease 10, slides 6, calculus sheet 18.
+- **Checks:** player tsc and `npm test` (all suites), server tsc and tests (124 pass, 6 database tests skipped),
+  ingest unittest, validate.py, and the re-ingested demo doc.json byte-identical.
+- **First unedited Attention run (10-28 09:57, real Meta API, the same generator as uploads):** 11 steps in 33 s,
+  12 model calls, no fallback beats. Watch it at http://localhost:5174/?paper=attention-short (git-excluded folder;
+  regenerate with `cd server && node --import tsx scripts-local-run-harness.ts standard <out> ../demo/attention
+  attention-short`, then copy `<out>/tour.json` into `demo/attention-short/`). Good: concise steps, highlights
+  everywhere, the formula built term by term with each term lit, results as bars, three good questions. Weak: pen
+  labels repeat names the figure already shows ("Encoder stack"), both figure steps redraw their figure as a flow
+  on the board, every method step uses a flow, no function plots yet, and the open ask panel covers the bottom of
+  the page.
+- **Test documents (local only, never commit):** 13 PDFs with a manifest in the session scratchpad
+  (`.../scratchpad/night/docs/MANIFEST.md`): three CC BY arXiv papers (IEEE robotics, physics, biology), three maths
+  sheets, MIT slides, two UK tenancy agreements, two versions of Google's terms, a German data-protection letter and
+  the IRS W-9.
+- **Names:** notes/NAMES.md proposes Nib, Penlight and Lupe to replace "Paper Tour" (Aaron to choose).
 
-**Next, in order:**
-1. Fix the failing board test, add the pen test to `npm test`, and review the five streams' diffs.
-2. Wire AskPanel into Reader.tsx: pause the tour, play the answer as a short second tour on the same narrator,
-   camera, pen and board, then "back to the tour" or "ask another"; suggested questions at the end.
-3. Run a real tour on the demo paper with the board and pen, and look at it in the player.
-4. Push: main is ahead of origin with local commits (pull --rebase first).
-5. Then: push-to-talk with Muse Voice Transcribe, the formula deep dive on demand, exercise-sheet tutor mode, and the
-   use cases in USE-CASES.md (course packs, contracts, life admin).
+**Next, in order (Aaron's direction, 10-28):**
+1. Insight and no doubling: a pen label never repeats words printed at the mark (say what the part does or why it
+   matters); the board never redraws the figure on screen (show a worked example, a plot of the function, the
+   intuition); a flow only when it adds something. Enforce with code checks, not only prompts.
+2. Unpack equations: their parts plus small x/y plots of the functions used, through a new `plot` board kind with a
+   safe expression grammar shared by server and player; a Manim prototype for the rare clip that needs more.
+3. Narrate in the document's language.
+4. Upload the test documents through the app and fix general causes; never tune to one document.
+5. The ask panel must not cover the page; retarget the camera during the board slide instead of restarting it; a
+   usable landscape phone layout.
+6. Push to GitHub (ask Aaron; main is ahead of origin, pull --rebase first).
+7. Later: push-to-talk with Muse Voice Transcribe, course packs, contracts with "what changed", life admin.
 
 **Running the static demo:** after the README quick start, `npm run dev` in `player/` (or `npm run dev:demo` from the
 root), then open http://localhost:5174/?paper=attention. Add `&silent=1&rate=4` to test quickly without speech.
