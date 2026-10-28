@@ -301,3 +301,28 @@ Give it a temp folder inside the repo instead: `mkdir -p .data/tmp && TMPDIR=$PW
 - Retry progress and model-call counters use only the latest run; drafted-step counts use completed beats,
   not every draft/repair response. Server build and 21 focused checks passed. Full provider completion remains
   unverified; an unrelated active generation was left undisturbed during this fix.
+
+## Successful tour and source-first visual quality (2026-10-28)
+
+- Full real Muse generation `4e3d7883-faa2-4b22-8c74-e69897e3ad5e` completed: 22 steps,
+  1,735 words, 196.309 seconds, 29 model calls. The agent corrected intermediate rejected drafts and published
+  a valid tour. All 22 steps were exercised in the reader without crash/non-finite SVG paths.
+- The user rejected colored-prose boards and a three-box numerical flow. Authored scenes now require quantitative
+  objects or a spatial relationship. Plans explicitly choose a tool from the learning difficulty, favor actual PDF
+  elements/cues, and reserve a copied formula for active term work. Function behavior should be plotted rather
+  than squeezed into labels. The same source-first preference applies to Q&A. Harness version is @14.
+- Saved v3 `1434e25a-c580-4a6d-8cb5-dcb4c7454239` preserves the original versions and replaces the
+  feed-forward detail with a checked ReLU plot, removes the table-overview prose panel, and clears the trivial
+  recap conversion panel. These are targeted corrections to the current user-flagged steps; production rules are
+  generic and contain no paper IDs, paper-specific formulas or coordinates.
+- Displayed vector/matrix LaTeX no longer enters the scalar expression parser. Explicit numerical calculations
+  and visible-value provenance remain checked. Scalar wrong-result regression still fails as expected.
+- Production build passed. Full suite: all player checks, server 266 pass / 7 existing skips; ingestion
+  61 pass / 1 existing skip. Publication checks for v3 report no problems. Evidence: `.data/harness13-current-tour/`.
+
+- Final browser verification of v3: all 22 steps load without crash/non-finite SVG geometry; ReLU playback follows
+  the original PDF equation, sample-marker centers were corrected to their intended data points, and pause works.
+  Plain axis descriptions render as readable text. The tested v3 has no publication validation problems. Final
+  automated run again passed all player suites, 266 server checks (7 existing skips), 61 ingestion checks (1 skip),
+  and production build. Source-first tutoring and useful-visual selection apply to future tours and Q&A; quality
+  remains a model judgement rather than a promise that every future explanation is perfect.
