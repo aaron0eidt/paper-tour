@@ -268,7 +268,8 @@ test('a contract follows what you agree to, what it costs, its deadlines and its
   assert.equal(all.length, 8);
   // The parties' sentence sits in what ingestion took for an author block; outside papers it is content to cite.
   const card = requests.find((r) => r.name === 'paper_card')!;
-  assert.ok(card.schema.properties.problem.properties.evidence.items.enum.includes('p1.s2'));
+  assert.equal(card.schema.properties.problem.properties.evidence.items.$ref, '#/$defs/evidenceId');
+  assert.ok(card.schema.$defs.evidenceId.enum.includes('p1.s2'));
   assert.deepEqual(card.schema.properties.doc_type.enum, [
     'research_paper',
     'exercise_sheet',

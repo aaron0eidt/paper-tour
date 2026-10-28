@@ -325,7 +325,17 @@ export class HarnessTourGenerator implements TourGenerator {
         attempt++
       ) {
         try {
-          const completion = await call(task, 'beat_direction', beatSchema, 6_000, 'low', signal);
+          // Reasoning shares the provider's output budget. Complex scenes exhausted
+          // 6k tokens in reasoning alone and returned incomplete JSON on every retry.
+          const detailed = beat.detail || attempt > 0;
+          const completion = await call(
+            task,
+            'beat_direction',
+            beatSchema,
+            detailed ? 12_000 : 6_000,
+            detailed ? 'medium' : 'low',
+            signal,
+          );
           const rawSay = (completion.value as { say?: unknown } | null)?.say;
           requireExample ||=
             (completion.value as { example?: unknown } | null)?.example !== undefined ||
@@ -361,10 +371,17 @@ export class HarnessTourGenerator implements TourGenerator {
           if (next) direction = next;
           // Report every fault together. Previously an example error skipped
           // the board error below, so the only repair never saw the bad scene.
-          const issues = [...(next?.exampleProblems ?? []), ...(next?.visualProblems ?? []), ...(next?.boardProblems ?? [])];
+          const issues = [
+            ...(next?.exampleProblems ?? []),
+            ...(next?.visualProblems ?? []),
+            ...(next?.boardProblems ?? []),
+          ];
           if (next && issues.length) {
             await input.onEvent?.('validation.failed', {
-              stage: 'direction', beat: beat.id, problems: issues, attempt: attempt + 1,
+              stage: 'direction',
+              beat: beat.id,
+              problems: issues,
+              attempt: attempt + 1,
             });
             task.push(...repairTurn(completion.value, issues));
             continue;

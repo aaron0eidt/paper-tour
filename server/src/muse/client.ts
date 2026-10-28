@@ -32,6 +32,7 @@ export async function providerFailureReason(response: Response): Promise<string>
       text += decoder.decode(value, { stream: true }).slice(0, 8192 - text.length);
     }
     if (/json schema.*(?:maximum nesting|nesting depth)/is.test(text)) return 'schema_nesting_depth';
+    if (/json schema.*(?:total enum|enum values|enum properties)/is.test(text)) return 'schema_enum_budget';
     if (/(?:invalid json schema|invalid schema|schema validation)/i.test(text)) return 'invalid_schema';
     if (/(?:context length|context window|too many tokens)/i.test(text)) return 'context_length';
     if (/(?:model not found|unknown model|model does not exist)/i.test(text)) return 'unknown_model';
@@ -127,7 +128,7 @@ export class MuseClient {
     } finally {
       if (pending) await onDelta(pending);
     }
-    if (!ended || !finish) throw new Error('Interrupted response stream');
+    if ((!ended && finish !== 'length') || !finish) throw new Error('Interrupted response stream');
     return JSON.stringify({
       choices: [{ finish_reason: finish, message: { content, ...(refusal ? { refusal: true } : {}) } }],
       usage,
@@ -183,12 +184,14 @@ export class MuseClient {
     if (response.status >= 500)
       throw new ProcessingError('muse_unavailable', 'Muse is temporarily unavailable. The tour will be retried.', true);
     if (!response.ok) {
-      console.warn(JSON.stringify({
-        event: 'model_request_rejected',
-        status: response.status,
-        schema: name,
-        reason: await providerFailureReason(response),
-      }));
+      console.warn(
+        JSON.stringify({
+          event: 'model_request_rejected',
+          status: response.status,
+          schema: name,
+          reason: await providerFailureReason(response),
+        }),
+      );
       throw new ProcessingError(
         'muse_request_rejected',
         'Muse could not process this paper. Check the model configuration and retry.',

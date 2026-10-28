@@ -25,6 +25,7 @@ test('provider diagnostics classify schema errors without exposing echoed conten
     error: { message: `JSON schema exceeds the maximum nesting depth of 10 levels. ${secret}` },
   })));
   assert.equal(reason, 'schema_nesting_depth');
+  assert.equal(await providerFailureReason(new Response('JSON schema exceeds maximum 3000 total enum values across enum properties. ' + secret)), 'schema_enum_budget');
   assert.equal(await providerFailureReason(new Response(secret)), 'request_rejected');
   assert.equal(await providerFailureReason(new Response('Invalid JSON schema: ' + secret)), 'invalid_schema');
   assert.equal(await providerFailureReason(new Response('x'.repeat(9000) + 'context length')), 'request_rejected');
@@ -519,7 +520,7 @@ test('streamed Muse output survives split UTF-8/CRLF frames and records real del
 });
 
 test('interrupted or truncated streams cannot become accepted model responses', async () => {
-  for (const suffix of ['', 'data: [DONE]\n\n', `data: ${JSON.stringify({ choices: [{ finish_reason: 'length' }] })}\n\ndata: [DONE]\n\n`]) {
+  for (const suffix of ['', 'data: [DONE]\n\n', `data: ${JSON.stringify({ choices: [{ finish_reason: 'length' }] })}\n\n`, `data: ${JSON.stringify({ choices: [{ finish_reason: 'length' }] })}\n\ndata: [DONE]\n\n`]) {
     const wire = `data: ${JSON.stringify({ choices: [{ delta: { content: '{"ok":true}' } }] })}\n\n${suffix}`;
     await assert.rejects(new MuseClient(settings, async () => new Response(wire, { headers: { 'content-type': 'text/event-stream' } })).complete([], 'test', {}, 100, undefined, async () => {}), assertCode(suffix.includes('length') ? 'muse_output_truncated' : 'muse_invalid_response'));
   }
