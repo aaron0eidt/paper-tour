@@ -360,6 +360,12 @@ export function checkFlow(raw: unknown): BoardCheck<FlowItem> {
 }
 
 /** Check a board item of the kind the beat asked for; `evidence` is the text a bars board's numbers must come from. */
+export function sceneTeachingProblem(item: SceneItem): string | null {
+  const quantitative = item.objects.some((object) => ['matrix', 'plot', 'vector'].includes(object.type));
+  const relationship = item.objects.some((object) => object.type === 'arrow') && item.objects.length >= 3;
+  return quantitative || relationship ? null : 'A scene must show a meaningful quantitative transformation or spatial relationship, not colored prose or decorative boxes. Use a plot, numeric matrix/vector, or connected objects that explain the mechanism. For a source-table overview, keep grounded PDF cues and omit the board unless an actual comparison adds insight.';
+}
+
 export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {
   if (kind === 'scene') {
     if (raw === undefined) return none();
@@ -367,6 +373,8 @@ export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardC
     const item = { ...raw, kind: 'scene' } as unknown as SceneItem;
     const problems = sceneProblems(item);
     if (!problems.length) {
+      const teachingProblem = sceneTeachingProblem(item);
+      if (teachingProblem) problems.push(teachingProblem);
       const printed = [0, 1, ...numbersIn(evidence)];
       for (const object of item.objects) {
         if (object.type === 'math' && object.text) {

@@ -49,7 +49,7 @@ function MathText({ text }: { text: string }) {
     try { return katex.renderToString(text, { throwOnError: true, trust: false, strict: 'ignore' }); }
     catch { return null; }
   }, [text]);
-  return html ? <span dangerouslySetInnerHTML={{ __html: html }} /> : <span>{text}</span>;
+  return /^[\p{L}][\p{L}\s-]+$/u.test(text) ? <span>{text}</span> : html ? <span dangerouslySetInnerHTML={{ __html: html }} /> : <span>{text}</span>;
 }
 
 function ObjectText({ object, math = false }: { object: SceneObject; math?: boolean }) {

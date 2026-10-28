@@ -17,7 +17,7 @@ function MathLabel({ text }: { text: string }) {
       return null;
     }
   }, [text]);
-  return html ? <span dangerouslySetInnerHTML={{ __html: html }} /> : <span>{text}</span>;
+  return /^[\p{L}][\p{L}\s-]+$/u.test(text) ? <span>{text}</span> : html ? <span dangerouslySetInnerHTML={{ __html: html }} /> : <span>{text}</span>;
 }
 
 /** Word events own the position; this short tween only smooths the distance

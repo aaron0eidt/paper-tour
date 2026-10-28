@@ -76,7 +76,7 @@ export const SCENE_SCHEMA = {
           w: coordinate,
           h: coordinate,
           color: { type: 'string', enum: colors },
-          text: { type: 'string', minLength: 1, maxLength: 280 },
+          text: { type: 'string', minLength: 1, maxLength: 280, description: 'Required readable content for text/math objects; math text supports LaTeX. Shapes may use text as their own label, avoiding a separate overlapping text object.' },
           values: {
             type: 'array',
             minItems: 1,
@@ -101,7 +101,7 @@ export const SCENE_SCHEMA = {
             },
           },
           background: { type: 'boolean' },
-          plotId: { type: 'string', minLength: 1, maxLength: 48 },
+          plotId: { type: 'string', minLength: 1, maxLength: 48, description: 'Bind arrow/vector/circle to this plot object using data coordinates. Arrow/vector x,y start and w,h are signed endpoint deltas. Circle x,y is its LOWER-LEFT bounding corner; w,h are positive diameters, so center (u,v) needs x=u-w/2,y=v-h/2.' },
         },
       },
     },

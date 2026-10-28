@@ -895,7 +895,8 @@
                   "text": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 280
+                    "maxLength": 280,
+                    "description": "Required readable content for text/math objects; math text supports LaTeX. Shapes may use text as their own label, avoiding a separate overlapping text object."
                   },
                   "values": {
                     "type": "array",
@@ -1023,7 +1024,8 @@
                   "plotId": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 48
+                    "maxLength": 48,
+                    "description": "Bind arrow/vector/circle to this plot object using data coordinates. Arrow/vector x,y start and w,h are signed endpoint deltas. Circle x,y is its LOWER-LEFT bounding corner; w,h are positive diameters, so center (u,v) needs x=u-w/2,y=v-h/2."
                   }
                 }
               }

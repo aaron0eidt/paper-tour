@@ -278,7 +278,7 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
     additionalProperties: false,
     required: ['plan', 'say', 'cues'],
     properties: {
-      plan: strict ? { type: 'string', maxLength: 600 } : { type: 'string' },
+      plan: strict ? { type: 'string', maxLength: 600, description: 'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.' } : { type: 'string' },
       ...Object.fromEntries(
         (['formula', 'flow', 'bars', 'plot', 'scene'] as const).map((kind) => [kind, strict ? {
           ...boardSchema(kind),

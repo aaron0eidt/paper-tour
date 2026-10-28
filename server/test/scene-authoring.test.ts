@@ -193,3 +193,11 @@ test('publication checks board focus against the board active at its narrated ti
   value.chapters[0].steps[0].actions.push({ type: 'board_focus', part: 2, at_word: 12 });
   assert.match(boardProblems(value).join(' '), /no board part/);
 });
+
+test('colored prose does not qualify as a visual explanation', () => {
+  const result = checkBoard('scene', {kind:'scene', objects:[
+    {id:'summary',type:'text',x:0.05,y:0.2,w:0.9,h:0.3,text:'Rows contain methods and columns contain metrics.'},
+  ]});
+  assert.equal(result.item, null);
+  assert.match(result.problems.join(' '), /colored prose/);
+});
