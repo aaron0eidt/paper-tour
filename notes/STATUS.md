@@ -1,5 +1,149 @@
 # Status (2026-10-28)
 
+## Composable live explanations (2026-10-28)
+
+- Native `scene` boards combine vectors, matrices, text, formulas, shapes and safe function plots. Stable object
+  IDs carry geometry and values between spoken example frames. `plotId` binds marks to actual plot-domain
+  coordinates using the renderer's exact axis projection, rather than guessed canvas positions.
+- All tour beats and follow-up answers may choose these boards. Numerical worked examples declare assumptions,
+  inputs, checked calculations and speech-anchored input/transformation/output frames; repeated symbolic formulas
+  alone do not satisfy a worked explanation. Required examples receive explicit correction instead of silent
+  omission. Source-result charts still require source values, while illustrative values are identified as examples.
+- Side visuals use 38% of the reader (with responsive bounds), and the PDF refits its full width. Bars, plots and
+  scenes follow narration progress, pause with speech, and render exact authored states when seeking.
+- Verification: production build and full player suite pass; server suite has 261 passes / 7 integration skips.
+  Browser checked live vector/matrix transitions, parameterized curves, pause, readable approximate values and
+  responsive bounds. A real Muse Q&A completed in one call / 31.966 s with two answer steps and three timed boards;
+  browser confirmed its live ReLU plot and pause. Evidence: `.data/native-scenes-answer-final.png`.
+- First full harness@12 attempt failed on an incomplete input frame; it also exposed an overly small numeric
+  guard for legitimate operation counts. Both were corrected, along with the provider schema nesting issue.
+  Retry `61721d0f-dc8d-4d65-887e-bca2fdf4cf03` later failed after 20/21 beats with `scene_invalid`. The
+  latest repair also exposes comma-separated numerical equalities being parsed as one scalar chain. This remains
+  an open generation/validation bug; no new acceptance run was started during commit preparation. The current
+  code must not be described as having completed a successful full scene tour.
+- Failed provider/Q&A calls now log safe reason codes and timing without request bodies, keys or question text.
+  Q&A allows a bounded 180 s for a rich visual response and its correction, instead of aborting at 75 s.
+
+## Measured figure annotations (2026-10-28)
+
+- User direction: fix the actual targeting, without hiding bad cues or silently replacing them with overview
+  frames. The initial raw-coordinate experiment improved resolution but still cut through raster modules;
+  it is not the accepted solution. Legacy tour geometry needs regeneration.
+- Figure authoring now receives a local catalog of measured module/container boundaries and OCR labels, in
+  addition to native PDF text/panel targets. Synthetic authoring IDs resolve to the existing canonical figure
+  ID and exact normalized region; stored document analyses and the tour schema remain unchanged. Related
+  components are outlined separately, rather than by a rectangle through unrelated content.
+- The reader reserves the actual source and stroke bounds while placing measured, wrapping labels outside
+  figures. White stroke casing is removed. Exact boxes have small, neighbour-aware padding. No renderer-level
+  conversion of bad arrows/circles into substitute shapes remains.
+- Tesseract is a local runtime dependency; OpenCV is pinned in Python requirements and Tesseract is installed
+  in the Docker image. Recognition is cached per image and logged as a visual-target analysis event.
+- Real model acceptance: generation `30d5ccc7-cb57-4ccd-a584-115aa76e7619`, saved v9 tour
+  `cfa5c56b-dcca-448b-8b11-64c5a51a6694`, completed in 80.513 s with 21 steps / 1,165 words / 22 calls.
+  No fallback, omitted beat or validation failure. All 13 marks on figures 1 and 2 resolve exactly to measured
+  regions (11) or existing native panels (2). Local recognition took 382 ms and 288 ms, cached repeats 1 ms.
+  Browser verified the architecture outlines at normal and narrow reader widths, preserving module boundaries.
+  Evidence: `.data/measured-tour-acceptance/`, `.data/measured-overlay-final.png`, `.data/measured-overlay-narrow.png`.
+- Checks: production build and all player suites passed; server 221 passed / 7 integration skips; ingestion
+  61 passed / 1 existing skip. Regression coverage includes image-format parity, exact group members, process
+  cancellation/errors and annotation collision layout. This establishes tested geometry, not perfect narration:
+  one MatMul cue precedes its explicit mention, and the decoder explanation should distinguish earlier output
+  tokens from the current shifted decoder input position.
+
+## Native visuals and neutral narration (2026-10-28, latest user direction)
+
+- The Manim video experiment has been removed at the user's request. Tours and follow-up answers use the existing
+  directly animated formula, flow, bar and function-plot boards. No storyboard authoring or render worker remains.
+  Legacy video boards are cleared at the reader boundary without interrupting the rest of a saved tour. Existing
+  stored experiment rows/media remain archived; they are not rendered or queued again.
+- Narration stays neutral and close to the paper's terminology, qualifications and original section/page order.
+  Avoid rhetorical questions, imagined story hooks and dramatic transitions. Important mechanisms may receive
+  a grounded worked explanation; numerical comparisons use matching metrics/baselines and speech-timed emphasis.
+- Preserved reader fixes: ordinary prose uses precise line highlights instead of page dimming; inactive formula
+  terms stay legible; the PDF refits its full width when a board opens. Region selection sends both the selected
+  crop and full page alongside paper context, using the loaded tour's pinned analysis. Answers support pause,
+  continue and stopping inference, without automatically resuming the original tour.
+- Decoder corruption (invisible-character, whitespace and repetitive-digit padding), copied internal instructions
+  and repeated explanations receive bounded repair instead of being silently published.
+
+- Final native acceptance: generation `c3f94f53-1132-4de8-b234-4ab62a1059e9`, saved tour v7
+  `b55a51d0-addb-4421-aace-c51be51c20f0`: 82.323 s, 22 steps, 1,292 words, 23 calls, no fallback,
+  omitted steps or validation failures. Boards: 3 formulas, 1 plot and 5 bar charts; 19 speech-timed board cues,
+  no video and forward camera page order. Live Q&A produced a native comparison board in one call (17.8 s).
+  Browser verified legacy-video skipping, the selected v7 formula, full page width, readable terms and pause.
+  Evidence: `.data/native-tour-acceptance/`, `.data/native-neutral-final.png`.
+- Checks: production build and 267 server/integration tests passed; player suites passed; ingestion 54 tests
+  passed with one pre-existing skip. The initial native check had one obsolete prompt-wording test, since removed.
+- Qualitative review remains evidence-bounded: the tour repeats some EN-DE comparison information across its
+  table detail and result paragraph. The source itself reports EN-FR 41.8 in the abstract/table but 41.0 in prose;
+  v7 uses the table value while highlighting that prose. A warmup explanation also attributes a general stability
+  rationale to the authors beyond the cited schedule text. These are narration/grounding follow-ups, not renderer
+  regressions, and are not claimed resolved by technical validation.
+
+## Guided generation and reader feedback (2026-10-28 evening)
+
+- The default is the staged Harness with the deep preset. The persistent conversation agent remains opt-in.
+  The final real Attention Is All You Need app run completed in 79.7 seconds: 22 steps, 1,004 spoken words,
+  23 model calls, no fallback beats or validation failures (saved tour v4). An earlier pass took 96.6 seconds.
+  This is a different generation strategy, not a controlled speedup
+  comparison with the cancelled conversation-agent run (which kept repairing its chapters after ten minutes).
+- Deep paper tours follow source-page order, keep overview/detail adjacent, and retain the final camera for the
+  recap. Narration explains mechanisms and assumptions; extra boards should add an example or consequence rather
+  than redraw the printed figure. Generation still needs qualitative review: valid targets alone do not prove
+  pedagogical quality or eliminate model overstatement.
+- The floating input has an accessible bounded language menu and an expandable task checklist. Planned beats and
+  their outcomes come from persisted events; retries reset attempt state. Activity presents public narration and
+  actions, with timing, repeated work and raw payloads under technical details.
+- Startup detects interrupted Harness jobs using the same document advisory lock as the worker. Only unlocked
+  orphan runs fail with an explicit retry action; live workers are left alone, and unknown paid calls are not
+  replayed automatically. Parallel failures abort and drain sibling work before returning.
+- An acceptance run was initially orphaned by a development-worker restart. It was recovered explicitly and
+  retried. Do not restart a worker during a real provider acceptance run. Temporary manifest refresh failures keep
+  the reader available and retry promptly.
+- Formula terms, animated function plots and table comparisons are native reader boards. Manim video rendering
+  was tried and then removed per user preference (see latest direction above). Table marks use unlabelled grounded outlines, including in old
+  tours; arrows, circles and guessed fractional regions are removed so values remain readable. The screenshot's
+  table pointers had correct extracted row targets but their tips fell outside the row due to arrow spacing.
+- Verification: production build, all player suites, 244 server/integration checks with no skips, and 53 ingestion
+  checks (one pre-existing skip) passed. Browser checked live checklist, language selection by keyboard, 388px input
+  layout, formula term timing and table comparisons. Local outputs: `.data/attention-app-final/` (v4),
+  `.data/attention-app-acceptance/` (earlier v3).
+
+## Chapter-save reliability (2026-10-28)
+
+- Live failures reproduced: provider double-encoded the nested chapter and used timing phrases absent from
+  narration, repeatedly rejecting otherwise usable chapters. Nested chapter JSON is now decoded before the same
+  schema validation. Agent timing cues without a unique narration match fall back to word zero with a recorded
+  warning; document references and visual grounding remain validated. Other generators retain strict timing.
+- Build passed; regression tests cover decoding, malformed payload rejection, invalid source rejection and cue
+  fallback. The original live document was deleted through the UI during verification; its final publication
+  could not be verified. Worker restarted with the changes before the replacement upload.
+
+## Readable live assistant and repeated-work guard (2026-10-28)
+
+- Activity opens on a readable live timeline: waveform orb, streamed assistant messages in speech bubbles,
+  named tool actions, outcomes and duration. Long completed messages can be expanded. Raw payloads and usage remain
+  in Technical details. Messages come from actual output, not invented thoughts or provider-private reasoning.
+- Three repeats of an unchanged action (or repeated rejected arguments for the same tool) pause the agent with
+  saved work. New evidence or changed tour artifacts reset the guard; explicit Resume grants a fresh attempt.
+  The next-turn prompt highlights missing work and discourages rereading evidence to repair invalid arguments.
+- Build and all 212 server/integration tests passed, including streaming text, tool labels, loop pausing and resume.
+  Browser checked against the saved real run; no additional paid inference was started. Live-provider efficiency
+  improvement still needs measurement on a subsequent generation.
+
+## Local agent context recovery fix (2026-10-28)
+
+- Explicit missing-provider-history errors now switch the run to a persistent local-history mode instead of
+  clearing visual context and repeatedly rebuilding the source root. Committed assistant messages, tool calls and
+  tool results are replayed from the local journal; stored images are hash-checked before reuse. Saved observations
+  and chapters remain intact. Provider-private reasoning is omitted.
+- A missing result for an already dispatched inference pauses with an explicit unknown-outcome message; it never
+  automatically creates a duplicate paid inference. Missing observation descriptions get a concise repair request;
+  descriptions are not fabricated and the validator still rejects incomplete observations.
+- Build and 204 local server/integration tests passed, including missing history at token-count and create time,
+  preserved image evidence, exactly-once publication and missing dispatched-result recovery. No additional live
+  provider inference was started to test this fix; real-provider behavior remains to be verified on continuation.
+
 ## Air implementation and verification (2026-10-28)
 
 The expanded local implementation task is implemented; external quality checks below remain explicit. No commits,
@@ -137,3 +281,11 @@ root), then open http://localhost:5174/?paper=attention. Add `&silent=1&rate=4` 
 **Local Supabase with Colima:** `npm run supabase:start` fails with "bind source path does not exist: /var/folders/…",
 because the experimental stack mounts a temp folder that Colima's VM cannot see (it shares only your home folder).
 Give it a temp folder inside the repo instead: `mkdir -p .data/tmp && TMPDIR=$PWD/.data/tmp npm run supabase:start`.
+
+## Commit preparation (2026-10-28)
+
+- Removed false numeric provenance errors for digits embedded in model names (for example ConvS2S).
+- Progressive comparisons may begin with one bar. Numerical calculation checks allow floating-point evaluation
+  tolerance while still rejecting wrong results. Comma/LaTeX-separated equalities received an initial correction;
+  the unresolved plain-comma case above still needs attention.
+- Production build passes; 10 focused example tests pass. No additional provider acceptance was started.
