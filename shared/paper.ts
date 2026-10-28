@@ -1,3 +1,5 @@
+import type { PlotItem } from './plot';
+export type { PlotItem } from './plot';
 // TypeScript mirror of schema/doc.schema.json and schema/tour.schema.json (version 0.1).
 // The schemas are the source of truth; keep these in sync with them.
 
@@ -238,6 +240,7 @@ export interface FormulaTerm {
 
 /** What the side board shows: the model fills a template, the player animates it. */
 export type BoardItem =
+  | PlotItem
   | { kind: 'formula'; title?: string; latex: string; terms: FormulaTerm[] }
   | { kind: 'flow'; title?: string; nodes: { id: string; label: string; color?: Color }[]; edges: [string, string][] }
   | {

@@ -1,3 +1,4 @@
+import { transcribe } from './muse/transcribe';
 import { generationRecorder } from './activity';
 import { agentSummary, scheduleAgent } from './agent/store';
 import type { AgentRun } from '../../shared/agent';
@@ -49,6 +50,8 @@ type Row = QueryResultRow;
 const iso = (date: Date | string) => new Date(date).toISOString();
 const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
 export interface Library {
+  transcribe?(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
+  demoTranscribe?(paper: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   agentRun?(owner: string, id: string, runId: string): Promise<AgentRun>;
   controlAgent?(owner: string, id: string, runId: string, action: 'pause' | 'resume' | 'cancel'): Promise<AgentRun>;
   list(owner: string): Promise<DocumentSummary[]>;
@@ -670,6 +673,24 @@ export class DocumentService implements Library {
       signal,
       demo: true,
     });
+  }
+  async transcribe(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal) {
+    await this.owned(owner, id);
+    return this.voice(owner, audio, async () => (await this.askSettings().resolveMuse(owner)).config, signal);
+  }
+  async demoTranscribe(paper: string, audio: Uint8Array, signal?: AbortSignal) {
+    if (!(await loadDemo(paper, this.demoRoot))) missing();
+    return this.voice('demo', audio, async () => this.askSettings().base, signal);
+  }
+  private async voice(key: string, audio: Uint8Array, config: () => Promise<MuseConfig>, signal?: AbortSignal) {
+    const limitKey = `voice:${key}`;
+    if (this.asking.get(limitKey)) throw new HttpError(429, 'voice_busy', 'Wait for the current transcription.');
+    this.asking.set(limitKey, 1);
+    try {
+      return await transcribe(await config(), audio, this.askSettings().transport, signal);
+    } finally {
+      this.asking.delete(limitKey);
+    }
   }
   private askSettings(): SettingsService {
     if (!this.settings) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');

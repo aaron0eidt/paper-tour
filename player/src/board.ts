@@ -1,3 +1,4 @@
+import { plotProblems } from '../../shared/plot';
 // The side board: checks that a board item can be drawn, and computes what the board draws (term
 // wrapping, flow and bar geometry, easing). Pure, so it can be tested; rendering is in
 // components/Board.tsx.
@@ -44,6 +45,10 @@ export function checkBoardItem(raw: unknown, where: string, warn: (message: stri
   const title = text(raw.title) ? { title: raw.title as string } : {};
   const list = (v: unknown) => (Array.isArray(v) ? v.filter(isObj) : []);
   switch (raw.kind) {
+    case 'plot': {
+      const problems = plotProblems(raw);
+      return problems.length ? fail(problems.join(' ')) : raw as unknown as BoardItem;
+    }
     case 'formula': {
       const latex = text(raw.latex);
       if (!latex) return fail('has no formula');

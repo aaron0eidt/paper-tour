@@ -2,7 +2,7 @@ import type { BoardKind } from './board';
 import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@4';
+export const HARNESS_VERSION = 'paper-tour-harness@5';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -36,12 +36,13 @@ ${types}
 const CUE_HELP: Record<string, string> = {
   highlight: 'highlight marks a sentence that states what you say.',
   note: 'note adds a short written remark, its label, next to a target.',
-  arrow: 'arrow points at one part of the figure and names it in its label, at most 4 words.',
+  arrow: 'arrow points at one part of the figure and explains its role in its label, at most 4 words; never repeat a printed label or caption.',
   circle: 'circle rings one part of the figure; its label is optional.',
-  box: 'box outlines a whole panel or figure; its label names it in at most 4 words.',
+  box: 'box outlines a whole panel or figure; its label explains why it matters in at most 4 words; never copy the printed name.',
   spotlight: 'spotlight dims everything else.',
 };
 const FOCUS_HELP: Record<BoardKind, string> = {
+  plot: 'board_focus lights up curve-1, curve-2 or curve-3 while you explain its behaviour.',
   formula: 'board_focus lights up one term of your formula while you name it: target term-1 is the first term.',
   flow: 'board_focus lights up one stage of your flow while you speak about it: its target is that node id.',
   bars: 'board_focus lights up one bar while you mention it: target bar-1 is the first bar.',
@@ -111,7 +112,9 @@ export const BOARD_EXAMPLES = {
 const example = (value: unknown) => `EXAMPLE from another document: ${JSON.stringify(value)}`;
 
 const BOARD_TASK: Record<BoardKind, string> = {
+  plot: `BOARD: an illustrative function plot, never claimed as measured data. Fill plot with kind plot, x/y increasing finite ranges, 1-3 curves with expression and a short LaTeX label. Expressions use x, optional parameter a, pi/e, + - * / ^, parentheses, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max or softmax(x,0). No code, properties or unknown functions. Optional parameter {from,to} sweeps a; omit for fixed curves. Explain what changes and why, and use curve-1 etc for focus.`,
   formula: `BOARD: the side board builds this equation term by term while you speak.
+- When function behaviour explains the equation better, you may instead supply an optional "plot" object: kind "plot", x/y finite increasing ranges, curves [{expression,label}], optional x_label/y_label (LaTeX) and parameter {from,to} for a. Safe expressions: x, a, pi/e, + - * / ^, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max, softmax(x,0). Focus curve-1 etc. Say this is an illustrative function, not measured data. Explain how an input or parameter changes the output; do not merely read symbols.
 - "formula.latex" is the whole equation in clean LaTeX that KaTeX can render. The extracted text is often garbled:
   repair it from the page image and the text around it. Leave out the equation number and the final punctuation.
 - "formula.terms" are the 2-4 parts a student must understand, in the order you explain them. Copy each term's latex
@@ -132,8 +135,7 @@ ${example(BOARD_EXAMPLES.formula)}`,
 ${example(BOARD_EXAMPLES.bars)}`,
   flow: `BOARD (optional): draw how it works as a small flow of 3-7 boxes joined by arrows on the side board.
 - Only when this step explains stages in order: a process, an architecture, a timeline of dates or the things to do
-  one after another; otherwise leave "flow.nodes" and "flow.edges" empty. Keep it simpler than the document: the main
-  stages only.
+  one after another; otherwise leave "flow.nodes" and "flow.edges" empty. Show an example or causal chain that adds insight. Never redraw a diagram already on screen or repeat its printed labels.
 - Nodes are node-1, node-2 and so on in the order the work flows, each label at most 3 words. Edges are arrows from an
   earlier node to a later one, and every node has at least one arrow.
 - To light up a stage while you speak about it, add a board_focus cue whose target is that node's id.
@@ -155,7 +157,7 @@ export function directTask(language: string, brief: string, { actions, board, wo
   const help = page.map((a) => CUE_HELP[a]);
   if (board && actions.includes('board_focus')) help.push(FOCUS_HELP[board]);
   const rules = [
-    `"say" is 25-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
+    `"say" is 25-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step". Explain why or how, in your own words; never read the source aloud.`,
   ];
   if (help.length)
     rules.push(

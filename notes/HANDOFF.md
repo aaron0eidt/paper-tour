@@ -1,5 +1,10 @@
 # Handoff
 
+Air implementation update (2026-10-28): read the current [STATUS.md](STATUS.md) before rebuilding the next-step list
+below. Insight guards, plots, language, reader polish, voice and documented local workflows are now implemented and
+locally tested; real paid-provider quality checks, naming and hackathon decisions remain open. Local demo/backup
+instructions are in [DEMO.md](DEMO.md).
+
 Start here if you are new to the project. This page says what the app does today, how to run it, how the parts fit
 together, the rules we work by, and what to build next. Details live in the other notes:
 [STATUS.md](STATUS.md) (current state), [PLAN.md](PLAN.md) (product plan), [HARNESS.md](HARNESS.md) (how the Meta

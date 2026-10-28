@@ -476,7 +476,7 @@ test('pen marks point at a region only on the figure the model saw, and long lab
   assert.ok(regions.includes('top-left') && regions.includes('whole'));
   assert.deepEqual(seen.actions[0], { type: 'zoom', target: 'fig1' });
   assert.deepEqual(seen.actions.slice(1), [
-    { type: 'arrow', target: 'fig1.a', region: [0, 0, 0.4, 0.4], color: 'pink', label: 'encoder' },
+    { type: 'arrow', target: 'fig1.a', region: [0, 0, 0.4, 0.4], color: 'pink' },
     {
       type: 'circle',
       target: 'fig1',
@@ -874,4 +874,26 @@ test('a demo question without a server key says where the key goes', async () =>
     await app.close();
     await demo.remove();
   }
+});
+
+test('an explicit answer language reaches the writer and the returned voice metadata', async () => {
+  let task = '';
+  const result = await ask({question:'Explain the scaling.', responseLanguage:'uk-UA'}, (request) => {
+    task = request.task;
+    return {answerable:'yes',steps:[{say:SCALE_SAY,cues:[],board:NO_BOARD}],followups:[]};
+  }, {tour:{...tour,voices:{host:{lang:'de-DE'}}}});
+  assert.match(task, /micro-tour in "uk-UA"/);
+  assert.match(task, /quotations in the original document language/);
+  assert.equal(result.answer.language,'uk-UA');
+});
+
+test('a copied answer is repaired once instead of reading a long source sentence aloud', async () => {
+  const source = structuredClone(doc);
+  const copied = 'The encoder transforms each input into a contextual representation which the decoder can use to generate an output sequence.';
+  source.sentences[0].text = copied;
+  let calls = 0;
+  const result = await answerQuestion({doc:source,documentId:'doc-test',request:{question:'Explain the encoder.'},language:'en-US',client:new MuseClient(settings,provider(() => ({answerable:'yes',steps:[{say:++calls===1?copied:SCALE_SAY,cues:[],board:NO_BOARD}],followups:[]})))});
+  assert.equal(calls,2);
+  assert.notEqual(result.answer.steps[0].say,copied);
+  await assert.rejects(answerQuestion({doc:source,documentId:'doc-test',request:{question:'Explain the encoder.'},language:'en-US',client:new MuseClient(settings,provider(() => ({answerable:'yes',steps:[{say:copied,cues:[],board:NO_BOARD}],followups:[]})))}), /no usable answer/);
 });

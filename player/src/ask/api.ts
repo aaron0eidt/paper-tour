@@ -2,6 +2,7 @@
 // reader plays as a second tour (server/src/harness/ask.ts). These types mirror the server's AskRequest and AskAnswer.
 
 import { apiRequest, ApiRequestError } from '../library/client';
+import { responseLanguage } from '../../../shared/languages';
 import type { Step } from '../types';
 
 /** One earlier exchange; follow-up questions build on it. */
@@ -12,6 +13,7 @@ export interface AskTurn {
 
 export interface AskRequest {
   question: string;
+  responseLanguage?: string;
   tourId?: string;
   stepId?: string;
   /** The figure, panel or equation the learner is looking at. */
@@ -24,6 +26,7 @@ export type Answerable = 'yes' | 'partly' | 'no';
 
 export interface AskAnswer {
   answerable: Answerable;
+  language?: string;
   steps: Step[];
   followups: string[];
 }
@@ -42,6 +45,7 @@ const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 export async function askQuestion(source: AskSource, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
   const body: AskRequest = { question: request.question.trim().slice(0, MAX_QUESTION) };
+  if (responseLanguage(request.responseLanguage)) body.responseLanguage = request.responseLanguage;
   if (request.tourId) body.tourId = request.tourId;
   if (request.stepId) body.stepId = request.stepId;
   if (request.figureId) body.figureId = request.figureId;

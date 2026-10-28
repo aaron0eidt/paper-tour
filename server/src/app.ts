@@ -1,3 +1,5 @@
+import { VOICE_MAX_BYTES } from '../../shared/voice';
+import { RESPONSE_LANGUAGES } from '../../shared/languages';
 import { setTimeout as delay } from 'node:timers/promises';
 import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
@@ -35,6 +37,7 @@ const askBody = objectBody(
     tourId: uuid,
     stepId: text(200),
     figureId: text(100),
+    responseLanguage: { enum: Object.keys(RESPONSE_LANGUAGES) },
     history: {
       type: 'array',
       maxItems: 4,
@@ -91,6 +94,7 @@ export async function createApp(options: Options) {
     logger: options.logger ? { redact: ['req.headers.authorization', 'req.body.apiKey'] } : false,
     bodyLimit: 65536,
   });
+  app.addContentTypeParser('audio/wav', { parseAs: 'buffer', bodyLimit: VOICE_MAX_BYTES }, (_req, body, done) => done(null, body));
   await app.register(cors, { origin: options.origins ?? false });
   app.get('/health', async () => ({ status: 'ok' }));
   app.setErrorHandler((error, request, reply) => {
@@ -132,6 +136,11 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
+      api.post<{ Params: { id: string }; Body: Buffer }>('/documents/:id/transcribe', { bodyLimit: VOICE_MAX_BYTES, schema: { params: documentParams } }, async (req, reply) => {
+        if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'invalid_audio', 'Send a WAV recording.');
+        if (!service.transcribe) throw new HttpError(503, 'voice_unavailable', 'Voice input is unavailable.');
+        return whileConnected(reply, (signal) => service.transcribe!(owner(req), req.params.id, req.body, signal));
+      });
       api.get('/models', async (req) => service.models(owner(req)));
       if (options.settings) {
         const settings = options.settings;
@@ -481,6 +490,14 @@ export async function createApp(options: Options) {
       async (demo) => {
         demo.addHook('onRequest', async (request) => {
           if (!fromLocalhost(request)) throw new HttpError(404, 'not_found', 'Endpoint not found.');
+        });
+        demo.post<{ Params: { paper: string }; Body: Buffer }>('/:paper/transcribe', {
+          bodyLimit: VOICE_MAX_BYTES,
+          schema: { params: { type: 'object', required: ['paper'], properties: { paper: { type: 'string', pattern: DEMO_PAPER.source } } } },
+        }, async (req, reply) => {
+          if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'invalid_audio', 'Send a WAV recording.');
+          if (!options.service.demoTranscribe) throw new HttpError(503, 'voice_unavailable', 'Voice input is unavailable.');
+          return whileConnected(reply, (signal) => options.service.demoTranscribe!(req.params.paper, req.body, signal));
         });
         demo.post<{ Params: { paper: string }; Body: AskRequest }>(
           '/:paper/ask',

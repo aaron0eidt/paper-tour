@@ -80,9 +80,10 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   const deep = preset === 'deep';
   const beats: Omit<Beat, 'id'>[] = [];
   // The board a beat may draw: a method as a flow, a result's numbers as bars (formulas and figures below).
-  const boards: Partial<Record<BeatKind, BoardKind>> = { method: 'flow', result: 'bars' };
+  const boards: Partial<Record<BeatKind, BoardKind>> = { result: 'bars' };
   const text = (kind: BeatKind, arc: Arc, item: CardItem | undefined) => {
-    const board = boards[kind];
+    const board = kind === 'method' && !beats.some((b) => b.board === 'flow')
+      && /(?:then|after|before|pipeline|stages|first|sends|feeds|passes|anschließend|danach|zuerst)/i.test(item?.text ?? '') ? 'flow' : boards[kind];
     if (item?.text && item.evidence.length)
       beats.push({ kind, arc, point: item.text, evidence: item.evidence, ...(board ? { board } : {}) });
   };
@@ -95,7 +96,7 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
     const arc = figureArc(ref);
     // A table's numbers may become bars, and a diagram of the method a simplified flow; a results plot draws on itself.
     const table = doc.figures.find((f) => f.id === ref.id)?.kind === 'table';
-    const board: BoardKind | undefined = table ? 'bars' : arc === 'method' ? 'flow' : undefined;
+    const board: BoardKind | undefined = table ? 'bars' : undefined;
     const beat: Omit<Beat, 'id'> = {
       kind: 'figure',
       arc,

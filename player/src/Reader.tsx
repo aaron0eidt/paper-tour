@@ -117,6 +117,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -292,7 +293,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // `framed` is the last command and the view chosen for it, so a resize can frame it again.
   const framed = useRef<{ cmd: CameraCommand; view: View } | null>(null);
   const frame = useCallback(
-    (cmd: CameraCommand, instant: boolean) => {
+    (cmd: CameraCommand, instant: boolean, retarget = false) => {
       if (!layout || !resolver) return;
       // A target that cannot be framed leaves the camera where it is; it must not take the app down.
       try {
@@ -300,6 +301,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         const view = cmd.action ? cameraView(cmd.action, resolver, layout, vp) : initialView(layout, vp);
         if (!view) return;
         if (instant) camera.jumpTo(view);
+        else if (retarget) camera.retargetTo(view);
         else camera.animateTo(view);
         framed.current = { cmd, view: camera.targetView };
       } catch (err) {
@@ -449,7 +451,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     // closing, a window resize) frames that target again, so it stays whole and in view. Otherwise
     // reflow preserves the page-relative reading position, including restored/manual navigation.
     const last = framed.current;
-    if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating);
+    if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating, true);
     else camera.jumpTo(camera.getView());
   }, [camera, layout, frame]);
 
@@ -508,6 +510,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       setZoomPercent(Math.round(camera.getView().s * 100));
       const position = positionFromView(layout, camera.getView());
       setCurrentPage(position.page);
+      if (now.current.away) return;
       checkpointRef.current = { ...position, ...tourCheckpoint.current };
       clearTimeout(pendingSave.current);
       pendingSave.current = setTimeout(() => {
@@ -525,6 +528,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   }, [layout, camera]);
   useEffect(() => {
     if (!layout || !restoredView.current) return;
+    // A status change can arrive before the camera has returned from an answer. The settled
+    // camera subscription records the new checkpoint; never flush an intermediate answer view.
+    if (now.current.away || camera.animating) return;
     const value = { ...positionFromView(layout, camera.getView()), ...tourCheckpoint.current };
     checkpointRef.current = value;
     clearTimeout(pendingSave.current);
@@ -562,6 +568,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const navigateTo = useCallback(
     (id: string, kind?: string) => {
       if (!resolver || !layout) return;
+      setNavigationOpen(false);
       active?.pause();
       const action = { type: 'focus' as const, target: id };
       frame({ seq: 1, key: id, action }, false);
@@ -623,6 +630,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // fires while the learner types, in the ask bar or any other field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && navigationOpen) {
+        setNavigationOpen(false);
+        return;
+      }
       if (isInteractive(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === ' ') {
         e.preventDefault();
@@ -639,7 +650,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active]);
+  }, [active, navigationOpen]);
 
   const onCopyId = useCallback((id: string) => {
     void copyText(id);
@@ -738,10 +749,20 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   );
 
   return (
-    <div className="app reader-app">
+    <div className={`app reader-app${navigationOpen ? ' navigation-open' : ''}`}>
       <header className="reader-app-toolbar">
         <button className="reader-library-button" onClick={back}>
           ‹ <span>Library</span>
+        </button>
+        <button
+          type="button"
+          className="reader-navigation-toggle"
+          aria-controls="reader-navigation"
+          aria-expanded={navigationOpen}
+          aria-label={navigationOpen ? 'Close paper navigation' : 'Open paper navigation'}
+          onClick={() => setNavigationOpen((open) => !open)}
+        >
+          Contents
         </button>
         <div className="reader-tour-actions">
           {' '}
@@ -797,6 +818,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         state={mainState}
         docTitle={manifest?.document.title ?? loaded?.doc?.source.title}
         onJump={(i) => {
+          setNavigationOpen(false);
           setSelection([]);
           leaveAnswer();
           engine?.goTo(i);
@@ -972,7 +994,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           </button>
         </div>
         {layout ? (
-          <BoardSplit board={state.board} camera={camera}>
+          <BoardSplit board={state.board}>
             <div className="ask-stage">
               <Stage
                 pdf={loaded?.pdf ?? null}

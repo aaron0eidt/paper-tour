@@ -34,6 +34,8 @@ import {
   type Solution,
 } from './exercise';
 import { paperBlock } from './paper-block';
+import { readsSource } from './insight';
+import { documentLanguage } from './language';
 import { HARNESS_VERSION, SHARED_RULES, cardTask, directTask } from './prompts';
 import { pythonVerifier, type LineCheck, type MathVerifier } from './verify';
 
@@ -99,7 +101,7 @@ export class HarnessTourGenerator implements TourGenerator {
     ]);
     checkImages(input);
     const { doc } = input;
-    const language = this.config.language;
+    const language = documentLanguage(doc, this.config.language);
     const { call, completions } = recordedCalls(this.client, input, this.model);
     const progress = (stage: TourProgress['stage'], done: number, total: number) =>
       onProgress?.({ stage, imagesDone: done, imagesTotal: total });
@@ -273,7 +275,15 @@ export class HarnessTourGenerator implements TourGenerator {
       for (let attempt = 0; attempt < 2 && !(direction && !direction.boardProblems?.length); attempt++) {
         try {
           const completion = await call(task, 'beat_direction', beatSchema, 6_000, 'low', signal);
-          const next = cleanDirection(completion.value, beat, targets);
+          const cleaned = cleanDirection(completion.value, beat, targets);
+          const copied = cleaned && readsSource(cleaned.say, doc);
+          const next = copied ? null : cleaned;
+          if (copied)
+            task.push(
+              ...repairTurn(completion.value, [
+                'Explain the mechanism, consequence or intuition in your own words; do not read the source aloud.',
+              ]),
+            );
           if (next && (!direction || !next.boardProblems?.length)) direction = next;
           if (next?.boardProblems?.length) {
             await input.onEvent?.('board.rejected', {
@@ -281,7 +291,9 @@ export class HarnessTourGenerator implements TourGenerator {
               problems: next.boardProblems,
               attempt: attempt + 1,
             });
-            task.push(...boardRepair(completion.value, beat.board!, next.boardProblems));
+            const kind =
+              beat.kind === 'formula' && (completion.value as { plot?: unknown } | null)?.plot ? 'plot' : beat.board!;
+            task.push(...boardRepair(completion.value, kind, next.boardProblems));
           } else if (!next)
             task.push(
               ...repairTurn(completion.value, [
@@ -305,8 +317,19 @@ export class HarnessTourGenerator implements TourGenerator {
     const used = new Set<string>();
     const steps = beats.map((beat, i) => {
       const result = results[i];
-      return 'steps' in result ? result.steps : [beatStep(beat, result.targets, result.direction, doc, used)];
+      if ('steps' in result) return result.steps;
+      const previous = new Set(used);
+      const step = beatStep(beat, result.targets, result.direction, doc, used);
+      if (!readsSource(step.say, doc)) return [step];
+      used.clear();
+      for (const id of previous) used.add(id);
+      return [];
     });
+    if (!steps.some((part) => part.length))
+      throw new ProcessingError(
+        'invalid_tour',
+        'The writer only repeated the source after repair. Try generating again.',
+      );
     const tour = assembleTour(
       card!,
       plan,

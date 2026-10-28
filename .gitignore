@@ -22,3 +22,6 @@ server/dist/
 supabase/.temp/
 supabase/.branches/
 .data/
+
+# Original synthetic demo/test assets generated locally.
+demo/local-*/

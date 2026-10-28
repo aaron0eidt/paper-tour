@@ -39,7 +39,7 @@ export function Sidebar({ tour, steps, state, docTitle, onJump, children, header
   }, [state.index, started]);
 
   return (
-    <aside className="sidebar">
+    <aside id="reader-navigation" className="sidebar" aria-label="Paper navigation">
       <header className="sidebar-head">
         {header}
         <div className="brand">Paper Tour</div>

@@ -1,3 +1,8 @@
+import { checkBoard } from './board';
+import { PLOT_SCHEMA } from '../../../shared/plot';
+import { responseLanguage } from '../../../shared/languages';
+import { documentLanguage } from './language';
+import { insightStep, readsSource } from './insight';
 import { randomUUID } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
@@ -37,6 +42,7 @@ export interface AskTurn {
 /** A learner's question, with where they are in the tour and what they are looking at. */
 export interface AskRequest {
   question: string;
+  responseLanguage?: string;
   tourId?: string;
   stepId?: string;
   figureId?: string;
@@ -47,6 +53,7 @@ export type Answerable = (typeof ANSWERABLE)[number];
 /** The answer as a micro-tour: steps in the tour contract, plus two questions to ask next. */
 export interface AskAnswer {
   answerable: Answerable;
+  language?: string;
   steps: Step[];
   followups: string[];
 }
@@ -338,7 +345,7 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
 // ---------------------------------------------------------------- the call
 
 export const CUE_ACTIONS = ['highlight', 'box', 'arrow', 'circle', 'spotlight', 'note'] as const;
-const BOARD_KINDS = ['none', 'formula', 'flow', 'bars'] as const;
+const BOARD_KINDS = ['none', 'formula', 'flow', 'bars', 'plot'] as const;
 const NO_BOARD = {
   kind: 'none',
   title: '',
@@ -394,7 +401,8 @@ the document while it speaks.
    step, on one page or one figure when you can. A question about part of a figure gets a mark on that part: its panel,
    or an arrow or circle whose "region" says where the part lies in the attached image. "region" is "whole" for every
    other cue, and always when no image is attached.
-5. The board is optional, at most one item per step; otherwise its "kind" is "none" and the other fields stay empty.
+5. For a function intuition you may use board.kind plot and optional board.plot: kind plot, x/y ranges, curves [{expression,label}], optional parameter {from,to}. Safe expressions use x/a, arithmetic and whitelisted sin/cos/tanh/exp/log/sqrt/abs/relu/sigmoid/min/max/softmax(x,0); no code. Explain the mechanism and label it illustrative, never measured data.
+6. The board is optional, at most one item per step; otherwise its "kind" is "none" and the other fields stay empty.
    - "formula" when the question is about an equation: its LaTeX, and 2 to 4 terms, each a separate part with "latex"
      copied exactly from the formula, a "label" of 1 to 4 words and an "anchor" where "say" explains that term.
    - "bars" to compare 2 to 6 numbers copied exactly from the passages or table cells, with their "unit".
@@ -477,6 +485,7 @@ export function answerSchema(retrieval: Retrieval, regions: readonly string[] = 
     unit: text(limits.unit),
     higher_is_better: { type: 'boolean' },
   });
+  board.properties.plot = PLOT_SCHEMA;
   return object({
     plan: text(600),
     answerable: { type: 'string', enum: ANSWERABLE },
@@ -570,6 +579,10 @@ export function boardFromAnswer(
   evidence: string,
 ): { item: BoardItem; focus: (number | null)[] } | null {
   if (!isRaw(raw)) return null;
+  if (raw.kind === 'plot') {
+    const { item } = checkBoard('plot', raw.plot ?? raw);
+    return item && item.kind === 'plot' ? { item, focus: item.curves.map((c) => anchorAt(say, c.label)) } : null;
+  }
   const at = (part: Raw | undefined) => (part ? anchorAt(say, str(part.anchor)) : null);
   if (raw.kind === 'formula') {
     const { item } = checkFormula(raw);
@@ -709,7 +722,7 @@ function toStep(
     );
     actions.splice(moves ? 1 : 0, 0, { type: 'board', item: board.item }, ...focus);
   }
-  return { id, say, actions };
+  return insightStep({ id, say, actions }, context.doc);
 }
 
 /** Steps that pass the tour contract: the canonical schema, real IDs, at_word inside the narration. */
@@ -794,7 +807,10 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
   const { client, doc, request } = input;
   const step = findStep(input.tour, request.stepId);
   const retrieval = retrieve(doc, request, step);
-  const task = `${askInstructions(input.language)}\n\n${askContext(request, retrieval, doc, step, input.image)}`;
+  const language = responseLanguage(request.responseLanguage)
+    ? request.responseLanguage
+    : (input.tour?.voices?.host?.lang ?? documentLanguage(doc, input.language));
+  const task = `${askInstructions(language)}\nKeep quotations in the original document language. Explain them in the answer language.\n\n${askContext(request, retrieval, doc, step, input.image)}`;
   const messages: MuseMessage[] = [
     { role: 'developer', content: SHARED_RULES },
     { role: 'user', content: `<DOCUMENT>\n${paperBlock(doc)}\n</DOCUMENT>` },
@@ -837,10 +853,23 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       if (effort !== 'low' || !(error instanceof ProcessingError && MODEL_FAULTS.has(error.code))) throw error;
       continue;
     }
-    answer = buildAnswer(value, context) ?? answer;
+    const candidate = buildAnswer(value, context);
+    if (candidate?.steps.some((step) => readsSource(step.say, doc))) {
+      messages.push(
+        { role: 'assistant', content: JSON.stringify(value) },
+        {
+          role: 'user',
+          content:
+            'Explain the mechanism, consequence or intuition in your own words. Do not read the source aloud; retain its facts and exact quotations only when needed.',
+        },
+      );
+      continue;
+    }
+    answer = candidate ?? answer;
     if (answer && answer.answerable !== 'no') break;
   }
   if (!answer) throw new ProcessingError('muse_invalid_response', 'The model returned no usable answer.');
+  if (responseLanguage(request.responseLanguage)) answer = { ...answer, language };
   return { answer, completions };
 }
 

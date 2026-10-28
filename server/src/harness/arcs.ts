@@ -247,7 +247,7 @@ export function cleanArcPlan(
         text: item.text.replace(/\s+/g, ' ').trim(),
         evidence: [...new Set(item.evidence)].filter((id) => known.has(id)),
         ...(item.title?.trim() ? { title: item.title.trim() } : {}),
-        ...(item.board && item.board !== 'none' && TOPIC_BOARDS.includes(item.board as BoardKind)
+        ...(item.board && item.board !== 'none' && TOPIC_BOARDS.includes(item.board as (typeof TOPIC_BOARDS)[number])
           ? { board: item.board as BoardKind }
           : {}),
         ...(item.visual && visuals.has(item.visual) ? { visual: item.visual } : {}),

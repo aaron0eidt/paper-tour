@@ -1,3 +1,4 @@
+import { PLOT_SCHEMA, plotProblems } from '../../../shared/plot';
 import katex, { type KatexOptions } from 'katex';
 import type { BoardItem } from '../../../shared/paper';
 
@@ -359,12 +360,17 @@ export function checkFlow(raw: unknown): BoardCheck<FlowItem> {
 
 /** Check a board item of the kind the beat asked for; `evidence` is the text a bars board's numbers must come from. */
 export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {
+  if (kind === 'plot') {
+    const item = isObj(raw) ? { ...raw, kind: 'plot' as const } : raw;
+    const problems = plotProblems(item);
+    return { item: problems.length ? null : item as BoardItem, problems };
+  }
   return kind === 'formula' ? checkFormula(raw) : kind === 'bars' ? checkBars(raw, evidence) : checkFlow(raw);
 }
 
 /** How many parts board_focus can light up: formula terms, flow nodes or bars. */
 export const boardParts = (item: BoardItem) =>
-  item.kind === 'formula' ? item.terms.length : item.kind === 'flow' ? item.nodes.length : item.bars.length;
+  item.kind === 'plot' ? item.curves.length : item.kind === 'formula' ? item.terms.length : item.kind === 'flow' ? item.nodes.length : item.bars.length;
 
 // ------------------------------------------------------------------------------------------------- schemas
 
@@ -378,6 +384,7 @@ const object = (properties: Record<string, object>) => ({
 
 /** The response schema of one board item the model fills in; every field is required, as constrained decoding wants. */
 export function boardSchema(kind: BoardKind) {
+  if (kind === 'plot') return PLOT_SCHEMA;
   if (kind === 'formula')
     return object({
       title: field(BOARD_LIMITS.title, 'What the formula computes, at most 6 words.'),

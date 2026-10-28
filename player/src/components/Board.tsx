@@ -1,7 +1,7 @@
+import { PlotBoard } from './Plot';
 // The side board beside the stage: it shows the engine's board item (a formula built term by term,
 // a flow of boxes and arrows, or bars of the paper's numbers) and lights the part in focus. The board
-// opens and closes only once the camera has settled: opening it resizes the stage and the camera
-// refits, and a resize during a camera flight would restart the flight.
+// opens alongside camera travel; the reader retargets the remaining flight when the stage resizes.
 
 import katex from 'katex';
 import type { TrustContext } from 'katex';
@@ -26,7 +26,6 @@ import {
   wrapTerms,
 } from '../board';
 import type { BarsItem, FlowItem } from '../board';
-import type { Camera } from '../camera';
 import type { BoardState } from '../engine';
 import type { BoardItem } from '../types';
 import '../board.css';
@@ -78,23 +77,16 @@ for (const font of ['20px KaTeX_Main', 'italic 20px KaTeX_Math', '20px KaTeX_Siz
  */
 export function BoardSplit({
   board,
-  camera,
   children,
 }: {
   board: BoardState;
-  camera: Pick<Camera, 'whenSettled'>;
   children: ReactNode;
 }) {
   const [dock, dispatch] = useReducer(dockReducer, { open: false, current: null, leaving: null });
 
   useEffect(() => {
-    const waiting = new AbortController();
-    void camera.whenSettled(waiting.signal).then(() => {
-      if (waiting.signal.aborted) return;
-      dispatch(board.item && board.key ? { type: 'show', shown: { key: board.key, item: board.item } } : { type: 'close' });
-    });
-    return () => waiting.abort();
-  }, [board.key, board.item, camera]);
+    dispatch(board.item && board.key ? { type: 'show', shown: { key: board.key, item: board.item } } : { type: 'close' });
+  }, [board.key, board.item]);
 
   useEffect(() => {
     if (dock.open || !dock.current) return;
@@ -152,6 +144,7 @@ const BoardView = memo(function BoardView({
         {item.kind === 'formula' && <FormulaBoard item={item} focus={focus} />}
         {item.kind === 'flow' && <FlowBoard item={item} focus={focus} />}
         {item.kind === 'bars' && <BarsBoard item={item} focus={focus} />}
+        {item.kind === 'plot' && <PlotBoard item={item} focus={focus} />}
       </div>
     </div>
   );

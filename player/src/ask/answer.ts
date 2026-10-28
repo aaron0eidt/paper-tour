@@ -2,6 +2,7 @@
 // so test/ask.test.ts checks it without a browser.
 
 import { DEFAULT_SPEAKER } from '../types';
+import { responseLanguage } from '../../../shared/languages';
 import type { CameraAction, Tour } from '../types';
 import type { TargetKind } from '../resolve';
 import type { AskAnswer } from './api';
@@ -23,6 +24,7 @@ export function answerTour(answer: AskAnswer, question: string, tour: Tour | nul
     title: question,
     paper: tour?.paper ?? 'answer',
     ...(tour?.voices ? { voices: tour.voices } : {}),
+    ...(responseLanguage(answer.language) ? { voices: { ...tour?.voices, [speaker]: { ...tour?.voices?.[speaker], lang: answer.language } } } : {}),
     chapters: [{ id: 'answer', title: question, steps }],
   };
 }

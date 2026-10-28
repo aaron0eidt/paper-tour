@@ -255,7 +255,7 @@ type Script = Partial<Record<Kind, (repair: boolean) => unknown>>;
 
 const good: Script = {
   formula: () => ({ plan: 'p', formula: FORMULA, say: FORMULA_SAY, cues: FORMULA_CUES }),
-  figure: () => ({ plan: 'p', flow: { title: '', nodes: [], edges: [] }, say: FIGURE_SAY, cues: FIGURE_CUES }),
+  figure: () => ({ plan: 'p', say: FIGURE_SAY, cues: FIGURE_CUES }),
   table: () => ({ plan: 'p', bars: TABLE_BARS, say: TABLE_SAY, cues: TABLE_CUES }),
   method: () => ({ plan: 'p', flow: METHOD_FLOW, say: METHOD_SAY, cues: METHOD_CUES }),
   result: () => ({ plan: 'p', bars: noBars, say: SAY, cues: resultCues }),
@@ -524,7 +524,7 @@ test('the plan gives formulas, methods, results and tables a board, and stays co
       'idea-1:-',
       'method-1:flow',
       'formula-1:formula',
-      'figure-1:flow',
+      'figure-1:-',
       'figure-2:bars',
       'result-1:bars',
       'limitation-1:-',
@@ -738,11 +738,11 @@ test('the direction schema puts the board before say and offers only the beat’
   const { requests } = await generate();
   const schema = (kind: Kind) => requests.find((r) => kindOf(r.brief) === kind)!.schema;
   const cue = (kind: Kind) => schema(kind).properties.cues.items.properties;
-  assert.deepEqual(Object.keys(schema('formula').properties), ['plan', 'formula', 'say', 'cues']);
+  assert.deepEqual(Object.keys(schema('formula').properties), ['plan', 'formula', 'plot', 'say', 'cues']);
   assert.deepEqual(cue('formula').action.enum, ['board_focus']);
-  assert.deepEqual(cue('formula').target.enum, ['term-1', 'term-2', 'term-3', 'term-4', 'term-5', 'term-6']);
-  assert.deepEqual(cue('figure').action.enum, ['arrow', 'circle', 'box', 'board_focus']);
-  assert.deepEqual(cue('figure').target.enum.slice(0, 3), ['fig1', 'fig1.a', 'node-1']);
+  assert.deepEqual(cue('formula').target.enum, ['term-1', 'term-2', 'term-3', 'term-4', 'term-5', 'term-6', 'curve-1', 'curve-2', 'curve-3']);
+  assert.deepEqual(cue('figure').action.enum, ['arrow', 'circle', 'box']);
+  assert.deepEqual(cue('figure').target.enum.slice(0, 3), ['fig1', 'fig1.a']);
   assert.ok(cue('figure').region.enum.includes('bottom-half'));
   assert.deepEqual(cue('table').target.enum, ['tab1', 'bar-1', 'bar-2', 'bar-3', 'bar-4', 'bar-5', 'bar-6']);
   assert.deepEqual(Object.keys(schema('result').properties), ['plan', 'bars', 'say', 'cues']);

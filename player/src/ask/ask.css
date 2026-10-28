@@ -29,29 +29,29 @@
   min-height: 0;
 }
 
-/* The bar's own lane under the page, so it never covers what the tour points at; the tray opens upwards over the
-   stage only while it is in use. */
+/* The full question tray occupies its own lane; the camera measures the remaining visible page. */
 .ask-lane {
   position: relative;
   z-index: 18;
   flex: none;
-  height: 62px;
+  height: auto;
+  padding: 8px 12px;
   background: var(--stage-bg);
 }
 
-/* Docked to the bottom of a positioned container: a compact pill until it is used, then a wide card. */
+/* Keep the tray in normal flow, including its expanded content. */
 .ask.ask-dock {
-  position: absolute;
+  position: relative;
   left: 0;
   right: 0;
-  bottom: var(--ask-dock-bottom, 8px);
+  bottom: auto;
   z-index: 18;
-  width: min(360px, calc(100% - 32px));
+  width: min(640px, 100%);
   transition: width 320ms var(--ask-ease);
 }
 
 .ask.ask-dock.expanded {
-  width: min(640px, calc(100% - 32px));
+  width: min(640px, 100%);
 }
 
 .ask-card {
@@ -455,3 +455,11 @@
     color: var(--muted);
   }
 }
+
+.ask-tray-clip { max-height: min(240px, 28dvh); overflow-y: auto; }
+.ask-mic { flex: none; display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 50%; width: 32px; height: 32px; padding: 0; cursor: pointer; touch-action: none; user-select: none; }
+.ask-mic.recording { border-color: var(--error); background: #6b2834; }
+.ask-mic:disabled { opacity: 0.4; cursor: default; }
+.ask-language { width: 76px; flex: none; border: 0; border-left: 1px solid var(--line); border-radius: 0; padding: 3px 4px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; }
+.ask-language option { background: var(--panel); color: var(--text); }
+@media (max-width: 500px) { .ask-language { width: 58px; } }

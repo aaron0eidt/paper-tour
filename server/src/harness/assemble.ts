@@ -1,3 +1,4 @@
+import { plotProblems } from '../../../shared/plot';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -15,6 +16,7 @@ import { ROOT } from '../config';
 import { indexElements } from '../elements';
 import type { Beat, BeatKind, Preset, TourPlan } from './beats';
 import { boardParts } from './board';
+import { insightStep } from './insight';
 import type { PaperCard } from './card';
 import { boardPart, regionOf, type BeatTargets, type Direction } from './direct';
 
@@ -147,7 +149,7 @@ export function beatStep(
   }
   const marked = actions.some((a) => ['box', 'arrow', 'circle', 'spotlight', 'note'].includes(a.type));
   if (beat.target && !marked) actions.push({ type: 'box', target: beat.target, color });
-  return { id: beat.id, say, actions, ...(board ? { hold_ms: BOARD_HOLD_MS } : {}) };
+  return insightStep({ id: beat.id, say, actions, ...(board ? { hold_ms: BOARD_HOLD_MS } : {}) }, doc);
 }
 
 /**
@@ -233,6 +235,7 @@ export function tourProblems(tour: Tour, doc: Doc): string[] {
   for (const step of tour.chapters.flatMap((c) => c.steps)) {
     const words = splitWords(step.say).length;
     for (const action of step.actions) {
+      if (action.type === 'board' && action.item.kind === 'plot') problems.push(...plotProblems(action.item).map((p) => `${step.id}: ${p}`));
       const used =
         'target' in action
           ? [action.target]

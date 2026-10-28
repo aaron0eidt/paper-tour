@@ -220,7 +220,7 @@
     display: none;
   }
 }
-@media (max-width: 580px) {
+@media (max-width: 860px) {
   .reader-app {
     grid-template-columns: 1fr;
   }
@@ -268,6 +268,9 @@
   font: inherit;
   font-size: 12px;
   text-decoration: none;
+}
+.reader-app-toolbar .reader-navigation-toggle {
+  display: none;
 }
 .reader-settings-button {
   width: 34px;
@@ -394,11 +397,39 @@
     margin-left: 2px;
   }
 }
-@media (max-width: 580px) {
+@media (max-width: 860px) {
   .reader-app-toolbar {
     grid-column: 1;
+  }
+  .reader-app-toolbar .reader-navigation-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+  .reader-app.navigation-open > .sidebar {
+    display: flex;
+    position: fixed;
+    z-index: 20;
+    top: 54px;
+    bottom: 0;
+    left: 0;
+    width: min(320px, calc(100vw - 36px));
+    box-shadow: 8px 0 24px rgb(0 0 0 / 30%);
   }
   .reader-mobile-back {
     display: none;
   }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .reader-app-toolbar { height: 40px; min-height: 40px; padding-block: 3px; }
+  .reader-app .main { padding-top: 36px; }
+  .reader-toolbar { height: 36px; }
+  .reader-app .controls { display: flex; min-height: 58px; padding: 4px 10px; gap: 8px; }
+  .reader-app .narration { flex: 1; min-width: 0; max-height: 38px; }
+  .reader-app .transport, .reader-app .settings { flex: none; }
+  .reader-app .ask-lane { padding-block: 4px; }
+  .reader-app .ask-tray-clip { max-height: 58px; }
+  .reader-app .sidebar-head { padding: 8px 12px; }
+  .reader-app .reader-tabs { margin-bottom: 6px; }
+  .reader-app.navigation-open > .sidebar { top: 40px; }
 }

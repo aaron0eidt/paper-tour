@@ -1,4 +1,56 @@
-# Status (2026-10-27)
+# Status (2026-10-28)
+
+## Air implementation and verification (2026-10-28)
+
+The expanded local implementation task is implemented; external quality checks below remain explicit. No commits,
+pushes, deployments or paid model/speech calls were made. The transferred mobile navigation changes were preserved
+and tested; its breakpoint now also covers the previously inaccessible 581–860 px range.
+
+- **Insight guards:** redundant printed pen labels are stripped while marks remain; flows repeating the visible
+  figure are dropped together with their focus cues. Method/figure beats no longer receive a flow automatically.
+  Near-verbatim long narration gets one repair; copied final fallbacks are dropped. If nothing useful survives,
+  generation fails clearly. Guards use extracted text, not a semantic guarantee for unreadable raster labels.
+- **Plots:** shared bounded expression parser/evaluator, no eval or executable model code. Formula beats and Q&A
+  can return validated `plot` boards, with axes, KaTeX labels, curve draw-in, moving point and optional parameter
+  sweep. Invalid domains/poles are segmented; reduced motion shows the final state.
+- **Language:** dominant document prose determines new tour narration and voice metadata. Q&A defaults to the
+  tour/document language; an explicit Answer language selection supports bilingual reading while quotes stay original.
+- **Reader:** the full Ask tray occupies its own lane, camera flights preserve continuity/deadline during board
+  resizing, and phone landscape controls are compact. Back to the tour remains reachable while drafting. Answer
+  camera movement and intermediate return flights cannot replace the main reading checkpoint.
+- **Exercise IDs:** tasks and nested parts resolve to their original blocks, including multiple pages, and are
+  projected into the element index using the existing block contract.
+- **Voice:** hold-to-talk interrupts playback, encodes bounded mono PCM16 WAV, uses the existing user's Meta
+  connection and documented Muse Voice Transcribe endpoint. Transcripts are reviewed before sending a question.
+  Permission failure/cancellation releases recording resources and restores the tour. See [VOICE.md](VOICE.md).
+- **Development tools:** audited Vite 5/esbuild advisories were removed by updating Vite to 6.4.5, the React plugin
+  to 4.7.0 and esbuild to 0.25.12. Player audit and server production audit report zero vulnerabilities; build and
+  browser regression pass again. Runtime React and PDF dependencies are unchanged.
+- **Further workflows:** local course PDF packs with source hashes/page maps, escaped literal version comparisons
+  and photo-to-searchable-PDF OCR. Original pages are retained; no model calls. These are working preparation tools,
+  not automatic exam alignment, a two-document reader or reliable personal-data redaction. See
+  [LOCAL-WORKFLOWS.md](LOCAL-WORKFLOWS.md).
+- **Demo:** reproducible CC0 synthetic documents and explicitly authored offline renderer fixtures, local instructions,
+  pitch rehearsal script and a labelled 22-second silent backup video. These are not unedited real model outputs or
+  evidence of writer quality. See [DEMO.md](DEMO.md). Name candidates remain Nib, Penlight and Lupe; no name selected.
+
+**Verified on the Air:** build passes; all player suites pass; server 142 pass / 6 database-only skips in the ordinary
+run, and 194/194 pass with isolated local Supabase (zero skips). Ingestion 53/53 passes with local Tesseract language
+data. Seven synthetic document types, a two-column paper with a detected figure, a course pack and a version bundle
+went through real authenticated upload/storage/worker processing; a photo-OCR PDF also passed the browser's resumable
+upload. Signed range access, cross-account isolation, search, stored progress and missing-key errors were checked.
+Chromium automation covers 1440×900, 390×844, 760×900 and 844×390, Q&A pause/back/cancel/late reply/error, plot/pen,
+navigation/search, library restoration and microphone permission/cancellation. No uncaught browser errors in the main
+run. API answers/transcription in those playback tests are fake transports. Reports and exact logs are gitignored
+under `.data/air-goal-report.md`, `.data/air-test-report.md` and `.data/air-test/logs/`.
+
+**Remaining external checks/decisions:** a separately authorised real Meta writer/transcription run and listening on
+the actual microphone/browser voices; licensed representative real-world documents and difficult camera photos;
+name/trademark decision and unknown hackathon rules. Manim is optional. The broader P1/P2 product modes in PLAN and
+USE-CASES remain a roadmap, not a claim that every listed future product is built. Never infer permission to publish
+or spend from this local verification.
+
+## Earlier project history
 
 The product plan is in [PLAN.md](PLAN.md).
 
@@ -66,7 +118,7 @@ findings were confirmed and 2 refuted. All of them, with evidence and suggested 
   the IRS W-9.
 - **Names:** notes/NAMES.md proposes Nib, Penlight and Lupe to replace "Paper Tour" (Aaron to choose).
 
-**Next, in order (Aaron's direction, 10-28):**
+**Historical next-step list (Aaron's direction, before the Air work; current state above):**
 1. Insight and no doubling: a pen label never repeats words printed at the mark (say what the part does or why it
    matters); the board never redraws the figure on screen (show a worked example, a plot of the function, the
    intuition); a flow only when it adds something. Enforce with code checks, not only prompts.

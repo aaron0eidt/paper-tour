@@ -289,3 +289,29 @@ test('the paper block lists every prose sentence by ID, and figures and equation
   assert.ok(block.includes('[eq1] (1), page 2: y = softmax(QK)V'));
   assert.ok(block.includes('## [sec-2] 2 Method'));
 });
+
+test('fake transport sees the document language and copied narration receives one repair', async () => {
+  const german = structuredClone(input);
+  german.doc.blocks[1].text = 'Die Funktion wird mit der Kettenregel berechnet. Für die Aufgabe müssen wir zuerst das innere Argument und dann die äußere Funktion betrachten.';
+  let repaired = false;
+  const copied = 'The encoder transforms each input into a contextual representation which the decoder can use to generate an output sequence.';
+  german.doc.sentences[0].text = copied;
+  const result = await new HarnessTourGenerator(settings, 'quick', provider((r) => {
+    if (r.name === 'paper_card') { assert.match(r.task, /de-DE/); return card; }
+    if (r.task.includes('Explain the mechanism, consequence or intuition')) repaired = true;
+    return r.task.includes('Explain the mechanism, consequence or intuition') ? goodModel(r) : { plan: 'p', say: copied, cues: [] };
+  })).generate(german);
+  assert.equal(repaired, true);
+  assert.equal(result.tour.voices?.host.lang, 'de-DE');
+  assert(steps(result.tour).every((s) => s.say !== copied));
+});
+
+test('a failed repair cannot publish a verbatim fallback from the paper card', async () => {
+  const source = structuredClone(input);
+  const copied = 'The encoder transforms each input into a contextual representation which the decoder can use to generate an output sequence.';
+  source.doc.sentences.forEach((sentence) => { sentence.text = copied; });
+  const run = new HarnessTourGenerator(settings, 'quick', provider((r) =>
+    r.name === 'paper_card' ? {plan:'invalid card'} : {plan:'p',say:copied,cues:[]}
+  )).generate(source);
+  await assert.rejects(run, (error) => error instanceof ProcessingError && error.code === 'invalid_tour');
+});

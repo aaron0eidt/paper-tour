@@ -707,6 +707,107 @@
             "bars"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "x",
+            "y",
+            "curves"
+          ],
+          "properties": {
+            "kind": {
+              "const": "plot"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "x": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number",
+                "minimum": -1000000,
+                "maximum": 1000000
+              }
+            },
+            "y": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number",
+                "minimum": -1000000,
+                "maximum": 1000000
+              }
+            },
+            "x_label": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "y_label": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "curves": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expression",
+                  "label"
+                ],
+                "properties": {
+                  "expression": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "color": {
+                    "enum": [
+                      "blue",
+                      "green",
+                      "pink",
+                      "orange",
+                      "yellow"
+                    ]
+                  }
+                }
+              }
+            },
+            "parameter": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "from",
+                "to"
+              ],
+              "properties": {
+                "from": {
+                  "type": "number",
+                  "minimum": -1000,
+                  "maximum": 1000
+                },
+                "to": {
+                  "type": "number",
+                  "minimum": -1000,
+                  "maximum": 1000
+                }
+              }
+            }
+          }
         }
       ]
     }

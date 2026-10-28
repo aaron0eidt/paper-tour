@@ -1,5 +1,6 @@
 import type { Doc, BBox } from '../../shared/paper';
 import type { IndexedElement } from '../../shared/contracts';
+import { exerciseTargets } from '../../shared/exercises';
 const json = (value: object) => value as Record<string, unknown>;
 const bounds = (rs: BBox[]): BBox | null =>
   rs.length
@@ -78,6 +79,14 @@ export function indexElements(doc: Doc): IndexedElement[] {
       bbox: e.bbox,
       data: json(e),
     });
+  for (const [id, ids] of exerciseTargets(doc)) {
+    const source = ids.flatMap((id) => blocks.get(id) ?? []);
+    if (!source.length) continue;
+    const page = source[0].page;
+    result.push({ id, kind: 'block', page, text: source.map((b) => b.text).join('\n'),
+      bbox: bounds(source.filter((b) => b.page === page).map((b) => b.bbox)),
+      data: { type: 'exercise', blocks: ids } });
+  }
   if (new Set(result.map((e) => e.id)).size !== result.length) throw new Error('Duplicate element IDs in analysis.');
   return result;
 }

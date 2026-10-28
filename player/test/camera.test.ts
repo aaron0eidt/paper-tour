@@ -80,3 +80,33 @@ try {
   globalThis.requestAnimationFrame = originalRequest;
   globalThis.cancelAnimationFrame = originalCancel;
 }
+
+// A board/ask resize during a flight must preserve continuity and the original completion time.
+{
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'performance');
+  let now = 1000;
+  Object.defineProperty(globalThis, 'performance', { configurable: true, value: { now: () => now } });
+  const oldRequest = globalThis.requestAnimationFrame, oldCancel = globalThis.cancelAnimationFrame;
+  let callback: FrameRequestCallback | null = null;
+  globalThis.requestAnimationFrame = (fn) => { callback = fn; return 1; };
+  globalThis.cancelAnimationFrame = () => { callback = null; };
+  try {
+    const c = camera();
+    c.animateTo({ cx: 300, cy: 1100, s: 1 }, 700);
+    now = 1350; callback!(now);
+    const before = c.getView();
+    c.setViewport({ width: 400, height: 350 });
+    c.retargetTo({ cx: 300, cy: 900, s: 0.8 });
+    assert.equal(c.getView().cy, before.cy, 'retarget has no position jump');
+    now = 1351; callback!(now);
+    assert.equal(Math.abs(c.getView().cy - before.cy) < 10, true, 'velocity stays continuous');
+    now = 1701; callback!(now);
+    assert.equal(c.animating, false, 'resizing does not restart another 700ms flight');
+    assert.equal(c.getView().cy, 900);
+    c.destroy();
+    console.log('  ok    resize retarget preserves continuity and the flight deadline');
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'performance', descriptor);
+    globalThis.requestAnimationFrame = oldRequest; globalThis.cancelAnimationFrame = oldCancel;
+  }
+}

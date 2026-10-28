@@ -245,6 +245,14 @@ test('a long wait says what is happening', () => {
   ]);
 });
 
+test('an explicit answer language changes only the micro-tour voice configuration', () => {
+  const original = JSON.stringify(tour);
+  const answer = answerTour({...reply,language:'uk-UA'}, 'Explain this', tour);
+  eq(answer.voices?.host?.lang,'uk-UA');
+  eq(JSON.stringify(tour),original);
+  eq(answerTour({...reply,language:'<script>'}, 'Explain this', tour).voices,tour.voices);
+});
+
 console.log(results.join('\n'));
 if (failures) throw new Error(`${failures} test(s) failed`);
 console.log(`\nall ${results.length} ask tests passed`);

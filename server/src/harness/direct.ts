@@ -1,3 +1,4 @@
+import { PLOT_SCHEMA } from '../../../shared/plot';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
 import type { MuseMessage } from '../muse/client';
@@ -89,12 +90,17 @@ export function regionOf(name: string | undefined): Region | undefined {
 export function boardPartIds(kind: BoardKind | undefined): string[] {
   if (kind === 'flow') return [...FLOW_NODE_IDS];
   if (!kind) return [];
+  if (kind === 'plot') return ['curve-1', 'curve-2', 'curve-3'];
   const [prefix, most] = kind === 'formula' ? ['term', BOARD_LIMITS.terms[1]] : ['bar', BOARD_LIMITS.bars[1]];
   return Array.from({ length: most }, (_, i) => `${prefix}-${i + 1}`);
 }
 
 /** The index board_focus lights up for a part ID, or -1 when the item has no such part. */
 export function boardPart(item: BoardItem, id: string): number {
+  if (item.kind === 'plot') {
+    const n = Number(/^curve-(\d+)$/.exec(id)?.[1]) - 1;
+    return n >= 0 && n < item.curves.length ? n : -1;
+  }
   if (item.kind === 'flow') return item.nodes.findIndex((n) => n.id === id);
   const [prefix, size] = item.kind === 'formula' ? ['term', item.terms.length] : ['bar', item.bars.length];
   const n = Number(new RegExp(`^${prefix}-(\\d+)$`).exec(id)?.[1]) - 1;
@@ -132,7 +138,9 @@ function resultTable(doc: Doc, evidence: string[], text: string): DocFigure | un
 
 /** Targets on the page the camera shows: a text beat's paragraphs, or a figure with its panels, or an equation. */
 export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
-  const parts = beat.board ? { parts: boardPartIds(beat.board) } : {};
+  const parts = beat.board
+    ? { parts: [...boardPartIds(beat.board), ...(beat.kind === 'formula' ? boardPartIds('plot') : [])] }
+    : {};
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const quote = (ids: string[]) => ids.map((id) => sentences.get(id)?.text ?? '').filter(Boolean);
   if (beat.target) {
@@ -210,10 +218,11 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['plan', ...(strict && beat.board ? [beat.board] : []), 'say', 'cues'],
+    required: ['plan', ...(strict && beat.board && beat.kind !== 'formula' ? [beat.board] : []), 'say', 'cues'],
     properties: {
       plan: strict ? { type: 'string', maxLength: 600 } : { type: 'string' },
       ...(beat.board ? { [beat.board]: strict ? boardSchema(beat.board) : {} } : {}),
+      ...(beat.kind === 'formula' ? { plot: strict ? PLOT_SCHEMA : {} } : {}),
       say: {
         type: 'string',
         minLength: 20,
@@ -333,7 +342,12 @@ export function cleanDirection(value: unknown, beat: Beat, targets: BeatTargets)
     }))
     .filter((c) => actions.has(c.action) && allowed(c))
     .slice(0, 4);
-  const check = beat.board ? checkBoard(beat.board, d[beat.board], targets.evidence) : null;
+  const check =
+    beat.kind === 'formula' && d.plot
+      ? checkBoard('plot', d.plot)
+      : beat.board
+        ? checkBoard(beat.board, d[beat.board], targets.evidence)
+        : null;
   const board = check?.item ? { board: check.item } : {};
   return { plan: d.plan, say, cues, ...board, boardProblems: check?.problems ?? [] };
 }

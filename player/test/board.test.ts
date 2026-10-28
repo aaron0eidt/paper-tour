@@ -111,10 +111,10 @@ test('items that cannot be drawn are skipped with a warning', () => {
   eq(checkBoardItem({ kind: 'flow', nodes: [{ id: 'a', label: 'A' }], edges: [] }, 'step "s"', warn), null, 'one box');
   const oneBar = { kind: 'bars', bars: [{ label: 'x', value: 1 }, { label: 'y', value: Number.NaN }] };
   eq(checkBoardItem(oneBar, 'step "s"', warn), null, 'one number');
-  eq(checkBoardItem({ kind: 'plot' }, 'step "s"', warn), null, 'unknown kind');
+  eq(checkBoardItem({ kind: 'timeline' }, 'step "s"', warn), null, 'unknown kind');
   eq(checkBoardItem(null, 'step "s"', warn), null, 'missing');
   eq(warnings.length, 5, 'warnings');
-  ok(warnings[3].includes('"plot"') && warnings[3].includes('step "s"'), 'names the kind and the step');
+  ok(warnings[3].includes('"timeline"') && warnings[3].includes('step "s"'), 'names the kind and the step');
 });
 
 test('a flow drops boxes without labels, edges to unknown boxes and self-loops', () => {

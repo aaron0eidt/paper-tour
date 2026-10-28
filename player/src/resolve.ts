@@ -2,6 +2,7 @@
 // an ID becomes geometry.
 
 import { checkBoardItem } from './board';
+import { exerciseTargets } from '../../shared/exercises';
 import { DEFAULT_COLOR, DEFAULT_ZOOM_PADDING, splitWords } from './types';
 import type { Action, BBox, Doc, DocBlock, DocEquation, DocFigure, DocPanel, DocSentence, Region, Tour } from './types';
 
@@ -15,7 +16,7 @@ export interface PageSize {
   height: number;
 }
 
-export type TargetKind = 'sentence' | 'block' | 'section' | 'figure' | 'panel' | 'equation' | 'page';
+export type TargetKind = 'sentence' | 'block' | 'section' | 'figure' | 'panel' | 'equation' | 'exercise' | 'page';
 
 export interface Problem {
   level: 'error' | 'warning' | 'info';
@@ -76,11 +77,13 @@ export class Resolver {
   private figures = new Map<string, DocFigure>();
   private panels = new Map<string, DocPanel & { page: number }>();
   private equations = new Map<string, DocEquation>();
+  private exercises = new Map<string, string[]>();
 
   constructor(doc: Doc | null, pageSizes: PageSize[]) {
     this.doc = doc;
     this.pageSizes = pageSizes;
     if (!doc) return;
+    this.exercises = exerciseTargets(doc);
     for (const b of doc.blocks) this.blocks.set(b.id, b);
     for (const s of doc.sentences) this.sentences.set(s.id, s);
     for (const s of doc.sections) this.sections.set(s.id, s.block);
@@ -92,6 +95,7 @@ export class Resolver {
   }
 
   kind(id: string): TargetKind | null {
+    if (this.exercises.has(id)) return 'exercise';
     if (this.sentences.has(id)) return 'sentence';
     if (this.blocks.has(id)) return 'block';
     if (this.sections.has(id)) return 'section';
@@ -116,6 +120,15 @@ export class Resolver {
     };
     const sentence = this.sentences.get(id);
     if (sentence) return one(sentence.page, sentence.rects);
+
+    const task = this.exercises.get(id);
+    if (task) {
+      const pages = new Map<number, BBox[]>();
+      for (const block of task) for (const group of this.resolve(block, opts) ?? [])
+        pages.set(group.page, [...(pages.get(group.page) ?? []), ...group.rects]);
+      const groups = [...pages].sort(([a], [b]) => a - b).map(([page, rects]) => ({ page, rects }));
+      return groups.length ? groups : null;
+    }
 
     const blockId = this.blocks.has(id) ? id : this.sections.get(id);
     const block = blockId ? this.blocks.get(blockId) : undefined;
@@ -146,6 +159,8 @@ export class Resolver {
 
   /** The page an element is on according to doc.json, whether or not the loaded PDF has it. */
   pageOf(id: string): number | null {
+    const task = this.exercises.get(id);
+    if (task) return this.blocks.get(task[0])?.page ?? null;
     const el =
       this.sentences.get(id) ??
       this.blocks.get(this.sections.get(id) ?? id) ??

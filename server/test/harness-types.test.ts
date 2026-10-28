@@ -725,7 +725,7 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
   );
   // A line the code could not check is marked on the board; one its author doubts also asks the learner to check.
   const unchecked = step('ex2-step-1').actions.find((a) => a.type === 'board');
-  assert.equal(unchecked?.type === 'board' && unchecked.item.title, 'Multiply the diagonals · unchecked');
+  assert.equal(unchecked?.type === 'board' && unchecked.item.title, 'Multiply the diagonals · ungeprüft');
   assert.equal(step('ex2-step-1').say, 'We multiply one times minus one, and subtract two times three.');
   assert.equal(step('ex2-step-2').say, 'Minus one minus six gives minus seven.');
   // The verifier saw every solution line and the answer, once per part.
@@ -773,7 +773,7 @@ test('a solution line that does not check out gets one repair with the reason; s
   const answer = fixed.step('ex1.b-answer');
   assert.equal(answer.say, 'So x is twelve, and both sides of the equation agree. Please check this step yourself.');
   const board = answer.actions.find((a) => a.type === 'board');
-  assert.equal(board?.type === 'board' && board.item.title, 'Result · unchecked');
+  assert.equal(board?.type === 'board' && board.item.title, 'Result · ungeprüft');
   assert.equal(fixed.step('ex1.b-step-1').say, solution('ex1.b').steps[0].say);
 });
 
