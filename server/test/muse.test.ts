@@ -527,6 +527,34 @@ test('interrupted or truncated streams cannot become accepted model responses', 
   }
 });
 
+test('SDK partial output streams only public narration before the structured response completes', async () => {
+  const publicText: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const encoder = new TextEncoder();
+  const frame = (content: string) => encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+  const transport: typeof fetch = async () => new Response(new ReadableStream({
+    async start(controller) {
+      controller.enqueue(frame('{"plan":"private reasoning","say":"The curve becomes'));
+      await gate;
+      controller.enqueue(frame(' gentler.","cues":[]}'));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`));
+      controller.close();
+    },
+  }), { headers: { 'content-type': 'text/event-stream' } });
+  const timer = setTimeout(release, 4000);
+  try {
+    const result = await new MuseClient(settings, transport).complete(userInput, 'beat_direction', {}, 100, undefined, undefined, undefined, 'medium', async (text) => {
+      publicText.push(text);
+      release();
+    });
+    assert.equal(publicText[0], 'The curve becomes');
+    assert.equal(publicText.at(-1), 'The curve becomes gentler.');
+    assert.ok(publicText.every((text) => !text.includes('private') && !text.includes('cues')));
+    assert.equal((result.value as { say: string }).say, publicText.at(-1));
+  } finally { clearTimeout(timer); release(); }
+});
+
 test('generation activity captures actual multimodal prompts without inline image bytes', async () => {
   const recorded: { type: string; data: Record<string, unknown> }[] = [];
   const generator = new MuseTourGenerator(settings, provider((request) => request.response_format.json_schema.name === 'paper_visual_observations'

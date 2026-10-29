@@ -7,9 +7,32 @@ import { HarnessTourGenerator } from './harness-fixture';
 import { planBeats } from '../src/harness/beats';
 import { findAnchor } from '../src/harness/assemble';
 import { checkBars, checkFlow, checkFormula, numbersIn } from '../src/harness/board';
-import { REGION_NAMES, regionOf } from '../src/harness/direct';
+import { REGION_NAMES, regionOf, beatTargets, cleanDirection } from '../src/harness/direct';
+import { beatStep } from '../src/harness/assemble';
 import { BOARD_EXAMPLES } from '../src/harness/prompts';
 import type { MeasuredTarget } from '../src/harness/visual-grounding';
+
+test('plots and successive source cues survive assembly, including in later steps using the same passages', () => {
+  const beat = { id: 'method-plot', kind: 'method' as const, arc: 'method', point: 'Response sensitivity', evidence: ['p1.s1', 'p1.s2', 'p1.s3', 'p1.s4'] };
+  const targets = beatTargets(beat, doc);
+  const say = 'First the motivation explains the question. Next the proposal describes the approach. Then the planner orders the work. Finally the figure shows the connections, and the transition becomes gentler in this illustrative response.';
+  const raw = {
+    ...BOARD_EXAMPLES.plot, say,
+    cues: [
+      ...['First the motivation', 'Next the proposal', 'Then the planner', 'Finally the figure'].map((anchor, i) => ({ action: 'highlight', target: `p1.s${i + 1}`, label: '', anchor })),
+      ...BOARD_EXAMPLES.plot.cues,
+    ],
+  };
+  const direction = cleanDirection(raw, beat, targets)!;
+  assert.deepEqual(direction.boardProblems, []);
+  assert.equal(direction.cues.length, 5);
+  const initial = beatStep(beat, targets, direction, doc);
+  const later = beatStep({ ...beat, id: 'method-revisit' }, targets, direction, doc);
+  assert.equal(initial.actions.filter((a) => a.type === 'highlight').length, 4);
+  assert.equal(later.actions.filter((a) => a.type === 'highlight').length, 4);
+  assert.ok(initial.actions.some((a) => a.type === 'board' && a.item.kind === 'plot'));
+  assert.ok(initial.actions.some((a) => a.type === 'board_focus' && Number(a.at_word) > 0));
+});
 
 // Pen marks and the side board in the short-tour writer, end to end with a scripted model (no network).
 

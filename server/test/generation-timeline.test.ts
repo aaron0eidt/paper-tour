@@ -110,3 +110,23 @@ test('parallel writing calls use their actual planned explanation labels', () =>
   ]);
   assert.equal(entries[0].title, 'Why the scaling term matters');
 });
+
+test('narration snapshots update in place without mixing raw JSON or parallel calls', () => {
+  const events = [
+    e('1', 'model.started', { callId: 'a', name: 'beat_direction' }),
+    e('2', 'model.started', { callId: 'b', name: 'beat_direction' }),
+    e('3', 'model.delta', { callId: 'a', delta: '{"plan":"private","say":"The curve' }),
+    e('4', 'model.narration', { callId: 'a', text: 'The curve' }),
+    e('5', 'model.delta', { callId: 'a', delta: ' bends.","cues":[]}' }),
+    e('6', 'model.narration', { callId: 'b', text: 'The matrix transforms.' }),
+    e('7', 'model.narration', { callId: 'a', text: 'The curve bends.' }),
+  ];
+  const rows = generationTimeline([...events, events[6]]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].text, 'The curve bends.');
+  assert.equal(rows[1].text, 'The matrix transforms.');
+  assert.equal(rows[0].state, 'running');
+  assert.match(rows[0].detail, /validation follows/);
+  events.push(e('8', 'model.failed', { callId: 'a' }));
+  assert.equal(generationTimeline(events)[0].state, 'failed');
+});
