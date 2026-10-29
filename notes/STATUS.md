@@ -1,4 +1,38 @@
-# Status (2026-10-28)
+# Status (2026-10-29)
+
+## Check after the 10-29 merges (2026-10-29)
+
+- **Checks:** on main after PR #2, the build and every suite pass: player suites, server 276 passed / 7 database
+  skips, ingestion 62 passed / 2 skips.
+- **Two real unedited runs** of *Attention Is All You Need* through `server/run-tour.ts` with the default `deep` preset
+  and muse-spark-1.3: after PR #1 (harness@21) 21 steps, 1,653 words, 22 model calls, 72 s; after PR #2 (harness@22)
+  21 steps, 1,589 words, 28 model calls, 72 s. Neither had fallback or omitted beats. Steps 1, 8, 11, 13, 20 and 21 of
+  the first were watched in the reader at 1440×900.
+- **Good:** crisp figure zooms; formula boards build `softmax(QKᵀ/√d_k)V` and the feed-forward network term by term in
+  readable colours; worked examples with labelled illustrative values (scores before and after the √d_k scaling, raw
+  scores to weights to output, ReLU hidden activations); result bars; the second run adds a plot of cost against
+  sequence length.
+- **Issues:**
+  1. Length: 21 steps and about 10-11 minutes of narration, against 11 steps in the earlier standard run. Chapters
+     follow pages, so the Table 2 results sit under "Page 8 · Regularization".
+  2. Doubling across steps: in the second run, steps 18, 19 and 20 all chart the same English-German BLEU numbers
+     (26.36, 27.3, 28.4), and steps 10, 11 and 13 each work through scores, softmax weights and output. In the first,
+     steps 18 and 19 both presented the English-German result, and step 1's scene restated the highlighted abstract
+     sentence as two boxes. The insight guards work within a step, not across steps.
+  3. A misleading badge: in the first run, the parsing bars marked the Transformer (91.3 F1) "Best", but Table 4 lists
+     Dyer et al. at 91.7 in the same WSJ-only setting, and the narration said the Transformer stays below it. The bars
+     renderer (`player/src/components/Board.tsx`, from 10-27) badges the highest bar shown, so a model-chosen subset
+     can mislead.
+  4. Plots: the second run uses one, but positional encoding still gets no board, and neither run explains the sine
+     and cosine functions.
+  5. The floating ask tray covered page text at the bottom of the reader in the first run; the reader layout has not
+     changed since.
+- **Decisions for Aaron and Nikolas:**
+  - The default preset is now `deep` (`server/src/config.ts`, `.env.example`); the plan asked for concise tours.
+  - After two failed corrections, one beat with an invalid scene, worked example or visual grounding now fails the
+    whole tour (`server/src/harness/generator.ts`, around line 402); before, the beat fell back and the tour still
+    played. The first runs in [VISUAL-EVALUATION.md](VISUAL-EVALUATION.md) failed on two of three papers before fixes.
+  - Tesseract and OpenCV are new runtime dependencies; local OCR is one of the open hackathon-rule questions.
 
 ## Composable live explanations (2026-10-28)
 
