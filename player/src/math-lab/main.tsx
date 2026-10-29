@@ -105,8 +105,8 @@ function App() {
           </a>
         </header>
         <div className="lab-intro">
-          <h1>Mathematik, die sich bewegt.</h1>
-          <p>Gleiche Werte. Gleiche Zeitsteuerung. Zwei Wege, einen Zusammenhang sichtbar zu machen.</p>
+          <h1>Mathematische Darstellung im Vergleich</h1>
+          <p>Gleiche Werte und Zeitsteuerung. Entscheidend ist, welche Darstellung den Zusammenhang klarer erklärt.</p>
         </div>
         <nav className="lab-tabs" aria-label="Mathematisches Beispiel">
           {['Funktionen', 'Lineare Algebra', 'Rechengraph'].map((title, i) => (

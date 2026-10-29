@@ -62,6 +62,16 @@ agent scene language.
 
 ## Findings from implementation
 
+Visual acceptance remains open. The first prototype was judged less attractive
+than the existing presentation; additional renderer capabilities do not establish
+a visual improvement. A subsequent lab-only pass frames the actual mathematical
+quantities more tightly, reduces grid/tick density, separates vector labels and
+uses lighter strokes. Bounds are derived from the transformation's endpoints,
+including negative/rotated cases, rather than fitted to one paper. Both lab
+renderers receive those same bounds, so camera framing does not favor a library.
+The original
+reader and renderer remain unchanged; this is not a decision to replace them.
+
 1. **A richer math renderer helps.** Mafs makes a transformed grid and draggable
    mathematical input straightforward. The same transformation changes geometry
    and numbers together, rather than replacing one static card with another.

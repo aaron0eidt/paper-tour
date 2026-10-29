@@ -1,8 +1,9 @@
-import { Mafs, Coordinates, Plot, Vector, Text, Point, Transform, Line, Circle, MovablePoint } from 'mafs';
+import { Mafs, Coordinates, Plot, Vector, Text, Point, Transform, Line, Circle, MovablePoint, Polygon } from 'mafs';
 import {
   activeNodes,
   functionState,
   matrixAt,
+  linearMapView,
   mafsMatrix,
   multiply,
   palette,
@@ -35,12 +36,22 @@ export function MafsRenderer({
         pan={false}
         zoom={false}
       >
-        <Coordinates.Cartesian yAxis={{ lines: 0.25 }} />
-        <Plot.OfX y={(x) => functionState(lesson, 0).fn(x)} color={palette.muted} style="dashed" />
-        <Plot.OfX y={state.fn} color={palette.blue} weight={3} />
-        <Line.Segment point1={[sample, 0]} point2={[sample, state.fn(sample)]} color={palette.pink} style="dashed" />
+        <Coordinates.Cartesian
+          xAxis={{ lines: 2, labels: (n) => (n % 2 === 0 ? String(n) : '') }}
+          yAxis={{ lines: 0.5, labels: (n) => (n >= 0 && n <= 1 ? String(n) : '') }}
+          subdivisions={false}
+        />
+        <Plot.OfX y={(x) => functionState(lesson, 0).fn(x)} color={palette.muted} style="dashed" opacity={0.6} />
+        <Plot.OfX y={state.fn} color={palette.blue} weight={2.5} />
+        <Line.Segment
+          point1={[sample, 0]}
+          point2={[sample, state.fn(sample)]}
+          color={palette.pink}
+          style="dashed"
+          opacity={0.6}
+        />
         <Point x={sample} y={state.fn(sample)} color={palette.pink} />
-        <Text x={2.7} y={0.16} size={16} color={palette.pink}>
+        <Text x={sample + 1.25} y={Math.max(0.1, state.fn(sample) - 0.12)} size={17} color={palette.pink}>
           f(1) = {state.fn(sample).toFixed(2)}
         </Text>
       </Mafs>
@@ -50,29 +61,50 @@ export function MafsRenderer({
     const a = matrixAt(lesson.matrix, progress),
       v = multiply(a, lesson.input);
     return (
-      <Mafs height={350} viewBox={{ x: [-4, 4], y: [-3, 3] }} pan={false} zoom={false}>
-        <g opacity={0.15}>
-          <Coordinates.Cartesian />
+      <Mafs height={350} viewBox={{ ...linearMapView(lesson), padding: 0.1 }} pan={false} zoom={false}>
+        <g opacity={0.35}>
+          <Coordinates.Cartesian xAxis={{ lines: false, labels: false }} yAxis={{ lines: false, labels: false }} />
         </g>
+        <Polygon
+          points={[
+            [0, 0],
+            [a[0][0], a[1][0]],
+            [a[0][0] + a[0][1], a[1][0] + a[1][1]],
+            [a[0][1], a[1][1]],
+          ]}
+          color={palette.blue}
+          fillOpacity={0.035}
+          strokeOpacity={0.2}
+          weight={1}
+        />
         <Transform matrix={mafsMatrix(a)}>
-          {Array.from({ length: 9 }, (_, i) => i - 4).map((k) => (
+          {Array.from({ length: 5 }, (_, i) => i - 2).map((k) => (
             <g key={k}>
-              <Line.Segment point1={[k, -4]} point2={[k, 4]} color={palette.blue} opacity={0.3} />
-              <Line.Segment point1={[-4, k]} point2={[4, k]} color={palette.green} opacity={0.3} />
+              <Line.Segment point1={[k, -3]} point2={[k, 3]} color={palette.blue} opacity={0.12} weight={1} />
+              <Line.Segment point1={[-3, k]} point2={[3, k]} color={palette.green} opacity={0.12} weight={1} />
             </g>
           ))}
         </Transform>
-        <Vector tip={lesson.input} color={palette.yellow} opacity={0.55} />
-        <Vector tip={[a[0][0], a[1][0]]} color={palette.blue} />
-        <Text x={a[0][0]} y={a[1][0] - 0.25} size={16} color={palette.blue}>
+        <Vector tip={lesson.input} color={palette.yellow} opacity={0.6} weight={1.5} />
+        <Text x={lesson.input[0] + 0.12} y={lesson.input[1] - 0.18} size={17} color={palette.yellow}>
+          v
+        </Text>
+        <Vector tip={[a[0][0], a[1][0]]} color={palette.blue} weight={1.6} />
+        <Text x={a[0][0]} y={a[1][0] - 0.2} size={17} color={palette.blue}>
           A e₁
         </Text>
-        <Vector tip={[a[0][1], a[1][1]]} color={palette.green} />
-        <Text x={a[0][1] - 0.32} y={a[1][1]} size={16} color={palette.green}>
+        <Vector tip={[a[0][1], a[1][1]]} color={palette.green} weight={1.6} />
+        <Text x={a[0][1] - 0.27} y={a[1][1] + 0.1} size={17} color={palette.green}>
           A e₂
         </Text>
-        <Vector tip={v} color={palette.pink} weight={3} />
-        <Text x={v[0] + 0.25} y={v[1] + 0.15} color={palette.pink} size={18}>
+        <Vector tip={v} color={palette.pink} weight={2.2} opacity={Math.min(1, progress * 4)} />
+        <Text
+          x={v[0] + 0.22}
+          y={v[1] + 0.18}
+          color={palette.pink}
+          size={19}
+          svgTextProps={{ opacity: Math.min(1, progress * 4) }}
+        >
           A v
         </Text>
         <MovablePoint
@@ -91,16 +123,23 @@ export function MafsRenderer({
     <Mafs
       height={350}
       viewBox={{ x: [0, 10], y: [-6, 0], padding: 0 }}
-      preserveAspectRatio={false}
+      preserveAspectRatio="contain"
       pan={false}
       zoom={false}
     >
       {graph.edges.map((e) => {
-        const lit = active.has(backward ? e.from : e.to),
+        const lit = active.has(backward ? e.to : e.from),
           tail = map(backward ? e.tip : e.tail),
           tip = map(backward ? e.tail : e.tip);
         return (
-          <Vector key={e.id} tail={tail} tip={tip} color={lit ? palette.pink : palette.muted} weight={lit ? 3 : 1.3} />
+          <Vector
+            key={e.id}
+            tail={tail}
+            tip={tip}
+            color={lit ? palette.pink : palette.blue}
+            opacity={lit ? 1 : 0.5}
+            weight={lit ? 2 : 1}
+          />
         );
       })}
       {graph.nodes.map((n) => (

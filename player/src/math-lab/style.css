@@ -81,9 +81,9 @@ button[aria-pressed='true'] {
   padding: 34px 0 22px;
 }
 .lab-intro h1 {
-  font-size: clamp(27px, 3.2vw, 43px);
+  font-size: clamp(25px, 2.4vw, 34px);
   line-height: 1.15;
-  letter-spacing: -1.3px;
+  letter-spacing: -0.65px;
   font-weight: 560;
   margin: 0 0 12px;
 }
@@ -142,7 +142,7 @@ button[aria-pressed='true'] {
   color: var(--muted);
 }
 .candidate .canvas-title h3 {
-  color: #b9cdff;
+  color: var(--text);
 }
 .native-scene-wrap {
   height: 350px;
@@ -173,8 +173,8 @@ button[aria-pressed='true'] {
 .MafsView {
   --mafs-bg: #141720;
   --mafs-fg: #dce4f5;
-  --mafs-line-color: #30384b;
-  --mafs-origin-color: #75819c;
+  --mafs-line-color: #242c3d;
+  --mafs-origin-color: #65718b;
   --mafs-blue: #7ea6ff;
   --mafs-pink: #ef9bd8;
   --mafs-yellow: #f0d779;
@@ -316,4 +316,12 @@ button[aria-pressed='true'] {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* The input handle stays discoverable without a large halo over the diagram. */
+.MafsView .mafs-movable-point-ring {
+  opacity: 0.25;
+}
+.MafsView .mafs-movable-point-focus {
+  opacity: 0.3;
 }

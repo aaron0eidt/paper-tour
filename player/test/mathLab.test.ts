@@ -28,6 +28,7 @@ import {
   functionState,
   lessons,
   matrixAt,
+  linearMapView,
   mafsMatrix,
   multiply,
   nativeScene,
@@ -38,6 +39,30 @@ const matrix: Matrix = [
   [1.4, 0.7],
   [0.3, 1.1],
 ];
+for (const a of [
+  matrix,
+  [
+    [0, -1],
+    [1, 0],
+  ] as Matrix,
+]) {
+  const lesson = { kind: 'linear-map' as const, title: 'bounds', matrix: a, input: [1, -0.5] as [number, number] };
+  const view = linearMapView(lesson);
+  const baseline = nativeScene(lesson, 0).objects.find((o) => o.id === 'axes')!.plot!;
+  assert.deepEqual(baseline.x, view.x);
+  assert.deepEqual(baseline.y, view.y);
+  for (const progress of [0, 0.5, 1]) {
+    const at = matrixAt(a, progress);
+    for (const point of [
+      multiply(at, lesson.input),
+      [at[0][0], at[1][0]],
+      [at[0][1], at[1][1]],
+      [at[0][0] + at[0][1], at[1][0] + at[1][1]],
+    ]) {
+      assert.ok(point[0] > view.x[0] && point[0] < view.x[1] && point[1] > view.y[0] && point[1] < view.y[1]);
+    }
+  }
+}
 assert.deepEqual(matrixAt(matrix, 0), [
   [1, 0],
   [0, 1],

@@ -88,6 +88,29 @@ export const multiply = (a: Matrix, v: Point): Point => [
   a[0][0] * v[0] + a[0][1] * v[1],
   a[1][0] * v[0] + a[1][1] * v[1],
 ];
+/** Frame the quantities being taught across the whole transition, rather than
+ * shrinking short vectors inside a large generic coordinate plane. */
+export function linearMapView(lesson: Extract<Lesson, { kind: 'linear-map' }>): { x: Point; y: Point } {
+  const a = lesson.matrix;
+  const points: Point[] = [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    lesson.input,
+    [a[0][0], a[1][0]],
+    [a[0][1], a[1][1]],
+    [a[0][0] + a[0][1], a[1][0] + a[1][1]],
+    multiply(a, lesson.input),
+  ];
+  const axis = (i: 0 | 1): Point => {
+    const low = Math.min(...points.map((p) => p[i]));
+    const high = Math.max(...points.map((p) => p[i]));
+    const margin = Math.max(0.55, (high - low) * 0.2);
+    return [low - margin, high + margin];
+  };
+  return { x: axis(0), y: axis(1) };
+}
 export function functionState(lesson: Extract<Lesson, { kind: 'function' }>, progress: number) {
   const a = mix(...lesson.parameter, progress),
     tree = parseExpression(lesson.expression);
@@ -137,7 +160,7 @@ export function activeNodes(graph: GraphGeometry, progress: number, backward: bo
   const rank = Math.min(count - 1, Math.floor(clamp(progress) * count));
   return new Set(graph.nodes.filter((n) => depth.get(n.id) === (backward ? count - 1 - rank : rank)).map((n) => n.id));
 }
-function coordinatePlane(): SceneObject {
+function coordinatePlane(view: { x: Point; y: Point }): SceneObject {
   return {
     id: 'axes',
     type: 'plot',
@@ -146,7 +169,7 @@ function coordinatePlane(): SceneObject {
     w: 0.84,
     h: 0.88,
     background: true,
-    plot: { kind: 'plot', x: [-4, 4], y: [-3, 3], curves: [{ expression: '0', label: 'zero', color: 'blue' }] },
+    plot: { kind: 'plot', ...view, curves: [{ expression: '0', label: 'zero', color: 'blue' }] },
   };
 }
 /** Use the existing production scene renderer as our baseline, without changing it. */
@@ -170,7 +193,7 @@ export function nativeScene(lesson: Lesson, progress: number, graph?: GraphGeome
     return {
       kind: 'scene',
       objects: [
-        coordinatePlane(),
+        coordinatePlane(linearMapView(lesson)),
         ...vectors.map((o) => ({
           id: o.id,
           type: 'vector' as const,
