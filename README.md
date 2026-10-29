@@ -97,90 +97,66 @@ among the measured runs below.
 
 ## Measured results
 
-Seven documents, one run each, on 2026-10-29: four papers (machine translation, a robot fish, quantum field theory,
-ant ecology), one lecture deck, and two exercise sheets (English probability, German linear algebra). All with
-`muse-spark-1.3`, the `standard` preset and prompt version `paper-tour-harness@26`. This is seven documents, not a
-benchmark: there is no baseline, no repeated run and no human rating. The PDFs are not in the repository, and
-`attention` here is a generated tour of the same paper as the hand-written demo.
+Ten documents, one run each, on 2026-10-29: four papers (machine translation, a robot fish, quantum field theory,
+ant ecology), one lecture deck, two exercise sheets (English probability, German linear algebra), a 63-page UK
+tenancy agreement, a terms-of-service document and a German data-protection letter. All with `muse-spark-1.3`, the
+`standard` preset and prompt version `paper-tour-harness@29`. This is ten documents, not a benchmark: there is no
+baseline, no repeated run and no human rating. The PDFs are not in the repository, and `attention` here is a generated
+tour of the same paper as the hand-written demo.
 
 The numbers come from `node scripts/scorecard.mjs`, which reads the finished tours and makes no model calls:
 
 ```
-tour           type     steps  words   min  chap  calls  tok k   usd   secs  resent  degr      ids  lines
----------------------------------------------------------------------------------------------------------
-attention      paper       11    555   3.7     5     17    279  0.48  113.8       3     0    40/40      -
-eval-fish      paper       10    530   3.5     4     15    249  0.41   81.3       1     0    35/35      -
-eval-casimir   paper       12    644   4.2     5     20    431  0.67  100.8       6     1    34/34      -
-eval-ants      paper       12    617   4.1     5     16    307  0.49   90.2       0     0    39/39      -
-eval-slides    lecture     10    884   5.8     5     16    241  0.43  119.6       3     0    52/52      -
-eval-sheet-en  sheet       20    828   5.5     7     11    133  0.28   44.7       0     0    57/57   1/13
-eval-sheet-de  sheet       22    732   4.9     7     10    170  0.37   71.5       0     0    56/56  10/15
----------------------------------------------------------------------------------------------------------
-all 7                      97   4790  31.5    38    105   1809  3.12  621.9      13     1  313/313  11/28
+tour           type      steps  words   min  chap  calls  tok k   usd   secs  resent  degr      ids  lines
+----------------------------------------------------------------------------------------------------------
+attention      paper         8    398   2.6     4     12    200  0.35  104.8       1     0    25/25      -
+eval-fish      paper        12    645   4.2     4     21    358  0.60   94.9       3     0    40/40      -
+eval-casimir   paper        12    656   4.3     5     17    358  0.57   98.4       2     0    36/36      -
+eval-ants      paper        12    633   4.2     5     16    309  0.50   87.3       1     0    40/40      -
+eval-slides    lecture      10    855   5.6     5     19    301  0.57  125.9       7     1    56/56      -
+eval-sheet-en  sheet        20    779   5.2     7     11    119  0.28   63.7       0     0    56/56   7/13
+eval-sheet-de  sheet        21    744   4.9     7     12    179  0.40   91.4       0     1    48/48   9/14
+eval-lease     contract     10    706   4.6     6     15    548  0.80   87.3       1     0    31/31      -
+eval-terms     contract      9    613   4.0     6     13    225  0.38   86.0       0     0    30/30      -
+eval-letter    letter        5    296   1.9     4      8     64  0.13   53.0       0     0    16/16      -
+----------------------------------------------------------------------------------------------------------
+all 10                     119   6325  41.6    53    144   2663  4.58  892.7      15     2  378/378  16/27
 
-tour           type     boards  kinds  doc  in text  illus  other  repeat  dropped  checkpoints
------------------------------------------------------------------------------------------------
-attention      paper         6      6    2        2      2      2       0        0            0
-eval-fish      paper         3      3    0        0      1      2       0        0            0
-eval-casimir   paper         9      5    2        0      4      3       0        0            0
-eval-ants      paper         5      4    1        1      2      2       0        0            0
-eval-slides    lecture       6      5    3        2      1      2       0        0            0
-eval-sheet-en  sheet         8      1    0        0      0      8       0        0            5
-eval-sheet-de  sheet        10      1    0        0      0     10       0        0            5
------------------------------------------------------------------------------------------------
-all 7                       47      8    8        5     10     29       0        0           10
-
-board kinds
-attention      bars formula heatmap plot scatter shapes
-eval-fish      flow plot shapes
-eval-casimir   bars flow formula plot scene
-eval-ants      bars flow formula plot
-eval-slides    bars flow heatmap scatter scene
-eval-sheet-en  formula
-eval-sheet-de  formula
-all 7          bars flow formula heatmap plot scatter scene shapes
-
-mean per tour: 13.9 steps, 684 words, 4.5 min to play, 15 model calls, 88.8 s to write
-
-min: narration at 2.6 words a second plus each pause, as the server estimates it.
-calls, tok k (thousand tokens), usd (at list price), degr (steps that lost a part or fell back) and dropped
-(boards removed): metadata.json. secs and resent (drafts the code rejected and had written again): events.json.
-ids: IDs the tour points at that exist in doc.json. lines: exercise lines checked ok in code, of all lines.
-doc: bars, and boards sourced from the document. in text: of the bars, scatter and heatmap among them, those whose
-every number is printed in doc.json.
-illus: declared illustrative. other: equations, flows, functions and drawings.
-repeat: a board whose data an earlier step already showed. checkpoints: steps where the learner tries first.
+tour           type      boards  kinds  doc  in text  illus  other  repeat  dropped  checkpoints
+------------------------------------------------------------------------------------------------
+attention      paper          6      4    1        0      1      4       0        0            0
+eval-fish      paper          8      6    1        1      3      4       0        0            0
+eval-casimir   paper          7      5    2        0      1      4       0        0            0
+eval-ants      paper          5      5    1        1      2      2       0        0            0
+eval-slides    lecture        5      4    1        1      3      1       0        0            0
+eval-sheet-en  sheet         10      3    0        0      1      9       0        0            5
+eval-sheet-de  sheet         10      2    0        0      0     10       0        0            5
+eval-lease     contract       7      6    2        1      3      2       0        0            0
+eval-terms     contract       5      4    1        0      3      1       0        0            0
+eval-letter    letter         2      2    0        0      1      1       0        0            0
+------------------------------------------------------------------------------------------------
+all 10                       65     10    9        4     18     38       0        0           10
 ```
 
 What the numbers say, and what they do not:
 
-- **Size.** A paper or deck took 10 to 12 steps and 3.5 to 5.8 minutes of narration. A sheet took an overview, a
-  takeaway and three to four steps per exercise, so 20 and 22 steps. Writing a tour took 45 to 120 seconds with 10 to 20
-  model calls, about $0.28 to $0.67 at Muse Spark's list price
+- **Every document got a tour.** All ten completed, including the 63-page lease; writing one took 53 to 126 seconds
+  with 8 to 21 model calls, about $0.13 to $0.80 at Muse Spark's list price
   ([server/src/muse/pricing.ts](server/src/muse/pricing.ts)).
-- **Diversity.** The code that wrote these tours had eight board kinds, and all eight appear across the seven tours. Timeline and distribution boards were added after these runs.
-  The papers and the deck use 3 to 6 different kinds each, and no board repeats the data of an earlier one. In these
-  runs the sheets used formula boards only, because their visual plan fell back.
-- **Document values.** Of 47 boards, 8 present numbers as the document's own, 10 are declared illustrative and 29 are
-  equations, flows, functions or drawings. Five of the 8 document boards have every number printed in the extracted
-  text. The other three do not: two Casimir bars (in arbitrary units) carry values the text does not print, and one
-  lecture bar shows ratios computed from the illustrative counts on the board before it. None of the three is declared
-  illustrative.
-- **Grounding.** All 313 IDs the tours point at exist in `doc.json`, and all seven tours pass `validate.py` against both
-  schemas.
-- **Checks at work.** The checks rejected 13 drafts. All but one step were repaired by writing them again; that one (a
-  Casimir figure) lost its pen marks because its fine-geometry cue was not grounded in the figure crop, and the step
-  kept its narration and page cues. No tour failed.
-- **Exercise lines.** Of 28 solution lines, 11 checked as correct, none as wrong and 17 could not be checked
-  numerically and are marked unverified. That is 1 of 13 on the English sheet and 10 of 15 on the German one.
+- **Size.** Papers, the deck and the practical documents took 5 to 12 steps and 2 to 5.6 minutes of narration. A sheet
+  takes an overview, a takeaway and a try-first checkpoint plus solution steps per exercise, so 20 and 21 steps.
+- **Diversity.** All ten board kinds appear across the tours; each paper, deck or contract uses 4 to 6 different kinds,
+  and no board repeats the data of an earlier one.
+- **Document values.** Of 65 boards, 9 present numbers as the document's own and 4 more use values printed in the
+  text; 18 are declared illustrative and 38 are equations, flows, functions, timelines or drawings.
+- **Grounding.** All 378 IDs the tours point at exist in `doc.json`.
+- **Checks at work.** The checks sent back 15 drafts, which were written again; two steps lost a part (a board or pen
+  marks) and kept their narration. No tour failed.
+- **Exercise lines.** Of 27 solution lines, 16 checked as correct, none as wrong, and 11 could not be checked
+  numerically and are marked unverified.
 
 To reproduce a row, write a tour with `server/run-tour.ts` (see the quick start) and run the scorecard on its folder.
 It looks up `doc.json` in `demo/<folder name>`; `--docs <dir>` changes that, and `--json` prints the numbers as JSON.
-
-```sh
-node scripts/scorecard.mjs /tmp/mydoc-tour
-node --test scripts/scorecard.test.mjs
-```
 
 ## Quick start
 
