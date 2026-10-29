@@ -1,4 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { recordedCalls } from '../ai/recorded-calls';
+import { museAuthoringSchema } from './authoring-schema';
+import { createHash } from 'node:crypto';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
@@ -125,61 +127,9 @@ export class MuseTourGenerator implements TourGenerator {
       AbortSignal.timeout(this.config.timeoutMs),
       ...(externalSignal ? [externalSignal] : []),
     ]);
-    // Every model call exposes its real inputs/output; images stay referenced, never copied into logs.
-    const complete: typeof this.client.complete = async (messages, name, schema, maxTokens, callSignal) => {
-      const callId = randomUUID(),
-        started = Date.now();
-      const publicMessages = messages.map((message) => ({
-        ...message,
-        content:
-          typeof message.content === 'string'
-            ? message.content
-            : message.content.map((part, index, parts) => {
-                if (part.type === 'text') return part;
-                const previous = parts[index - 1];
-                const targetId =
-                  previous?.type === 'text' ? /^Visual source ([^;]+);/.exec(previous.text)?.[1] : undefined;
-                const source = input.images.find((image) => image.targetId === targetId);
-                return { type: 'image', ...(source ? { ...imageEvidence(source), label: source.label } : {}) };
-              }),
-      }));
-      await input.onEvent?.('model.started', {
-        callId,
-        name,
-        model: this.model,
-        promptVersion: PROMPT_VERSION,
-        messages: publicMessages,
-        responseSchema: schema,
-        maxTokens,
-        reasoningEffort: 'medium',
-      });
-      try {
-        const completion = await this.client.complete(
-          messages,
-          name,
-          schema,
-          maxTokens,
-          callSignal,
-          input.onEvent ? async (delta) => input.onEvent!('model.delta', { callId, delta }) : undefined,
-          input.onEvent ? async (usage) => input.onEvent!('model.usage', { callId, usage }) : undefined,
-        );
-        await input.onEvent?.('model.completed', {
-          callId,
-          output: completion.value,
-          usage: completion.usage,
-          requestId: completion.requestId,
-          durationMs: Date.now() - started,
-        });
-        return completion;
-      } catch (error) {
-        await input.onEvent?.('model.failed', {
-          callId,
-          code: error instanceof ProcessingError ? error.code : 'model_error',
-          durationMs: Date.now() - started,
-        });
-        throw error;
-      }
-    };
+    const { call, completions } = recordedCalls(this.client, input, this.model, PROMPT_VERSION);
+    const complete: typeof this.client.complete = (messages, name, schema, maxTokens, callSignal) =>
+      call(messages, name, museAuthoringSchema(schema), maxTokens, 'medium', callSignal ?? signal);
     checkImages(input);
     const goals = walkthroughGoals(input.doc);
     if (goals.requiredPages.length > MAX_CONTENT_PAGES)
@@ -188,7 +138,6 @@ export class MuseTourGenerator implements TourGenerator {
         'This paper has too many content pages for a detailed automatic tour.',
       );
     const context = paperContext(input.doc);
-    const completions: Completion[] = [];
     const observations: VisualObservation[] = [];
     let reusedVisualBatches = 0;
     const progress = async (stage: TourProgress['stage'], done: number) =>
@@ -249,7 +198,6 @@ export class MuseTourGenerator implements TourGenerator {
         let completion: Completion | undefined;
         try {
           completion = await complete(messages, 'paper_visual_observations', schema, 8192, signal);
-          completions.push(completion);
           const value = completion.value as { observations?: VisualObservation[] };
           if (!check(value))
             throw new TourValidationError(['Return exactly one complete observation for each supplied visual source.']);
@@ -306,7 +254,6 @@ export class MuseTourGenerator implements TourGenerator {
       let completion: Completion | undefined;
       try {
         completion = await complete(messages, 'paper_tour_draft', TOUR_DRAFT_SCHEMA, 24576, signal);
-        completions.push(completion);
         await progress('validating', input.images.length);
         let result: ReturnType<typeof materializeTour>;
         try {
@@ -374,7 +321,6 @@ export class MuseTourGenerator implements TourGenerator {
             8192,
             signal,
           );
-          completions.push(patch);
           if (!ajv.compile(patchSchema)(patch.value))
             throw new TourValidationError(['Missing-page explanations did not match the required step format.']);
           const merged = mergeCoverageSteps(draft, (patch.value as { steps: DraftStep[] }).steps, input.doc);

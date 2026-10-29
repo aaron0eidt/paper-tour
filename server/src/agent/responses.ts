@@ -111,12 +111,13 @@ export class ResponsesClient {
   }
   async count(input: object, signal?: AbortSignal): Promise<number> {
     const fields = input as Record<string, unknown>;
+    const counted = fields.tool_choice === 'none' ? { ...fields, tools: [] } : fields;
     const response = await this.historyRequest(
       '/input_tokens',
       Object.fromEntries(
         ['input', 'instructions', 'tools', 'reasoning', 'previous_response_id']
-          .filter((key) => fields[key] !== undefined)
-          .map((key) => [key, fields[key]])
+          .filter((key) => counted[key] !== undefined)
+          .map((key) => [key, counted[key]])
           .concat([['model', this.config.model]]),
       ),
       signal,

@@ -10,7 +10,8 @@ import { OFFICIAL_MODELS } from '../muse/pricing';
 import { arcSchema, arcTask, arcTourPlan, cleanArcPlan, fallbackArcPlan, type ArcPlan, type ArcType } from './arcs';
 import { assembleTour, beatStep, boardProblems, frameSteps, tourProblems, tourSeconds } from './assemble';
 import { paperPlan, type Beat, type Preset, type TourPlan } from './beats';
-import { imageParts, pool, recordedCalls } from './calls';
+import { imageParts, pool } from './calls';
+import { recordedCalls } from '../ai/recorded-calls';
 import { cardProblems, cardSchema, cleanCard, evidencePool, fallbackCard, repairTurn, type PaperCard } from './card';
 import {
   beatBrief,
@@ -113,7 +114,7 @@ export class HarnessTourGenerator implements TourGenerator {
     checkImages(input);
     const { doc } = input;
     const language = documentLanguage(doc, this.config.language);
-    const { call, completions } = recordedCalls(this.client, input, this.model);
+    const { call, completions } = recordedCalls(this.client, input, this.model, HARNESS_VERSION);
     const progress = (stage: TourProgress['stage'], done: number, total: number) =>
       onProgress?.({ stage, imagesDone: done, imagesTotal: total });
     const prefix: MuseMessage[] = [
@@ -236,7 +237,10 @@ export class HarnessTourGenerator implements TourGenerator {
       // keeps its best answer, and a line still in doubt is marked on the board.
       for (let attempt = 0; attempt < 2 && !(best && !best.problems.length); attempt++) {
         try {
-          const completion = await call(task, 'exercise_solution', solveSchema(unit), 24_000, 'high', signal);
+          const completion = await call(task, 'exercise_solution', solveSchema(unit), 24_000, 'high', signal, {
+            id: beat.id,
+            label: beat.point,
+          });
           const { solution, problems } = cleanSolution(completion.value, unit);
           if (!solution) {
             await input.onEvent?.('validation.failed', {
@@ -335,6 +339,7 @@ export class HarnessTourGenerator implements TourGenerator {
             detailed ? 12_000 : 6_000,
             detailed ? 'medium' : 'low',
             signal,
+            { id: beat.id, label: beat.point },
           );
           const rawSay = (completion.value as { say?: unknown } | null)?.say;
           requireExample ||=

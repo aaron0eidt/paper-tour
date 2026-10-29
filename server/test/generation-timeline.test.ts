@@ -98,3 +98,15 @@ test('harness entries show public narration and honest call labels without expos
   assert.equal(rows[1].text, 'Look at the encoder tower.');
   assert.match(rows[1].detail, /draft/);
 });
+
+test('parallel writing calls use their actual planned explanation labels', () => {
+  const entries = generationTimeline([
+    {
+      id: '1',
+      type: 'model.started',
+      at: '2026-10-29T00:00:00Z',
+      data: { callId: 'm1', name: 'beat_direction', task: { id: 'formula', label: 'Why the scaling term matters' } },
+    },
+  ]);
+  assert.equal(entries[0].title, 'Why the scaling term matters');
+});

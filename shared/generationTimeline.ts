@@ -61,12 +61,15 @@ export function generationTimeline(events: GenerationEvent[]): ActivityEntry[] {
       const args = object(event.data.arguments);
       const ids = Array.isArray(args.ids) ? args.ids.filter((id: unknown) => typeof id === 'string') : [];
       const chapter = object(args.chapter);
+      const task = object(event.data.task);
       entries.set(key, {
         id: key,
         kind,
         title:
           kind === 'model'
-            ? (modelActivityNames[String(event.data.name)] ?? 'Working with the paper')
+            ? typeof task.label === 'string' && task.label.trim()
+              ? task.label.trim()
+              : (modelActivityNames[String(event.data.name)] ?? 'Working with the paper')
             : (names[String(event.data.name)] ?? 'Use document tool'),
         detail:
           typeof args.query === 'string'
