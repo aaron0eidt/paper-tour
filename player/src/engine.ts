@@ -50,6 +50,12 @@ export interface BoardState {
 
 export const EMPTY_BOARD: BoardState = { key: null, item: null, focus: null };
 
+/** A board's animation clock follows speech, including pause, restart and silent step previews. */
+export interface BoardPlayback {
+  playing: boolean;
+  progress: number;
+}
+
 export interface EngineState {
   status: Status;
   index: number;
@@ -58,6 +64,24 @@ export interface EngineState {
   overlays: OverlayEntry[];
   camera: CameraCommand;
   board: BoardState;
+  /** A silent seek shows all of the selected step's actions, rather than an in-progress word. */
+  preview?: boolean;
+}
+
+/** Progress over the current board's narrated interval, not a separate wall clock. */
+export function boardPlayback(state: EngineState, steps: readonly FlatStep[]): BoardPlayback {
+  const key = state.board.key;
+  if (!key || !state.board.item) return { playing: false, progress: 1 };
+  const origin = steps[Number(key.split(':')[0])];
+  const actionIndex = origin?.schedule.findIndex((action) => action.key === key) ?? -1;
+  if (!origin || actionIndex < 0 || origin.index !== state.index || state.preview || state.status === 'ended')
+    return { playing: false, progress: 1 };
+  const start = origin.schedule[actionIndex].at;
+  const next = origin.schedule.slice(actionIndex + 1).find(({ action }) => action.type === 'board' || action.type === 'board_clear');
+  const end = Math.min(next?.at ?? origin.words.length, origin.words.length);
+  const progress = end <= start ? Number(state.word >= origin.words.length - 1)
+    : Math.max(0, Math.min(1, (state.word + 1 - start) / (end - start)));
+  return { playing: state.status === 'playing', progress };
 }
 
 export interface Timers {
@@ -90,7 +114,11 @@ export function isBoard(a: Action): a is BoardControl {
 
 /** The board after one board action; a focus only counts in the step being shown. */
 export function boardAfter(board: BoardState, a: BoardControl, key: string, current: boolean): BoardState {
-  if (a.type === 'board') return { key, item: a.item, focus: null };
+  // Older saved tours may contain removed video boards. Skip them without opening an empty panel or stalling playback.
+  if (a.type === 'board')
+    return ['formula', 'flow', 'bars', 'plot', 'scene'].includes(a.item.kind)
+      ? { key, item: a.item, focus: null }
+      : EMPTY_BOARD;
   if (a.type === 'board_clear') return EMPTY_BOARD;
   return current && board.item ? { ...board, focus: a.part } : board;
 }
@@ -142,6 +170,7 @@ export class TourEngine {
   private holdTimer: unknown = null;
   private nextAction = 0;
   private narrationDone = false;
+  private preview = false;
 
   constructor(tour: Tour, opts: EngineOptions) {
     this.tour = tour;
@@ -234,6 +263,7 @@ export class TourEngine {
       overlays: this.overlays,
       camera: this.camera,
       board: this.board,
+      preview: this.preview,
     };
   }
 
@@ -313,6 +343,7 @@ export class TourEngine {
     this.index = i;
     this.rebuild(i, true);
     this.word = -1;
+    this.preview = true;
     this.status = 'paused';
     this.emit();
   }
@@ -330,6 +361,10 @@ export class TourEngine {
     this.index = i;
     this.status = 'playing';
     this.word = -1;
+    this.preview = false;
+    // The item persists across steps, but a term/node focus belongs to the words
+    // that named it. Rebuilding a seek and advancing naturally must agree.
+    if (this.board.focus !== null) this.board = { ...this.board, focus: null };
     this.nextAction = 0;
     this.narrationDone = false;
     this.fireUpTo(0);

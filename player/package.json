@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "esbuild test/camera.test.ts test/pdfLifetime.test.ts test/engine.test.ts test/readerState.test.ts test/board.test.ts test/pen.test.ts test/ask.test.ts src/narration/voices.test.ts src/library/modelChoices.test.ts --bundle --platform=node --format=esm --log-level=warning --outdir=node_modules/.cache/paper-tour && node node_modules/.cache/paper-tour/test/engine.test.js && node node_modules/.cache/paper-tour/test/readerState.test.js && node node_modules/.cache/paper-tour/test/board.test.js && node node_modules/.cache/paper-tour/test/pen.test.js && node node_modules/.cache/paper-tour/src/narration/voices.test.js && node node_modules/.cache/paper-tour/src/library/modelChoices.test.js && node node_modules/.cache/paper-tour/test/pdfLifetime.test.js && node node_modules/.cache/paper-tour/test/camera.test.js && node node_modules/.cache/paper-tour/test/ask.test.js"
+    "test": "esbuild test/camera.test.ts test/pdfLifetime.test.ts test/engine.test.ts test/readerState.test.ts test/board.test.ts test/pen.test.ts test/labelLayout.test.ts test/ask.test.ts src/narration/voices.test.ts src/library/modelChoices.test.ts --bundle --platform=node --format=esm --log-level=warning --outdir=node_modules/.cache/paper-tour && node node_modules/.cache/paper-tour/test/engine.test.js && node node_modules/.cache/paper-tour/test/readerState.test.js && node node_modules/.cache/paper-tour/test/board.test.js && node node_modules/.cache/paper-tour/test/pen.test.js && node node_modules/.cache/paper-tour/test/labelLayout.test.js && node node_modules/.cache/paper-tour/src/narration/voices.test.js && node node_modules/.cache/paper-tour/src/library/modelChoices.test.js && node node_modules/.cache/paper-tour/test/pdfLifetime.test.js && node node_modules/.cache/paper-tour/test/camera.test.js && node node_modules/.cache/paper-tour/test/ask.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
@@ -20,9 +20,9 @@
   "devDependencies": {
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
-    "@vitejs/plugin-react": "4.3.4",
-    "esbuild": "0.21.5",
+    "@vitejs/plugin-react": "4.7.0",
+    "esbuild": "0.25.12",
     "typescript": "5.6.3",
-    "vite": "5.4.21"
+    "vite": "6.4.5"
   }
 }

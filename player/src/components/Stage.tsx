@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { MouseEvent } from 'react';
-import { transformOf } from '../camera';
-import type { Camera, View } from '../camera';
+import type { MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { transformOf, unproject } from '../camera';
+import type { Camera, ScreenRect, View } from '../camera';
 import { nextPlan } from '../canvasPlan';
 import type { Plan } from '../canvasPlan';
 import type { Layout } from '../layout';
@@ -10,6 +10,9 @@ import type { Scene } from '../scene';
 import { PageView } from './PageView';
 import type { DebugPage } from './PageView';
 import { ScreenLayer } from './ScreenLayer';
+import { hasRegionArea, regionFromDrag } from '../ask/regionSelection';
+import type { RegionSelection } from '../ask/regionSelection';
+import type { PageBox } from '../layout';
 
 interface Props {
   pdf: PDFDocumentProxy | null;
@@ -19,6 +22,10 @@ interface Props {
   debugPages: Map<number, DebugPage> | null;
   onViewportChange(): void;
   onCopyId(id: string): void;
+  selecting?: boolean;
+  regionSelection?: RegionSelection | null;
+  onSelectRegion?(region: RegionSelection): void;
+  onCancelSelection?(): void;
 }
 
 const PLAN_THROTTLE_MS = 150;
@@ -33,18 +40,55 @@ interface Point {
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
-export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange, onCopyId }: Props) {
+export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange, onCopyId, selecting = false, regionSelection, onSelectRegion, onCancelSelection }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const hoveredRef = useRef<Element | null>(null);
   // True from the moment a pointer gesture becomes a drag until the next pointer goes down.
   const draggedRef = useRef(false);
+  const [draftRegion, setDraftRegion] = useState<RegionSelection | null>(null);
+  const regionDrag = useRef<{ id: number; page: PageBox; start: [number, number] } | null>(null);
+  const selectingRef = useRef(selecting);
+  selectingRef.current = selecting;
+  useEffect(() => {
+    if (!selecting) { regionDrag.current = null; setDraftRegion(null); }
+  }, [selecting]);
   const [plan, setPlan] = useState<Plan>({ scales: [], details: [] });
+  const [occlusions, setOcclusions] = useState<ScreenRect[]>([]);
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
 
   useLayoutEffect(() => camera.setLayout(layout), [camera, layout]);
+
+  // Only the floating card occupies the PDF, not the full-width transparent ask lane.
+  // Its live bounds include an expanded progress tray and adapt to a side-board resize.
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const host = viewport?.closest('.ask-stage');
+    if (!viewport || !host) return;
+    const observed = new Set<Element>();
+    const measure = () => {
+      const bounds = viewport.getBoundingClientRect();
+      const cards = [...host.querySelectorAll('.ask-card, .ask-language-menu')];
+      for (const card of cards) {
+        if (!observed.has(card)) { observed.add(card); resize.observe(card); }
+      }
+      for (const card of observed) {
+        if (!cards.includes(card)) { resize.unobserve(card); observed.delete(card); }
+      }
+      const next = cards.map((card) => card.getBoundingClientRect()).filter((r) => r.width && r.height).map((r) => ({
+        left: r.left - bounds.left, right: r.right - bounds.left, top: r.top - bounds.top, bottom: r.bottom - bounds.top,
+      }));
+      setOcclusions((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(viewport);
+    const changes = new MutationObserver(measure);
+    changes.observe(host, { childList: true, subtree: true });
+    measure();
+    return () => { resize.disconnect(); changes.disconnect(); };
+  }, []);
 
   // ID overlay: one delegated handler for hover tooltips and click-to-copy.
   const setHovered = useCallback((target: Element | null, x = 0, y = 0) => {
@@ -124,6 +168,7 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (selectingRef.current) return;
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
       const dx = e.deltaX * unit;
       const dy = e.deltaY * unit;
@@ -153,6 +198,7 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
       return { x: e.clientX - box.left, y: e.clientY - box.top };
     };
     const onDown = (e: PointerEvent) => {
+      if (selectingRef.current) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (!pointers.size) {
         draggedRef.current = false;
@@ -163,6 +209,7 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
     };
     const onUp = (e: PointerEvent) => void pointers.delete(e.pointerId);
     const onMove = (e: PointerEvent) => {
+      if (selectingRef.current) { pointers.clear(); return; }
       const prev = pointers.get(e.pointerId);
       if (!prev) return;
       if (e.pointerType === 'mouse' && !(e.buttons & 1)) return onUp(e); // released where we did not see it
@@ -210,6 +257,36 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
     if (id) onCopyId(id);
   };
 
+  const regionPoint = (event: ReactPointerEvent): [number, number] => {
+    const bounds = viewportRef.current!.getBoundingClientRect();
+    return unproject(event.clientX - bounds.left, event.clientY - bounds.top, camera.getView(), camera.viewport);
+  };
+  const beginRegion = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    const start = regionPoint(event);
+    const page = layout.pages.find((p) => start[0] >= p.x && start[0] <= p.x + p.width && start[1] >= p.y && start[1] <= p.y + p.height);
+    if (!page) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    regionDrag.current = { id: event.pointerId, page, start };
+    setDraftRegion(regionFromDrag(page, start, start));
+  };
+  const moveRegion = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = regionDrag.current;
+    if (!drag || drag.id !== event.pointerId) return;
+    setDraftRegion(regionFromDrag(drag.page, drag.start, regionPoint(event)));
+  };
+  const finishRegion = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = regionDrag.current;
+    if (!drag || drag.id !== event.pointerId) return;
+    regionDrag.current = null;
+    setDraftRegion(null);
+    const next = regionFromDrag(drag.page, drag.start, regionPoint(event));
+    if (hasRegionArea(next, drag.page, camera.getView().s)) onSelectRegion?.(next);
+  };
+  const shownRegion = draftRegion ?? regionSelection;
+  const regionPage = shownRegion && layout.pages.find((p) => p.n === shownRegion.page);
+
   return (
     <div
       className={`viewport${debugPages ? ' debug' : ''}`}
@@ -231,9 +308,25 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
             debug={debugPages?.get(box.n) ?? null}
           />
         ))}
+        {shownRegion && regionPage && (
+          <div className="pdf-region-selection" style={{
+            left: regionPage.x + shownRegion.rect[0] * regionPage.width,
+            top: regionPage.y + shownRegion.rect[1] * regionPage.height,
+            width: (shownRegion.rect[2] - shownRegion.rect[0]) * regionPage.width,
+            height: (shownRegion.rect[3] - shownRegion.rect[1]) * regionPage.height,
+          }} />
+        )}
       </div>
-      <ScreenLayer camera={camera} notes={scene.notes} labels={scene.labels} />
+      <ScreenLayer camera={camera} notes={scene.notes} labels={scene.labels} obstacles={scene.obstacles} occlusions={occlusions} />
       <div className="dbg-tooltip" ref={tooltipRef} />
+      {selecting && <>
+        <div className="pdf-region-picker" onPointerDown={beginRegion} onPointerMove={moveRegion} onPointerUp={finishRegion}
+          onPointerCancel={() => { regionDrag.current = null; setDraftRegion(null); }} />
+        <div className="pdf-region-instruction" role="status">
+          <span>Drag over a figure, equation or passage</span>
+          <button type="button" onClick={onCancelSelection}>Cancel <kbd>Esc</kbd></button>
+        </div>
+      </>}
     </div>
   );
 }

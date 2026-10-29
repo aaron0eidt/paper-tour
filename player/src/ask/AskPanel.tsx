@@ -1,19 +1,24 @@
-// The ask bar: a compact field over the bottom of the stage that opens into a tray with the tour's suggested questions
+import { useVoiceInput } from './voice';
+import { LanguagePicker } from './LanguagePicker';
+// The ask bar: a field below the stage that opens into a tray with the tour's suggested questions
 // when it ends, a waiting state, the answer's verdict and follow-ups, and errors in plain words. It does not play
 // answers: the reader plays them as a second tour and sets the tour aside meanwhile ("Back to the tour").
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react';
-import { answerText, askErrorMessage, askQuestion, isCancelled, MAX_HISTORY, MAX_QUESTION } from './api';
+import { answerText, askErrorMessage, askQuestion, isCancelled, MAX_HISTORY } from './api';
 import type { Answerable, AskAnswer, AskSource, AskTurn } from './api';
 import { openQuestions, waitingLabel } from './answer';
-import { AlertIcon, AnswerIcon, ResumeIcon, SendIcon, SparkIcon, StopIcon } from './icons';
+import { AlertIcon, AnswerIcon, MicrophoneIcon, PauseIcon, RegionIcon, ResumeIcon, SendIcon, SparkIcon, StopIcon } from './icons';
+import type { RegionSelection } from './regionSelection';
 import './ask.css';
 
 /** Where the learner is when they ask: the tour step, and the figure, panel or equation on screen. */
 export interface AskContext {
+  analysisId?: string;
   stepId?: string;
   figureId?: string;
+  selection?: RegionSelection;
 }
 
 export interface AskPanelProps {
@@ -36,12 +41,25 @@ export interface AskPanelProps {
   /** The learner stopped a question before its answer came. */
   onCancel?(): void;
   onResume?(): void;
+  resumeLabel?: string;
+  answerPaused?: boolean;
+  onPauseAnswer?(): void;
+  onContinueAnswer?(): void;
+  selection?: RegionSelection | null;
+  selecting?: boolean;
+  selectionPreview?: ReactNode;
+  onSelectRegion?(): void;
+  onClearRegion?(): void;
+  onCancelSelection?(): void;
   className?: string;
+  /** Reader-owned live generation or playback status, kept within the floating card. */
+  tourStatus?: ReactNode;
 }
 
 type Phase =
   | { kind: 'idle' }
   | { kind: 'thinking'; question: string; since: number }
+  | { kind: 'stopped'; question: string }
   | { kind: 'answered'; question: string; answer: AskAnswer }
   | { kind: 'failed'; question: string; message: string };
 
@@ -61,6 +79,7 @@ function isTyping(target: EventTarget | null): boolean {
 export function AskPanel(props: AskPanelProps) {
   const { source, tourId, suggestions, ended = false, away = false, answering = false, className } = props;
   const [draft, setDraft] = useState('');
+  const [language, setLanguage] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [history, setHistory] = useState<AskTurn[]>([]);
   const [focused, setFocused] = useState(false);
@@ -69,6 +88,16 @@ export function AskPanel(props: AskPanelProps) {
   // The reader's callbacks as of now, for an answer that arrives after it re-rendered.
   const latest = useRef(props);
   latest.current = props;
+  const voice = useVoiceInput(source, {
+    onStart: () => latest.current.onAsk?.(''),
+    onCancel: () => latest.current.onCancel?.(),
+    onTranscript: (text) => {
+      setDraft(text);
+      setPhase({ kind: 'idle' });
+      input.current?.focus();
+    },
+  });
+  const voiceBusy = voice.phase !== 'idle';
   const busy = phase.kind === 'thinking';
   const key = sourceKey(source);
 
@@ -77,8 +106,16 @@ export function AskPanel(props: AskPanelProps) {
     setDraft('');
     setPhase({ kind: 'idle' });
     setHistory([]);
-    return () => request.current?.abort();
+    return () => {
+      const pending = request.current;
+      request.current = null;
+      pending?.abort();
+    };
   }, [key, tourId]);
+
+  useEffect(() => {
+    if (props.selection && !props.selecting) input.current?.focus();
+  }, [props.selection, props.selecting]);
 
   // The reader went back to the tour on its own (a step picked in the sidebar, another tour): the answer is gone.
   useEffect(() => {
@@ -114,8 +151,8 @@ export function AskPanel(props: AskPanelProps) {
 
   const ask = useCallback(
     async (text: string) => {
-      const question = text.replace(/\s+/g, ' ').trim().slice(0, MAX_QUESTION);
-      if (!question || busy) return;
+      const question = text.replace(/\s+/g, ' ').trim();
+      if (!question || busy || voiceBusy || latest.current.selecting) return;
       request.current?.abort();
       const controller = new AbortController();
       request.current = controller;
@@ -128,7 +165,7 @@ export function AskPanel(props: AskPanelProps) {
       try {
         answer = await askQuestion(
           source,
-          { question, tourId: tourId ?? undefined, ...where, history },
+          { question, responseLanguage: language || undefined, tourId: tourId ?? undefined, ...where, history },
           controller.signal,
         );
       } catch (error) {
@@ -136,7 +173,7 @@ export function AskPanel(props: AskPanelProps) {
         request.current = null;
         // Stopped by the learner: back to the question, ready to edit or send again.
         if (isCancelled(error)) {
-          setPhase({ kind: 'idle' });
+          setPhase({ kind: 'stopped', question });
           latest.current.onCancel?.();
         } else setPhase({ kind: 'failed', question, message: askErrorMessage(error) });
         return;
@@ -150,13 +187,14 @@ export function AskPanel(props: AskPanelProps) {
       input.current?.blur();
       latest.current.onAnswer(answer, question);
     },
-    [busy, source, tourId, history],
+    [busy, voiceBusy, source, tourId, history, language],
   );
 
   const stop = () => request.current?.abort();
   // Back to the tour folds the panel away and hands the keyboard back to the player; the conversation stays.
   const resumeTour = () => {
     setPhase({ kind: 'idle' });
+    setDraft('');
     input.current?.blur();
     latest.current.onResume?.();
   };
@@ -195,7 +233,7 @@ export function AskPanel(props: AskPanelProps) {
         : invite || (focused && !history.length)
           ? offered
           : [];
-  const back = away && !busy && !typing && (phase.kind === 'answered' || phase.kind === 'failed');
+  const back = away && !busy && !voiceBusy && !props.selecting;
   let status: ReactNode = null;
   if (phase.kind === 'thinking')
     status = (
@@ -203,6 +241,8 @@ export function AskPanel(props: AskPanelProps) {
         <span className="ask-shimmer">{waitingLabel(Date.now() - phase.since)}</span>
       </p>
     );
+  else if (phase.kind === 'stopped')
+    status = <p className="ask-status" role="status">Answer stopped. Your playback position is saved.</p>;
   else if (phase.kind === 'answered' && !typing)
     status = (
       <p className={`ask-status ${phase.answer.answerable}`} role="status">
@@ -245,20 +285,42 @@ export function AskPanel(props: AskPanelProps) {
         Ask another
       </button>,
     );
+  if ((answering || props.answerPaused) && !busy && !voiceBusy && !props.selecting)
+    actions.push(
+      <button type="button" className="ask-action resume" key="answer-control" onMouseDown={keepFocus}
+        onClick={() => answering ? props.onPauseAnswer?.() : props.onContinueAnswer?.()}>
+        {answering ? <PauseIcon /> : <ResumeIcon />}
+        <span>{answering ? 'Pause answer' : 'Continue answer'}</span>
+      </button>,
+    );
   if (back)
     actions.push(
       <button type="button" className="ask-action resume" key="back" onMouseDown={keepFocus} onClick={resumeTour}>
         <ResumeIcon />
-        <span>Back to the tour</span>
+        <span>{props.resumeLabel ?? 'Back to the tour'}</span>
       </button>,
     );
-  const open = !!status || !!questions.length;
+  const open = !!status || !!questions.length || actions.length > 0 || !!voice.error || voiceBusy;
   // Keep the last content while the tray folds away, so it does not vanish before it closes.
   const tray = useRef<ReactNode>(null);
   const order = (i: number) => ({ '--i': i }) as CSSProperties;
   if (open)
     tray.current = (
       <div className="ask-tray-body">
+        {voice.error && (
+          <p className="ask-status failed" role="alert">
+            {voice.error}
+          </p>
+        )}
+        {voiceBusy && (
+          <p className="ask-status" role="status">
+            {voice.phase === 'permission'
+              ? 'Allow the microphone, then hold to record.'
+              : voice.phase === 'recording'
+                ? 'Listening… release to transcribe.'
+                : 'Transcribing…'}
+          </p>
+        )}
         {(status || actions.length > 0) && (
           <div className="ask-head">
             {status}
@@ -286,7 +348,6 @@ export function AskPanel(props: AskPanelProps) {
     );
 
   const empty = !draft.trim();
-  const near = draft.length > MAX_QUESTION - 80;
   const expanded = focused || busy || open || !empty;
   return (
     <section
@@ -298,9 +359,18 @@ export function AskPanel(props: AskPanelProps) {
       }}
     >
       <div className={`ask-card${focused ? ' focused' : ''}${busy ? ' busy' : ''}${away ? ' away' : ''}`}>
+        {props.tourStatus}
         <div className={`ask-tray${open ? ' open' : ''}`}>
           <div className="ask-tray-clip">{tray.current}</div>
         </div>
+        {props.selection && !props.selecting && (
+          <div className="ask-selection-chip">
+            {props.selectionPreview}
+            <span><strong>Selected region</strong><small>Page {props.selection.page} · included with your question</small></span>
+            <button type="button" onClick={props.onSelectRegion} disabled={busy || voiceBusy} aria-label="Change selected region">Change</button>
+            <button type="button" onClick={props.onClearRegion} disabled={busy || voiceBusy} aria-label="Remove selected region" title="Remove selected region">×</button>
+          </div>
+        )}
         <form className="ask-bar" onSubmit={submit}>
           <SparkIcon />
           <textarea
@@ -308,26 +378,69 @@ export function AskPanel(props: AskPanelProps) {
             className="ask-input"
             rows={1}
             value={draft}
-            maxLength={MAX_QUESTION}
-            readOnly={busy}
-            placeholder={phase.kind === 'answered' ? 'Ask a follow-up…' : 'Ask about this document…'}
+            readOnly={busy || voiceBusy || props.selecting}
+            placeholder={props.selecting ? 'Select a region on the page…' : props.selection ? 'Ask about this region…' : phase.kind === 'answered' ? 'Ask a follow-up…' : 'Ask about this document…'}
             aria-label="Ask a question about this document"
             enterKeyHint="send"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
           />
-          {near && !busy && (
-            <span className="ask-count" aria-live="polite">
-              {draft.length}/{MAX_QUESTION}
-            </span>
-          )}
           {empty && !focused && !busy && <kbd className="ask-kbd">/</kbd>}
+          <LanguagePicker value={language} disabled={busy || voiceBusy} onChange={setLanguage} />
+          {props.onSelectRegion && (
+            <button type="button" className={`ask-region${props.selecting || props.selection ? ' selected' : ''}`}
+              disabled={busy || voiceBusy} aria-label={props.selecting ? 'Cancel region selection' : 'Select a region to ask about'}
+              aria-pressed={!!props.selecting} title="Select a figure, equation or passage"
+              onClick={props.selecting ? props.onCancelSelection : props.onSelectRegion}>
+              <RegionIcon />
+            </button>
+          )}
+          {voice.available && (
+            <button
+              type="button"
+              className={`ask-mic${voice.phase === 'recording' ? ' recording' : ''}`}
+              aria-label={voiceBusy ? 'Cancel voice input' : 'Hold to record a question'}
+              title="Hold to record; release to transcribe with your Meta connection. Review the text before asking."
+              disabled={busy}
+              onPointerDown={(e) => {
+                if (voiceBusy) {
+                  voice.cancel();
+                  return;
+                }
+                e.currentTarget.setPointerCapture(e.pointerId);
+                void voice.begin();
+              }}
+              onPointerUp={() => voice.stop()}
+              onPointerCancel={() => voice.cancel()}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') voice.cancel();
+                else if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                  e.preventDefault();
+                  void voice.begin();
+                }
+              }}
+              onKeyUp={(e) => {
+                if (e.key === ' ' || e.key === 'Enter') {
+                  e.preventDefault();
+                  voice.stop();
+                }
+              }}
+              onClick={(e) => {
+                if (e.detail === 0) {
+                  if (voiceBusy) voice.stop();
+                  else void voice.begin();
+                }
+              }}
+            >
+              {voice.phase === 'transcribing' ? '…' : <MicrophoneIcon />}
+            </button>
+          )}
           <button
             type="submit"
             className={`ask-send${busy ? ' stop' : empty ? '' : ' ready'}`}
-            disabled={!busy && empty}
-            aria-label={busy ? 'Stop' : 'Ask'}
-            title={busy ? 'Stop (Esc)' : 'Ask (Enter)'}
+            disabled={voiceBusy || props.selecting || (!busy && empty)}
+            aria-label={busy ? 'Stop generating answer' : 'Ask'}
+            title={busy ? 'Stop generating answer (Esc)' : 'Ask (Enter)'}
           >
             {busy ? <StopIcon /> : <SendIcon />}
           </button>

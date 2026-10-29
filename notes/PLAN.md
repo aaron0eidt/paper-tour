@@ -1,5 +1,9 @@
 # Plan
 
+Implementation update (2026-10-28): current verified work is in [STATUS.md](STATUS.md); local additional document
+workflows in [LOCAL-WORKFLOWS.md](LOCAL-WORKFLOWS.md), voice in [VOICE.md](VOICE.md), rehearsal in [DEMO.md](DEMO.md).
+The modes and P1/P2 items below describe the broader product direction; they are not all implemented features.
+
 Paper Tour turns a document into a tutor that reads it with you. A voice explains while the page moves: it lights
 up the sentence that matters, zooms into the figure and draws on it, works through the formula on a board next to the
 page, and stops whenever you ask something. It starts with research papers and grows to exercise sheets, lecture
@@ -48,8 +52,8 @@ publishes a tour of the exercise sheet, an author puts a tour of the paper on th
 | Quiz | the end of any tour | Three questions, answered by voice; the feedback points at the evidence. |
 
 Presets: **Quick** (about 2 minutes, 6 steps), **Standard** (about 5 minutes, 10–12 steps) and **Deep** (about 10
-minutes, up to 24 steps, deep dives inline). Today's automatic tours walk every content page and run 50–90 steps; that
-is the main thing to change.
+minutes, up to 24 steps, deep dives inline). The default harness now produces short beat-based tours; the earlier
+page-by-page writer remains available explicitly through `TOUR_WRITER=muse`.
 
 ## Features
 

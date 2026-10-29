@@ -1,11 +1,15 @@
 import test from 'node:test';
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Action, BBox, Doc, Step, Tour } from '../../shared/paper';
 import { createApp, demoAllowed } from '../src/app';
-import type { MuseConfig } from '../src/config';
+import { ROOT, type MuseConfig } from '../src/config';
 import type { Database } from '../src/db';
 import { HttpError, ProcessingError } from '../src/errors';
 import { MuseClient } from '../src/muse/client';
@@ -26,6 +30,7 @@ import {
 } from '../src/harness/ask';
 import { paperBlock } from '../src/harness/paper-block';
 import { SHARED_RULES } from '../src/harness/prompts';
+import type { MeasuredTarget } from '../src/harness/visual-grounding';
 
 const settings: MuseConfig = {
   apiKey: 'unit-test-key',
@@ -198,9 +203,19 @@ function provider(fn: (request: Request) => unknown): typeof fetch {
     return result instanceof Response ? result : reply(result);
   }) as typeof fetch;
 }
-const ask = (request: AskRequest, model: (r: Request) => unknown, extra: { tour?: Tour; image?: TourImage } = {}) =>
+const ask = (
+  request: AskRequest,
+  model: (r: Request) => unknown,
+  extra: {
+    tour?: Tour;
+    image?: TourImage;
+    images?: TourImage[];
+    measureFigure?: (image: TourImage, signal?: AbortSignal) => Promise<MeasuredTarget[]>;
+  } = {},
+) =>
   answerQuestion({
     client: new MuseClient(settings, provider(model)),
+    measureFigure: async () => [],
     doc,
     documentId: 'doc-test',
     request,
@@ -476,7 +491,7 @@ test('pen marks point at a region only on the figure the model saw, and long lab
   assert.ok(regions.includes('top-left') && regions.includes('whole'));
   assert.deepEqual(seen.actions[0], { type: 'zoom', target: 'fig1' });
   assert.deepEqual(seen.actions.slice(1), [
-    { type: 'arrow', target: 'fig1.a', region: [0, 0, 0.4, 0.4], color: 'pink', label: 'encoder' },
+    { type: 'arrow', target: 'fig1.a', region: [0, 0, 0.4, 0.4], color: 'pink' },
     {
       type: 'circle',
       target: 'fig1',
@@ -485,26 +500,87 @@ test('pen marks point at a region only on the figure the model saw, and long lab
       at_word: say.split(' ').indexOf('decoder') - 1,
     },
   ]);
-  const [blind] = (await ask({ question: 'What is on the left?', figureId: 'fig1' }, model)).answer.steps;
+  await assert.rejects(ask({ question: 'What is on the left?', figureId: 'fig1' }, model), /no usable answer/);
   assert.deepEqual(regions, ['whole']);
-  assert.ok(
-    blind.actions.every((a) => !('region' in a)),
-    'without the image, marks go around the whole target',
+});
+
+test('Q&A repairs measured highlight and spotlight requests instead of dropping their geometry', async () => {
+  const measured: MeasuredTarget = {
+    id: 'measured:fig1:1',
+    target: 'fig1',
+    kind: 'component',
+    label: 'Attention',
+    region: [0.55, 0.4, 0.79, 0.47],
+  };
+  const image: TourImage = {
+    targetId: 'fig1',
+    kind: 'figure',
+    page: 1,
+    label: 'Figure 1',
+    dataUrl: 'data:image/png;base64,AA==',
+  };
+  const say =
+    'The middle orange block combines information from all input positions, so the decoder can select useful source features.';
+  const value = (action: string, anchor = 'middle orange block') => ({
+    plan: 'Explain the visible module.',
+    answerable: 'yes',
+    steps: [{ say, cues: [{ action, target: measured.id, region: 'whole', label: '', anchor }], board: NO_BOARD }],
+    followups: [],
+  });
+  for (const wrong of ['highlight', 'spotlight', 'missing-anchor']) {
+    let calls = 0;
+    const result = await ask(
+      { question: 'Highlight the attention module in Figure 1.', figureId: 'fig1' },
+      (request) => {
+        assert.ok(
+          !request.schema.properties.steps.items.properties.cues.items.properties.action.enum.includes('spotlight'),
+        );
+        if (++calls === 1) return wrong === 'missing-anchor' ? value('box', 'words not spoken here') : value(wrong);
+        assert.match(
+          request.task,
+          wrong === 'missing-anchor' ? /anchor copied from the spoken/ : /use box for a measured component/,
+        );
+        return value('box');
+      },
+      { image, measureFigure: async () => [measured] },
+    );
+    assert.equal(calls, 2);
+    assert.deepEqual(result.answer.steps[0].actions, [
+      { type: 'zoom', target: 'fig1' },
+      { type: 'box', target: 'fig1', region: measured.region, color: 'pink', at_word: 1 },
+    ]);
+  }
+  let failedCalls = 0;
+  await assert.rejects(
+    ask(
+      { question: 'Highlight the module.', figureId: 'fig1' },
+      () => {
+        failedCalls++;
+        return value('highlight');
+      },
+      { image, measureFigure: async () => [measured] },
+    ),
+    /no usable answer/,
+  );
+  assert.equal(
+    failedCalls,
+    2,
+    'bad measured actions stop after one repair, rather than return narration without the requested mark',
   );
 });
 
-test('narration is cleaned for the voice and kept to 60 words, cut after a whole sentence', () => {
+test('narration is cleaned for the voice and kept to 100 words, cut after a whole sentence', () => {
   assert.equal(
     spoken('The scale is $\\sqrt{d_k}$, and a run costs $5 in C#.'),
     'The scale is square root of d k, and a run costs $5 in C#.',
   );
   const sentence = 'Attention lets every token look at all the other tokens at once.'; // 12 words
-  const said = spoken(Array(6).fill(sentence).join(' '));
-  assert.equal(said, Array(5).fill(sentence).join(' '));
-  assert.equal(said.split(' ').length, 60);
-  // A first sentence too long to cut after is cut at 60 words and closed with a full stop.
-  const rambling = spoken(Array(70).fill('word').join(' '));
-  assert.equal(rambling, `${Array(60).fill('word').join(' ')}.`);
+  const said = spoken(Array(10).fill(sentence).join(' '));
+  assert.equal(said, Array(8).fill(sentence).join(' '));
+  assert.equal(said.split(' ').length, 96);
+  // A first sentence too long to cut after is cut at 100 words and closed with a full stop.
+  const rambling = spoken(Array(110).fill('word').join(' '));
+  assert.equal(rambling, `${Array(100).fill('word').join(' ')}.`);
 });
 
 test('a task or part of an exercise sheet the question names comes into focus', () => {
@@ -643,7 +719,10 @@ test('questions use the document’s model, and a Contributor model only with th
 const DOCUMENT = '7694558d-f7e2-4cbd-9355-978ec677b254';
 const ANALYSIS = '1c3c4c62-0f45-4a4e-9a35-3d2b0c1d7e11';
 const TOUR = '5a0d3f8e-7b8e-4c55-bb4c-0f2f1f8b9c3d';
-function library(model: (r: Request) => unknown) {
+function library(
+  model: (r: Request) => unknown,
+  options: { doc?: Doc; storage?: FileStorage; currentAnalysisId?: string; analysisQueries?: string[] } = {},
+) {
   const query = async (text: string, values: unknown[] = []) => {
     if (text.startsWith('select * from documents'))
       return {
@@ -653,7 +732,8 @@ function library(model: (r: Request) => unknown) {
                 {
                   id: DOCUMENT,
                   owner_id: 'owner',
-                  current_analysis_id: ANALYSIS,
+                  current_analysis_id: options.currentAnalysisId ?? ANALYSIS,
+                  upload_path: `owner/${DOCUMENT}/original.pdf`,
                   tour_model: 'muse-spark-1.3',
                   tour_allow_training: false,
                 },
@@ -662,13 +742,17 @@ function library(model: (r: Request) => unknown) {
       };
     if (text.startsWith('select script,analysis_id from tours'))
       return { rows: values[0] === TOUR ? [{ script: tour, analysis_id: ANALYSIS }] : [] };
-    if (text.startsWith('select id,doc from analyses'))
-      return { rows: values[0] === ANALYSIS ? [{ id: ANALYSIS, doc }] : [] };
+    if (text.startsWith('select id,doc from analyses')) {
+      options.analysisQueries?.push(String(values[0]));
+      return {
+        rows: values[0] === ANALYSIS && values[1] === DOCUMENT ? [{ id: ANALYSIS, doc: options.doc ?? doc }] : [],
+      };
+    }
     if (text.includes('from assets')) return { rows: [] };
     throw new Error(`Unexpected query: ${text}`);
   };
   const db = { query, pool: { query } } as unknown as Database;
-  const storage = {} as FileStorage;
+  const storage = options.storage ?? ({} as FileStorage);
   const muse = {
     resolveMuse: async (_owner: string, chosen?: string) => ({
       config: { ...settings, model: chosen ?? settings.model },
@@ -721,9 +805,9 @@ test('only the document’s owner may ask, and the answer comes back as steps', 
     assert.equal(language, 'en-GB', 'answers speak the tour’s language');
     const unknownTour = await post('owner', { ...question, tourId: ANALYSIS });
     assert.equal(unknownTour.statusCode, 404);
+    assert.equal((await post('owner', { question: 'Why scale the dot products? '.repeat(100) })).statusCode, 200);
     for (const payload of [
       { question: '' },
-      { question: 'x'.repeat(501) },
       { question: 'Why?', history: Array(5).fill({ question: 'a', answer: 'b' }) },
     ])
       assert.equal((await post('owner', payload)).statusCode, 400);
@@ -874,4 +958,437 @@ test('a demo question without a server key says where the key goes', async () =>
     await app.close();
     await demo.remove();
   }
+});
+
+test('an explicit answer language reaches the writer and the returned voice metadata', async () => {
+  let task = '';
+  const result = await ask(
+    { question: 'Explain the scaling.', responseLanguage: 'uk-UA' },
+    (request) => {
+      task = request.task;
+      return { answerable: 'yes', steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }], followups: [] };
+    },
+    { tour: { ...tour, voices: { host: { lang: 'de-DE' } } } },
+  );
+  assert.match(task, /micro-tour in "uk-UA"/);
+  assert.match(task, /quotations in the original document language/);
+  assert.equal(result.answer.language, 'uk-UA');
+});
+
+test('a copied answer is repaired once instead of reading a long source sentence aloud', async () => {
+  const source = structuredClone(doc);
+  const copied =
+    'The encoder transforms each input into a contextual representation which the decoder can use to generate an output sequence.';
+  source.sentences[0].text = copied;
+  let calls = 0;
+  const result = await answerQuestion({
+    doc: source,
+    documentId: 'doc-test',
+    request: { question: 'Explain the encoder.' },
+    language: 'en-US',
+    client: new MuseClient(
+      settings,
+      provider(() => ({
+        answerable: 'yes',
+        steps: [{ say: ++calls === 1 ? copied : SCALE_SAY, cues: [], board: NO_BOARD }],
+        followups: [],
+      })),
+    ),
+  });
+  assert.equal(calls, 2);
+  assert.notEqual(result.answer.steps[0].say, copied);
+  await assert.rejects(
+    answerQuestion({
+      doc: source,
+      documentId: 'doc-test',
+      request: { question: 'Explain the encoder.' },
+      language: 'en-US',
+      client: new MuseClient(
+        settings,
+        provider(() => ({ answerable: 'yes', steps: [{ say: copied, cues: [], board: NO_BOARD }], followups: [] })),
+      ),
+    }),
+    /no usable answer/,
+  );
+});
+
+test('region questions prioritize intersecting real source IDs while preserving paper, history and current narration', async () => {
+  const selection = { page: 2, rect: [0, 0.16, 0.5, 0.19] as BBox };
+  const focused = retrieve(doc, { question: 'Explain this region.', selection }, tour.chapters[0].steps[0]);
+  assert.equal(focused.home, 'eq1');
+  assert.equal(focused.focus[0].id, 'eq1');
+  const images: TourImage[] = ['page2', 'selection-page2'].map((targetId) => ({
+    targetId,
+    kind: 'page',
+    page: 2,
+    label: targetId,
+    dataUrl: `data:image/jpeg;base64,${Buffer.from(targetId).toString('base64')}`,
+  }));
+  let seen: Request | undefined;
+  const result = await ask(
+    {
+      question: 'Explain this region.',
+      selection,
+      stepId: 'method-1',
+      history: [{ question: 'How are weights calculated?', answer: 'Using normalized scores.' }],
+    },
+    (r) => {
+      seen = r;
+      return {
+        plan: 'Explain selected formula.',
+        answerable: 'yes',
+        steps: [
+          {
+            say: SCALE_SAY,
+            board: NO_BOARD,
+            cues: [
+              { action: 'box', target: 'eq1', region: 'whole', label: '', anchor: 'The authors scale' },
+              { action: 'box', target: 'selection-page2', region: 'whole', label: '', anchor: 'The authors scale' },
+            ],
+          },
+        ],
+        followups: [],
+      };
+    },
+    { images, tour },
+  );
+  assert.equal(seen!.messages[1].content, `<DOCUMENT>\n${paperBlock(doc)}\n</DOCUMENT>`);
+  assert.match(seen!.task, /SELECTED REGION: page 2/);
+  assert.match(seen!.task, /Q: How are weights calculated/);
+  assert.match(seen!.task, /THE TOUR WAS SAYING: Attention compares/);
+  assert.equal(seen!.messages.at(-1).content.filter((part: any) => part.type === 'image_url').length, 2);
+  const cueSchema = seen!.schema.properties.steps.items.properties.cues.items.properties;
+  assert.ok(cueSchema.target.enum.includes('eq1'));
+  assert.ok(!cueSchema.target.enum.includes('selection-page2'));
+  assert.deepEqual(cueSchema.region.enum, ['whole'], 'crop coordinates are not figure-relative annotation regions');
+  assert.ok(result.answer.steps[0].actions.some((a) => a.type === 'box' && a.target === 'eq1'));
+  assert.ok(!result.answer.steps[0].actions.some((a) => 'target' in a && a.target === 'selection-page2'));
+});
+
+test('invalid selection requests return 400 before image access or model calls', async () => {
+  let calls = 0;
+  const app = await createApp({
+    service: library(() => {
+      calls++;
+      throw new Error('must not call model');
+    }),
+    authenticate: async () => 'owner',
+  });
+  try {
+    for (const selection of [
+      null,
+      { page: 0, rect: [0, 0, 1, 1] },
+      { page: 4, rect: [0, 0, 1, 1] },
+      { page: 1, rect: [0, 0, 2, 1] },
+      { page: 1, rect: [0.5, 0, 0.5, 1] },
+      { page: 1, rect: [1, 0, 0, 1] },
+      { page: 1, rect: [0, 0, 1] },
+      { page: 1, rect: [0, 0, 1, 1], image: 'data:image/png;base64,private' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/documents/${DOCUMENT}/ask`,
+        headers: { authorization: 'Bearer owner' },
+        payload: { question: 'Explain it', selection },
+      });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.ok(!response.body.includes(settings.apiKey));
+      assert.ok(!response.body.includes('data:image'));
+    }
+    assert.equal(calls, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+const selectionPython = process.env.PYTHON_BIN ?? resolve(ROOT, 'ingest/.venv/bin/python');
+test(
+  'the owned ask route uses the pinned analysis and sends real page/crop images from its original PDF',
+  { skip: !existsSync(selectionPython) },
+  async () => {
+    const { stdout } = await promisify(execFile)(
+      selectionPython,
+      [
+        '-I',
+        '-c',
+        'import pymupdf,base64; d=pymupdf.open(); [d.new_page(width=600,height=800) for _ in range(3)]; d[1].insert_text((30,140),"Attention = normalized scores times values"); print(base64.b64encode(d.tobytes()).decode())',
+      ],
+      { timeout: 10000 },
+    );
+    const pdf = Buffer.from(stdout.trim(), 'base64');
+    const original = { ...doc, source: { ...doc.source, sha256: createHash('sha256').update(pdf).digest('hex') } };
+    const downloads: string[] = [],
+      queried: string[] = [];
+    let seen: Request | undefined;
+    const storage = {
+      download: async (path: string) => {
+        downloads.push(path);
+        return pdf;
+      },
+    } as unknown as FileStorage;
+    const service = library(
+      (r) => {
+        seen = r;
+        return { plan: 'p', answerable: 'yes', steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }], followups: [] };
+      },
+      { doc: original, storage, currentAnalysisId: '11111111-1111-4111-8111-111111111111', analysisQueries: queried },
+    );
+    const app = await createApp({ service, authenticate: async (token) => token });
+    const payload = {
+      question: 'Explain this region',
+      analysisId: ANALYSIS,
+      selection: { page: 2, rect: [0, 0.15, 0.6, 0.2] },
+    };
+    const post = (token: string, body = payload) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/documents/${DOCUMENT}/ask`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: body,
+      });
+    try {
+      assert.equal((await post('stranger')).statusCode, 404);
+      assert.equal(downloads.length, 0);
+      const response = await post('owner');
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(queried, [ANALYSIS]);
+      assert.deepEqual(downloads, [`owner/${DOCUMENT}/original.pdf`]);
+      const images = seen!.messages.at(-1).content.filter((part: any) => part.type === 'image_url');
+      assert.equal(images.length, 2);
+      assert.ok(images.every((part: any) => part.image_url.url.startsWith('data:image/jpeg;base64,')));
+      assert.notEqual(images[0].image_url.url, images[1].image_url.url);
+      assert.ok(!response.body.includes('data:image') && !response.body.includes(settings.apiKey));
+      const mismatch = await app.inject({
+        method: 'POST',
+        url: `/api/documents/${DOCUMENT}/ask`,
+        headers: { authorization: 'Bearer owner' },
+        payload: { ...payload, tourId: TOUR, analysisId: DOCUMENT },
+      });
+      assert.equal(mismatch.statusCode, 400);
+      assert.equal(downloads.length, 1);
+    } finally {
+      await app.close();
+    }
+  },
+);
+
+test('Q&A repairs leaked authoring instructions and duplicate narration once', async () => {
+  const leaked =
+    'Never narrate schema, rendering instructions or authoring rules. Shrinking the scores leaves room for several tokens to contribute instead of letting one dominate.';
+  const dirty = {
+    plan: 'Explain scaling.',
+    answerable: 'yes',
+    steps: [
+      { say: leaked, cues: [], board: NO_BOARD },
+      { say: leaked, cues: [], board: NO_BOARD },
+    ],
+    followups: [],
+  };
+  const clean =
+    'Scaling the scores keeps attention from concentrating too sharply. This example changes a score of sixteen into four before the weights are computed.';
+  const calls: Request[] = [];
+  const result = await ask({ question: 'Explain equation 1 with an example.' }, (request) => {
+    calls.push(request);
+    return calls.length === 1
+      ? dirty
+      : {
+          plan: 'Explain the consequence.',
+          answerable: 'yes',
+          steps: [{ say: clean, cues: [], board: NO_BOARD }],
+          followups: [],
+        };
+  });
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['ask_answer', 'ask_answer'],
+  );
+  assert.deepEqual(
+    calls.map((call) => call.effort),
+    ['low', 'medium'],
+  );
+  assert.match(calls[1].task, /copies an internal authoring instruction/);
+  assert.match(calls[1].task, /substantially repeats step 1/);
+  assert.deepEqual(JSON.parse(calls[1].messages.at(-2).content), dirty);
+  assert.equal(result.completions.length, 2);
+  assert.deepEqual(
+    result.answer.steps.map((step) => step.say),
+    [clean],
+  );
+});
+
+test('Q&A stops after one unsuccessful narration repair and reports an unusable answer', async () => {
+  let calls = 0;
+  const leaked =
+    'Never narrate schema, rendering instructions or authoring rules. The example compares attention scores before and after scaling.';
+  await assert.rejects(
+    ask({ question: 'Explain equation 1.' }, () => {
+      calls++;
+      return {
+        plan: 'p',
+        answerable: 'yes',
+        steps: [
+          { say: leaked, cues: [], board: NO_BOARD },
+          { say: leaked, cues: [], board: NO_BOARD },
+        ],
+        followups: [],
+      };
+    }),
+    (error) => {
+      assert.ok(error instanceof ProcessingError);
+      assert.equal(error.code, 'muse_invalid_response');
+      const publicError = askError(error);
+      assert.ok(publicError instanceof HttpError);
+      assert.equal(publicError.status, 502);
+      assert.equal(publicError.code, 'answer_failed');
+      return true;
+    },
+  );
+  assert.equal(calls, 2, 'an invalid repair cannot start a third model call');
+});
+
+test('clean Q&A uses one call and retains its live formula board', async () => {
+  const calls: Request[] = [];
+  const result = await ask({ question: 'Why scale the dot products?' }, (request) => {
+    calls.push(request);
+    return {
+      plan: 'Explain the consequence of scaling.',
+      answerable: 'yes',
+      steps: [
+        {
+          say: SCALE_SAY,
+          cues: [],
+          board: {
+            ...NO_BOARD,
+            kind: 'formula',
+            latex: String.raw`\frac{QK^T}{\sqrt{d_k}}`,
+            terms: [
+              { latex: 'QK^T', label: 'scores', anchor: 'dot products' },
+              { latex: String.raw`\sqrt{d_k}`, label: 'scale', anchor: 'tiny gradients' },
+            ],
+          },
+        },
+      ],
+      followups: [],
+    };
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(result.completions.length, 1);
+  assert.deepEqual(
+    result.answer.steps.map((step) => step.say),
+    [spoken(SCALE_SAY)],
+  );
+  assert.deepEqual(Object.keys(calls[0].schema.properties.steps.items.properties), ['say', 'cues', 'board', 'example']);
+  assert.ok(!calls[0].task.includes('Repair the answer:'));
+  assert.ok(result.answer.steps[0].actions.some((action) => action.type === 'board' && action.item.kind === 'formula'));
+  assert.ok(result.answer.steps[0].actions.some((action) => action.type === 'board_focus'));
+});
+
+test('measured diagram stays in view while a supporting passage on another page is highlighted', async () => {
+  const measured: MeasuredTarget = {
+    id: 'measured:fig1:1',
+    target: 'fig1',
+    kind: 'component',
+    label: 'Attention',
+    region: [0.55, 0.4, 0.79, 0.47],
+  };
+  const image: TourImage = {
+    targetId: 'fig1',
+    kind: 'figure',
+    page: 1,
+    label: 'Figure 1',
+    dataUrl: 'data:image/png;base64,AA==',
+  };
+  const say =
+    'The attention module mixes information from the inputs. The supporting explanation states why scaling keeps the scores from becoming too large.';
+  const result = await ask(
+    { question: 'Explain the attention module in Figure 1 and why the scores are scaled.', figureId: 'fig1' },
+    () => ({
+      plan: 'Explain the diagram with textual evidence.',
+      answerable: 'yes',
+      followups: [],
+      steps: [
+        {
+          say,
+          board: NO_BOARD,
+          cues: [
+            { action: 'box', target: measured.id, region: 'whole', label: '', anchor: 'attention module' },
+            { action: 'highlight', target: 'p2.s4', region: 'whole', label: '', anchor: 'supporting explanation' },
+          ],
+        },
+      ],
+    }),
+    { image, measureFigure: async () => [measured] },
+  );
+  const actions = result.answer.steps[0].actions;
+  assert.deepEqual(
+    actions.filter((a) => a.type === 'zoom' || a.type === 'focus'),
+    [{ type: 'zoom', target: 'fig1' }],
+  );
+  assert.ok(actions.some((a) => a.type === 'box' && a.target === 'fig1' && a.region?.[0] === 0.55));
+  assert.ok(
+    actions.some((a) => a.type === 'highlight' && a.targets.includes('p2.s4')),
+    'supporting evidence is retained without redirecting the camera',
+  );
+});
+
+test('Q&A corrects a narrated numerical example into actual timed native values', async () => {
+  const { exampleSay, numericalExample } = await import('./example-fixture');
+  let calls = 0;
+  const result = await ask({ question: 'Show a small worked numerical example.' }, (request) => {
+    calls++;
+    if (calls === 2) assert.match(request.task, /needs example frames/);
+    return {
+      plan: 'Illustrate a transformation.',
+      answerable: 'yes',
+      followups: [],
+      steps: [
+        {
+          say: exampleSay,
+          cues: [],
+          board: NO_BOARD,
+          ...(calls === 2 ? { example: numericalExample() } : {}),
+        },
+      ],
+    };
+  });
+  assert.equal(calls, 2);
+  const boards = result.answer.steps[0].actions.filter((a) => a.type === 'board');
+  assert.deepEqual(
+    boards.map((a) => a.item.kind === 'formula' && a.item.latex),
+    [false, '2+2=4'],
+  );
+  assert.ok((boards[1].at_word ?? 0) > (boards[0].at_word ?? 0));
+  let failures = 0;
+  await assert.rejects(
+    ask({ question: 'Show a worked numerical example.' }, () => {
+      failures++;
+      return { plan: 'p', answerable: 'yes', followups: [], steps: [{ say: exampleSay, cues: [], board: NO_BOARD }] };
+    }),
+    /no usable answer/,
+  );
+  assert.equal(failures, 2, 'a failed example ends after its one correction, without narration-only fallback');
+});
+
+test('Q&A cannot downgrade a failed worked example to static prose in its correction', async () => {
+  const { exampleSay } = await import('./example-fixture');
+  let attempts = 0;
+  await assert.rejects(
+    ask({ question: 'Explain a worked case.' }, () => ({
+      plan: 'p',
+      answerable: 'yes',
+      followups: [],
+      steps: [
+        {
+          say:
+            ++attempts === 1
+              ? exampleSay
+              : 'The transformation combines each input with itself to increase the magnitude of the result.',
+          cues: [],
+          board: NO_BOARD,
+        },
+      ],
+    })),
+    /no usable answer/,
+  );
+  assert.equal(attempts, 2);
 });

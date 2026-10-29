@@ -8,13 +8,15 @@ import { AnalysisWorker } from './worker';
 import { TourWorker } from './tour-worker';
 import { MuseTourGenerator } from './muse/generator';
 import { SettingsService } from './settings';
+import { recoverInterruptedTours } from './tour-recovery';
+const workerStartedAt = new Date();
 const c = config();
 const db = new Database(c.databaseUrl);
 const { storage } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const worker = new AnalysisWorker(db, storage, c, enqueue);
 const settings = new SettingsService(db, c.muse);
-// Short main-idea tours by default; TOUR_WRITER=muse brings back the one-shot page-by-page writer.
+// Guided concepts and focused details; TOUR_WRITER=muse selects the one-shot writer.
 const writer = (muse: MuseConfig) =>
   c.tours.writer === 'harness' ? new HarnessTourGenerator(muse, c.tours.preset) : new MuseTourGenerator(muse);
 const tourWorker = new TourWorker(db, storage, c, writer(c.muse), undefined, async (owner, model) => {
@@ -29,6 +31,9 @@ const tourWorker = new TourWorker(db, storage, c, writer(c.muse), undefined, asy
 const agent = new PaperAgent(db, storage, c, enqueue, settings, (input, signal) =>
   tourWorker.loadImages(input, signal),
 );
+const interruptedTours = await recoverInterruptedTours(db, boss, workerStartedAt);
+if (interruptedTours.length)
+  console.log(JSON.stringify({ event: 'interrupted_tours_recovered', generationIds: interruptedTours }));
 await tourWorker.reconcile(enqueue);
 await agent.reconcile();
 await boss.work<{ documentId: string; agentRunId: string; wakeIndex: number }>(

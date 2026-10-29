@@ -1,10 +1,21 @@
+import { checkExample, claimsNumericExample, EXAMPLE_SCHEMA, type WorkedExample } from './example';
+import { tableTextBlocks, tableLines } from '../../../shared/tableTargets';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
-import type { MuseMessage } from '../muse/client';
 import type { Beat } from './beats';
-import { BOARD_LIMITS, FLOW_NODE_IDS, boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
+import { BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
 import type { DocType } from './doctype';
 import type { DirectOptions } from './prompts';
+import {
+  BOUNDS_SCHEMA,
+  exactBounds,
+  figureFrameText,
+  figureTextTargets,
+  measuredCueTargets,
+  measuredFrameText,
+  visualCueProblems,
+  type MeasuredTarget,
+} from './visual-grounding';
 
 export const CUE_ACTIONS = ['highlight', 'box', 'spotlight', 'note', 'arrow', 'circle', 'board_focus'] as const;
 export type CueAction = (typeof CUE_ACTIONS)[number];
@@ -13,6 +24,8 @@ export interface Cue {
   target: string;
   /** Where on the figure or panel a pen mark goes; missing means the whole target. */
   region?: RegionName;
+  /** Exact target-relative coordinates from the attached image; supersedes legacy named regions. */
+  bounds?: Region;
   label: string;
   anchor: string;
 }
@@ -22,8 +35,11 @@ export interface Direction {
   cues: Cue[];
   /** The side-board item, when the model drew one that passed its checks. */
   board?: BoardItem;
+  example?: WorkedExample;
+  exampleProblems?: string[];
   /** Why the board the model drew was dropped; empty when it passed or none was drawn. */
   boardProblems?: string[];
+  visualProblems?: string[];
 }
 /** What a beat may point at: sentences to highlight, figures, panels or equations to mark, and parts of its board. */
 export interface BeatTargets {
@@ -36,6 +52,10 @@ export interface BeatTargets {
   evidence?: string;
   /** A table whose cells a text beat quotes as the source of its numbers. */
   table?: string;
+  tableCells?: string[];
+  /** The actual figure crop supplied to this direction call. Absent means no fine visual targeting. */
+  imaged?: string;
+  measured?: MeasuredTarget[];
 }
 
 /** Named areas of a figure or panel for pen marks: a 3 by 3 grid with some overlap, the four halves, or the whole. */
@@ -85,33 +105,9 @@ export function regionOf(name: string | undefined): Region | undefined {
   return region ? [...region] : undefined;
 }
 
-/** Part IDs a board_focus cue chooses from: term-1 … for a formula, the flow's node IDs, bar-1 … for bars. */
-export function boardPartIds(kind: BoardKind | undefined): string[] {
-  if (kind === 'flow') return [...FLOW_NODE_IDS];
-  if (!kind) return [];
-  const [prefix, most] = kind === 'formula' ? ['term', BOARD_LIMITS.terms[1]] : ['bar', BOARD_LIMITS.bars[1]];
-  return Array.from({ length: most }, (_, i) => `${prefix}-${i + 1}`);
-}
+export { boardPartIds, boardPart } from './board';
 
-/** The index board_focus lights up for a part ID, or -1 when the item has no such part. */
-export function boardPart(item: BoardItem, id: string): number {
-  if (item.kind === 'flow') return item.nodes.findIndex((n) => n.id === id);
-  const [prefix, size] = item.kind === 'formula' ? ['term', item.terms.length] : ['bar', item.bars.length];
-  const n = Number(new RegExp(`^${prefix}-(\\d+)$`).exec(id)?.[1]) - 1;
-  return n >= 0 && n < size ? n : -1;
-}
-
-/** A table's cells as extracted, one line per text block: the table_text blocks centred inside its box on its page. */
-export function tableLines(doc: Doc, table: DocFigure): string[] {
-  const [x0, y0, x1, y1] = table.bbox;
-  const inside = ([a, b, c, d]: number[]) =>
-    (a + c) / 2 >= x0 && (a + c) / 2 <= x1 && (b + d) / 2 >= y0 && (b + d) / 2 <= y1;
-  return doc.blocks
-    .filter((b) => b.page === table.page && b.type === 'table_text' && inside(b.bbox))
-    .map((b) => b.text.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .slice(0, 60);
-}
+export { tableLines } from '../../../shared/tableTargets';
 
 /** The table a result rests on: one its evidence cites, else the one that repeats most of its distinctive numbers. */
 function resultTable(doc: Doc, evidence: string[], text: string): DocFigure | undefined {
@@ -132,18 +128,41 @@ function resultTable(doc: Doc, evidence: string[], text: string): DocFigure | un
 
 /** Targets on the page the camera shows: a text beat's paragraphs, or a figure with its panels, or an equation. */
 export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
-  const parts = beat.board ? { parts: boardPartIds(beat.board) } : {};
+  const parts = { parts: BOARD_KINDS.flatMap(boardPartIds) };
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const quote = (ids: string[]) => ids.map((id) => sentences.get(id)?.text ?? '').filter(Boolean);
   if (beat.target) {
     const figure = doc.figures.find((f) => f.id === beat.target);
     const equation = doc.equations.find((e) => e.id === beat.target);
     const page = figure?.page ?? equation?.page ?? 1;
-    const visuals = figure ? [figure.id, ...figure.panels.map((p) => p.id)] : [beat.target];
-    if (beat.board !== 'bars' || !figure) return { page, sentences: [], visuals, ...parts };
+    const tableCells =
+      figure?.kind === 'table'
+        ? tableTextBlocks(doc, figure)
+            .slice(0, 60)
+            .map((b) => b.id)
+        : [];
+    const visuals = figure
+      ? [
+          figure.id,
+          ...figure.panels.map((p) => p.id),
+          ...figureTextTargets(doc, figure).map((b) => b.id),
+          ...tableCells,
+        ]
+      : [beat.target];
+    const table = figure?.kind === 'table' ? { table: figure.id } : {};
+    if (beat.board !== 'bars' || !figure)
+      return {
+        page,
+        sentences: [],
+        visuals,
+        tableCells,
+        ...table,
+        ...parts,
+        evidence: figure ? [figure.caption, ...quote(figure.referenced_by)].join('\n') : (equation?.text ?? ''),
+      };
     // A table's numbers come from what its brief quotes: the caption, the citing sentences and the cells.
     const evidence = [figure.caption, ...quote(figure.referenced_by.slice(0, 4)), ...tableLines(doc, figure)];
-    return { page, sentences: [], visuals, ...parts, evidence: evidence.join('\n') };
+    return { page, sentences: [], visuals, tableCells, ...table, ...parts, evidence: evidence.join('\n') };
   }
   const first = sentences.get(beat.evidence[0]);
   const page = first?.page ?? 1;
@@ -155,7 +174,7 @@ export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
   );
   const ids = doc.blocks.filter((b) => blocks.has(b.id)).flatMap((b) => b.sentences);
   const targets = { page, sentences: ids.slice(0, 60), visuals: [], ...parts };
-  if (beat.board !== 'bars') return targets;
+  if (beat.board !== 'bars') return { ...targets, evidence: quote(beat.evidence).join('\n') };
   const quoted = quote([...new Set([...beat.evidence, ...(beat.boardEvidence ?? [])])]);
   const table = resultTable(doc, beat.evidence, quoted.join('\n'));
   return {
@@ -166,10 +185,17 @@ export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
 }
 
 /** Cue actions a beat may use: text beats highlight, figures get the pen, and a formula walks its board's terms. */
-function actionsFor(beat: Beat): CueAction[] {
-  const board: CueAction[] = beat.board ? ['board_focus'] : [];
+function actionsFor(beat: Beat, targets?: BeatTargets): CueAction[] {
+  const board: CueAction[] = ['board_focus'];
   if (beat.kind === 'formula') return board;
-  return [...(beat.target ? (['arrow', 'circle', 'box'] as const) : (['highlight', 'note'] as const)), ...board];
+  return [
+    ...(beat.target
+      ? targets?.table || targets?.measured?.some((t) => t.kind === 'component' || t.kind === 'panel')
+        ? (['box'] as const)
+        : (['arrow', 'circle', 'box'] as const)
+      : (['highlight', 'note'] as const)),
+    ...board,
+  ];
 }
 
 /** The IDs a cue may target, for the actions the beat allows. */
@@ -182,15 +208,17 @@ function cueTargets(actions: CueAction[], targets: BeatTargets): string[] {
   ];
 }
 
-/** Spoken words a beat aims for; the code accepts up to 70 (90 for the takeaway). */
-const sayWords = (beat: Beat) => (beat.kind === 'takeaway' ? 65 : beat.kind === 'formula' ? 55 : 45);
+/** Leave room for causal explanation; detail steps teach a worked example, not a terse caption. */
+const sayWords = (beat: Beat) =>
+  beat.detail ? 150 : beat.kind === 'takeaway' ? 90 : ['formula', 'method', 'figure'].includes(beat.kind) ? 110 : 80;
 
 /** What the beat's task offers the model: its cue actions, its board, the spoken length it aims for and its tone. */
-export function directOptions(beat: Beat, type?: DocType): DirectOptions {
+export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets): DirectOptions {
   return {
-    actions: actionsFor(beat),
+    actions: actionsFor(beat, targets),
     ...(beat.board ? { board: beat.board } : {}),
     words: sayWords(beat),
+    detail: beat.detail,
     ...(type ? { type } : {}),
   };
 }
@@ -200,20 +228,47 @@ export function directOptions(beat: Beat, type?: DocType): DirectOptions {
  * A board comes before "say", so the narration walks through the terms, stages or numbers the board already holds.
  */
 export function directionSchema(beat: Beat, targets: BeatTargets, strict = true) {
-  const actions = actionsFor(beat);
+  const actions = actionsFor(beat, targets);
   const ids = strict ? cueTargets(actions, targets) : [];
+  if (strict) ids.push(...(targets.measured ?? []).map((t) => t.id));
   const pen = actions.includes('arrow');
-  const words = beat.kind === 'takeaway' ? 90 : 70;
+  const measured = targets.measured ?? [];
+  const words = beat.detail ? 175 : 135;
   const region = strict
-    ? { type: 'string', enum: REGION_NAMES, description: 'arrow or circle: where the part is in the image.' }
+    ? {
+        type: 'string',
+        enum: targets.imaged ? REGION_NAMES : ['whole'],
+        description: 'Legacy region; use whole when exact bounds are supplied.',
+      }
     : { type: 'string' };
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['plan', ...(strict && beat.board ? [beat.board] : []), 'say', 'cues'],
+    required: ['plan', 'say', 'cues'],
     properties: {
-      plan: strict ? { type: 'string', maxLength: 600 } : { type: 'string' },
-      ...(beat.board ? { [beat.board]: strict ? boardSchema(beat.board) : {} } : {}),
+      plan: strict
+        ? {
+            type: 'string',
+            maxLength: 600,
+            description:
+              'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.',
+          }
+        : { type: 'string' },
+      ...Object.fromEntries(
+        BOARD_KINDS.map((kind) => [
+          kind,
+          strict
+            ? {
+                ...boardSchema(kind),
+                description:
+                  kind === 'scene'
+                    ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
+                    : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,
+              }
+            : {},
+        ]),
+      ),
+      example: strict ? EXAMPLE_SCHEMA : {},
       say: {
         type: 'string',
         minLength: 20,
@@ -237,6 +292,14 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
                 ? { type: 'string', enum: ids }
                 : { type: 'string', maxLength: 0 },
             ...(pen || !strict ? { region } : {}),
+            ...(!strict ? { bounds: {} } : pen && targets.imaged ? { bounds: BOUNDS_SCHEMA } : {}),
+            ...(!strict
+              ? { members: {} }
+              : measured.length
+                ? {
+                    members: { type: 'array', maxItems: 4, items: { type: 'string', enum: measured.map((t) => t.id) } },
+                  }
+                : {}),
             label: {
               type: 'string',
               maxLength: 80,
@@ -259,6 +322,13 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
       .filter(Boolean)
       .map((s) => `[${s!.id}] ${s!.text}`);
   const lines = [`STEP KIND: ${beat.kind}${beat.detail ? ' (a closer look at one important detail)' : ''}`];
+  if (beat.kind === 'figure' || beat.kind === 'formula') {
+    lines.push(
+      beat.detail
+        ? 'TEACHING ROLE: build on the preceding overview with one concrete mechanism, worked example or contrast. Explain a new causal link and why it matters. Never restate the overview.'
+        : 'TEACHING ROLE: orient the learner: what this computes or depicts, its inputs and outputs, and its purpose. Leave a worked example or close-up causal mechanism for the following detail step.',
+    );
+  }
   if (beat.role) lines.push(`THIS STEP OF THE TOUR: ${beat.role}`);
   lines.push(`POINT TO MAKE: ${beat.point}`);
   const figure = doc.figures.find((f) => f.id === beat.target);
@@ -271,9 +341,23 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
     lines.push(`${figure.kind.toUpperCase()} ${figure.number} [${figure.id}], page ${figure.page}: ${figure.caption}`);
     if (figure.panels.length)
       lines.push(`PANELS: ${figure.panels.map((p) => `${p.id}${p.label ? ` (${p.label})` : ''}`).join(', ')}`);
+    if (targets.imaged === figure.id && figure.kind === 'figure') lines.push(figureFrameText(doc, figure));
+    if (targets.measured?.length) lines.push(measuredFrameText(targets.measured));
     lines.push('CITED BY:', ...quote(figure.referenced_by.slice(0, 4)));
-    if (figure.kind === 'table') lines.push(...cells(figure));
-    lines.push('The image of this figure is attached. Describe only what is visible or stated.');
+    if (figure.kind === 'table')
+      lines.push(
+        ...cells(figure),
+        'GROUNDED TABLE TEXT TARGETS (one extracted block can contain several rows; it is not necessarily a cell):',
+        ...tableTextBlocks(doc, figure)
+          .slice(0, 60)
+          .map((b) => `[${b.id}] ${b.text}`),
+        'Use only unlabelled boxes around these complete blocks. Never use arrows, circles, overlaid labels or guessed top/center/bottom/half regions inside a table. A block containing several rows cannot point out one specific value. A group label only encloses the label, not all rows in that group. Explain the row/value verbally or on the side board; if no exact target supports it, keep an unlabelled whole-table overview.',
+      );
+    lines.push(
+      targets.imaged === figure.id
+        ? 'The image of this figure is attached. Describe only what is visible or stated.'
+        : 'No figure crop is attached for this step. Use an unlabelled overview box only; do not guess component positions, arrows or circles.',
+    );
   } else if (equation) {
     const block = doc.blocks.findIndex((b) => b.id === equation.block);
     const around = doc.blocks.slice(Math.max(0, block - 1), block + 2).flatMap((b) => b.sentences);
@@ -307,13 +391,18 @@ const ajv = new Ajv2020({ strict: false, allErrors: true });
  * Keep a direction whose shape and narration are usable; drop just the cues with an action or target this beat may not
  * use. The board is checked here too: one that fails comes back as `boardProblems`, without the board.
  */
-export function cleanDirection(value: unknown, beat: Beat, targets: BeatTargets): Direction | null {
+export function cleanDirection(
+  value: unknown,
+  beat: Beat,
+  targets: BeatTargets,
+  requireExample = false,
+): Direction | null {
   if (!ajv.compile(directionSchema(beat, targets, false))(value)) return null;
   const d = value as Direction & Record<string, unknown>;
   const say = d.say.replace(/\s+/g, ' ').trim();
   const words = say.split(' ').length;
-  if (words < 8 || words > (beat.kind === 'takeaway' ? 90 : 70)) return null;
-  const actions = new Set<string>(actionsFor(beat)),
+  if (words < 8 || words > (beat.detail ? 175 : 135)) return null;
+  const actions = new Set<string>(actionsFor(beat, targets)),
     sentences = new Set(targets.sentences),
     visuals = new Set(targets.visuals),
     parts = new Set(targets.parts);
@@ -323,31 +412,67 @@ export function cleanDirection(value: unknown, beat: Beat, targets: BeatTargets)
     if (c.action === 'board_focus') return parts.has(c.target);
     return visuals.has(c.target);
   };
-  const cues = d.cues
+  const visualProblems = visualCueProblems(
+    d.cues,
+    targets.imaged === beat.target ? targets.imaged : undefined,
+    targets.measured,
+  );
+  const expanded = d.cues.flatMap((c) => {
+    const measured = measuredCueTargets(c.target, (c as Cue & { members?: unknown }).members, targets.measured ?? []);
+    return measured.length
+      ? measured.map((t) => ({ ...c, target: t.target, bounds: t.region, region: undefined }))
+      : [c];
+  });
+  const cues = expanded
     .map((c) => ({
-      action: c.action,
+      action:
+        targets.table && visuals.has(c.target) && ['arrow', 'circle'].includes(c.action) ? ('box' as const) : c.action,
       target: c.target,
-      ...(REGION_NAMES.includes(c.region as RegionName) ? { region: c.region } : {}),
-      label: typeof c.label === 'string' ? c.label : '',
+      ...(c.bounds === undefined &&
+      REGION_NAMES.includes(c.region as RegionName) &&
+      !(targets.table && visuals.has(c.target))
+        ? { region: c.region }
+        : {}),
+      ...(exactBounds(c.bounds) && !(targets.table && visuals.has(c.target)) ? { bounds: exactBounds(c.bounds)! } : {}),
+      label:
+        (targets.table && visuals.has(c.target)) || (c.bounds !== undefined && !exactBounds(c.bounds))
+          ? ''
+          : typeof c.label === 'string'
+            ? c.label
+            : '',
       anchor: c.anchor,
     }))
     .filter((c) => actions.has(c.action) && allowed(c))
     .slice(0, 4);
-  const check = beat.board ? checkBoard(beat.board, d[beat.board], targets.evidence) : null;
+  const example = checkExample(
+    d.example,
+    say,
+    requireExample || (beat.kind === 'formula' && !!beat.detail) || claimsNumericExample(say),
+  );
+  const candidates = BOARD_KINDS.filter((kind) => d[kind] !== undefined && d[kind] !== null).map((kind) => ({
+    kind,
+    check: checkBoard(kind, d[kind], targets.evidence),
+  }));
+  const boards = candidates.filter((c) => c.check.item);
+  const boardProblems = candidates.flatMap((c) => c.check.problems.map((p) => `${c.kind}: ${p}`));
+  if (boards.length > 1)
+    boardProblems.push(
+      'Choose one useful native board, or put successive states in example.frames; multiple simultaneous boards cannot be shown.',
+    );
+  if (example.example && boards.length)
+    example.problems.push(
+      'Use example frames for the worked case, without a second top-level board repeating or replacing them.',
+    );
+  const check = example.example ? null : boards[0]?.check;
   const board = check?.item ? { board: check.item } : {};
-  return { plan: d.plan, say, cues, ...board, boardProblems: check?.problems ?? [] };
-}
-
-/** One repair turn for a board that failed its checks: the exact problems, and the rest of the answer kept. */
-export function boardRepair(previous: unknown, kind: BoardKind, problems: string[]): MuseMessage[] {
-  const empty = kind === 'formula' ? '' : `, or leave "${kind}" empty if the document does not support it`;
-  const content = [
-    `The "${kind}" board cannot be shown:`,
-    ...problems.map((p) => `- ${p}`),
-    `Return the complete answer again with "${kind}" fixed${empty}. Keep "say" and the cues unless they must change.`,
-  ];
-  return [
-    { role: 'assistant', content: JSON.stringify(previous) },
-    { role: 'user', content: content.join('\n') },
-  ];
+  return {
+    plan: d.plan,
+    say,
+    cues,
+    ...board,
+    ...(example.example ? { example: example.example } : {}),
+    exampleProblems: example.problems,
+    boardProblems,
+    visualProblems,
+  };
 }

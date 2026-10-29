@@ -2,6 +2,8 @@
 // an ID becomes geometry.
 
 import { checkBoardItem } from './board';
+import { exerciseTargets } from '../../shared/exercises';
+import { clipsTableRow, isTableTarget } from '../../shared/tableTargets';
 import { DEFAULT_COLOR, DEFAULT_ZOOM_PADDING, splitWords } from './types';
 import type { Action, BBox, Doc, DocBlock, DocEquation, DocFigure, DocPanel, DocSentence, Region, Tour } from './types';
 
@@ -15,7 +17,7 @@ export interface PageSize {
   height: number;
 }
 
-export type TargetKind = 'sentence' | 'block' | 'section' | 'figure' | 'panel' | 'equation' | 'page';
+export type TargetKind = 'sentence' | 'block' | 'section' | 'figure' | 'panel' | 'equation' | 'exercise' | 'page';
 
 export interface Problem {
   level: 'error' | 'warning' | 'info';
@@ -64,7 +66,12 @@ export function applyRegion(groups: PageRects[], region?: Region): PageRects[] {
   const w = x1 - x0;
   const h = y1 - y0;
   const [a, b, c, d] = region.map((v) => Math.min(1, Math.max(0, v)));
-  return [{ page, rects: [[x0 + Math.min(a, c) * w, y0 + Math.min(b, d) * h, x0 + Math.max(a, c) * w, y0 + Math.max(b, d) * h]] }];
+  return [
+    {
+      page,
+      rects: [[x0 + Math.min(a, c) * w, y0 + Math.min(b, d) * h, x0 + Math.max(a, c) * w, y0 + Math.max(b, d) * h]],
+    },
+  ];
 }
 
 export class Resolver {
@@ -76,11 +83,13 @@ export class Resolver {
   private figures = new Map<string, DocFigure>();
   private panels = new Map<string, DocPanel & { page: number }>();
   private equations = new Map<string, DocEquation>();
+  private exercises = new Map<string, string[]>();
 
   constructor(doc: Doc | null, pageSizes: PageSize[]) {
     this.doc = doc;
     this.pageSizes = pageSizes;
     if (!doc) return;
+    this.exercises = exerciseTargets(doc);
     for (const b of doc.blocks) this.blocks.set(b.id, b);
     for (const s of doc.sentences) this.sentences.set(s.id, s);
     for (const s of doc.sections) this.sections.set(s.id, s.block);
@@ -92,6 +101,7 @@ export class Resolver {
   }
 
   kind(id: string): TargetKind | null {
+    if (this.exercises.has(id)) return 'exercise';
     if (this.sentences.has(id)) return 'sentence';
     if (this.blocks.has(id)) return 'block';
     if (this.sections.has(id)) return 'section';
@@ -116,6 +126,16 @@ export class Resolver {
     };
     const sentence = this.sentences.get(id);
     if (sentence) return one(sentence.page, sentence.rects);
+
+    const task = this.exercises.get(id);
+    if (task) {
+      const pages = new Map<number, BBox[]>();
+      for (const block of task)
+        for (const group of this.resolve(block, opts) ?? [])
+          pages.set(group.page, [...(pages.get(group.page) ?? []), ...group.rects]);
+      const groups = [...pages].sort(([a], [b]) => a - b).map(([page, rects]) => ({ page, rects }));
+      return groups.length ? groups : null;
+    }
 
     const blockId = this.blocks.has(id) ? id : this.sections.get(id);
     const block = blockId ? this.blocks.get(blockId) : undefined;
@@ -146,6 +166,8 @@ export class Resolver {
 
   /** The page an element is on according to doc.json, whether or not the loaded PDF has it. */
   pageOf(id: string): number | null {
+    const task = this.exercises.get(id);
+    if (task) return this.blocks.get(task[0])?.page ?? null;
     const el =
       this.sentences.get(id) ??
       this.blocks.get(this.sections.get(id) ?? id) ??
@@ -199,7 +221,8 @@ function checkValues(a: Action, where: string, warn: (message: string) => void):
       break;
     case 'zoom': {
       const p = given.padding;
-      if (p !== undefined && !(typeof p === 'number' && p >= 0 && p <= 1)) reset('padding', String(DEFAULT_ZOOM_PADDING));
+      if (p !== undefined && !(typeof p === 'number' && p >= 0 && p <= 1))
+        reset('padding', String(DEFAULT_ZOOM_PADDING));
       break;
     }
     case 'note':
@@ -219,6 +242,9 @@ function checkValues(a: Action, where: string, warn: (message: string) => void):
       if (given.label !== undefined && typeof given.label !== 'string') reset('label', 'no label');
       break;
     case 'board': {
+      // Retired video boards in saved tours clear the panel; their narration and PDF cues still work.
+      if (given.item && typeof given.item === 'object' && 'kind' in given.item && given.item.kind === 'animation')
+        return { type: 'board_clear' };
       const item = checkBoardItem(given.item, where, warn);
       if (!item) return null;
       out.item = item;
@@ -240,6 +266,7 @@ function checkValues(a: Action, where: string, warn: (message: string) => void):
  */
 export function prepareTour(tour: Tour, resolver: Resolver): { tour: Tour; problems: Problem[] } {
   const problems: Problem[] = [];
+  const tableRowWarnings: string[] = [];
   const seen = new Set<string>();
   const warn = (message: string) => {
     console.warn(`[tour] ${message}`);
@@ -268,10 +295,35 @@ export function prepareTour(tour: Tour, resolver: Resolver): { tour: Tour; probl
       const words = splitWords(step.say).length;
       const actions = step.actions.flatMap((raw): Action[] => {
         const where = `step "${step.id}" (${raw.type})`;
-        const a = checkValues(raw, where, warn);
+        let a = checkValues(raw, where, warn);
         if (!a) return [];
+        if (a.type === 'box' && a.region && resolver.doc && clipsTableRow(resolver.doc, a.target, a.region)) {
+          tableRowWarnings.push(where);
+          console.warn(`[tour] Box cuts a printed table row in ${where}; using a table overview.`);
+          const { region: _region, label: _label, ...overview } = a;
+          a = overview;
+        }
+        if (
+          (a.type === 'arrow' || a.type === 'circle' || a.type === 'box') &&
+          resolver.doc &&
+          isTableTarget(resolver.doc, a.target)
+        ) {
+          // Existing tours benefit too: the centre of a multi-row block is not
+          // the narrated value. Outline its grounded extent without labels.
+          const { target, color, at_word, persist } = a;
+          a = {
+            type: 'box',
+            target,
+            ...(color ? { color } : {}),
+            ...(at_word !== undefined ? { at_word } : {}),
+            ...(persist !== undefined ? { persist } : {}),
+          };
+        }
         if (a.at_word !== undefined && a.at_word >= words) {
-          problems.push({ level: 'info', message: `at_word ${a.at_word} in ${where} is past the last word (${words} words); it fires at the end.` });
+          problems.push({
+            level: 'info',
+            message: `at_word ${a.at_word} in ${where} is past the last word (${words} words); it fires at the end.`,
+          });
         }
         switch (a.type) {
           case 'clear':
@@ -292,6 +344,9 @@ export function prepareTour(tour: Tour, resolver: Resolver): { tour: Tour; probl
       return { ...step, actions };
     }),
   }));
+
+  if (tableRowWarnings.length)
+    warn(`${tableRowWarnings.length} table annotations need regeneration for precise rows; showing table overviews.`);
 
   if (offPage.size) {
     const pages = resolver.pageSizes.length;

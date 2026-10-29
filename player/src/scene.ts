@@ -2,14 +2,14 @@
 // screen-space items (notes, box and pen labels) anchored to stage rects.
 
 import { DEFAULT_COLOR } from './types';
-import type { ArrowAction, BBox, Color, NoteAction } from './types';
+import type { ArrowAction, BBox, CameraAction, Color, NoteAction } from './types';
 import { stageRect, toStage } from './layout';
 import type { Layout } from './layout';
 import type { OverlayEntry } from './engine';
 import { unionRect } from './resolve';
 import type { Resolver } from './resolve';
 
-export const BOX_PAD = 3;
+export const BOX_PAD = 2;
 export const SPOT_PAD = 5;
 
 export type PenSide = 'left' | 'right' | 'top' | 'bottom';
@@ -68,6 +68,8 @@ export interface PageShapes {
   boxes: { key: string; rect: BBox; color: Color }[];
   /** Spotlight holes on this page. */
   holes: BBox[];
+  /** A gentle reading veil inferred from the active narration focus. */
+  readingSpotlight?: boolean;
   /** Arrows and circles, drawn above the spotlight. */
   pens: PenShape[];
 }
@@ -91,6 +93,8 @@ export interface SceneLabel {
    * for an arrow the side it takes when it does not fit there.
    */
   pin?: { x: number; y: number; side: PenLabelSide; alt?: PenSide };
+  /** Parent visual in stage coordinates: optional labels must stay outside it. */
+  area?: BBox;
 }
 
 export interface Scene {
@@ -99,10 +103,31 @@ export interface Scene {
   spotlight: boolean;
   notes: SceneNote[];
   labels: SceneLabel[];
+  /** PDF content in stage coordinates, kept clear by measured screen labels. */
+  obstacles: BBox[];
 }
 
 const pad = (r: BBox, d: number): BBox => [r[0] - d, r[1] - d, r[2] + d, r[3] + d];
 const overlaps = (a: BBox, b: BBox) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+
+/** At most two PDF points of clearance, reduced next to an actual neighbouring
+ * source/component. Containing figures and text inside the target are not neighbours. */
+export function paddedBox(region: BBox, neighbours: BBox[]): BBox {
+  let left = BOX_PAD, top = BOX_PAD, right = BOX_PAD, bottom = BOX_PAD;
+  const [x0, y0, x1, y1] = region;
+  for (const other of neighbours) {
+    if (overlaps(region, other)) continue;
+    if (other[1] < y1 + BOX_PAD && other[3] > y0 - BOX_PAD) {
+      if (other[2] <= x0) left = Math.min(left, (x0 - other[2]) / 2);
+      if (other[0] >= x1) right = Math.min(right, (other[0] - x1) / 2);
+    }
+    if (other[0] < x1 + BOX_PAD && other[2] > x0 - BOX_PAD) {
+      if (other[3] <= y0) top = Math.min(top, (y0 - other[3]) / 2);
+      if (other[1] >= y1) bottom = Math.min(bottom, (other[1] - y1) / 2);
+    }
+  }
+  return [x0 - left, y0 - top, x1 + right, y1 + bottom];
+}
 
 /**
  * The spotlight is one even-odd path, where two overlapping holes would cancel out and dim their
@@ -352,6 +377,84 @@ export function penArrow(
   };
 }
 
+/** A straight segment crossing a rectangle, including its border. */
+function crossesRect(a: Point, b: Point, rect: BBox): boolean {
+  let lo = 0, hi = 1;
+  for (const axis of [0, 1] as const) {
+    const delta = b[axis] - a[axis];
+    if (Math.abs(delta) < 1e-8) {
+      if (a[axis] < rect[axis] || a[axis] > rect[axis + 2]) return false;
+    } else {
+      const t0 = (rect[axis] - a[axis]) / delta;
+      const t1 = (rect[axis + 2] - a[axis]) / delta;
+      lo = Math.max(lo, Math.min(t0, t1));
+      hi = Math.min(hi, Math.max(t0, t1));
+      if (lo > hi) return false;
+    }
+  }
+  return true;
+}
+
+/** A leader from outside a figure, never through known printed content. The
+ * finite set of short, straight routes is intentional: an elaborate detour can
+ * suggest an extra connection in the source diagram. No clear route means an
+ * outline is safer. `from` is a preference, never an override of collisions. */
+export function externalArrow(
+  key: string,
+  color: Color,
+  region: BBox,
+  page: BBox,
+  area: BBox,
+  obstacles: BBox[] = [],
+  from: ArrowAction['from'] = 'auto',
+): PenArrowShape | null {
+  const sides = from && from !== 'auto' ? [from, ...SIDE_ORDER.filter(side => side !== from)] : SIDE_ORDER;
+  const candidates: { arrow: PenArrowShape; score: number }[] = [];
+  const maxLength = Math.max(ARROW_MAX, 0.7 * Math.min(area[2] - area[0], area[3] - area[1]));
+  for (const side of sides) {
+    const base = penArrow(key, color, region, page, null, side);
+    if (base.side !== side) continue;
+    const [ox, oy] = OUTWARD[side];
+    // Text extraction is not a map of the diagram's lines. Only cross a small
+    // boundary corridor; a central component gets an outline even when the
+    // surrounding raster artwork has no extracted text to flag as an obstacle.
+    const penetration = Math.max(0, side === 'left' ? base.tip[0] - area[0] : side === 'right' ? area[2] - base.tip[0]
+      : side === 'top' ? base.tip[1] - area[1] : area[3] - base.tip[1]);
+    if (penetration > Math.min(18, 0.1 * Math.min(area[2] - area[0], area[3] - area[1]))) continue;
+    for (const lean of [0, -12, 12]) {
+      const tail: Point = [
+        ox < 0 ? Math.min(area[0] - 12, base.tip[0] - ARROW_MIN) : ox > 0 ? Math.max(area[2] + 12, base.tip[0] + ARROW_MIN) : base.tip[0] + lean,
+        oy < 0 ? Math.min(area[1] - 12, base.tip[1] - ARROW_MIN) : oy > 0 ? Math.max(area[3] + 12, base.tip[1] + ARROW_MIN) : base.tip[1] + lean,
+      ];
+      if (tail[0] < page[0] + PEN_EDGE || tail[0] > page[2] - PEN_EDGE || tail[1] < page[1] + PEN_EDGE || tail[1] > page[3] - PEN_EDGE) continue;
+      const len = Math.hypot(tail[0] - base.tip[0], tail[1] - base.tip[1]);
+      if (len > maxLength || obstacles.some(rect => crossesRect(tail, base.tip, pad(rect, 2)))) continue;
+      // A zero-bend quadratic retains the existing SVG draw animation without
+      // wandering into nearby labels. Head wings remain behind the target gap.
+      const middle: Point = [(tail[0] + base.tip[0]) / 2, (tail[1] + base.tip[1]) / 2];
+      const head = { fit: Math.min(12, HEAD_FIT * len), max: Math.min(17, HEAD_MAX * len) };
+      const angle = Math.atan2(base.tip[1] - tail[1], base.tip[0] - tail[0]);
+      const wings = base.wings.map(path => {
+        const [, , x, y] = (path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+        return [base.tip[0] + head.max * (x * Math.cos(angle) - y * Math.sin(angle)),
+          base.tip[1] + head.max * (x * Math.sin(angle) + y * Math.cos(angle))] as Point;
+      });
+      if (wings.some(end => obstacles.some(rect => crossesRect(base.tip, end, pad(rect, 2))))) continue;
+      const arrow: PenArrowShape = {
+        ...base, tail, labelSide: side, labelAlt: side,
+        d: `M${pt(tail)}Q${pt(middle)} ${pt(base.tip)}`,
+        angle: round(Math.atan2(base.tip[1] - tail[1], base.tip[0] - tail[0]) / DEG),
+        head,
+        bounds: [Math.min(tail[0], base.tip[0]) - head.max, Math.min(tail[1], base.tip[1]) - head.max,
+          Math.max(tail[0], base.tip[0]) + head.max, Math.max(tail[1], base.tip[1]) + head.max],
+      };
+      candidates.push({ arrow, score: len + Math.abs(lean) * 0.2 + (side === from ? -8 : 0) });
+    }
+  }
+  candidates.sort((a, b) => a.score - b.score);
+  return candidates[0]?.arrow ?? null;
+}
+
 /**
  * A loop around `region` (page points): a slightly irregular ellipse, drawn counter-clockwise
  * from about eleven o'clock, once around and a little past its start, its end running just wide
@@ -462,6 +565,29 @@ export function penCircle(key: string, color: Color, region: BBox): PenCircleSha
   };
 }
 
+/** Existing source geometry only: no model or image-based guesses. */
+function printedRects(resolver: Resolver): { page: number; rect: BBox }[] {
+  const doc = resolver.doc;
+  if (!doc) return [];
+  const sentenceBlocks = new Set(doc.sentences.filter(sentence => sentence.rects.length).map(sentence => sentence.block));
+  return [
+    ...doc.sentences.flatMap(sentence => sentence.rects.map(rect => ({ page: sentence.page, rect }))),
+    ...doc.blocks.filter(block => block.text.trim() && !sentenceBlocks.has(block.id)).map(block => ({ page: block.page, rect: block.bbox })),
+  ];
+}
+
+function visualArea(resolver: Resolver, target: string): BBox | null {
+  const doc = resolver.doc;
+  const group = resolver.resolve(target)?.[0];
+  if (!doc || !group) return null;
+  const rect = unionRect(group.rects);
+  const contains = (outer: BBox) => rect[0] >= outer[0] - 1 && rect[1] >= outer[1] - 1 && rect[2] <= outer[2] + 1 && rect[3] <= outer[3] + 1;
+  const matches = doc.figures.filter(figure => figure.page === group.page &&
+    (figure.id === target || figure.panels.some(panel => panel.id === target) || contains(figure.bbox)));
+  matches.sort((a, b) => (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]) - (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]));
+  return matches[0]?.bbox ?? null;
+}
+
 /**
  * The area an arrow at `target` should start at the edge of: the figure (or table) for a figure
  * or panel; for text, its block's column over the page's height, so arrows come in from the
@@ -490,13 +616,29 @@ function areaOf(resolver: Resolver, target: string, pageHeight: number): BBox | 
   return block ? [block.bbox[0], 0, block.bbox[2], pageHeight] : null;
 }
 
-export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout: Layout): Scene {
-  const scene: Scene = { pages: new Map(), spotlight: false, notes: [], labels: [] };
+export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout: Layout, readingFocus?: CameraAction | null): Scene {
+  const content = printedRects(resolver);
+  const occupied = [...content, ...(resolver.doc?.figures ?? []).map(figure => ({ page: figure.page, rect: figure.bbox })),
+    ...(resolver.doc?.equations ?? []).map(equation => ({ page: equation.page, rect: equation.bbox }))];
+  const scene: Scene = { pages: new Map(), spotlight: false, notes: [], labels: [],
+    obstacles: occupied.filter(item => layout.pages[item.page - 1]).map(item => toStage(layout, item.page, item.rect)) };
+
+  const isTextTarget = (target: string) => ['sentence', 'block', 'section', 'exercise'].includes(resolver.kind(target) ?? '');
   const page = (n: number) => {
     let shapes = scene.pages.get(n);
     if (!shapes) scene.pages.set(n, (shapes = { markers: [], underlines: [], boxes: [], holes: [], pens: [] }));
     return shapes;
   };
+
+  // Measured authoring publishes canonical figure regions. Keep nearby authored
+  // components separate; border clearance must not turn them into a union box.
+  const boxNeighbors = [...occupied, ...(resolver.doc?.figures ?? []).flatMap(figure =>
+    figure.panels.map(panel => ({ page: figure.page, rect: panel.bbox })))];
+  for (const { action } of overlays) {
+    if (action.type !== 'box') continue;
+    for (const group of resolver.resolveTarget(action.target, action.region) ?? [])
+      boxNeighbors.push({ page: group.page, rect: unionRect(group.rects) });
+  }
 
   for (const { key, action: a } of overlays) {
     switch (a.type) {
@@ -515,15 +657,24 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
         const color = a.color ?? DEFAULT_COLOR;
         const g = groups?.[0];
         if (!g) break;
-        const rect = pad(stageRect(layout, [g])!.rect, BOX_PAD);
-        const local = pad(unionRect(g.rects), BOX_PAD);
+        const area = visualArea(resolver, a.target);
+        const local = paddedBox(unionRect(g.rects), boxNeighbors.filter(item => item.page === g.page).map(item => item.rect));
+        const rect = toStage(layout, g.page, local);
         page(g.page).boxes.push({ key, rect: local, color });
-        if (a.label) scene.labels.push({ key, text: a.label, color, rect });
+        if (a.label) scene.labels.push({ key, text: a.label, color, rect, ...(area ? { area: toStage(layout, g.page, area) } : {}) });
         break;
       }
       case 'spotlight': {
-        scene.spotlight = true;
+        // Ordinary prose stays readable as a whole page. Old text spotlights
+        // become precise line highlights, ignoring guessed regions that can
+        // slice through letters. Deliberate visual spotlights remain unchanged.
+        if (isTextTarget(a.target)) {
+          for (const g of resolver.resolve(a.target, { lines: true }) ?? [])
+            page(g.page).markers.push({ key: `${key}.${g.page}`, rects: g.rects, color: DEFAULT_COLOR });
+          break;
+        }
         for (const g of resolver.resolveTarget(a.target, a.region) ?? []) {
+          scene.spotlight = true;
           page(g.page).holes.push(pad(unionRect(g.rects), SPOT_PAD));
         }
         break;
@@ -545,10 +696,14 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
         const sheet: BBox = [0, 0, box.width, box.height];
         // An arrow keeps its tail and label off the marks drawn before it on the page.
         const drawn = [...shapes.pens.map((p) => p.bounds), ...shapes.boxes.map((b) => b.rect)];
-        const pen =
-          a.type === 'arrow'
-            ? penArrow(key, color, region, sheet, areaOf(resolver, a.target, box.height), a.from, drawn)
-            : penCircle(key, color, region);
+        const area = visualArea(resolver, a.target);
+        const obstacles = content.filter(item => item.page === g.page).map(item => item.rect).concat(drawn);
+        const arrow = a.type === 'arrow' && area ? externalArrow(key, color, region, sheet, area, obstacles, a.from) : null;
+        // Preserve the authored shape. Legacy guesses need regeneration against measured
+        // targets; the player must not disguise them as a different whole-figure outline.
+        const pen = a.type === 'arrow'
+          ? arrow ?? penArrow(key, color, region, sheet, area ?? areaOf(resolver, a.target, box.height), a.from, drawn)
+          : penCircle(key, color, region);
         shapes.pens.push(pen);
         if (a.label) {
           const [x, y] = pen.kind === 'arrow' ? pen.tail : pen.labelAt;
@@ -556,10 +711,30 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
           const pin =
             pen.kind === 'arrow' ? { side: pen.labelSide, alt: pen.labelAlt } : { side: 'upper-right' as const };
           const rect = toStage(layout, g.page, pen.bounds);
-          scene.labels.push({ key, text: a.label, color, rect, pin: { x: sx, y: sy, ...pin } });
+          scene.labels.push({ key, text: a.label, color, rect, pin: { x: sx, y: sy, ...pin }, ...(area ? { area: toStage(layout, g.page, area) } : {}) });
         }
         break;
       }
+    }
+  }
+  // Visual orientation may use a gentle veil before a spoken mark appears.
+  // Text reading uses its authored line highlights without automatically dimming.
+  const readingKind = readingFocus && resolver.kind(readingFocus.target);
+  const visualFocus = readingFocus?.type === 'zoom' && !isTextTarget(readingFocus.target) &&
+    (['figure', 'panel', 'equation'].includes(readingKind ?? '') || !!readingFocus.region);
+  if (!scene.spotlight && readingFocus && visualFocus) {
+    const groups = resolver.resolveTarget(readingFocus.target, readingFocus.type === 'zoom' ? readingFocus.region : undefined);
+    const marked = groups?.some(group => {
+      const shapes = scene.pages.get(group.page);
+      return shapes && (shapes.markers.length || shapes.underlines.length || shapes.boxes.length || shapes.pens.length);
+    });
+    // Orient with a light veil first. Once a spoken highlight or pen mark appears,
+    // it becomes the primary emphasis and the automatic veil retires. Authored
+    // spotlights remain explicit choices, rather than receiving a second effect.
+    if (groups?.length && !marked) {
+      scene.spotlight = true;
+      for (const box of layout.pages) page(box.n).readingSpotlight = true;
+      for (const group of groups) page(group.page).holes.push(pad(unionRect(group.rects), SPOT_PAD + 3));
     }
   }
   for (const shapes of scene.pages.values()) {

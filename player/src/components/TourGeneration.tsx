@@ -16,6 +16,7 @@ export interface TourGenerationProps {
   onOpenTour?(tourId: string): void;
   compact?: boolean;
   toolbar?: boolean;
+  activityRequest?: number;
 }
 
 /** Generation never owns playback: the reader explicitly opens the saved tour. */
@@ -27,6 +28,7 @@ export function TourGeneration({
   onOpenTour,
   compact = false,
   toolbar = false,
+  activityRequest,
 }: TourGenerationProps) {
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +90,8 @@ export function TourGeneration({
           documentId={documentId}
           generationId={current.id}
           agentRunId={current.agentRunId}
+          active={active || requesting}
+          openRequest={activityRequest}
           onChanged={onChanged}
           label={toolbar ? 'Activity' : undefined}
         />

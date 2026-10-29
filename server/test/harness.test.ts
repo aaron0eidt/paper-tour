@@ -1,10 +1,11 @@
+import { exampleSay, numericalExample } from './example-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { MuseConfig } from '../src/config';
 import type { Doc, Step } from '../../shared/paper';
 import type { TourGenerationInput, TourImage } from '../src/tour-generator';
 import { ProcessingError } from '../src/errors';
-import { HarnessTourGenerator } from '../src/harness/generator';
+import { HarnessTourGenerator } from './harness-fixture';
 import { anchorWord } from '../src/harness/assemble';
 import { paperBlock } from '../src/harness/paper-block';
 
@@ -175,6 +176,8 @@ function provider(fn: (request: Request) => Response | unknown): typeof fetch {
 /** A well-behaved model: the card above, and per beat a direction using its first allowed action and target. */
 function goodModel(request: Request) {
   if (request.name === 'paper_card') return card;
+  if (request.task.includes('STEP KIND: formula (a closer look'))
+    return { plan: 'Compute the worked case.', say: exampleSay, example: numericalExample(), cues: [] };
   const cue = request.schema.properties.cues.items.properties;
   const target = cue.target.enum?.[0];
   const cues = target ? [{ action: cue.action.enum[0], target, label: 'Look here', anchor: 'explains the point' }] : [];
@@ -184,12 +187,18 @@ const steps = (tour: { chapters: { steps: Step[] }[] }) => tour.chapters.flatMap
 
 test('a standard tour follows the argument in a handful of steps and ends with questions', async () => {
   const names: string[] = [];
+  const events: { type: string; data: Record<string, unknown> }[] = [];
   const generator = new HarnessTourGenerator(
     settings,
     'standard',
     provider((r) => (names.push(r.name), goodModel(r))),
   );
-  const { tour, metadata } = await generator.generate(input);
+  const { tour, metadata } = await generator.generate({
+    ...input,
+    onEvent: async (type, data) => {
+      events.push({ type, data });
+    },
+  });
   const all = steps(tour);
   assert.ok(all.length >= 6 && all.length <= 12, `${all.length} steps`);
   assert.deepEqual(
@@ -207,6 +216,18 @@ test('a standard tour follows the argument in a handful of steps and ends with q
   assert.ok(problem.actions.some((a) => a.type === 'highlight' && a.targets[0] === 'p1.s1' && a.at_word === 2));
   assert.equal(metadata.cardSource, 'model');
   assert.deepEqual(metadata.fallbackBeats, []);
+  const planned = events.find((event) => event.type === 'plan.ready')!.data.beats as { id: string; label: string }[];
+  assert.ok(planned.every((beat) => beat.label.length > 0));
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === 'beat.started')
+      .map((event) => event.data.beat)
+      .sort(),
+    planned.map((beat) => beat.id).sort(),
+  );
+  const completed = events.filter((event) => event.type === 'beat.completed');
+  assert.equal(completed.length, planned.length);
+  assert.ok(completed.every((event) => event.data.outcome === 'directed' && Number(event.data.durationMs) >= 0));
 });
 
 test('a quick tour stays at six steps or fewer', async () => {
@@ -288,4 +309,229 @@ test('the paper block lists every prose sentence by ID, and figures and equation
   assert.ok(block.includes('[fig1] figure 1, page 1: The pipeline'));
   assert.ok(block.includes('[eq1] (1), page 2: y = softmax(QK)V'));
   assert.ok(block.includes('## [sec-2] 2 Method'));
+});
+
+test('fake transport sees the document language and copied narration receives one repair', async () => {
+  const german = structuredClone(input);
+  german.doc.blocks[1].text =
+    'Die Funktion wird mit der Kettenregel berechnet. Für die Aufgabe müssen wir zuerst das innere Argument und dann die äußere Funktion betrachten.';
+  let repaired = false;
+  const copied =
+    'The encoder transforms each input into a contextual representation which the decoder can use to generate an output sequence.';
+  german.doc.sentences[0].text = copied;
+  const result = await new HarnessTourGenerator(
+    settings,
+    'quick',
+    provider((r) => {
+      if (r.name === 'paper_card') {
+        assert.match(r.task, /de-DE/);
+        return card;
+      }
+      if (r.task.includes('Explain the mechanism, consequence or intuition')) repaired = true;
+      return r.task.includes('Explain the mechanism, consequence or intuition')
+        ? goodModel(r)
+        : { plan: 'p', say: copied, cues: [] };
+    }),
+  ).generate(german);
+  assert.equal(repaired, true);
+  assert.equal(result.tour.voices?.host.lang, 'de-DE');
+  assert(steps(result.tour).every((s) => s.say !== copied));
+});
+
+test('a failed repair cannot publish a verbatim fallback from the paper card', async () => {
+  const source = structuredClone(input);
+  const copied =
+    'The encoder transforms each input into a contextual representation which the decoder can use to generate an output sequence.';
+  source.doc.sentences.forEach((sentence) => {
+    sentence.text = copied;
+  });
+  const run = new HarnessTourGenerator(
+    settings,
+    'quick',
+    provider((r) => (r.name === 'paper_card' ? { plan: 'invalid card' } : { plan: 'p', say: copied, cues: [] })),
+  ).generate(source);
+  await assert.rejects(run, (error) => error instanceof ProcessingError && error.code === 'invalid_tour');
+});
+
+test('deep formula details correct their concrete sequence within two repairs and never publish a symbolic-only example', async () => {
+  let attempts = 0;
+  const run = (correct: boolean) =>
+    new HarnessTourGenerator(
+      settings,
+      'deep',
+      provider((request) => {
+        if (request.name === 'beat_direction' && request.task.includes('STEP KIND: formula (a closer look')) {
+          attempts++;
+          assert.ok(request.task.includes('PRECEDING OVERVIEW'));
+          assert.ok(request.task.includes(SAY));
+          if (correct && attempts === 2) return goodModel(request);
+          return { plan: 'p', say: exampleSay, cues: [] };
+        }
+        return goodModel(request);
+      }),
+    ).generate(input);
+  const corrected = await run(true);
+  assert.equal(attempts, 2);
+  const detail = steps(corrected.tour).find((step) => step.id === 'formula-2')!;
+  assert.deepEqual(
+    detail.actions.filter((a) => a.type === 'board').map((a) => a.item.kind === 'formula' && a.item.latex),
+    [false, '2+2=4'],
+  );
+  assert.ok(!(corrected.metadata.omittedDetails as string[]).includes('formula-2'));
+  attempts = 0;
+  await assert.rejects(
+    run(false),
+    (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
+  );
+  assert.equal(attempts, 3);
+});
+
+test('a fatal beat request records the failed planned item before rejecting the generation', async () => {
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const generator = new HarnessTourGenerator(
+    settings,
+    'quick',
+    provider((request) => (request.name === 'paper_card' ? card : reply({}, 401))),
+  );
+  await assert.rejects(
+    generator.generate({
+      ...input,
+      onEvent: async (type, data) => {
+        events.push({ type, data });
+      },
+    }),
+    (error) => error instanceof ProcessingError && error.code === 'muse_auth_failed',
+  );
+  const failed = events.find((event) => event.type === 'beat.failed');
+  assert.ok(failed);
+  assert.equal(failed.data.code, 'muse_auth_failed');
+  assert.ok(events.some((event) => event.type === 'beat.started' && event.data.beat === failed.data.beat));
+});
+
+test('deep paper tours move forward through source pages and keep the final view for the recap', async () => {
+  const { tour } = await new HarnessTourGenerator(settings, 'deep', provider(goodModel)).generate(input);
+  const { indexElements } = await import('../src/elements');
+  const elements = new Map(indexElements(doc).map((e) => [e.id, e]));
+  const cameras = steps(tour).map((step) => step.actions.find((a) => a.type === 'focus' || a.type === 'zoom')!);
+  const pages = cameras.map((a) => elements.get((a as any).target)!.page);
+  assert.deepEqual(
+    pages,
+    [...pages].sort((a, b) => a - b),
+  );
+  assert.equal((cameras.at(-1) as any).target, (cameras.at(-2) as any).target);
+});
+
+test('fatal direction failure aborts siblings and drains their events before generation rejects', async () => {
+  let requests = 0;
+  let aborted = 0;
+  const events: string[] = [];
+  const transport: typeof fetch = async (_url, init) => {
+    const request = JSON.parse(String(init?.body));
+    if (request.response_format.json_schema.name === 'paper_card') return reply(card);
+    requests++;
+    if (requests === 1) return reply({}, 401);
+    const signal = init!.signal!;
+    return new Promise<Response>((_resolve, reject) => {
+      const stop = () => {
+        aborted++;
+        reject(new Error('sibling transport cancelled'));
+      };
+      if (signal.aborted) stop();
+      else signal.addEventListener('abort', stop, { once: true });
+    });
+  };
+  const generator = new HarnessTourGenerator(settings, 'quick', transport);
+  await assert.rejects(
+    generator.generate({
+      ...input,
+      onEvent: async (type) => {
+        if (type === 'beat.failed') await new Promise((resolve) => setImmediate(resolve));
+        events.push(type);
+      },
+    }),
+    (error) => error instanceof ProcessingError && error.code === 'muse_auth_failed',
+  );
+  assert.ok(requests > 1);
+  assert.equal(aborted, requests - 1);
+  assert.equal(events.filter((type) => type === 'beat.failed').length, requests);
+  const settledCount = events.length;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(events.length, settledCount, 'no sibling events after generation returned');
+});
+
+test('deep chapter titles never use a heading below the first explained source', async () => {
+  const { paperPlan } = await import('../src/harness/beats');
+  const withLaterHeading = structuredClone(doc);
+  withLaterHeading.blocks.push({
+    id: 'late-heading',
+    page: 1,
+    type: 'heading',
+    bbox: [0, 700, 500, 720],
+    text: 'Later topic',
+    sentences: [],
+  });
+  withLaterHeading.sections.push({
+    id: 'late-section',
+    title: 'Later topic',
+    level: 1,
+    page: 1,
+    block: 'late-heading',
+  });
+  const plan = paperPlan(card, withLaterHeading, 'deep');
+  assert.equal(plan.chapters.find((c) => c.id === 'page-1')?.title, 'Page 1 · Introduction');
+});
+
+test('formula detail prompts teach an actual consequence instead of repeating the overview template', async () => {
+  const { directTask } = await import('../src/harness/prompts');
+  const prompt = directTask('en', 'PRECEDING OVERVIEW: symbols already explained', {
+    actions: ['board_focus'],
+    board: 'formula',
+    words: 150,
+    detail: true,
+  });
+  assert.match(prompt, /concrete starting values/);
+  assert.match(prompt, /90-150 spoken words/);
+  assert.match(prompt, /not universal superiority/);
+  assert.doesNotMatch(prompt, /tell what the formula computes, then explain the terms/);
+  assert.doesNotMatch(prompt, /EXAMPLE from another document/);
+});
+
+test('decoder padding is repaired before a tour can publish it', async () => {
+  let repair = false;
+  const result = await new HarnessTourGenerator(
+    settings,
+    'quick',
+    provider((request) => {
+      if (request.name === 'paper_card') return card;
+      if (request.task.includes('STEP KIND: formula (a closer look'))
+        return { plan: 'Compute the worked case.', say: exampleSay, example: numericalExample(), cues: [] };
+      if (request.task.includes('invisible formatting')) repair = true;
+      return request.task.includes('STEP KIND: problem') && !request.task.includes('invisible formatting')
+        ? { ...goodModel(request), say: SAY + '\u200b'.repeat(80) }
+        : goodModel(request);
+    }),
+  ).generate(input);
+  assert.equal(repair, true);
+  assert.equal(steps(result.tour)[0].say, SAY);
+  assert.ok(steps(result.tour).every((step) => !/\p{Cf}{8,}/u.test(step.say)));
+});
+
+test('a non-formula beat cannot silently remove its numerical example during repair', async () => {
+  let attempts = 0;
+  const generator = new HarnessTourGenerator(
+    settings,
+    'quick',
+    provider((request) => {
+      if (request.name === 'beat_direction' && request.task.includes('STEP KIND: method')) {
+        attempts++;
+        return { plan: 'p', say: attempts === 1 ? exampleSay : SAY, cues: [] };
+      }
+      return goodModel(request);
+    }),
+  );
+  await assert.rejects(
+    generator.generate(input),
+    (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
+  );
+  assert.equal(attempts, 3);
 });

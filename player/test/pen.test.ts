@@ -2,12 +2,14 @@
 // `npm test` (esbuild bundles this file for Node, no test framework needed).
 
 import { TourEngine } from '../src/engine';
-import { layoutPages } from '../src/layout';
+import { layoutPages, toStage } from '../src/layout';
+import { project } from '../src/camera';
 import { SilentNarrator } from '../src/narration/silent';
 import { Resolver } from '../src/resolve';
-import { ARROW_GAP, ARROW_MAX, ARROW_MIN, CIRCLE_PAD, buildScene, penArrow, penCircle, penRandom } from '../src/scene';
+import { ARROW_GAP, ARROW_MAX, ARROW_MIN, BOX_PAD, CIRCLE_PAD, buildScene, externalArrow, penArrow, penCircle, paddedBox, penRandom } from '../src/scene';
 import type { PenArrowShape, PenSide } from '../src/scene';
 import { penLabelPosition } from '../src/components/ScreenLayer';
+import { DEFAULT_COLOR } from '../src/types';
 import type { BBox, Doc, OverlayAction, Tour } from '../src/types';
 
 // ------------------------------------------------------------------ harness
@@ -277,7 +279,7 @@ await test('scene: arrows and circles become page shapes with pinned labels', ()
     'shapes, keys and colours',
   );
   const arrow = pens[0] as PenArrowShape;
-  eq(arrow.side, 'right', 'a left panel is pointed at from inside its figure');
+  eq(arrow.side, 'left', 'a left panel is pointed at from outside its figure');
   const box = layout.pages[1];
   eq(
     scene.labels.map((l) => [l.key, l.text, l.pin?.side]),
@@ -293,6 +295,104 @@ await test('scene: arrows and circles become page shapes with pinned labels', ()
   eq(label.rect, [box.x + x0, box.y + y0, box.x + x1, box.y + y1], 'label rect is the mark');
   const again = buildScene(overlays, resolver, layout);
   eq(JSON.stringify(again.pages.get(2)), JSON.stringify(scene.pages.get(2)), 'rebuilt identically');
+});
+
+await test('external leaders avoid printed content even when an explicit side would cross it', () => {
+  const area: BBox = [100, 100, 500, 400];
+  const target: BBox = [120, 120, 160, 140];
+  const obstacles: BBox[] = [[80, 110, 116, 150]];
+  const a = externalArrow('external', 'blue', target, PAGE, area, obstacles, 'left');
+  ok(!!a, 'an unobstructed route exists');
+  if (!a) return;
+  ok(a.side !== 'left', 'preferred side yields to printed content');
+  ok(a.tail[0] < area[0] || a.tail[0] > area[2] || a.tail[1] < area[1] || a.tail[1] > area[3], 'tail and label pin are outside the parent figure');
+  for (let n = 0; n <= 100; n++) {
+    const t = n / 100, x = a.tail[0] + (a.tip[0] - a.tail[0]) * t, y = a.tail[1] + (a.tip[1] - a.tail[1]) * t;
+    ok(obstacles.every(r => x < r[0] - 2 || x > r[2] + 2 || y < r[1] - 2 || y > r[3] + 2), 'shaft clears the printed obstacle with stroke padding');
+  }
+  ok(length(a) <= ARROW_MAX, 'boundary leaders stay short');
+  eq(externalArrow('central', 'blue', [280, 230, 320, 250], PAGE, area), null, 'empty extracted text does not license a long leader across unknown diagram artwork');
+  eq(externalArrow('external', 'blue', target, PAGE, area, obstacles, 'left'), a, 'route is stable between renders');
+});
+
+await test('exact boxes keep at most two points of padding and share neighbouring clearance', () => {
+  const target: BBox = [100, 100, 200, 150];
+  eq(paddedBox(target, []), [98, 98, 202, 152], 'empty surroundings use two points');
+  eq(paddedBox(target, [[0, 0, 500, 500], [110, 110, 180, 140]]), [98, 98, 202, 152], 'parent figure and interior text do not alter target bounds');
+  eq(paddedBox(target, [[201, 100, 250, 150], [100, 151, 200, 190], [50, 100, 99, 150]]),
+    [99.5, 98, 200.5, 150.5], 'padding uses no more than half the measured neighbour gap');
+  eq(paddedBox(target, [[200, 100, 250, 150]]), [98, 98, 200, 152], 'touching components receive no extra padding at their shared edge');
+});
+
+await test('blocked legacy arrows retain the authored arrow, while exact figure text gets an exterior leader', () => {
+  const target: BBox = [260, 220, 300, 260], area: BBox = [100, 100, 500, 400];
+  const ring: BBox[] = [[0, 0, 612, 216], [0, 264, 612, 792], [0, 0, 256, 792], [304, 0, 612, 792]];
+  eq(externalArrow('blocked', 'pink', target, PAGE, area, ring), null, 'no route is invented through occupied content');
+  const doc: Doc = {
+    schema: 'paper-tour/doc@0.1', source: { file: 'paper.pdf', sha256: '0'.repeat(64), num_pages: 1, generator: 'test' },
+    pages: [{ n: 1, width: 612, height: 792 }], sections: [], equations: [], sentences: [],
+    blocks: ring.map((bbox, i) => ({ id: `p1.b${i}`, page: 1, type: 'paragraph', text: 'Printed content', bbox, sentences: [] })),
+    figures: [{ id: 'fig1', kind: 'figure', number: '1', page: 1, bbox: area, panels: [{ id: 'fig1.a', bbox: target }], caption: '', image: '', referenced_by: [] }],
+  };
+  const layout = layoutPages(doc.pages);
+  const overlays = [{ key: 'blocked', step: 0, persist: false, action: { type: 'arrow' as const, target: 'fig1.a', label: 'Component' } }];
+  const scene = buildScene(overlays, new Resolver(doc, doc.pages), layout);
+  eq(scene.pages.get(1)?.pens[0], penArrow('blocked', DEFAULT_COLOR, target, PAGE, area), 'legacy geometry is not silently replaced with an outline or dropped');
+  eq(scene.labels.length, 1, 'authored label remains available to the measured placement layer');
+
+  const precise: Doc = { ...doc, blocks: [{ id: 'component', page: 1, type: 'figure_text', text: 'Operation', bbox: [120, 170, 160, 184], sentences: [] }] };
+  const exact = buildScene([{ ...overlays[0], action: { type: 'arrow', target: 'component', label: 'Operation' } }], new Resolver(precise, precise.pages), layout);
+  const arrow = exact.pages.get(1)?.pens[0] as PenArrowShape;
+  eq(arrow.kind, 'arrow', 'grounded component gets a safe leader');
+  ok(arrow.tail[0] < area[0], 'figure_text target uses parent figure, not a text-column heuristic');
+  eq(exact.labels[0].area, toStage(layout, 1, area), 'label carries the full parent figure exclusion');
+  ok(exact.obstacles.some(r => JSON.stringify(r) === JSON.stringify(toStage(layout, 1, area))), 'screen labels receive the parent figure as occupied content');
+});
+
+await test('legacy grid marks are never silently reinterpreted as whole-figure overviews', () => {
+  const figure: BBox = [100, 120, 500, 440];
+  const doc: Doc = {
+    schema: 'paper-tour/doc@0.1', source: { file: 'raster.pdf', sha256: '0'.repeat(64), num_pages: 1, generator: 'test' },
+    pages: [{ n: 1, width: 612, height: 792 }], blocks: [], sentences: [], equations: [], sections: [],
+    figures: [{ id: 'fig1', kind: 'figure', number: '1', page: 1, bbox: figure, caption: '', image: 'raster.png', referenced_by: [],
+      panels: [{ id: 'fig1.a', bbox: [150, 180, 250, 280] }] }],
+  };
+  const resolver = new Resolver(doc, doc.pages), layout = layoutPages(doc.pages);
+  const entries = (actions: OverlayAction[]) => actions.map((action, i) => ({ key: `legacy:${i}`, step: 0, persist: false, action }));
+  const scene = buildScene(entries([
+    { type: 'arrow', target: 'fig1', region: [0, 0.6, 0.4, 1], label: 'Input' },
+    { type: 'circle', target: 'fig1', region: [0, 0.3, 0.4, 0.7], label: 'Mixing' },
+    { type: 'box', target: 'fig1', region: [0.5, 0, 1, 1], label: 'Output' },
+    { type: 'circle', target: 'fig1.a', region: [0.3, 0.3, 0.7, 0.7], label: 'Inside panel' },
+  ]), resolver, layout);
+  eq(scene.pages.get(1)?.pens.length, 3, 'the three authored pen actions stay distinct');
+  eq(scene.pages.get(1)?.pens.map(pen => pen.kind), ['arrow', 'circle', 'circle'], 'authored action types are preserved');
+  eq(scene.pages.get(1)?.boxes[0].rect, [298, 118, 502, 442], 'legacy box remains its authored region and needs regeneration');
+  eq(scene.labels.length, 4, 'labels are not discarded by shape substitution');
+  eq(scene.pages.get(1)?.pens[1], penCircle('legacy:1', DEFAULT_COLOR, [100, 216, 260, 344]), 'broad circle retains canonical circle geometry');
+  const precise = buildScene(entries([{ type: 'circle', target: 'fig1', region: [0.12, 0.24, 0.36, 0.49] }]), resolver, layout);
+  eq(precise.pages.get(1)?.pens[0], penCircle('legacy:0', DEFAULT_COLOR, [148, 196.8, 244, 276.8]), 'circle stays anchored to the authored region without a rectangle substitution');
+  const panel = buildScene(entries([{ type: 'circle', target: 'fig1.a' }]), resolver, layout);
+  eq(panel.pages.get(1)?.pens[0], penCircle('legacy:0', DEFAULT_COLOR, [150, 180, 250, 280]), 'exact panel keeps the authored circle');
+});
+
+await test('measured component regions publish as separate exact boxes with local clearance', () => {
+  const doc: Doc = {
+    schema: 'paper-tour/doc@0.1', source: { file: 'measured.pdf', sha256: '0'.repeat(64), num_pages: 1, generator: 'test' },
+    pages: [{ n: 1, width: 612, height: 792 }], blocks: [], sentences: [], equations: [], sections: [],
+    figures: [{ id: 'fig1', kind: 'figure', number: '1', page: 1, bbox: [100, 100, 500, 400], caption: '',
+      image: 'raster.png', panels: [], referenced_by: [] }],
+  };
+  const scene = buildScene([
+    { key: 'one', step: 0, persist: false, action: { type: 'box', target: 'fig1', region: [0.1, 0.2, 0.3, 0.4] } },
+    { key: 'two', step: 0, persist: false, action: { type: 'box', target: 'fig1', region: [0.3025, 0.2, 0.5025, 0.4] } },
+  ], new Resolver(doc, doc.pages), layoutPages(doc.pages));
+  const boxes = scene.pages.get(1)?.boxes ?? [];
+  eq(boxes.length, 2, 'disjoint components remain two boxes, never a union or whole-frame overview');
+  eq(boxes[0].rect, [138, 158, 220.5, 222], 'first measured component respects the neighbouring component');
+  ok(Math.abs(boxes[1].rect[0] - 220.5) < 1e-8, 'second box shares only the available gap');
+  eq(scene.pages.get(1)?.pens.length, 0, 'player adds no inferred arrows or circle outlines');
+  eq(scene.labels.length, 0, 'empty authored labels do not duplicate component names');
 });
 
 await test('pen marks persist and clear like other overlays', () => {
@@ -330,6 +430,36 @@ await test('pen marks persist and clear like other overlays', () => {
   engine.destroy();
 });
 
+await test('boxes and arrow endpoints retain their source alignment across zoom and side-panel widths', () => {
+  const sizes = [{ width: 600, height: 800 }, { width: 500, height: 800 }];
+  const doc: Doc = {
+    schema: 'paper-tour/doc@0.1', source: { file: 'alignment.pdf', sha256: '0'.repeat(64), num_pages: 2, generator: 'test' },
+    pages: sizes.map((size, i) => ({ n: i + 1, ...size })), sections: [], blocks: [], sentences: [], equations: [],
+    figures: [{ id: 'fig1', kind: 'figure', number: '1', page: 2, bbox: [80, 200, 240, 400], panels: [], caption: '', image: '', referenced_by: [] }],
+  };
+  const layout = layoutPages(sizes), resolver = new Resolver(doc, sizes);
+  const region: [number, number, number, number] = [0.05, 0.2, 0.55, 0.7];
+  const overlays = [
+    { type: 'box' as const, target: 'fig1', region },
+    { type: 'arrow' as const, target: 'fig1', region, from: 'left' as const },
+  ].map((action, i) => ({ key: `calibrate:${i}`, step: 0, persist: false, action }));
+  const shapes = buildScene(overlays, resolver, layout).pages.get(2)!;
+  const target: BBox = [88, 240, 168, 340];
+  eq(shapes.boxes[0].rect, [86, 238, 170, 342], 'box stays in the exact page coordinate system');
+  const arrow = buildScene(overlays.slice(1), resolver, layout).pages.get(2)!.pens[0] as PenArrowShape;
+  pointsInto(arrow, target, 'left');
+  for (const s of [0.5, 1, 2.5, 4, 6]) for (const width of [900, 480]) {
+    const vp = { width, height: 600 }, view = { cx: layout.pages[1].x + 250, cy: layout.pages[1].y + 300, s };
+    const source = project(toStage(layout, 2, target), view, vp);
+    const outline = project(toStage(layout, 2, shapes.boxes[0].rect), view, vp);
+    ok(Math.abs(source.left - outline.left - BOX_PAD * s) < 1e-8, 'box padding scales once, with the PDF');
+    ok(Math.abs(outline.bottom - source.bottom - BOX_PAD * s) < 1e-8, 'vertical geometry includes the page offset once');
+    const tip = project(toStage(layout, 2, [...arrow.tip, ...arrow.tip] as BBox), view, vp);
+    ok(Math.abs(source.left - tip.left - ARROW_GAP * s) < 1e-8, 'arrow endpoint retains its intended gap at high zoom');
+    ok(Math.abs(tip.top - (source.top + source.bottom) / 2) < 1e-8, 'arrow still points at the same region centre');
+  }
+});
+
 await test('pen labels sit beside their point and inside the viewport', () => {
   const vp = { width: 800, height: 600 };
   const size = { w: 90, h: 22 };
@@ -360,6 +490,52 @@ await test('pen labels sit beside their point and inside the viewport', () => {
   // A circle near the right edge: its label takes the upper-left corner.
   const corner = penLabelPosition(760, 200, 'upper-right', size, vp, { center: { x: 700, y: 260 } });
   ok(corner.left + size.w < 640 + 1 && corner.top + size.h < 200, `upper left of the loop: ${JSON.stringify(corner)}`);
+});
+
+await test('prose stays undimmed while visual emphasis retains its deliberate spotlight', () => {
+  const doc: Doc = {
+    schema: 'paper-tour/doc@0.1',
+    source: { file: 'reading.pdf', sha256: 'a'.repeat(64), num_pages: 1, generator: 'test' },
+    pages: [{ n: 1, width: 600, height: 800 }], sections: [], figures: [], equations: [],
+    blocks: [{ id: 'p1.b1', type: 'paragraph', page: 1, bbox: [50, 100, 550, 220], text: 'One. Two.', sentences: ['p1.s1', 'p1.s2'] }],
+    sentences: [
+      { id: 'p1.s1', block: 'p1.b1', page: 1, text: 'One.', rects: [[50, 100, 200, 120]] },
+      { id: 'p1.s2', block: 'p1.b1', page: 1, text: 'Two.', rects: [[50, 200, 300, 220]] },
+    ],
+  };
+  const resolver = new Resolver(doc, doc.pages);
+  const layout = layoutPages(doc.pages);
+  const highlights = [{ key: 'claim', step: 0, persist: false, action: { type: 'highlight' as const, targets: ['p1.s2'] } }];
+  const reading = buildScene([], resolver, layout, { type: 'focus', target: 'p1.s1' });
+  ok(!reading.spotlight, 'ordinary prose focus never dims surrounding lines');
+  ok(!buildScene([], resolver, layout, { type: 'zoom', target: 'p1.b1', region: [0, 0, 1, 0.5] }).spotlight, 'a text zoom region does not create a veil');
+  const emphasized = buildScene(highlights, resolver, layout, { type: 'focus', target: 'p1.s1' });
+  ok(!emphasized.spotlight, 'spoken highlight replaces automatic dimming');
+  const untouched = buildScene([], resolver, layout, { type: 'focus', target: 'page1' });
+  ok(!untouched.spotlight, 'overview never dims the whole page');
+  ok(!buildScene([], resolver, layout, { type: 'focus', target: 'missing' }).spotlight, 'missing focus never dims the whole page');
+  ok(!buildScene(highlights, resolver, layout).spotlight, 'manual selection outside narration remains unchanged');
+  const figureDoc: Doc = { ...doc, figures: [{ id: 'fig1', kind: 'figure', number: '1', page: 1, bbox: [50, 300, 550, 600], caption: '', image: 'f.png', panels: [], referenced_by: [] }] };
+  const visualResolver = new Resolver(figureDoc, figureDoc.pages);
+  const zoom = { type: 'zoom' as const, target: 'fig1' };
+  const whole = buildScene([], visualResolver, layout, zoom);
+  eq(whole.pages.get(1)?.holes, [[42, 292, 558, 608]], 'visual overview initially stays bright');
+  const directed = buildScene([
+    { key: 'overview-box', step: 0, persist: false, action: { type: 'box', target: 'fig1' } },
+    { key: 'part-arrow', step: 0, persist: false, action: { type: 'arrow', target: 'fig1', region: [0, 0, 0.5, 1], label: 'Input path' } },
+  ], visualResolver, layout, zoom);
+  ok(!directed.spotlight, 'spoken component marks replace automatic visual dimming');
+  eq(directed.pages.get(1)?.pens[0].kind, 'arrow', 'old authored arrow remains an arrow and needs regeneration for measured geometry');
+  eq(directed.labels.length, 1, 'player does not conceal legacy authoring with another shape');
+  const explicit = buildScene([{ key: 'spot', step: 0, persist: false, action: { type: 'spotlight', target: 'p1.s2' } }], resolver, layout, { type: 'focus', target: 'p1.s1' });
+  ok(!explicit.spotlight, 'legacy text spotlight becomes a line highlight');
+  eq(explicit.pages.get(1)?.markers[0].rects, [[50, 200, 300, 220]], 'highlight uses the extracted sentence line');
+  const paragraph = buildScene([{ key: 'paragraph', step: 0, persist: false, action: { type: 'spotlight', target: 'p1.b1', region: [0, 0.1, 1, 0.15] } }], resolver, layout);
+  ok(!paragraph.spotlight, 'a guessed paragraph region cannot darken or slice lines');
+  eq(paragraph.pages.get(1)?.markers[0].rects, [[50, 100, 200, 120], [50, 200, 300, 220]], 'paragraph emphasis follows separate line rectangles rather than the bounding box');
+  const explicitFigure = buildScene([{ key: 'figure', step: 0, persist: false, action: { type: 'spotlight', target: 'fig1', region: [0, 0, 0.5, 1] } }], visualResolver, layout, zoom);
+  ok(explicitFigure.spotlight && !explicitFigure.pages.get(1)?.readingSpotlight, 'authored figure spotlight remains deliberate');
+  eq(explicitFigure.pages.get(1)?.holes, [[45, 295, 305, 605]], 'figure spotlight keeps its exact region');
 });
 
 console.log(results.join('\n'));

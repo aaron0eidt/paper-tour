@@ -3,9 +3,10 @@ import type { BoardKind } from './board';
 import { ARCS, type Arc, type CardItem, type CardRef, type PaperCard } from './card';
 import type { DocType } from './doctype';
 import type { Unit } from './exercise';
+import { indexElements } from '../elements';
 
 export const PRESETS = ['quick', 'standard', 'deep'] as const;
-/** A hard ceiling for every preset: a tour stays concise, depth comes from questions. */
+/** Planning guardrail; spend depth on mechanisms and comparisons, never padding. */
 export const MAX_STEPS = 30;
 export type Preset = (typeof PRESETS)[number];
 export type BeatKind =
@@ -66,25 +67,102 @@ export interface TourPlan {
 
 /** A paper's tour: its argument in the six arcs, sized by the preset. */
 export function paperPlan(card: PaperCard, doc: Doc, preset: Preset): TourPlan {
+  const beats = planBeats(card, doc, preset);
+  if (preset === 'deep') {
+    const elements = new Map(indexElements(doc).map((e) => [e.id, e]));
+    const source = (beat: Beat) => elements.get(beat.target ?? beat.evidence[0]);
+    const ordered = beats
+      .filter((b) => b.kind !== 'takeaway')
+      .sort((a, b) => {
+        const x = source(a),
+          y = source(b);
+        return (x?.page ?? 1) - (y?.page ?? 1) || (x?.bbox?.[1] ?? 0) - (y?.bbox?.[1] ?? 0);
+      });
+    const chapters: PlanChapter[] = [];
+    for (const beat of ordered) {
+      const page = source(beat)?.page ?? 1;
+      const id = `page-${page}`;
+      if (!chapters.some((c) => c.id === id)) {
+        const y = source(beat)?.bbox?.[1] ?? 0;
+        const section = doc.sections
+          .filter((s) => s.page < page || (s.page === page && (elements.get(s.block)?.bbox?.[1] ?? Infinity) <= y))
+          .sort(
+            (a, b) =>
+              a.page - b.page || (elements.get(a.block)?.bbox?.[1] ?? 0) - (elements.get(b.block)?.bbox?.[1] ?? 0),
+          )
+          .at(-1);
+        chapters.push({ id, title: section ? `Page ${page} · ${section.title}` : `Page ${page}` });
+      }
+      beat.arc = id;
+    }
+    const ending = beats.filter((b) => b.kind === 'takeaway');
+    if (ending.length) chapters.push({ id: 'takeaway', title: card.chapter_titles.takeaway });
+    return { type: 'research_paper', chapters, beats: [...ordered, ...ending] };
+  }
   return {
     type: 'research_paper',
     chapters: ARCS.map((arc) => ({ id: arc, title: card.chapter_titles[arc] })),
-    beats: planBeats(card, doc, preset),
+    beats,
   };
 }
 
 const RESULT_RE = /\b(result|accura|perform|compar|score|bleu|error|outperform|benchmark|ablation|speed|cost)/i;
+
+const TEACHING_ROLES: Partial<Record<BeatKind, string>> = {
+  problem:
+    'State the problem and motivation as the paper presents them, with its scope and terminology. Keep a neutral tone without adding a hook or rhetorical question.',
+  idea: 'Describe the central contribution and its relation to the stated problem, preserving the authors’ claims and qualifications.',
+  method:
+    'Actively choose the visual that clarifies this mechanism: a process flow, an input/output plot, a numerical comparison or a worked transformation. Explain the method in the order presented: inputs, operations and outputs. Explain reasons supported by the text; do not invent failure cases or unsupported causal claims.',
+  result:
+    'Present the experiment, metric and comparable baseline, then the relevant values and their difference. State only the supported implication and its scope.',
+  limitation:
+    'Show where the preceding explanation stops working or remains uncertain, and why that boundary matters for applying the method.',
+  takeaway:
+    'Summarize the paper’s conclusion, main evidence and limitations in neutral language. Offer a relevant follow-up question without inventing a dramatic resolution.',
+};
+
+/** Card summaries may cite just the claim; its paragraph contains the causal
+ * explanation. Make that evidence available without adding unrelated pages. */
+function mechanismEvidence(item: CardItem, doc: Doc): string[] {
+  const cited = new Set(item.evidence);
+  const primary = doc.sentences.find((s) => s.id === item.evidence[0]);
+  const local = primary ? doc.sentences.filter((s) => s.page === primary.page && s.block === primary.block) : [];
+  return [...new Set([...item.evidence, ...local.map((s) => s.id).filter((id) => !cited.has(id))])];
+}
 
 /** Code-only beat plan (no model): the paper's argument, not its pages. Quick ≈ 6, standard ≈ 10-12, deep ≤ 24 steps. */
 export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   const deep = preset === 'deep';
   const beats: Omit<Beat, 'id'>[] = [];
   // The board a beat may draw: a method as a flow, a result's numbers as bars (formulas and figures below).
-  const boards: Partial<Record<BeatKind, BoardKind>> = { method: 'flow', result: 'bars' };
+  const boards: Partial<Record<BeatKind, BoardKind>> = { result: 'bars' };
   const text = (kind: BeatKind, arc: Arc, item: CardItem | undefined) => {
-    const board = boards[kind];
+    const board = kind === 'method' ? 'flow' : boards[kind];
     if (item?.text && item.evidence.length)
-      beats.push({ kind, arc, point: item.text, evidence: item.evidence, ...(board ? { board } : {}) });
+      beats.push({
+        kind,
+        arc,
+        point: item.text,
+        evidence: deep && kind === 'method' ? mechanismEvidence(item, doc) : item.evidence,
+        ...(board ? { board } : {}),
+        role: TEACHING_ROLES[kind],
+        ...(kind === 'result'
+          ? {
+              boardEvidence: [...new Set(card.results.flatMap((r) => r.evidence))],
+              notes: [
+                'COMPARISON: choose one meaningful contrast with matching metric, dataset and conditions. Explain the gap or trade-off, not a list of scores. If a board helps, reveal/focus the baseline, proposed result and comparison when those values are spoken. Extra result evidence is only for genuinely comparable values.',
+              ],
+            }
+          : {}),
+        ...(deep && kind === 'method'
+          ? {
+              notes: [
+                "MECHANISM: use the supporting paragraph to explain a causal chain or one small worked case. Connect it to the paper's central problem, distinguish illustrative inputs from evidence, and avoid repeating an adjacent figure or formula overview.",
+              ],
+            }
+          : {}),
+      });
   };
   const figureArc = (ref: CardRef): Arc => {
     const figure = doc.figures.find((f) => f.id === ref.id);
@@ -95,7 +173,7 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
     const arc = figureArc(ref);
     // A table's numbers may become bars, and a diagram of the method a simplified flow; a results plot draws on itself.
     const table = doc.figures.find((f) => f.id === ref.id)?.kind === 'table';
-    const board: BoardKind | undefined = table ? 'bars' : arc === 'method' ? 'flow' : undefined;
+    const board: BoardKind | undefined = table ? 'bars' : undefined;
     const beat: Omit<Beat, 'id'> = {
       kind: 'figure',
       arc,
@@ -103,9 +181,24 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
       evidence: [],
       target: ref.id,
       ...(board ? { board } : {}),
+      role: table
+        ? 'Orient the learner to the experiment question, metric and comparison groups. Explain what the table can test before reading individual values.'
+        : "Orient the learner to the mechanism: identify its input, output and purpose, then trace the main relationship that solves the paper's problem.",
     };
     beats.push(beat);
-    if (deep) beats.push({ ...beat, detail: true });
+    if (deep)
+      beats.push({
+        ...beat,
+        detail: true,
+        role: table
+          ? 'Work through one meaningful numerical comparison: baseline, changed condition, result and size of the difference. Explain what it supports and what it cannot establish.'
+          : 'Follow one concrete input, interaction or failure case through the depicted mechanism. Explain why the intermediate changes matter instead of repeating the overview or printed labels.',
+        notes: [
+          table
+            ? 'Keep compared values on the same metric and evaluation setting. Use a side comparison only if it adds insight; synchronize each value with its spoken explanation. Do not invent a causal reason for an observed score gap.'
+            : 'Choose one important causal path. A separate visual should show a transformation, interaction or worked example that the static source does not already make obvious.',
+        ],
+      });
   };
   const formula = (ref: CardRef | undefined) => {
     if (!ref) return;
@@ -116,9 +209,15 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
       evidence: [],
       target: ref.id,
       board: 'formula',
+      role: 'Explain the equation as a mechanism: what enters, what each important operation changes, why it is needed, and what the output means.',
     };
     beats.push(beat);
-    if (deep) beats.push({ ...beat, detail: true });
+    if (deep)
+      beats.push({
+        ...beat,
+        detail: true,
+        role: 'Apply the equation to an explicitly labelled small worked case. Change an input, compute the consequence and explain the intuition; the symbol definitions have already been taught.',
+      });
   };
   const methods = card.method_steps.slice(0, preset === 'quick' ? 1 : preset === 'standard' ? 3 : 4);
   const figures = card.key_figures.slice(0, preset === 'quick' ? 1 : preset === 'standard' ? 2 : 3);

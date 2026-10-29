@@ -1,5 +1,17 @@
 # Handoff
 
+Latest visual direction (2026-10-28 evening): use native live scenes, including vectors, matrices and animated
+function plots, in both tour generation and answers. The reader board uses 38% of available width. Keep narration
+neutral and close to the document's order; illustrate numerical examples through changing input/intermediate/output
+states. No Manim videos, paper-specific templates, or silent replacement/omission of invalid required visuals.
+Measured source targets and strict scene/example validation now supersede the older arrow/overview fallback rules
+below. Read the latest acceptance results in [STATUS.md](STATUS.md); historical checks below are not current evidence.
+
+Air implementation update (2026-10-28): read the current [STATUS.md](STATUS.md) before rebuilding the next-step list
+below. Insight guards, plots, language, reader polish, voice and documented local workflows are now implemented and
+locally tested; real paid-provider quality checks, naming and hackathon decisions remain open. Local demo/backup
+instructions are in [DEMO.md](DEMO.md).
+
 Start here if you are new to the project. This page says what the app does today, how to run it, how the parts fit
 together, the rules we work by, and what to build next. Details live in the other notes:
 [STATUS.md](STATUS.md) (current state), [PLAN.md](PLAN.md) (product plan), [HARNESS.md](HARNESS.md) (how the Meta

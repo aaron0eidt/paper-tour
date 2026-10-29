@@ -241,3 +241,116 @@
   margin: 0 0 10px;
   line-height: 1.5;
 }
+
+.activity-progress {
+  position: relative;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  white-space: normal;
+}
+.activity-progress strong {
+  font-size: 14px;
+}
+.activity-progress p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.activity-step-time {
+  display: block;
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.activity-progress .activity-saved-work {
+  color: var(--text);
+}
+.activity-efficiency {
+  margin-top: 10px;
+  color: var(--warn);
+}
+.activity-efficiency summary {
+  cursor: pointer;
+}
+.activity-efficiency ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+.activity-inspector-layout {
+  height: min(500px, calc(100dvh - 440px));
+}
+
+.activity-diagnostics {
+  padding: 14px 0 16px;
+  border-top: 1px solid var(--line);
+}
+.activity-diagnostics-heading {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.activity-diagnostics-heading > span,
+.activity-diagnostics p,
+.activity-diagnostics dt {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.activity-diagnostics dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 14px 0 10px;
+}
+.activity-diagnostics dd {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.activity-diagnostics p {
+  margin: 6px 0;
+}
+.activity-diagnostics summary {
+  cursor: pointer;
+  color: var(--accent);
+  margin-top: 10px;
+}
+.activity-diagnostics ol {
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+.activity-diagnostics li button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 8px 0;
+  color: var(--muted);
+}
+.activity-diagnostics li button:hover {
+  color: var(--text);
+}
+.activity-diagnostics li strong {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .activity-diagnostics dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .activity-diagnostics-heading {
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+}

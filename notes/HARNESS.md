@@ -4,6 +4,13 @@ How Paper Tour drives Meta's models. The goal is correct, short, well-directed t
 capable but not frontier model. Every call is small, constrained and checkable, and the harness, not the model,
 guarantees structure, IDs, geometry, timing and safety. The product plan is in [PLAN.md](PLAN.md).
 
+## Architecture and extension points
+
+The agent workflow, source retrieval, provider authoring, response validation and source I/O have separate modules.
+Native visualization schemas, validators and focus identities are registered together in `harness/board.ts`; tours,
+worked examples and Q&A share its kind catalog. See [CODE-AUDIT.md](CODE-AUDIT.md) for the module map, verification and
+the concrete steps for adding a visual or changing the workflow.
+
 ## What the Meta API gives us (checked 2026-10-27)
 
 - **Models on our key:** `muse-spark-1.3`, `1.2`, `1.1` (and `-contributor` variants), `muse-wonder-1.0`,
@@ -33,8 +40,9 @@ guarantees structure, IDs, geometry, timing and safety. The product plan is in [
 2. **Choose, don't generate.** Element IDs, grid labels, colours, templates and action types are enums built for that
    call. The model cannot name an element that does not exist. Keep each enum short by listing only what that call
    may use.
-3. **The code owns geometry and timing.** The model never outputs coordinates or word indexes: regions come from grid
-   or SAM labels, timing from an anchor phrase quoted from the narration.
+3. **The code owns validated geometry and timing.** Prefer locally measured source targets. Where image-relative
+   bounds are allowed, validate their normalized coordinates and grounding before publication. Timing comes from an
+   anchor phrase quoted from the narration; code resolves its word index.
 4. **Think in a field first.** Every schema starts with a short `plan` string, so the model reasons before it commits,
    and the logs show why.
 5. **One shared prefix.** Every call on a document starts with the same developer message and the same paper block;

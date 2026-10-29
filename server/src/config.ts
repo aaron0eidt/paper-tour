@@ -60,7 +60,7 @@ export function config(): Config {
     analysisTimeoutMs: 300_000,
     tours: {
       writer: choice('TOUR_WRITER', ['harness', 'muse'], 'harness'),
-      preset: choice('TOUR_PRESET', ['quick', 'standard', 'deep'], 'standard'),
+      preset: choice('TOUR_PRESET', ['quick', 'standard', 'deep'], 'deep'),
     },
     agent: {
       enabled: process.env.PAPER_AGENT_ENABLED === 'true',

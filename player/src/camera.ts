@@ -65,6 +65,17 @@ export function focusView(rect: BBox, page: PageBox, layout: Layout, vp: Viewpor
   return clampView({ cx: page.x + page.width / 2, cy, s }, layout, vp);
 }
 
+/** Refit the visible page when a side panel changes the available width. The
+ * current vertical reading anchor survives; an old manual/detail zoom does not.
+ */
+export function fitWidthView(view: View, layout: Layout, vp: Viewport): View {
+  const distance = (page: PageBox) => Math.max(page.y - view.cy, view.cy - page.y - page.height, 0);
+  const page = layout.pages.reduce<PageBox | undefined>((nearest, candidate) =>
+    !nearest || distance(candidate) < distance(nearest) ? candidate : nearest, undefined);
+  if (!page) return clampView(view, layout, vp);
+  return clampView({ cx: page.x + page.width / 2, cy: view.cy, s: readingScale(page.width, vp) }, layout, vp);
+}
+
 /** Fit the rect plus padding (a fraction of its size on each side) into the viewport. */
 export function zoomView(rect: BBox, padding: number, layout: Layout, vp: Viewport): View {
   const w = Math.max(1, rect[2] - rect[0]);
@@ -80,13 +91,15 @@ export function initialView(layout: Layout, vp: Viewport): View {
   return focusView([p.x, p.y, p.x + p.width, p.y + p.height], p, layout, vp);
 }
 
-export function cameraView(action: CameraAction, resolver: Resolver, layout: Layout, vp: Viewport): View | null {
+export function cameraView(action: CameraAction, resolver: Resolver, layout: Layout, vp: Viewport, options: { fitWidth?: boolean } = {}): View | null {
   const groups = action.type === 'zoom' ? resolver.resolveTarget(action.target, action.region) : resolver.resolve(action.target);
   const target = groups && stageRect(layout, groups);
   const page = target && layout.pages[target.page - 1];
   // A target on a page the layout does not have cannot be framed.
   if (!target || !page) return null;
-  if (action.type === 'focus') return focusView(target.rect, page, layout, vp);
+  // Text focus keeps the page legible in context. Deliberate zoom commands can
+  // inspect detail, except while a side explanation needs the full paper width.
+  if (action.type === 'focus' || options.fitWidth) return focusView(target.rect, page, layout, vp);
   return zoomView(target.rect, action.padding ?? DEFAULT_ZOOM_PADDING, layout, vp);
 }
 
@@ -95,6 +108,11 @@ export function project(r: BBox, v: View, vp: Viewport): ScreenRect {
   const x = (sx: number) => (sx - v.cx) * v.s + vp.width / 2;
   const y = (sy: number) => (sy - v.cy) * v.s + vp.height / 2;
   return { left: x(r[0]), top: y(r[1]), right: x(r[2]), bottom: y(r[3]) };
+}
+
+/** Viewport pixels back to the same stage coordinates used by PDF overlays. */
+export function unproject(x: number, y: number, v: View, vp: Viewport): [number, number] {
+  return [v.cx + (x - vp.width / 2) / v.s, v.cy + (y - vp.height / 2) / v.s];
 }
 
 export function transformOf(v: View, vp: Viewport): string {
@@ -112,7 +130,7 @@ export class Camera {
   private view: View = { cx: 0, cy: 0, s: 1 };
   private vp: Viewport = { width: 1, height: 1 };
   private layout: Layout = { pages: [], width: 1, height: 1 };
-  private anim: { from: View; to: View; start: number; duration: number } | null = null;
+  private anim: { from: View; to: View; start: number; duration: number; velocity?: View } | null = null;
   private raf = 0;
   private settleTimer: ReturnType<typeof setTimeout> | undefined;
   private listeners = new Set<Listener>();
@@ -185,6 +203,31 @@ export class Camera {
     this.raf = requestAnimationFrame(this.frame);
   }
 
+  /** Reframe a resize without restarting the flight: preserve position, velocity and its original deadline. */
+  retargetTo(view: View): void {
+    const a = this.anim;
+    if (!a) return this.jumpTo(view);
+    const now = performance.now();
+    const sample = (time: number) => this.sample(a, time);
+    const before = sample(now - 1), current = sample(now);
+    const velocity = { cx: current.cx - before.cx, cy: current.cy - before.cy, s: Math.log(current.s / before.s) };
+    this.view = current;
+    this.anim = { from: current, to: clampView(view, this.layout, this.vp), start: now,
+      duration: Math.max(80, a.start + a.duration - now), velocity };
+  }
+
+  private sample(a: NonNullable<Camera['anim']>, now: number): View {
+    const t = clamp((now - a.start) / a.duration, 0, 1);
+    if (!a.velocity) {
+      const e = easeInOutCubic(t);
+      return { cx: lerp(a.from.cx, a.to.cx, e), cy: lerp(a.from.cy, a.to.cy, e), s: a.from.s * Math.pow(a.to.s / a.from.s, e) };
+    }
+    const h0 = 2*t*t*t - 3*t*t + 1, h1 = t*t*t - 2*t*t + t, h2 = -2*t*t*t + 3*t*t;
+    const value = (from: number, to: number, v: number) => h0*from + h1*a.duration*v + h2*to;
+    return { cx: value(a.from.cx, a.to.cx, a.velocity.cx), cy: value(a.from.cy, a.to.cy, a.velocity.cy),
+      s: Math.exp(value(Math.log(a.from.s), Math.log(a.to.s), a.velocity.s)) };
+  }
+
   panBy(dx: number, dy: number): void {
     const v = this.view;
     this.userInput({ cx: v.cx + dx / v.s, cy: v.cy + dy / v.s, s: v.s });
@@ -228,7 +271,6 @@ export class Camera {
     const a = this.anim;
     if (!a) return;
     const t = Math.min(1, (now - a.start) / a.duration);
-    const e = easeInOutCubic(t);
     if (t >= 1) {
       this.anim = null;
       this.view = a.to;
@@ -236,7 +278,7 @@ export class Camera {
       return;
     }
     // Scale interpolates geometrically so zooming feels even.
-    this.view = { cx: lerp(a.from.cx, a.to.cx, e), cy: lerp(a.from.cy, a.to.cy, e), s: a.from.s * Math.pow(a.to.s / a.from.s, e) };
+    this.view = this.sample(a, now);
     this.notify(true);
     this.raf = requestAnimationFrame(this.frame);
   };

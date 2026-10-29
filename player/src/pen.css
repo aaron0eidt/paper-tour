@@ -1,11 +1,25 @@
 /* Pen marks: arrows and circles drawn on the page like a tutor's pen (geometry in scene.ts). */
 
+/* Let the spoken passage stay bright while the surrounding text recedes. The
+   existing SVG holes keep highlighted lines completely outside this veil. */
+.spotlight.spotlight-reading {
+  fill: rgba(15, 23, 42, 0.35);
+  animation: fade-in 380ms ease both;
+}
+
+.layer-marker .hl-rect {
+  animation: reading-marker 560ms cubic-bezier(0.22, 0.7, 0.25, 1) both;
+}
+@keyframes reading-marker {
+  from { transform: scaleX(0); opacity: 0.45; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+
 .layer-fx,
 .layer-pen {
   /* The stage scales the page by --zoom, so strokes are sized in screen pixels: a touch bolder
      when zoomed in on a figure, whose own lines are bolder there too. */
   --pen-w: calc(clamp(2.5px, 1.9px + 0.35px * var(--zoom, 1), 3.25px) * var(--inv-zoom, 1));
-  --pen-halo: calc(1.5px * var(--inv-zoom, 1));
 }
 
 .pen-stroke {
@@ -17,12 +31,6 @@
   stroke-dasharray: 1 2;
   stroke-dashoffset: 1;
   animation: pen-draw 460ms cubic-bezier(0.3, 0.55, 0.3, 1) forwards;
-}
-
-/* The casing: the same stroke in page white, wider, drawn in step with it underneath. */
-.pen-casing {
-  stroke: #fff;
-  stroke-width: calc(var(--pen-w) + 2 * var(--pen-halo));
 }
 
 .pen-loop {
@@ -47,14 +55,27 @@
   animation-timing-function: cubic-bezier(0.2, 0.6, 0.35, 1);
 }
 
-.pen-head.pen-casing {
-  stroke-width: calc((var(--pen-w) + 2 * var(--pen-halo)) / var(--head));
-}
-
 @keyframes pen-draw {
   to {
     stroke-dashoffset: 0;
   }
+}
+
+/* Chips are measured at a few readable widths and laid out in empty PDF margins.
+   Wrapping lets a label fit a narrow gutter without truncating its meaning. */
+.screen-layer .box-label {
+  box-sizing: border-box;
+  width: max-content;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  line-height: 1.35;
+  padding: 4px 8px;
+}
+
+.screen-layer .note {
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
 }
 
 /* Labels (in the screen layer) appear once their stroke is drawn. */
@@ -70,6 +91,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .layer-marker .hl-rect,
+  .spotlight.spotlight-reading {
+    animation: none;
+  }
   .pen-stroke {
     animation: none;
     stroke-dasharray: none;

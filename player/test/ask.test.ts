@@ -3,6 +3,8 @@
 
 import { answerTour, openQuestions, visualShown, waitingLabel } from '../src/ask/answer';
 import type { AskAnswer } from '../src/ask/api';
+import { hasRegionArea, regionFromDrag } from '../src/ask/regionSelection';
+import { project, unproject } from '../src/camera';
 import { TourEngine } from '../src/engine';
 import type { Timers } from '../src/engine';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from '../src/narration/narrator';
@@ -243,6 +245,34 @@ test('a long wait says what is happening', () => {
     'Writing the answer',
     'Still working on it',
   ]);
+});
+
+test('an explicit answer language changes only the micro-tour voice configuration', () => {
+  const original = JSON.stringify(tour);
+  const answer = answerTour({...reply,language:'uk-UA'}, 'Explain this', tour);
+  eq(answer.voices?.host?.lang,'uk-UA');
+  eq(JSON.stringify(tour),original);
+  eq(answerTour({...reply,language:'<script>'}, 'Explain this', tour).voices,tour.voices);
+});
+
+test('selected regions use normalized page coordinates after pan, zoom and reversed drags', () => {
+  const page = { n: 3, x: 82, y: 1688, width: 600, height: 800 };
+  const viewport = { width: 680, height: 900 };
+  for (const scale of [.5, 1, 4]) {
+    const view = { cx: 410, cy: 1880, s: scale };
+    const start = project([page.x + 450, page.y + 600, page.x + 450, page.y + 600], view, viewport);
+    const end = project([page.x + 150, page.y + 200, page.x + 150, page.y + 200], view, viewport);
+    const region = regionFromDrag(page, unproject(start.left, start.top, view, viewport), unproject(end.left, end.top, view, viewport));
+    eq(region, { page: 3, rect: [.25, .25, .75, .75] });
+    eq(hasRegionArea(region, page, scale), true);
+  }
+});
+
+test('a region is clamped to its starting page and a click is not accepted', () => {
+  const page = { n: 2, x: 32, y: 860, width: 600, height: 800 };
+  eq(regionFromDrag(page, [332, 1260], [-100, 2000]), { page: 2, rect: [0, .5, .5, 1] });
+  eq(hasRegionArea(regionFromDrag(page, [100, 1000], [100, 1000]), page, 4), false);
+  eq(hasRegionArea(regionFromDrag(page, [100, 1000], [105, 1100]), page, 1), false);
 });
 
 console.log(results.join('\n'));

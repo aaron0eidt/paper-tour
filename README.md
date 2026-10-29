@@ -110,6 +110,10 @@ optional per-word timings), so the scaffold runs without API keys.
 
 For private PDF uploads and automatic Muse tours, use Node.js 22.12+ and Python 3.12:
 
+Install Tesseract for local recognition of labels inside raster figures (`brew install tesseract` on macOS;
+`apt-get install tesseract-ocr` on Debian/Ubuntu). The Docker image includes it. Python requirements include
+OpenCV for measuring diagram components. This recognition runs locally before figure cues are authored.
+
 ```sh
 npm ci
 npm --prefix server ci
@@ -140,6 +144,11 @@ npm run test:integration
 Integration tests require the local Supabase stack. `Dockerfile` and `compose.yaml` provide an
 optional deployment setup; environment variables are listed in `.env.example`.
 
+New tours use the guided harness by default (`TOUR_WRITER=harness`, `TOUR_PRESET=deep`). It plans
+explanations, directs independent steps concurrently, then gives each detail step its preceding overview
+to build on. `quick` and `standard` remain available. Activity shows readable narration, concurrent
+work and timing diagnostics; the floating question bubble also shows progress.
+
 Set `PAPER_AGENT_ENABLED=true` for new tours to use the persistent paper agent. Existing jobs keep
 their original engine. The agent uses Meta Responses, saved paper sessions and seven scoped
 paper tools; its instructions and tool schemas are in `server/src/agent/tools.ts`. Runs and tool
@@ -151,3 +160,9 @@ Provider prompt caching is measured separately from local image/observation reus
 Run `npm run test:smoke:muse` for an explicit live test with the configured local test account.
 It uploads a small diagram PDF and checks saved tours, source links and the agent journal when
 enabled; it uses the profile's selected model and consumes API tokens.
+## Questions about a selected region
+
+Use the region-selection button beside the question field to ask about an area
+of a PDF, with or without a tour. The server sends a crop and the full page from
+the original PDF, alongside document text and conversation context. Pause/continue
+keeps the current narration position; stopping a pending question aborts it.

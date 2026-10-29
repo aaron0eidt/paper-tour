@@ -1,5 +1,7 @@
+import { RESPONSE_LANGUAGES } from '../../shared/languages';
 import { setTimeout as delay } from 'node:timers/promises';
-import Fastify, { type FastifyReply } from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import type { Readable } from 'node:stream';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
@@ -31,14 +33,23 @@ const objectBody = (properties: Record<string, unknown>, required: string[]) => 
 const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
 const askBody = objectBody(
   {
-    question: text(500),
+    question: { type: 'string', minLength: 1 },
     tourId: uuid,
+    analysisId: uuid,
+    selection: objectBody(
+      {
+        page: { type: 'integer', minimum: 1 },
+        rect: { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number', minimum: 0, maximum: 1 } },
+      },
+      ['page', 'rect'],
+    ),
     stepId: text(200),
     figureId: text(100),
+    responseLanguage: { enum: Object.keys(RESPONSE_LANGUAGES) },
     history: {
       type: 'array',
       maxItems: 4,
-      items: objectBody({ question: text(500), answer: text(2000) }, ['question', 'answer']),
+      items: objectBody({ question: { type: 'string', minLength: 1 }, answer: text(2000) }, ['question', 'answer']),
     },
   },
   ['question'],
@@ -91,6 +102,11 @@ export async function createApp(options: Options) {
     logger: options.logger ? { redact: ['req.headers.authorization', 'req.body.apiKey'] } : false,
     bodyLimit: 65536,
   });
+  app.addContentTypeParser('audio/wav', {}, async (_req: FastifyRequest, payload: Readable) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of payload) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  });
   await app.register(cors, { origin: options.origins ?? false });
   app.get('/health', async () => ({ status: 'ok' }));
   app.setErrorHandler((error, request, reply) => {
@@ -132,6 +148,15 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
+      api.post<{ Params: { id: string }; Body: Buffer }>(
+        '/documents/:id/transcribe',
+        { schema: { params: documentParams } },
+        async (req, reply) => {
+          if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'invalid_audio', 'Send a WAV recording.');
+          if (!service.transcribe) throw new HttpError(503, 'voice_unavailable', 'Voice input is unavailable.');
+          return whileConnected(reply, (signal) => service.transcribe!(owner(req), req.params.id, req.body, signal));
+        },
+      );
       api.get('/models', async (req) => service.models(owner(req)));
       if (options.settings) {
         const settings = options.settings;
@@ -482,6 +507,26 @@ export async function createApp(options: Options) {
         demo.addHook('onRequest', async (request) => {
           if (!fromLocalhost(request)) throw new HttpError(404, 'not_found', 'Endpoint not found.');
         });
+        demo.post<{ Params: { paper: string }; Body: Buffer }>(
+          '/:paper/transcribe',
+          {
+            schema: {
+              params: {
+                type: 'object',
+                required: ['paper'],
+                properties: { paper: { type: 'string', pattern: DEMO_PAPER.source } },
+              },
+            },
+          },
+          async (req, reply) => {
+            if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'invalid_audio', 'Send a WAV recording.');
+            if (!options.service.demoTranscribe)
+              throw new HttpError(503, 'voice_unavailable', 'Voice input is unavailable.');
+            return whileConnected(reply, (signal) =>
+              options.service.demoTranscribe!(req.params.paper, req.body, signal),
+            );
+          },
+        );
         demo.post<{ Params: { paper: string }; Body: AskRequest }>(
           '/:paper/ask',
           {

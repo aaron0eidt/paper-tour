@@ -1,3 +1,6 @@
+import { sceneProblems } from '../../../shared/scene';
+import { plotProblems } from '../../../shared/plot';
+import { isTableTarget } from '../../../shared/tableTargets';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -15,11 +18,14 @@ import { ROOT } from '../config';
 import { indexElements } from '../elements';
 import type { Beat, BeatKind, Preset, TourPlan } from './beats';
 import { boardParts } from './board';
+import { exampleActions } from './example';
+import { insightStep } from './insight';
 import type { PaperCard } from './card';
 import { boardPart, regionOf, type BeatTargets, type Direction } from './direct';
+import { groundedVisualMark } from './visual-grounding';
 
 /** At most this many marks (boxes, arrows, circles) on one figure: one or two that name the parts beat many boxes. */
-const MAX_MARKS = 3;
+const MAX_MARKS = 4;
 /** A short pause after a step that shows a board, so its last animation settles before the next step. */
 const BOARD_HOLD_MS = 800;
 /** Narration pace at rate 1, for the length estimate. */
@@ -91,20 +97,25 @@ export function beatStep(
   doc: Doc,
   used: Set<string>,
 ): Step {
+  if (direction?.exampleProblems?.length) throw new Error(direction.exampleProblems.join(' '));
+  if (direction?.visualProblems?.length) throw new Error(direction.visualProblems.join(' '));
   const name = elementName(beat, doc);
   const say = direction?.say ?? (name ? `Let's look at ${name}. ${beat.point}` : beat.point);
   const words = splitWords(say).length;
   const color = markColor(beat);
   const board = direction?.board;
+  const example = direction?.example;
   const actions: Action[] = [
     beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: beat.evidence[0] },
   ];
   // The board item appears with the step; a formula step also outlines its equation on the page.
   if (board) actions.push({ type: 'board', item: board });
+  if (example) actions.push(...exampleActions(example));
   if (beat.kind === 'formula' && beat.target) actions.push({ type: 'box', target: beat.target, color });
   let highlights = 0,
     marks = 0,
     lastPart = -1;
+  let lastBoard: BoardItem | undefined;
   const focusWords = new Set<number>();
   for (const cue of direction?.cues ?? []) {
     const found = findAnchor(say, cue.anchor);
@@ -117,20 +128,42 @@ export function beatStep(
       actions.push({ type: 'highlight', targets: [cue.target], color: beat.tint ?? COLORS[beat.kind], ...timing });
     } else if (cue.action === 'board_focus') {
       // A part lights up when the narration names it: never without its board or anchor, nor twice in a row or at once.
-      const part = board ? boardPart(board, cue.target) : -1;
+      const active = example ? example.frames.filter((frame) => frame.at <= at).at(-1)?.item : board;
+      if (active !== lastBoard) {
+        lastPart = -1;
+        lastBoard = active;
+      }
+      const part = active ? boardPart(active, cue.target) : -1;
       if (part < 0 || found === null || part === lastPart || focusWords.has(at)) continue;
       lastPart = part;
       focusWords.add(at);
       actions.push({ type: 'board_focus', part, ...timing });
     } else if (cue.action === 'box' || cue.action === 'arrow' || cue.action === 'circle') {
+      if (found === null) continue;
+      const tableTarget = isTableTarget(doc, cue.target);
+      // Extracted blocks may merge rows. Never imply a precise value with an
+      // arrow endpoint, a guessed image subdivision or a label on the table.
       if (marks >= MAX_MARKS) continue;
       marks++;
-      const region = regionOf(cue.region);
-      const mark = { target: cue.target, ...(region ? { region } : {}), ...markLabel(cue.label), color, ...timing };
+      const grounded = groundedVisualMark(
+        doc,
+        cue.target,
+        cue.action,
+        cue.bounds ?? regionOf(cue.region),
+        cue.label,
+        targets.imaged,
+      );
+      const mark = {
+        target: cue.target,
+        ...(grounded.region ? { region: grounded.region } : {}),
+        ...markLabel(grounded.label),
+        color,
+        ...timing,
+      };
       actions.push(
-        cue.action === 'box'
+        grounded.action === 'box' || tableTarget
           ? { type: 'box', ...mark }
-          : cue.action === 'arrow'
+          : grounded.action === 'arrow'
             ? { type: 'arrow', ...mark }
             : { type: 'circle', ...mark },
       );
@@ -147,7 +180,7 @@ export function beatStep(
   }
   const marked = actions.some((a) => ['box', 'arrow', 'circle', 'spotlight', 'note'].includes(a.type));
   if (beat.target && !marked) actions.push({ type: 'box', target: beat.target, color });
-  return { id: beat.id, say, actions, ...(board ? { hold_ms: BOARD_HOLD_MS } : {}) };
+  return insightStep({ id: beat.id, say, actions, ...(board || example ? { hold_ms: BOARD_HOLD_MS } : {}) }, doc);
 }
 
 /**
@@ -198,11 +231,34 @@ export function assembleTour(
   preset: Preset,
 ): Tour {
   const settle = boardSettler();
+  let previousCamera: Action | undefined;
+  const positioned = steps.map((list, index) =>
+    list.map((step) => {
+      if (
+        preset === 'deep' &&
+        plan.type === 'research_paper' &&
+        plan.beats[index].kind === 'takeaway' &&
+        previousCamera
+      ) {
+        // A verbal recap does not require a jump back to the abstract. Its source
+        // remains in the teaching plan; the screen stays at the final explanation.
+        return {
+          ...step,
+          actions: [
+            { ...previousCamera, at_word: 0 },
+            ...step.actions.filter((a) => ['board', 'board_focus', 'board_clear'].includes(a.type)),
+          ],
+        };
+      }
+      previousCamera = step.actions.find(isCamera) ?? previousCamera;
+      return step;
+    }),
+  );
   const chapters = plan.chapters
     .map((chapter) => ({
       id: chapter.id,
       title: chapter.title,
-      steps: plan.beats.flatMap((beat, i) => (beat.arc === chapter.id ? steps[i].map(settle) : [])),
+      steps: plan.beats.flatMap((beat, i) => (beat.arc === chapter.id ? positioned[i].map(settle) : [])),
     }))
     .filter((chapter) => chapter.steps.length);
   return {
@@ -233,6 +289,10 @@ export function tourProblems(tour: Tour, doc: Doc): string[] {
   for (const step of tour.chapters.flatMap((c) => c.steps)) {
     const words = splitWords(step.say).length;
     for (const action of step.actions) {
+      if (action.type === 'board' && action.item.kind === 'scene')
+        problems.push(...sceneProblems(action.item).map((p) => `${step.id}: ${p}`));
+      if (action.type === 'board' && action.item.kind === 'plot')
+        problems.push(...plotProblems(action.item).map((p) => `${step.id}: ${p}`));
       const used =
         'target' in action
           ? [action.target]
@@ -256,7 +316,7 @@ export function boardProblems(tour: Tour): string[] {
   const problems: string[] = [];
   for (const step of tour.chapters.flatMap((c) => c.steps)) {
     let item: BoardItem | null = null;
-    for (const action of step.actions) {
+    for (const action of [...step.actions].sort((a, b) => (a.at_word ?? 0) - (b.at_word ?? 0))) {
       if (action.type === 'board') item = action.item;
       else if (action.type === 'board_clear') item = null;
       else if (action.type === 'board_focus' && !(item && action.part < boardParts(item)))

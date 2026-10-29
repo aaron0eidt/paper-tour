@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { MuseConfig } from '../src/config';
 import type { Action, BBox, BlockType, Doc, DocExercise, Step, Tour } from '../../shared/paper';
 import type { TourGenerationInput, TourImage } from '../src/tour-generator';
-import { HarnessTourGenerator } from '../src/harness/generator';
+import { HarnessTourGenerator } from './harness-fixture';
 import { ARC_SPECS, arcTourPlan, fallbackArcPlan } from '../src/harness/arcs';
 import { findAnchor } from '../src/harness/assemble';
 import { checkFormula } from '../src/harness/board';
@@ -147,6 +147,15 @@ function plainDirection(r: Request, extra: object = {}) {
   const cues = target ? [{ action: 'highlight', target, label: '', anchor: 'explains the point' }] : [];
   return { plan: 'p', say: SAY, cues, ...extra };
 }
+/** All native schemas are available now; this scripted author follows the planner's
+ * suggested board for these document-type fixtures instead of inferring it from availability. */
+function suggestedBoard(r: Request): 'bars' | 'flow' | 'formula' | undefined {
+  const suggestion = /^BOARD(?: \([^)]*\))?: (.+)$/m.exec(r.brief)?.[1] ?? '';
+  if (suggestion.includes('as bars')) return 'bars';
+  if (suggestion.includes('a flow')) return 'flow';
+  if (suggestion.includes('equation term by term')) return 'formula';
+  return undefined;
+}
 const steps = (tour: Tour) => tour.chapters.flatMap((c) => c.steps);
 const types = (step: Step) => step.actions.map((a: Action) => a.type);
 
@@ -236,8 +245,8 @@ const TIMELINE = {
 function leaseModel(r: Request) {
   if (r.name === 'paper_card') return cardFor('contract', ['p1.s2', 'p1.s3', 'p2.s2']);
   if (r.name === 'tour_plan') return leasePlan;
-  if (r.schema.properties.bars) return plainDirection(r, { bars: COSTS });
-  if (r.schema.properties.flow) return plainDirection(r, { flow: TIMELINE });
+  if (suggestedBoard(r) === 'bars') return plainDirection(r, { bars: COSTS });
+  if (suggestedBoard(r) === 'flow') return plainDirection(r, { flow: TIMELINE });
   return plainDirection(r);
 }
 
@@ -259,7 +268,8 @@ test('a contract follows what you agree to, what it costs, its deadlines and its
   assert.equal(all.length, 8);
   // The parties' sentence sits in what ingestion took for an author block; outside papers it is content to cite.
   const card = requests.find((r) => r.name === 'paper_card')!;
-  assert.ok(card.schema.properties.problem.properties.evidence.items.enum.includes('p1.s2'));
+  assert.equal(card.schema.properties.problem.properties.evidence.items.$ref, '#/$defs/evidenceId');
+  assert.ok(card.schema.$defs.evidenceId.enum.includes('p1.s2'));
   assert.deepEqual(card.schema.properties.doc_type.enum, [
     'research_paper',
     'exercise_sheet',
@@ -353,7 +363,7 @@ test('a letter says what it is, what to do as a flow of steps, by when, and what
   } = await run(letter, (r) => {
     if (r.name === 'paper_card') return cardFor('letter', ['p1.s1', 'p1.s2', 'p1.s4']);
     if (r.name === 'tour_plan') return plan;
-    if (r.schema.properties.flow) return plainDirection(r, { flow: TIMELINE });
+    if (suggestedBoard(r) === 'flow') return plainDirection(r, { flow: TIMELINE });
     return plainDirection(r);
   });
   assert.deepEqual(
@@ -466,8 +476,8 @@ test('a lecture follows its own order: one chapter per topic, its figure right a
   } = await run(slides, (r) => {
     if (r.name === 'paper_card') return cardFor('lecture', ['p1.s1', 'p2.s1', 'p4.s1']);
     if (r.name === 'tour_plan') return plan;
-    if (r.schema.properties.formula) return plainDirection(r, { formula });
-    if (r.schema.properties.bars) return plainDirection(r, { bars: epochs });
+    if (suggestedBoard(r) === 'formula') return plainDirection(r, { formula });
+    if (suggestedBoard(r) === 'bars') return plainDirection(r, { bars: epochs });
     return plainDirection(r);
   });
   assert.deepEqual(
@@ -725,7 +735,7 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
   );
   // A line the code could not check is marked on the board; one its author doubts also asks the learner to check.
   const unchecked = step('ex2-step-1').actions.find((a) => a.type === 'board');
-  assert.equal(unchecked?.type === 'board' && unchecked.item.title, 'Multiply the diagonals · unchecked');
+  assert.equal(unchecked?.type === 'board' && unchecked.item.title, 'Multiply the diagonals · ungeprüft');
   assert.equal(step('ex2-step-1').say, 'We multiply one times minus one, and subtract two times three.');
   assert.equal(step('ex2-step-2').say, 'Minus one minus six gives minus seven.');
   // The verifier saw every solution line and the answer, once per part.
@@ -773,7 +783,7 @@ test('a solution line that does not check out gets one repair with the reason; s
   const answer = fixed.step('ex1.b-answer');
   assert.equal(answer.say, 'So x is twelve, and both sides of the equation agree. Please check this step yourself.');
   const board = answer.actions.find((a) => a.type === 'board');
-  assert.equal(board?.type === 'board' && board.item.title, 'Result · unchecked');
+  assert.equal(board?.type === 'board' && board.item.title, 'Result · ungeprüft');
   assert.equal(fixed.step('ex1.b-step-1').say, solution('ex1.b').steps[0].say);
 });
 

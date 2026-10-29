@@ -65,7 +65,9 @@ function enumOrNone(values: string[]) {
 /** The card's response schema; `strict` adds the ID enums the model must choose from (cleanCard re-checks them). */
 export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
   const text = { type: 'string', minLength: 1, maxLength: 300 };
-  const evidence = strict ? { type: 'string', enum: sentenceIds } : { type: 'string' };
+  // Repeating the same long enum in six fields exceeds the provider's total
+  // enum budget. A shared definition preserves every allowed source ID.
+  const evidence = strict ? { $ref: '#/$defs/evidenceId' } : { type: 'string' };
   const item = {
     type: 'object',
     additionalProperties: false,
@@ -84,6 +86,7 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
   });
   const short = { type: 'string', minLength: 1, maxLength: 80 };
   return {
+    ...(strict ? { $defs: { evidenceId: { type: 'string', enum: sentenceIds } } } : {}),
     type: 'object',
     additionalProperties: false,
     required: [

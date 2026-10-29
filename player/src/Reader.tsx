@@ -1,8 +1,8 @@
 import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Camera, cameraView, initialView, readingScale } from './camera';
+import { Camera, cameraView, fitWidthView, initialView, readingScale } from './camera';
 import type { View } from './camera';
-import { EMPTY_BOARD, TourEngine } from './engine';
+import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutPages } from './layout';
 import { loadManifest, loadPaper } from './load';
@@ -19,6 +19,7 @@ import { Problems } from './components/Problems';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import { TourGeneration } from './components/TourGeneration';
+import { TourDockStatus } from './components/TourDockStatus';
 import { isTourGenerationActive } from './library/tourGeneration';
 import { apiRequest, ApiRequestError, getSupabase } from './library/client';
 import type { DocumentManifest, ReaderState, SearchHit } from '../../shared/contracts';
@@ -28,6 +29,8 @@ import { AskPanel } from './ask/AskPanel';
 import type { AskContext } from './ask/AskPanel';
 import { answerTour, visualShown } from './ask/answer';
 import type { AskAnswer, AskSource } from './ask/api';
+import type { RegionSelection } from './ask/regionSelection';
+import { SelectionPreview } from './ask/SelectionPreview';
 import './reader.css';
 
 interface Params {
@@ -56,7 +59,7 @@ const IDLE: EngineState = {
   camera: { seq: 0, key: null, action: null },
   board: EMPTY_BOARD,
 };
-const EMPTY_SCENE: Scene = { pages: new Map(), spotlight: false, notes: [], labels: [] };
+const EMPTY_SCENE: Scene = { pages: new Map(), spotlight: false, notes: [], labels: [], obstacles: [] };
 const noSubscribe = () => () => {};
 const idleState = () => IDLE;
 
@@ -105,8 +108,11 @@ async function copyText(text: string): Promise<void> {
 
 export function Reader({ documentId, onBack }: { documentId?: string; onBack(): void }) {
   const params = useMemo(readParams, []);
+  const [activityRequest, setActivityRequest] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loadedAnalysisId, setLoadedAnalysisId] = useState<string | undefined>();
   const [fatal, setFatal] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const browserVoices = useBrowserVoices();
   const [speed, setSpeed] = useState(1);
@@ -117,10 +123,19 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selection, setSelection] = useState<OverlayEntry[]>([]);
+  const [regionSelection, setRegionSelection] = useState<RegionSelection | null>(null);
+  const [selectingRegion, setSelectingRegion] = useState(false);
+  const selectionCheckpoint = useRef<{ engine: TourEngine | null; playing: boolean } | null>(null);
+  useEffect(() => {
+    setRegionSelection(null);
+    setSelectingRegion(false);
+    selectionCheckpoint.current = null;
+  }, [documentId, params.paper]);
   const [currentPage, setCurrentPage] = useState(1);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -139,7 +154,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     let alive = true;
     let loading = false;
     let lastPoll = 0;
-    const accept = (value: Loaded) => {
+    let needsRetry = false;
+    let retryContent = false;
+    const accept = (value: Loaded, analysisId?: string) => {
       if (!alive) {
         if (value.pdf !== loadedRef.current?.pdf) retirePdf(value.pdf);
         return;
@@ -147,15 +164,18 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       const previousPdf = loadedRef.current?.pdf;
       loadedRef.current = value;
       setLoaded(value);
+      setLoadedAnalysisId(analysisId);
       if (previousPdf !== value.pdf) retirePdf(previousPdf);
     };
     const refresh = async () => {
       if (loading) return;
       lastPoll = Date.now();
       loading = true;
+      let fetchingManifest = !!documentId;
       try {
         if (!documentId) {
           accept(await loadPaper(params.paper));
+          if (alive) setFatal(null);
           return;
         }
         const pinnedTour = activeTour ?? manifestRef.current?.selectedTour?.id;
@@ -163,9 +183,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           `/api/documents/${documentId}/manifest${pinnedTour ? `?tourId=${encodeURIComponent(pinnedTour)}` : ''}`,
         );
         if (!alive) return;
+        fetchingManifest = false;
+        setRefreshError(null);
         const previous = manifestRef.current;
         const reloadPdf = !!loadedRef.current?.pdf && Date.now() - pdfOpenedAt.current > 45 * 60 * 1000;
         const changed =
+          retryContent ||
           !previous ||
           !isPdfOpen(loadedRef.current?.pdf) ||
           next.docAnalysisId !== previous.docAnalysisId ||
@@ -179,6 +202,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           if (next.selectedTour) setTab('tour');
         }
         if (changed) {
+          retryContent = true;
           if (previous && checkpointRef.current) savedPosition.current = checkpointRef.current;
           const previousPdf = loadedRef.current?.pdf;
           const value = await loadManifest(next, reloadPdf ? undefined : (loadedRef.current ?? undefined));
@@ -190,9 +214,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             throw new Error('The PDF connection could not be refreshed. Your current document is still open.');
           if (reloadPdf) restoredView.current = false;
           if (value.pdf && value.pdf !== previousPdf) pdfOpenedAt.current = Date.now();
-          accept(value);
+          accept(value, next.selectedTour?.analysisId ?? next.docAnalysisId ?? undefined);
+          retryContent = false;
         }
+        // Content failures force the reload above; validation problems remain on Loaded.
         setFatal(null);
+        needsRetry = false;
       } catch (error) {
         if (alive && error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) {
           setLoaded(null);
@@ -200,7 +227,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           onBack();
           return;
         }
-        if (alive) setFatal((error as Error).message);
+        if (alive) {
+          needsRetry = true;
+          if (fetchingManifest && loadedRef.current) setRefreshError((error as Error).message);
+          else setFatal((error as Error).message);
+        }
       } finally {
         loading = false;
       }
@@ -216,7 +247,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             ['queued', 'processing'].includes(current.analysis?.status ?? '') ||
             isTourGenerationActive(current.tourGeneration) ||
             (!!current.doc && !current.tours.length && !current.tourGeneration);
-          if (!document.hidden && (working || Date.now() - lastPoll > 60_000)) void refresh();
+          if (!document.hidden && (working || needsRetry || Date.now() - lastPoll > 60_000)) void refresh();
         }, 4000)
       : undefined;
     return () => {
@@ -284,24 +315,36 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const active = answer ?? engine;
 
   const scene = useMemo(
-    () => (resolver && layout ? buildScene([...state.overlays, ...selection], resolver, layout) : EMPTY_SCENE),
-    [state.overlays, selection, resolver, layout],
+    () =>
+      resolver && layout
+        ? buildScene(
+            [...state.overlays, ...selection],
+            resolver,
+            layout,
+            state.status === 'playing' ? state.camera.action : null,
+          )
+        : EMPTY_SCENE,
+    [state.overlays, state.camera, state.status, selection, resolver, layout],
   );
 
   // Camera: frame the engine's current camera command; re-frame instantly on resize.
   // `framed` is the last command and the view chosen for it, so a resize can frame it again.
-  const framed = useRef<{ cmd: CameraCommand; view: View } | null>(null);
+  const framed = useRef<{ cmd: CameraCommand; view: View; fitWidth?: boolean } | null>(null);
+  const fitSourceWidth = useRef(false);
+  fitSourceWidth.current = !!state.board.item;
   const frame = useCallback(
-    (cmd: CameraCommand, instant: boolean) => {
+    (cmd: CameraCommand, instant: boolean, retarget = false) => {
       if (!layout || !resolver) return;
       // A target that cannot be framed leaves the camera where it is; it must not take the app down.
       try {
         const vp = camera.viewport;
-        const view = cmd.action ? cameraView(cmd.action, resolver, layout, vp) : initialView(layout, vp);
+        const fitWidth = retarget ? fitSourceWidth.current || !!framed.current?.fitWidth : fitSourceWidth.current;
+        const view = cmd.action ? cameraView(cmd.action, resolver, layout, vp, { fitWidth }) : initialView(layout, vp);
         if (!view) return;
         if (instant) camera.jumpTo(view);
+        else if (retarget) camera.retargetTo(view);
         else camera.animateTo(view);
-        framed.current = { cmd, view: camera.targetView };
+        framed.current = { cmd, view: camera.targetView, fitWidth };
       } catch (err) {
         console.warn('[camera] could not frame', cmd.action, err);
       }
@@ -360,20 +403,26 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     const shown = last && camera.targetView === last.view ? last.cmd.action : null;
     return {
       stepId: tour && tour.status !== 'idle' ? main?.steps[tour.index]?.step.id : undefined,
-      figureId: ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
+      figureId: !regionSelection && ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
+      selection: regionSelection ?? undefined,
+      analysisId: loadedAnalysisId,
     };
-  }, [camera]);
+  }, [camera, regionSelection, loadedAnalysisId]);
 
   // A question pauses whatever plays; the first one of a conversation remembers where the tour was.
   const setAside = useCallback(() => {
     const { engine: main, answer: playing, away: was } = now.current;
+    const regionCheckpoint = selectionCheckpoint.current;
+    selectionCheckpoint.current = null;
+    setSelectingRegion(false);
     playing?.pause();
     if (!was) {
       const last = framed.current;
       const next: Away = {
         framed: last && camera.targetView === last.view ? last : null,
         view: camera.targetView,
-        playing: main?.getState().status === 'playing',
+        playing:
+          main?.getState().status === 'playing' || (regionCheckpoint?.engine === main && regionCheckpoint.playing),
       };
       now.current.away = next;
       setAway(next);
@@ -395,7 +444,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         fallbackNarrator: new SilentNarrator(),
         rate,
         beforeNarration: (signal) => camera.whenSettled(signal),
-      });
+        });
       // An answer step without a camera move keeps the view; it never jumps back to the first page.
       let lastCamera = 0;
       e.subscribe(() => {
@@ -417,6 +466,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const backToTour = useCallback(() => {
     const { engine: main, away: was, frame: show } = now.current;
     dropAnswer();
+    setRegionSelection(null);
     now.current.away = null;
     setAway(null);
     if (!was) return;
@@ -427,16 +477,47 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       camera.animateTo(was.view);
     }
   }, [camera, dropAnswer]);
-  // A question stopped before its answer came changes nothing, unless an earlier answer is still on screen.
-  const onAskCancelled = useCallback(() => {
-    if (!now.current.answer) backToTour();
-  }, [backToTour]);
   // Leaving the answer for somewhere else in the tour: no need to restore the view first.
   const leaveAnswer = useCallback(() => {
     dropAnswer();
     now.current.away = null;
     setAway(null);
   }, [dropAnswer]);
+
+  // Selection pauses the visible narration without losing the main tour checkpoint.
+  const beginRegionSelection = useCallback(() => {
+    const current = now.current.answer ?? now.current.engine;
+    if (!selectionCheckpoint.current)
+      selectionCheckpoint.current = { engine: current, playing: current?.getState().status === 'playing' };
+    current?.pause();
+    camera.jumpTo(camera.getView());
+    setSelectingRegion(true);
+  }, [camera]);
+  const cancelRegionSelection = useCallback(() => {
+    setSelectingRegion(false);
+    const checkpoint = selectionCheckpoint.current;
+    selectionCheckpoint.current = null;
+    if (checkpoint?.playing && checkpoint.engine === (now.current.answer ?? now.current.engine))
+      checkpoint.engine?.play();
+  }, []);
+  const acceptRegionSelection = useCallback((region: RegionSelection) => {
+    setRegionSelection(region);
+    setSelectingRegion(false);
+  }, []);
+  const clearRegionSelection = useCallback(() => {
+    setRegionSelection(null);
+    cancelRegionSelection();
+  }, [cancelRegionSelection]);
+  useEffect(() => {
+    if (!selectingRegion) return;
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      cancelRegionSelection();
+    };
+    window.addEventListener('keydown', cancel);
+    return () => window.removeEventListener('keydown', cancel);
+  }, [selectingRegion, cancelRegionSelection]);
 
   const onViewportChange = useCallback(() => {
     if (!layout) return;
@@ -449,7 +530,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     // closing, a window resize) frames that target again, so it stays whole and in view. Otherwise
     // reflow preserves the page-relative reading position, including restored/manual navigation.
     const last = framed.current;
-    if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating);
+    if (fitSourceWidth.current || last?.fitWidth) {
+      const wasFramed = last && camera.targetView === last.view;
+      const view = fitWidthView(camera.targetView, layout, camera.viewport);
+      if (camera.animating) camera.retargetTo(view);
+      else camera.jumpTo(view);
+      if (wasFramed) framed.current = { ...last, view: camera.targetView, fitWidth: true };
+    } else if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating, true);
     else camera.jumpTo(camera.getView());
   }, [camera, layout, frame]);
 
@@ -508,6 +595,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       setZoomPercent(Math.round(camera.getView().s * 100));
       const position = positionFromView(layout, camera.getView());
       setCurrentPage(position.page);
+      if (now.current.away) return;
       checkpointRef.current = { ...position, ...tourCheckpoint.current };
       clearTimeout(pendingSave.current);
       pendingSave.current = setTimeout(() => {
@@ -525,6 +613,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   }, [layout, camera]);
   useEffect(() => {
     if (!layout || !restoredView.current) return;
+    // A status change can arrive before the camera has returned from an answer. The settled
+    // camera subscription records the new checkpoint; never flush an intermediate answer view.
+    if (now.current.away || camera.animating) return;
     const value = { ...positionFromView(layout, camera.getView()), ...tourCheckpoint.current };
     checkpointRef.current = value;
     clearTimeout(pendingSave.current);
@@ -562,6 +653,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const navigateTo = useCallback(
     (id: string, kind?: string) => {
       if (!resolver || !layout) return;
+      setNavigationOpen(false);
       active?.pause();
       const action = { type: 'focus' as const, target: id };
       frame({ seq: 1, key: id, action }, false);
@@ -623,7 +715,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // fires while the learner types, in the ask bar or any other field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isInteractive(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'Escape' && navigationOpen) {
+        setNavigationOpen(false);
+        return;
+      }
+      if (selectingRegion || isInteractive(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === ' ') {
         e.preventDefault();
         active?.toggle();
@@ -639,7 +735,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active]);
+  }, [active, navigationOpen, selectingRegion]);
 
   const onCopyId = useCallback((id: string) => {
     void copyText(id);
@@ -738,10 +834,20 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   );
 
   return (
-    <div className="app reader-app">
+    <div className={`app reader-app${navigationOpen ? ' navigation-open' : ''}`}>
       <header className="reader-app-toolbar">
         <button className="reader-library-button" onClick={back}>
           ‹ <span>Library</span>
+        </button>
+        <button
+          type="button"
+          className="reader-navigation-toggle"
+          aria-controls="reader-navigation"
+          aria-expanded={navigationOpen}
+          aria-label={navigationOpen ? 'Close paper navigation' : 'Open paper navigation'}
+          onClick={() => setNavigationOpen((open) => !open)}
+        >
+          Contents
         </button>
         <div className="reader-tour-actions">
           {' '}
@@ -749,6 +855,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             <TourGeneration
               documentId={documentId}
               generation={manifest.tourGeneration}
+              activityRequest={activityRequest}
               canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
               onChanged={() => setManifestRefresh((value) => value + 1)}
               onOpenTour={
@@ -797,6 +904,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         state={mainState}
         docTitle={manifest?.document.title ?? loaded?.doc?.source.title}
         onJump={(i) => {
+          setNavigationOpen(false);
           setSelection([]);
           leaveAnswer();
           engine?.goTo(i);
@@ -972,7 +1080,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           </button>
         </div>
         {layout ? (
-          <BoardSplit board={state.board} camera={camera}>
+          <BoardSplit board={state.board} playback={boardPlayback(state, active?.steps ?? [])}>
             <div className="ask-stage">
               <Stage
                 pdf={loaded?.pdf ?? null}
@@ -982,11 +1090,28 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 debugPages={debug ? debugPages : null}
                 onViewportChange={onViewportChange}
                 onCopyId={onCopyId}
+                selecting={selectingRegion}
+                regionSelection={regionSelection}
+                onSelectRegion={acceptRegionSelection}
+                onCancelSelection={cancelRegionSelection}
               />
               {loaded?.doc && (
                 <div className="ask-lane">
                   <AskPanel
                     className="ask-dock"
+                    tourStatus={
+                      <TourDockStatus
+                        documentId={documentId}
+                        generation={manifest?.tourGeneration}
+                        state={state}
+                        steps={active?.steps ?? []}
+                        chapter={active?.tour.chapters[active.steps[state.index]?.chapterIndex ?? 0]?.title}
+                        answering={!!answer}
+                        onActivity={
+                          manifest?.tourGeneration ? () => setActivityRequest((request) => request + 1) : undefined
+                        }
+                      />
+                    }
                     source={askSource}
                     tourId={documentId ? selectedTourId : null}
                     context={askContext}
@@ -994,9 +1119,20 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     ended={mainState.status === 'ended'}
                     away={!!away}
                     answering={answerState.status === 'playing'}
+                    answerPaused={!!answer && answerState.status === 'paused'}
+                    onPauseAnswer={() => now.current.answer?.pause()}
+                    onContinueAnswer={() => now.current.answer?.play()}
+                    resumeLabel={engine ? (answer ? 'Back to the tour' : 'Continue tour') : 'Back to the document'}
+                    selection={regionSelection}
+                    selecting={selectingRegion}
+                    selectionPreview={
+                      regionSelection && <SelectionPreview pdf={loaded.pdf} selection={regionSelection} />
+                    }
+                    onSelectRegion={beginRegionSelection}
+                    onClearRegion={clearRegionSelection}
+                    onCancelSelection={cancelRegionSelection}
                     onAsk={setAside}
                     onAnswer={onAnswer}
-                    onCancel={onAskCancelled}
                     onResume={backToTour}
                   />
                 </div>
@@ -1007,7 +1143,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           <div className="viewport loading">{fatal ? `Could not load the paper: ${fatal}` : 'Loading paper…'}</div>
         )}
 
-        {(errors.length > 0 || fatal || saveError || manifest?.analysis?.error) && (
+        {(errors.length > 0 || fatal || refreshError || saveError || manifest?.analysis?.error) && (
           <div className="banner" role="alert">
             {errors.map((p, i) => (
               <div key={i}>{p.message}</div>
@@ -1017,6 +1153,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 {fatal} <button onClick={back}>Back to library</button>
               </div>
             )}
+            {refreshError && <div title={refreshError}>Could not refresh the document. Reconnecting…</div>}
             {saveError && <div>{saveError}</div>}
             {manifest?.analysis?.error && <div>{manifest.analysis.error} The PDF remains available to read.</div>}
           </div>

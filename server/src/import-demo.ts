@@ -38,7 +38,9 @@ try {
     // Validate the exact original and tour before storing anything.
     await prepareAnalysis(pdf, temp, c, source);
     const service = new DocumentService(db, storage, async () => {});
-    const reserved = await service.reserve(owner, 'Attention Is All You Need.pdf', pdf.length);
+    const metadata = JSON.parse(await readFile(source.doc, 'utf8'));
+    const title = String(metadata.source?.title || 'Imported demo').slice(0, 190);
+    const reserved = await service.reserve(owner, `${title}.pdf`, pdf.length);
     await storage.upload(reserved.path, pdf, 'application/pdf');
     const analysisId = randomUUID();
     await db.transaction(async (tx) => {
