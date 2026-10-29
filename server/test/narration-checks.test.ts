@@ -95,7 +95,7 @@ function narrator(problem: unknown[], seen: Request[] = []) {
   let problemCalls = 0;
   return (request: Request) => {
     if (request.name === 'paper_card') return card;
-    if (request.name === 'visual_plan') return planFor(request);
+    if (['visual_plan', 'opening_visual'].includes(request.name)) return planFor(request);
     // The quick checks of a standard paper tour are not what these tests are about: nothing to ask, nothing counted.
     if (request.name === 'quick_check') return checkReply(request, { fits: false });
     seen.push(request);

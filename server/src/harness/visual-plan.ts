@@ -41,9 +41,13 @@ export const kindLimit = (kind: BoardKind) => (kind === 'formula' || kind === 'p
 export const plannableBeats = (beats: Beat[]) =>
   beats.some((beat) => beat.unit) ? beats.filter((beat) => beat.unit) : beats;
 
-/** What the plan is for: an exercise sheet's tasks, whose solution lines stay formula boards, or the steps of a tour. */
+/**
+ * What the plan is for: an exercise sheet's tasks, whose solution lines stay formula boards, or the steps of a tour.
+ * `settled` says that some steps were planned ahead of it (planOpening): the call leaves them out and counts them.
+ */
 export interface PlanOptions {
   sheet?: boolean;
+  settled?: boolean;
 }
 /** The kinds an exercise sheet's plan offers: a formula is what the solution lines already are. */
 export const sheetKinds = () => BOARD_KINDS.filter((kind) => kind !== 'formula' && kind !== 'timeline');
@@ -77,14 +81,15 @@ export const exampleKinds = (visual?: StepVisual): readonly BoardKind[] =>
  * may also use the kinds that show a mechanism and that the plan has not used up: each unit of room goes to one such
  * step, in turn, so that two steps never take the same room.
  */
-export function allocateFrames(plan: VisualPlan, beats: Beat[]): VisualPlan {
+export function allocateFrames(plan: VisualPlan, beats: Beat[], settled: ReadonlySet<string> = new Set()): VisualPlan {
   const used = new Map<BoardKind, number>();
   for (const entry of plan.values())
     if (entry.visual !== 'none') used.set(entry.visual, (used.get(entry.visual) ?? 0) + 1);
   const room = (kind: BoardKind) => kindLimit(kind) - (used.get(kind) ?? 0);
+  // A step planned ahead of the rest (planOpening) was written with its frames already; they are not allotted again.
   const carrying = beats.filter((beat) => {
     const entry = plan.get(beat.id);
-    return entry && exampleRules(beat, entry).offered;
+    return entry && !settled.has(beat.id) && exampleRules(beat, entry).offered;
   });
   const flexible = carrying.filter((beat) => ['formula', 'none'].includes(plan.get(beat.id)!.visual));
   const slots = MECHANISM_KINDS.flatMap((kind) => Array.from({ length: Math.max(0, room(kind)) }, () => kind));
@@ -211,9 +216,11 @@ ${kinds}
 5. Answer with one entry per step, in tour order. For none, leave "idea" and "data" empty.`;
 }
 
-export function visualPlanTask(language: string, { sheet }: PlanOptions = {}): string {
+const kindsList = () => KINDS_ORDER.map((kind) => `   - ${kind}: ${KINDS_HELP[kind]}`).join('\n');
+
+export function visualPlanTask(language: string, { sheet, settled }: PlanOptions = {}): string {
   if (sheet) return sheetPlanTask(language);
-  const kinds = KINDS_ORDER.map((kind) => `   - ${kind}: ${KINDS_HELP[kind]}`).join('\n');
+  const kinds = kindsList();
   return `TASK: design the side-board visuals of this tour, which is narrated in ${JSON.stringify(language)}.
 For each step decide whether a visual would make the step's point click, and which one. A visual must show what the
 document is trying to show at that step (its mechanism, relationship or trade-off) in a way the page alone cannot.
@@ -233,7 +240,34 @@ ${kinds}
    items (words of an example sentence, settings, methods), never "item 1".
 4. A step on a worked numerical case names the kind that shows its mechanism, and its example frames use that kind (bars
    only for a few comparable quantities of one unit). Frames count toward each kind's limit.
-5. Answer with one entry per step, in tour order. For none, leave "idea" and "data" empty.`;
+5. Answer with one entry per step, in tour order. For none, leave "idea" and "data" empty.${
+    settled
+      ? `
+6. A step marked "already planned" keeps its visual: leave it out of your answer, and count its kind toward every limit
+   above, so that no other step repeats its picture.`
+      : ''
+  }`;
+}
+
+/**
+ * The task of the call that plans the opening step alone (planOpening), which the learner waits for: it runs while the
+ * tour's claims are still being found, sees the document card only, and its choice is kept by the plan of the other steps.
+ */
+export function openingPlanTask(language: string): string {
+  return `TASK: decide the side-board visual of the OPENING step of this tour, which is narrated in ${JSON.stringify(language)}.
+The opening step says what the document does and the problem it answers, then names the claims the tour takes next. It is
+listed below as the first step. A second call plans the other steps right after this one and keeps your choice: about
+half of all the steps get a visual, each kind is used at most once in the whole tour (formula and plot at most twice),
+and diversity comes first. The learner is waiting for this step to start, so a visual here must be simple.
+1. The kinds and what they are for:
+${kindsList()}
+2. Choose a visual only when it makes the opening point click in a way the page alone cannot. None is right when the page
+   already shows it, when the point is simple, or when a later step is likelier to need that kind (a figure step teaches
+   on the figure itself, and a results step has the document's numbers).
+3. If you choose one, "idea" says in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks, and
+   "data" says exactly which numbers, symbols or labels it uses (at most ${DATA_WORDS} words): document values copied as
+   printed, anything else marked illustrative. Labels are real items, never "item 1".
+4. Answer with one entry, for the opening step. For none, leave "idea" and "data" empty.`;
 }
 
 const trimmed = (text: string, max = 280) => {
@@ -245,7 +279,7 @@ const trimmed = (text: string, max = 280) => {
  * The document card and every step with its point, its evidence sentences and its figure or equation, then the tables
  * the steps stand on, as read from the page.
  */
-export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc): string {
+export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc, settled: VisualPlan = new Map()): string {
   const sentences = new Map(doc.sentences.map((s) => [s.id, s.text]));
   const quote = (ids: string[], max: number) =>
     ids.slice(0, max).flatMap((id) => (sentences.has(id) ? [`    [${id}] ${trimmed(sentences.get(id)!)}`] : []));
@@ -277,6 +311,9 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc): strin
     const figure = doc.figures.find((f) => f.id === beat.target);
     const equation = doc.equations.find((e) => e.id === beat.target);
     lines.push(`[${beat.id}] ${beat.kind} step${beat.detail ? ' (a closer look at one detail)' : ''}`);
+    const ahead = settled.get(beat.id);
+    if (ahead)
+      lines.push(`  already planned (leave it out of your answer; it counts toward the limits): ${visualLine(ahead)}`);
     lines.push(`  the point: ${beat.point}`);
     if (figure) lines.push(`  on ${figure.kind} ${figure.number}, page ${figure.page}: ${trimmed(figure.caption)}`);
     if (listed(figure)) lines.push('  its rows and columns are listed under TABLES below');
@@ -346,11 +383,15 @@ export function cleanVisualPlan(
   value: unknown,
   beats: Beat[],
   { sheet }: PlanOptions = {},
+  settled: VisualPlan = new Map(),
 ): { plan: VisualPlan | null; problems: string[]; adjusted: PlanAdjustment[] } {
   const known = new Set(beats.map((beat) => beat.id));
   const kinds = new Set<string>(['none', ...BOARD_KINDS]);
   const listed = (value as { beats?: unknown } | null)?.beats;
-  const entries = new Map<string, StepVisual>();
+  // A step planned ahead of the rest is kept as it was decided, and counted before any other step: the tour's limits
+  // hold for it too.
+  const entries = new Map<string, StepVisual>([...settled].filter(([id]) => known.has(id)));
+  const ahead = entries.size;
   const problems: string[] = [];
   for (const raw of Array.isArray(listed) ? listed : []) {
     const entry = (raw ?? {}) as Record<string, unknown>;
@@ -376,18 +417,25 @@ export function cleanVisualPlan(
       data: visual === 'none' ? '' : words(entry.data, DATA_WORDS),
     });
   }
-  if (!entries.size) return { plan: null, problems: problems.length ? problems : ['beats: no entry'], adjusted: [] };
+  if (entries.size === ahead)
+    return { plan: null, problems: problems.length ? problems : ['beats: no entry'], adjusted: [] };
   const plan: VisualPlan = new Map();
   const adjusted: PlanAdjustment[] = [];
   const used = new Map<BoardKind, number>();
   const room = Math.max(1, Math.floor(beats.length * BOARD_SHARE));
   const tasks = new Set<string>();
   let boards = 0;
+  for (const [id, entry] of entries)
+    if (settled.has(id) && entry.visual !== 'none') {
+      used.set(entry.visual, (used.get(entry.visual) ?? 0) + 1);
+      boards++;
+    }
   for (const beat of beats) {
     const entry = entries.get(beat.id) ?? { visual: 'none' as const, idea: '', data: '' };
     const none = { visual: 'none' as const, idea: '', data: '' };
     const task = beat.unit?.task.id;
-    if (entry.visual === 'none') plan.set(beat.id, entry);
+    if (settled.has(beat.id)) plan.set(beat.id, entry);
+    else if (entry.visual === 'none') plan.set(beat.id, entry);
     else if (sheet && entry.visual === 'formula') {
       plan.set(beat.id, none);
       adjusted.push({ beat: beat.id, visual: 'formula', reason: 'the solution lines are formula boards already' });
@@ -458,12 +506,14 @@ export function tableSteps(beats: Beat[], doc: Doc): TableStep[] {
  * only learns its table. Otherwise the first such step takes the kind of the first ready board that the variety rules
  * leave room for: a free step before a step with another board, one not in detail before a detail; when every kind
  * its table offers is used up, the last step elsewhere with such a board gives it up. The plan stays within the limits
- * of each kind and the share of steps with a board, and every change is recorded.
+ * of each kind and the share of steps with a board, and every change is recorded. A step planned ahead of the rest
+ * (`settled`) is already written and never gives its board up.
  */
 export function withTableBoard(
   plan: VisualPlan,
   beats: Beat[],
   doc: Doc,
+  settled: ReadonlySet<string> = new Set(),
 ): { plan: VisualPlan; adjusted: PlanAdjustment[] } {
   const out: VisualPlan = new Map(plan);
   const adjusted: PlanAdjustment[] = [];
@@ -491,7 +541,7 @@ export function withTableBoard(
         const others = holders(view.kind).filter((id) => id !== beat.id);
         const giving =
           takeover && others.length >= kindLimit(view.kind)
-            ? others.filter((id) => !results.has(id)).at(-1)
+            ? others.filter((id) => !results.has(id) && !settled.has(id)).at(-1)
             : undefined;
         const fits = giving !== undefined || others.length < kindLimit(view.kind);
         if (!fits || boards + (free ? 1 : 0) - (giving === undefined ? 0 : 1) > room) continue;
@@ -536,4 +586,28 @@ export function visualPlanEvent(plan: VisualPlan, beats: Beat[]) {
     const entry = plan.get(beat.id);
     return entry ? [{ beat: beat.id, ...entry }] : [];
   });
+}
+
+/**
+ * What the opening step is told about the worked example it may carry. The plan of the other steps allots example frames
+ * only once it is done, and the opening is written before; so its frames stay in its own kind, which the tour's limits
+ * already count. A step planned as a relationship (heatmap, scatter, plot, ...) or as none carries no example.
+ */
+export function openingEntry(entry: StepVisual): StepVisual {
+  return entry.visual === 'none' || RELATIONAL_KINDS.includes(entry.visual)
+    ? entry
+    : { ...entry, frames: [entry.visual] };
+}
+
+/**
+ * The visual of the opening step from the answer of the call that plans it alone (openingPlanTask), checked like any plan
+ * of one step: null when the answer has no usable entry.
+ */
+export function cleanOpeningPlan(
+  value: unknown,
+  beat: Beat,
+): { visual: StepVisual | null; problems: string[]; adjusted: PlanAdjustment[] } {
+  const checked = cleanVisualPlan(value, [beat]);
+  const entry = checked.plan?.get(beat.id);
+  return { visual: entry ? openingEntry(entry) : null, problems: checked.problems, adjusted: checked.adjusted };
 }

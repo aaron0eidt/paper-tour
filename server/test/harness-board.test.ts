@@ -337,7 +337,7 @@ function provider(script: Script, requests: Request[]): typeof fetch {
     const value =
       request.name === 'paper_card'
         ? card
-        : request.name === 'visual_plan'
+        : ['visual_plan', 'opening_visual'].includes(request.name)
           ? { plan: 'none', beats: [] }
           : ((kind &&
               script[kind]?.(

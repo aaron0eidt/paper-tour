@@ -394,6 +394,20 @@ function statedEvidence(claim: Claim, doc: Doc): string[] {
 }
 
 /**
+ * The step that opens a claim-organised paper tour, as far as the card alone decides it: the problem, in the places the
+ * card cites for it and for the key idea. The claims it names are added by the plan.
+ */
+export const thesisBeat = (card: PaperCard): Omit<Beat, 'id'> => ({
+  kind: 'problem',
+  arc: 'problem',
+  point: card.problem.text || card.key_idea.text,
+  evidence: [...new Set([...card.problem.evidence, ...card.key_idea.evidence])].slice(0, 3),
+  move: 'thesis',
+  role: MOVE_SPECS.thesis.role,
+  say: MOVE_SPECS.thesis.words,
+});
+
+/**
  * A paper's tour organised by its claims: the thesis, then each claim in its own chapter (what changed, why it works, the
  * evidence with its scope, the catch), then the takeaway, sized by the preset. Claims are taken in the order their
  * evidence stands in the paper, so the camera mostly moves forward. A step the claim has no material for is left out.
@@ -515,13 +529,7 @@ export function claimPlan(claims: Claim[], card: PaperCard, doc: Doc, preset: Pr
   for (const chapter of chapters)
     chapter.parts = chapter.parts.filter(({ beat }) => beat.move !== 'catch' || ++catches <= CATCH_LIMITS[preset]);
   const opening: Part = {
-    kind: 'problem',
-    arc: 'problem',
-    point: card.problem.text || card.key_idea.text,
-    evidence: [...new Set([...card.problem.evidence, ...card.key_idea.evidence])].slice(0, 3),
-    move: 'thesis',
-    role: MOVE_SPECS.thesis.role,
-    say: MOVE_SPECS.thesis.words,
+    ...thesisBeat(card),
     notes: [`THE TOUR'S CLAIMS, in order: ${ordered.map((c, i) => `${i + 1}) ${c.claim}`).join(' | ')}`],
   };
   const closing: Part = {

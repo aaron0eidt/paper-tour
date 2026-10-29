@@ -168,7 +168,7 @@ test('an example whose frames take a kind another step has planned is corrected,
     provider((request) => {
       requests.push(request);
       if (request.name === 'paper_card') return card;
-      if (request.name === 'visual_plan')
+      if (['visual_plan', 'opening_visual'].includes(request.name))
         return planFor(request, (id) =>
           id === 'method-1'
             ? { visual: 'bars', idea: 'Show the readings of the probes.', data: 'illustrative' }

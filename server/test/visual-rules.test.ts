@@ -532,7 +532,7 @@ function model(
 ) {
   return (request: Request) => {
     if (request.name === 'paper_card') return card;
-    if (request.name === 'visual_plan') return planFor(request, (id) => plan[id] ?? 'none');
+    if (['visual_plan', 'opening_visual'].includes(request.name)) return planFor(request, (id) => plan[id] ?? 'none');
     const kind = /STEP KIND: (\w+)/.exec(request.task)?.[1] ?? '';
     attempts[kind] = (attempts[kind] ?? 0) + 1;
     return direct(request, EXPLAIN, answers[kind]?.(attempts[kind]) ?? {});
@@ -788,7 +788,7 @@ test('a step loses its board and board cues but keeps its narration and page cue
 // ------------------------------------------------------------------------------------------------------- the prompts
 
 test('the prompts and the visual plan state the rules briefly', () => {
-  assert.equal(HARNESS_VERSION, 'paper-tour-harness@31');
+  assert.equal(HARNESS_VERSION, 'paper-tour-harness@32');
   const prompt = (board?: Parameters<typeof directTask>[2]['board']) =>
     directTask('en', 'BRIEF', { actions: ['highlight', 'board_focus'], board, words: 120 });
   assert.match(prompt(), /A step that reports results \(a result or a table\) draws only the document’s own numbers/);

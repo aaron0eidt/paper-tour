@@ -407,7 +407,7 @@ function model(check: (request: Request, n: number) => unknown = (r) => checkRep
   return (request: Request) => {
     names.push(request.name);
     if (request.name === 'paper_card') return card;
-    if (request.name === 'visual_plan') return planFor(request);
+    if (['visual_plan', 'opening_visual'].includes(request.name)) return planFor(request);
     if (request.name === 'quick_check') return check(request, asked++);
     return direct(request, EXPLAIN);
   };
@@ -451,7 +451,7 @@ test('a standard paper tour pauses after its mechanism and after its result, and
     { id: 'check-1', chapter: 'method', kind: 'predict', hints: 2 },
     { id: 'check-2', chapter: 'evidence', kind: 'predict', hints: 2 },
   ]);
-  assert.equal((metadata as any).promptVersion, 'paper-tour-harness@31');
+  assert.equal((metadata as any).promptVersion, 'paper-tour-harness@32');
   const plan = events.find((e) => e.type === 'plan.ready')!;
   assert.deepEqual(plan.data.checks, [
     { chapter: 'method', after: 'figure-1' },

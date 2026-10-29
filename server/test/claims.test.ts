@@ -253,7 +253,9 @@ function provider(model: (r: Request) => unknown, requests: Request[] = []): typ
       brief: texts.find((t) => t.startsWith('TASK:') && !t.startsWith('TASK: understand')) ?? '',
     };
     requests.push(request);
-    const value = request.name === 'visual_plan' ? { plan: 'none', beats: [] } : model(request);
+    const value = ['visual_plan', 'opening_visual'].includes(request.name)
+      ? { plan: 'none', beats: [] }
+      : model(request);
     return new Response(
       JSON.stringify({
         choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }],
@@ -531,6 +533,102 @@ test('a paper without an abstract or a conclusion is toured as before, with no c
   })();
   assert.equal(requests.filter((r) => r.name === 'claims').length, 0);
   assert.equal(metadata.planSource, 'code');
+});
+
+// ------------------------------------------------------------------------------- claims beside the card
+
+/** A transport that the test steers by call name; a held call waits until the generation aborts it. */
+function steered(hold: (name: string) => Promise<void> | undefined, requests: Request[]) {
+  const inner = provider(model(), requests);
+  return (async (url: unknown, init?: RequestInit) => {
+    const name = JSON.parse(String(init?.body)).response_format.json_schema.name;
+    const wait = hold(name);
+    if (wait) await wait;
+    return inner(url as never, init);
+  }) as typeof fetch;
+}
+const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+
+test('the claims of a paper are asked for while its card is written, not after it', async () => {
+  const requests: Request[] = [];
+  let asked!: () => void;
+  const claimsAsked = new Promise<void>((resolve) => (asked = resolve));
+  const transport = steered((name) => {
+    if (name === 'claims') asked();
+    // The card is held until the claims call has been sent: a writer that waited for the card first would never get there.
+    if (name === 'paper_card')
+      return Promise.race([
+        claimsAsked,
+        sleep(2000).then(() => Promise.reject(new Error('the claims were not asked while the card was written'))),
+      ]);
+  }, requests);
+  const { metadata } = await new HarnessTourGenerator(settings, 'standard', transport).generate(input);
+  assert.deepEqual(
+    requests.slice(0, 2).map((r) => r.name),
+    ['claims', 'paper_card'],
+  );
+  assert.equal(requests.filter((r) => r.name === 'claims').length, 1, 'the claims are not asked twice');
+  assert.equal(metadata.planSource, 'claims');
+  assert.equal((metadata.claims as unknown[]).length, 3);
+});
+
+test('the claims asked for beside the card are dropped when the card says the document is not a paper', async () => {
+  const events: { type: string; data: any }[] = [];
+  const requests: Request[] = [];
+  const stopped: string[] = [];
+  const asLetter = (r: Request) => (r.name === 'paper_card' ? { ...card, doc_type: 'letter' } : undefined);
+  const inner = provider(model(asLetter), requests);
+  const transport = (async (url: unknown, init?: RequestInit) => {
+    const name = JSON.parse(String(init?.body)).response_format.json_schema.name;
+    // The claims never answer: the call has to be cancelled for the tour to be written without it.
+    if (name === 'claims')
+      return new Promise<Response>((_, reject) =>
+        init!.signal!.addEventListener('abort', () => (stopped.push(name), reject(new Error('aborted')))),
+      );
+    return inner(url as never, init);
+  }) as typeof fetch;
+  const { metadata } = await new HarnessTourGenerator(settings, 'standard', transport).generate({
+    ...input,
+    onEvent: async (type, data) => {
+      events.push({ type, data });
+    },
+  });
+  await sleep(10);
+  assert.deepEqual(stopped, ['claims'], 'the call was cancelled, not left to finish');
+  assert.ok(!events.some((e) => e.type === 'claims.ready'));
+  assert.equal(metadata.docType, 'letter');
+  assert.equal(metadata.claims, undefined);
+  assert.equal(requests.filter((r) => r.name === 'opening_visual').length, 0, 'no paper, no opening plan');
+});
+
+test('a card that cannot be made ends the claims call that was asked for beside it', async () => {
+  const stopped: string[] = [];
+  const transport = (async (_url: unknown, init?: RequestInit) => {
+    const name = JSON.parse(String(init?.body)).response_format.json_schema.name;
+    if (name === 'paper_card') return new Response('denied', { status: 401 });
+    return new Promise<Response>((_, reject) =>
+      init!.signal!.addEventListener('abort', () => (stopped.push(name), reject(new Error('aborted')))),
+    );
+  }) as typeof fetch;
+  await assert.rejects(
+    new HarnessTourGenerator(settings, 'standard', transport).generate(input),
+    (error: { code?: string }) => error.code === 'muse_auth_failed',
+  );
+  await sleep(10);
+  assert.deepEqual(stopped, ['claims']);
+});
+
+test('a claims call that fails for good fails the tour, as it did before it ran beside the card', async () => {
+  const requests: Request[] = [];
+  const transport = steered(() => undefined, requests);
+  const denied = (async (url: unknown, init?: RequestInit) => {
+    const name = JSON.parse(String(init?.body)).response_format.json_schema.name;
+    return name === 'claims' ? new Response('denied', { status: 401 }) : transport(url as never, init);
+  }) as typeof fetch;
+  await assert.rejects(
+    new HarnessTourGenerator(settings, 'standard', denied).generate(input),
+    (error: { code?: string }) => error.code === 'muse_auth_failed',
+  );
 });
 
 // --------------------------------------------------------------------------------------------- the moves

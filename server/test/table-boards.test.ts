@@ -187,7 +187,8 @@ test('a tour whose plan leaves the table to the page still draws its numbers on 
     const requests: Request[] = [];
     const model = (request: Request) => {
       if (request.name === 'paper_card') return tableCard;
-      if (request.name === 'visual_plan') return planFor(request, (id) => (id === 'idea-1' ? 'plot' : 'none'));
+      if (['visual_plan', 'opening_visual'].includes(request.name))
+        return planFor(request, (id) => (id === 'idea-1' ? 'plot' : 'none'));
       if (!/STEP KIND: figure/.test(request.task)) return direct(request, explain);
       // The model reads the ready board from its brief and copies it, or leaves the board out.
       const line = request.task.split('\n').find((l) => /^- (scatter|heatmap|bars), /.test(l));

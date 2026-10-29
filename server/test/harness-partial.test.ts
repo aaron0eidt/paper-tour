@@ -24,7 +24,7 @@ function transport(gate?: { kind: string; opened: Promise<void> }): typeof fetch
       typeof content === 'string' ? content : content.map((p: any) => p.text ?? '').join('\n');
     const task: string = body.messages.map((m: any) => text(m.content)).join('\n');
     if (name === 'paper_card') return reply(card);
-    if (name === 'visual_plan') return reply({ plan: 'none', beats: [] });
+    if (['visual_plan', 'opening_visual'].includes(name)) return reply({ plan: 'none', beats: [] });
     // A quick check closes the method and the evidence chapter of a standard paper tour.
     if (name === 'quick_check') return reply(checkReply({ schema } as never));
     if (gate && task.includes(`STEP KIND: ${gate.kind}`)) await gate.opened;

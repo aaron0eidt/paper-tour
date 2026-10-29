@@ -166,7 +166,9 @@ function provider(model: (r: Request) => unknown, requests: Request[] = []): typ
       images: all.filter((p: any) => p.type === 'image_url').length,
     };
     requests.push(request);
-    const value = request.name === 'visual_plan' ? { plan: 'none', beats: [] } : model(request);
+    const value = ['visual_plan', 'opening_visual'].includes(request.name)
+      ? { plan: 'none', beats: [] }
+      : model(request);
     return new Response(
       JSON.stringify({
         choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }],

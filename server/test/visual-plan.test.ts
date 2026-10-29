@@ -525,7 +525,8 @@ test('a rejected key still fails the tour at the plan call, before any step is d
     provider((r) => (names.push(r.name), r.name === 'paper_card' ? card : reply({}, 401))),
   );
   await assert.rejects(generator.generate(input), (e: { code?: string }) => e.code === 'muse_auth_failed');
-  assert.deepEqual(names, ['paper_card', 'visual_plan']);
+  // The opening step's own plan runs beside the plan of the tour; its refusal costs nothing, the tour's plan fails the job.
+  assert.deepEqual(names, ['paper_card', 'opening_visual', 'visual_plan']);
 });
 
 const move = (id: string, ...actions: Action[]): Step => ({ id, say: 'one two three four five six', actions });

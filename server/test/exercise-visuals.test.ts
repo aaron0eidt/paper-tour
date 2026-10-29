@@ -648,6 +648,49 @@ test('a sheet draws the planned visual for a task once the part is solved, and i
   assert.deepEqual(metadata.degraded, []);
 });
 
+test('a sheet’s overview is written and announced before the plan of its visuals is made; a task’s visual waits for the plan', async () => {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => (open = resolve));
+  const requests: Request[] = [];
+  const events: { type: string; data: Record<string, any> }[] = [];
+  const inner = provider(
+    sheetModel(
+      (id) => (id === 'exercise-ex1.a' ? 'heatmap' : 'none'),
+      [draw(grid(), [{ target: 'row-1', anchor: 'the sick people' }])],
+    ),
+    requests,
+  );
+  const held = (async (url: unknown, init?: RequestInit) => {
+    // The plan is held back until the overview has been announced; a writer that waited for it would never get there.
+    if (JSON.parse(String(init?.body)).response_format.json_schema.name === 'visual_plan')
+      await Promise.race([
+        opened,
+        new Promise((_, no) => setTimeout(() => no(new Error('the overview waited for the plan')), 3000)),
+      ]);
+    return inner(url as never, init);
+  }) as typeof fetch;
+  const { tour } = await new HarnessTourGenerator(settings, 'standard', held, verifier).generate({
+    ...input(sheet),
+    onEvent: async (type, data) => {
+      events.push({ type, data });
+      if (type === 'tour.partial') open();
+    },
+  });
+  const order = events.map((e) => e.type);
+  assert.ok(order.indexOf('tour.partial') < order.indexOf('visual.plan'));
+  assert.equal(events.find((e) => e.type === 'tour.partial')!.data.ready, 1);
+  assert.equal(events.find((e) => e.type === 'beat.completed')!.data.beat, 'overview-1');
+  // The overview and the takeaway are written with no visual, as they are when the plan has been made.
+  for (const kind of ['overview', 'takeaway'])
+    assert.match(
+      requests.find((r) => r.name === 'beat_direction' && r.task.includes(`STEP KIND: ${kind}`))!.task,
+      /VISUAL FOR THIS STEP: none/,
+    );
+  // The task's visual is drawn once the plan is made and the part solved, as before.
+  assert.deepEqual(boards(allSteps(tour).find((s) => s.id === 'ex1.a-method')!), ['heatmap']);
+  assert.equal(requests.filter((r) => r.name === 'visual_plan').length, 1);
+});
+
 test('a sheet keeps the plan to one visual per task and to the kinds that differ', async () => {
   const { requests, events, all } = await generate(sheetModel(() => 'heatmap', [draw()]));
   // Every task asked for a heatmap: the first is kept, the other part of the same task and the second task are not.

@@ -143,13 +143,13 @@ export function reply(value: unknown, status = 200) {
 }
 /** One request to the scripted model: the call's name, its response schema, the whole conversation and its brief. */
 export type Request = { name: string; schema: any; task: string; messages: string[] };
-export function provider(fn: (request: Request) => Response | unknown): typeof fetch {
+export function provider(fn: (request: Request) => Response | unknown | Promise<Response | unknown>): typeof fetch {
   return (async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     const text = (content: any) =>
       typeof content === 'string' ? content : content.map((p: any) => p.text ?? '').join('\n');
     const messages: string[] = body.messages.map((m: any) => text(m.content));
-    const result = fn({
+    const result = await fn({
       name: body.response_format.json_schema.name,
       schema: body.response_format.json_schema.schema,
       task: messages.join('\n'),

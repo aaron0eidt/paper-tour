@@ -137,7 +137,9 @@ function provider(model: Model, requests: Request[]): typeof fetch {
           {
             finish_reason: 'stop',
             message: {
-              content: JSON.stringify(request.name === 'visual_plan' ? { plan: 'none', beats: [] } : model(request)),
+              content: JSON.stringify(
+                ['visual_plan', 'opening_visual'].includes(request.name) ? { plan: 'none', beats: [] } : model(request),
+              ),
             },
           },
         ],

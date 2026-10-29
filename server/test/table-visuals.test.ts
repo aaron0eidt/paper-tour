@@ -275,7 +275,7 @@ test('a tour whose model copies the ready board of a table plays it, and one tha
     const requests: Request[] = [];
     const model = (request: Request) => {
       if (request.name === 'paper_card') return tableCard;
-      if (request.name === 'visual_plan')
+      if (['visual_plan', 'opening_visual'].includes(request.name))
         return planFor(request, (id) =>
           id === 'figure-1'
             ? { visual: 'scatter', idea: 'Savings against cost.', data: 'Water saved (%) against Pump cost (EUR).' }
