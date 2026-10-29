@@ -51,9 +51,9 @@ export interface Unit {
 /** Tour length for a sheet by preset: longer than a paper's, since a solution step is short. */
 export const SHEET_STEPS: Record<Preset, number> = { quick: 10, standard: 22, deep: 30 };
 const STEP_CAP: Record<Preset, number> = { quick: 2, standard: 3, deep: 4 };
-/** The checkpoint's limits, as the tour schema states them. */
-const COACH_PROMPT_MAX = 300;
-const COACH_HINT_MAX = 200;
+/** The checkpoint's limits, as the tour schema states them (a paper's quick checks keep to them too, check.ts). */
+export const COACH_PROMPT_MAX = 300;
+export const COACH_HINT_MAX = 200;
 /** Most sentences (or formulas) of a task a solve call may cite from. */
 const UNIT_IDS = 400;
 const COACH_HINTS = 3;

@@ -184,3 +184,19 @@ export function direct(request: Request, say: string, extra: object = {}) {
     : [];
   return { plan: 'p', say, cues, ...extra };
 }
+
+/** A quick check for the chapter in the request: the question, two hints that keep the answer back, and the answer pointing at the first target the schema allows. */
+export function checkReply(request: Request, over: object = {}) {
+  return {
+    plan: 'p',
+    fits: true,
+    kind: 'predict',
+    prompt: 'Before the next step: what does a valve do when its probe reads wet soil?',
+    hints: ['Think about what the controller compares the reading with.', 'The valve opens only below a threshold.'],
+    answer: 'It stays shut, so no water is spent on soil that is already wet.',
+    keys: ['shut'],
+    target: request.schema.properties.target.enum[0],
+    anchor: 'no water is spent',
+    ...over,
+  };
+}

@@ -552,7 +552,8 @@ export class DocumentService implements Library {
     const d = await this.owned(owner, id);
     if (state.page > (d.page_count ?? 100))
       throw new HttpError(400, 'invalid_position', 'The page is outside this PDF.');
-    if (!state.tourId && state.stepId) throw new HttpError(400, 'invalid_position', 'A tour step needs its tour.');
+    // A step with no tour is a place in a tour still being written (it has no tours row until it is finished, and the
+    // reader saves where the learner is as it plays). Which step it is can only be checked against a saved tour.
     if (state.tourId) {
       const {
         rows: [tour],

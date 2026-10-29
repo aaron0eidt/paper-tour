@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Step, Tour } from '../../shared/paper';
 import { HarnessTourGenerator } from './harness-fixture';
-import { card, doc, input, reply, settings } from './plan-fixture';
+import { card, checkReply, doc, input, reply, settings } from './plan-fixture';
 import { frameSteps, tourProblems } from '../src/harness/assemble';
 import type { Preset } from '../src/harness/beats';
 
@@ -11,7 +11,7 @@ import type { Preset } from '../src/harness/beats';
 
 type Event = { type: string; data: Record<string, any> };
 const SAY =
-  'Water goes only where the soil is dry, so wet corners stop costing twice, in the pump bill and in the roots.';
+  'Water goes only where the soil is dry, so wet corners stop costing twice, in the pump bill and in the roots. Because the dose follows the reading, the amount tracks the need instead of the calendar, and nothing is spent on soil that has no use for it.';
 const steps = (tour: Tour) => tour.chapters.flatMap((c) => c.steps);
 
 /** A scripted model in which one kind of step waits until the test lets it go. */
@@ -25,6 +25,8 @@ function transport(gate?: { kind: string; opened: Promise<void> }): typeof fetch
     const task: string = body.messages.map((m: any) => text(m.content)).join('\n');
     if (name === 'paper_card') return reply(card);
     if (name === 'visual_plan') return reply({ plan: 'none', beats: [] });
+    // A quick check closes the method and the evidence chapter of a standard paper tour.
+    if (name === 'quick_check') return reply(checkReply({ schema } as never));
     if (gate && task.includes(`STEP KIND: ${gate.kind}`)) await gate.opened;
     const cue = schema.properties.cues.items.properties;
     const target = cue.target.enum?.[0];
@@ -59,7 +61,8 @@ test('the tour so far is announced each time the next steps in order are finishe
   let total = 0;
   const result = await run('standard', { kind: 'takeaway', opened: last.opened }, (event) => {
     events.push(event);
-    if (event.type === 'plan.ready') total = event.data.beats.length;
+    // The steps of the tour: one per beat, and two for each quick check that closes a chapter.
+    if (event.type === 'plan.ready') total = event.data.beats.length + 2 * (event.data.checks?.length ?? 0);
     // Everything but the last step is announced, then the last step is allowed to finish.
     if (event.type === 'tour.partial' && event.data.ready === total - 1) last.open();
   });
@@ -67,6 +70,7 @@ test('the tour so far is announced each time the next steps in order are finishe
   const partials = events.filter((e) => e.type === 'tour.partial');
   assert.ok(partials.length >= 1);
   assert.equal(final.length, total);
+  assert.equal(final.filter((s) => s.checkpoint).length, 2, 'the checks are part of the tour that is announced');
   let before = 0;
   for (const { data } of partials) {
     const tour = data.tour as Tour;

@@ -121,6 +121,15 @@ export function growthOf(held: HeldPartial | null, status: TourGenerationStatus 
   }
 }
 
+/**
+ * The growth as the learner should see it. What can be played is what the reader holds, and after a retry that has not
+ * yet written as far as the attempt before it did, that is more than the new attempt's steps: the counts shown must
+ * agree with the list of steps. The same object comes back when nothing changes.
+ */
+export function withPlayableSteps(growth: Growth | null, playable: number): Growth | null {
+  return growth && playable > growth.steps ? { ...growth, steps: playable } : growth;
+}
+
 /** What the timeline and the sidebar say while the tour waits for its next step. */
 export function writingLabel(growth: Pick<Growth, 'phase'> | null | undefined): string {
   return growth?.phase === 'retrying' ? 'Writing the tour again' : 'Writing the next step';

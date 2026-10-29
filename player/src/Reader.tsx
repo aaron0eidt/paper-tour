@@ -20,6 +20,7 @@ import type { KeyTarget } from './keys';
 import { buildClock } from './tourClock';
 import { BoardSplit } from './components/Board';
 import { CoachCard } from './components/CoachCard';
+import { checkpointKind } from './components/checkpointWords';
 import { ControlBar } from './components/ControlBar';
 import { Filmstrip } from './components/Filmstrip';
 import type { DebugPage } from './components/PageView';
@@ -33,7 +34,7 @@ import { isTourGenerationActive } from './library/tourGeneration';
 import { apiRequest, ApiRequestError, getSupabase } from './library/client';
 import { usePartialTour } from './library/usePartialTour';
 import type { PartialSource } from './library/usePartialTour';
-import { currentStatus, growthOf, partialPath, playablePartial } from './partialTour';
+import { currentStatus, growthOf, partialPath, playablePartial, withPlayableSteps } from './partialTour';
 import { readGrowthPlan, simulatedSource } from './dev/growth';
 import type { DocumentManifest, ReaderState, SearchHit, TourPartialView } from '../../shared/contracts';
 import type { OverlayEntry } from './engine';
@@ -1132,6 +1133,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   // The time the steps still to be written are expected to take shows on the timeline as a stretch of its own.
   const pending = growing && !answer ? Math.max(1, (growth?.planned ?? 0) - (engine?.steps.length ?? 0)) : 0;
+  // The learner can play what the engine holds, which after a retry can be more than the new attempt has written so far.
+  const playable = withPlayableSteps(growth, engine?.steps.length ?? 0);
   const clock = useMemo(
     () => (active ? buildClock(active.steps, { rate: speed * params.rate, voices: active.tour.voices, pending }) : null),
     [active, state.revision, speed, params.rate, pending],
@@ -1319,7 +1322,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         tour={tab === 'tour' ? (engine?.tour ?? null) : null}
         steps={steps}
         state={mainState}
-        growth={growth}
+        growth={playable}
         docTitle={readerTitle({
           doc: manifest?.document.title ?? loaded?.doc?.source.title,
           tour: tourSource?.title,
@@ -1550,7 +1553,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               {endOpen && engine && (
                 <TourEnd
                   tour={engine.tour}
-                  stopped={growth?.phase === 'stopped' ? growth : null}
+                  stopped={playable?.phase === 'stopped' ? playable : null}
                   questions={loaded?.doc ? openQuestions(engine.tour.suggested_questions, asked) : []}
                   ready={readyQuestions}
                   onReplayChapter={(step) => {
@@ -1569,7 +1572,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               {loaded?.doc && (
                 <div className="ask-lane">
                   {coachStep?.checkpoint && (
-                    <CoachCard key={coachStep.step.id} checkpoint={coachStep.checkpoint} onSolve={() => active?.reveal()} />
+                    <CoachCard key={coachStep.step.id} checkpoint={coachStep.checkpoint} kind={checkpointKind(coachStep.step.id)} onSolve={() => active?.reveal()} />
                   )}
                   <AskPanel
                     className="ask-dock"
@@ -1578,7 +1581,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                         documentId={documentId}
                         generation={manifest?.tourGeneration}
                         hasTour={!!engine?.steps.length}
-                        steps={growth ? { ready: growth.steps, planned: growth.planned } : null}
+                        steps={playable ? { ready: playable.steps, planned: playable.planned } : null}
                         onActivity={
                           manifest?.tourGeneration ? () => setActivityRequest((request) => request + 1) : undefined
                         }

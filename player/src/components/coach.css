@@ -1,5 +1,6 @@
-/* The "Your turn" pause. A calm glass card above the question bar: what to try, hints that arrive one at a time, and a
-   way to go on. It floats over the stage like the ask dock, so the camera keeps the task in view above it. */
+/* The pause where the learner tries first: "Your turn" on an exercise sheet, "Quick check" between the chapters of a
+   paper or a deck. A calm glass card above the question bar: what to try, hints that arrive one at a time, and a way
+   to go on. It floats over the stage like the ask dock, so the camera keeps the task in view above it. */
 
 .coach-card {
   --coach-ease: cubic-bezier(0.2, 0.8, 0.2, 1);

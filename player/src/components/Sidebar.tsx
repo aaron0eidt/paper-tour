@@ -4,6 +4,7 @@ import type { EngineState, FlatStep } from '../engine';
 import { stoppedCopy, writingLabel } from '../partialTour';
 import type { Growth } from '../partialTour';
 import type { Tour } from '../types';
+import { CHECKPOINT_WORDS, checkpointKind } from './checkpointWords';
 
 interface Props {
   tour: Tour | null;
@@ -78,6 +79,7 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
                     .map((s) => {
                       const current = started && s.index === state.index;
                       const past = s.index < done && !current;
+                      const pause = s.checkpoint ? CHECKPOINT_WORDS[checkpointKind(s.step.id)] : null;
                       return (
                         <li key={s.step.id}>
                           <button
@@ -87,7 +89,7 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
                           >
                             <span className="step-dot" />
                             <span className="step-text">{stepLabel(s.step.say)}</span>
-                            {s.checkpoint && <span className="step-try" aria-label="Your turn">Try</span>}
+                            {pause && <span className="step-try" aria-label={pause.heading}>{pause.chip}</span>}
                           </button>
                         </li>
                       );

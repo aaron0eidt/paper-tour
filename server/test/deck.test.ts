@@ -18,8 +18,9 @@ import {
   type DeckPlan,
 } from '../src/harness/deck';
 import { deckLike } from '../src/harness/doctype';
+import { checkReply } from './plan-fixture';
 import { paperBlock, proseSentences } from '../src/harness/paper-block';
-import { findAnchor } from '../src/harness/assemble';
+import { findAnchor, tourProblems } from '../src/harness/assemble';
 import type { Preset } from '../src/harness/beats';
 
 // A lecture deck is planned slide by slide in its own order: boilerplate slides are skipped, trivial neighbours merge into
@@ -464,6 +465,47 @@ test('a deck tour is planned slide by slide, narrated in the lecturer’s voice,
   );
   assert.deepEqual((metadata.deck as any).steps, [[3], [4, 5], [6, 7], [8]]);
   assert.equal(tour.suggested_questions?.length, 3);
+});
+
+test('a lecture pauses after its sections that teach: a quick check, then the answer on the slide', async () => {
+  // Six content slides as six steps in three sections; the last section is the summary, which no check follows.
+  const sections = {
+    ...plan,
+    beats: [3, 4, 5, 6, 7, 8].map((n) => ({
+      slides: [String(n)],
+      chapter: n < 5 ? 'Why sort' : n < 8 ? 'Two algorithms' : 'The numbers',
+      title: `Slide ${n}`,
+      point: `What slide ${n} adds to the lecture's story about sorting.`,
+      callback: '0',
+    })),
+  };
+  const events: { type: string; data: any }[] = [];
+  const { tour, all, requests, metadata } = await run(
+    model((r) => (r.name === 'deck_plan' ? sections : r.name === 'quick_check' ? checkReply(r as never) : undefined)),
+    'standard',
+    deck,
+    events,
+  );
+  assert.deepEqual(
+    tour.chapters.map((c) => [c.title, c.steps.map((s) => s.id).join(' ')]),
+    [
+      ['Why sort', 'point-1 point-2 check-1 check-1-answer'],
+      ['Two algorithms', 'point-3 point-4 point-5 check-2 check-2-answer'],
+      ['The numbers', 'point-6'],
+    ],
+  );
+  assert.equal(requests.filter((r) => r.name === 'quick_check').length, 2);
+  // The answer flies to a sentence of the section's slides and marks it.
+  const [camera, mark] = all.find((s) => s.id === 'check-1-answer')!.actions as any[];
+  assert.match(mark.targets[0], /^p[34]\.s\d$/);
+  assert.deepEqual(
+    [camera.type, camera.target, mark.type, mark.color],
+    ['focus', mark.targets[0], 'highlight', 'green'],
+  );
+  assert.equal(all.find((s) => s.id === 'check-2')!.checkpoint?.hints.length, 2);
+  assert.deepEqual(tourProblems(tour, deck), []);
+  assert.equal((metadata as any).quickChecks.length, 2);
+  assert.equal(events.filter((e) => e.type === 'check.written').length, 2);
 });
 
 test('a highlight on another slide of the step moves the camera there, at the same word', async () => {

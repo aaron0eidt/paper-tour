@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app';
 import { HttpError } from '../src/errors';
-import type { Db } from '../src/db';
+import type { Database, Db } from '../src/db';
+import { DocumentService } from '../src/service';
 import type { Library } from '../src/service';
+import type { FileStorage } from '../src/storage';
 import { clearPartial, partialFromEvent, partialSink, partialView, savePartial } from '../src/tour-partial';
 import type { TourPartial } from '../src/tour-partial';
 import type { Doc, Tour } from '../../shared/paper';
@@ -341,4 +343,44 @@ test('a server without partial tours says so, and the reader falls back to the f
     assert.equal(response.statusCode, 503);
     assert.equal(response.json().error.code, 'partial_unavailable');
   });
+});
+
+// ------------------------------------------------------------------------- the reader's place in a growing tour
+
+/** A service over a script of answers: the document is the owner's, a tour is never found. */
+function positions(pageCount: number | null = 8) {
+  const seen: string[] = [];
+  const query = async (text: string) => {
+    seen.push(text.replace(/\s+/g, ' ').trim());
+    if (text.includes('from documents')) return { rows: [{ id: documentId, page_count: pageCount }], rowCount: 1 };
+    if (text.includes('from tours')) return { rows: [], rowCount: 0 };
+    return { rows: [], rowCount: 1 };
+  };
+  const db = { pool: { query }, query, transaction: async (run: (tx: unknown) => unknown) => run({ query }) } as unknown as Database;
+  return { seen, service: new DocumentService(db, {} as FileStorage, async () => {}) };
+}
+const place = (over: Record<string, unknown> = {}) => ({ page: 2, pageOffset: 0.4, zoom: 1, tourId: null, stepId: null, ...over });
+
+test('the reader can save the step it is on in a tour that is still being written', async () => {
+  // A partial is never a tours row, so its steps have no tour id: this used to answer 400 on every step and the reader
+  // showed "Reading position could not be saved" for as long as the first steps played.
+  const { seen, service } = positions();
+  await service.saveState('the-owner', documentId, place({ stepId: 's3' }));
+  assert.ok(seen.some((text) => text.startsWith('insert into reader_states')), 'the place is kept');
+  assert.ok(!seen.some((text) => text.includes('from tours')), 'there is no saved tour to look the step up in');
+});
+
+test('a step of a saved tour is still checked against that tour, and a page outside the PDF is refused', async () => {
+  const { seen, service } = positions();
+  await assert.rejects(
+    () => service.saveState('the-owner', documentId, place({ tourId: attempt, stepId: 's3' })),
+    (error) => error instanceof HttpError && error.status === 404,
+    'a tour of another document or a deleted one',
+  );
+  assert.ok(seen.some((text) => text.includes('from tours')));
+  assert.ok(!seen.some((text) => text.startsWith('insert into reader_states')));
+  await assert.rejects(
+    () => positions(8).service.saveState('the-owner', documentId, place({ page: 9 })),
+    (error) => error instanceof HttpError && error.status === 400,
+  );
 });

@@ -91,7 +91,8 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // `open` is a document the notice offers to open: one just uploaded, whose tour can play before it is finished.
+  const [notice, setNotice] = useState<{ text: string; open?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('recent');
@@ -172,7 +173,7 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
     setError(null);
     try {
       await apiRequest(`/api/documents/${item.id}/analyze`, { method: 'POST' });
-      setNotice(`Preparing “${item.title}” again.`);
+      setNotice({ text: `Preparing “${item.title}” again.` });
       refreshDocuments();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not restart the analysis. Try again.');
@@ -215,10 +216,11 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
           allowTraining={allowTraining}
           canUpload={!!profile.data && canUseModel(models.catalog, model, allowTraining) && !models.loading}
           onChanged={refreshDocuments}
-          onUploaded={() => {
-            setNotice(
-              'PDF saved. We’ll prepare its contents, then create a guided tour. You can read it while this runs.',
-            );
+          onUploaded={(documentId) => {
+            setNotice({
+              text: 'PDF saved. We’ll prepare its contents, then write a guided tour; its first steps can play while the rest is still being written.',
+              open: documentId,
+            });
             refreshDocuments();
           }}
         />
@@ -232,15 +234,22 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
         )}
         {notice && (
           <div className="library-feedback library-notice" role="status">
-            <span>{notice}</span>
-            <button
-              type="button"
-              className="library-text-button"
-              onClick={() => setNotice(null)}
-              aria-label="Dismiss notice"
-            >
-              Dismiss
-            </button>
+            <span>{notice.text}</span>
+            <span className="library-notice-actions">
+              {notice.open && (
+                <button type="button" className="library-text-button" onClick={() => onOpenDocument(notice.open!)}>
+                  Open it now
+                </button>
+              )}
+              <button
+                type="button"
+                className="library-text-button"
+                onClick={() => setNotice(null)}
+                aria-label="Dismiss notice"
+              >
+                Dismiss
+              </button>
+            </span>
           </div>
         )}
         <div className="library-toolbar">

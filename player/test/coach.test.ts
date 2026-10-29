@@ -2,6 +2,7 @@
 // Node with esbuild like the other player tests (no test framework), with a fake narrator and fake timers.
 
 import { MAX_HINTS, hintLabel, moreHints, normalizeCheckpoint } from '../src/coach';
+import { CHECKPOINT_WORDS, checkpointKind } from '../src/components/checkpointWords';
 import { FADE_MS, TourEngine, flattenTour } from '../src/engine';
 import type { EngineState, Timers } from '../src/engine';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from '../src/narration/narrator';
@@ -86,6 +87,14 @@ test('hints come one at a time, up to the number there are', () => {
   eq([0, 1, 2, 3].map((n) => hintLabel(n, 3)), ['Hint (1 of 3)', 'Another hint (2 of 3)', 'Another hint (3 of 3)', null], 'labels');
   eq(hintLabel(0, 1), 'Hint', 'a single hint is just "Hint"');
   eq(hintLabel(0, 0), null, 'no hints, no button');
+});
+
+test('a quick check between chapters reads as one; any other checkpoint is the learner’s turn', () => {
+  eq(['check-1', 'check-2', 'check-12'].map(checkpointKind), ['check', 'check', 'check'], 'the writer’s quick checks');
+  eq(['ex1.a-try', 'ex1-try', 'method-1', 'check-1-answer', 'check-', 'check', ''].map(checkpointKind), ['try', 'try', 'try', 'try', 'try', 'try', 'try'], 'the rest');
+  eq(checkpointKind(undefined), 'try', 'no id');
+  eq(CHECKPOINT_WORDS.try, { heading: 'Your turn', chip: 'Try', reveal: 'Show solution', revealTitle: 'Show the solution (Space)' }, 'an exercise keeps its words');
+  eq(CHECKPOINT_WORDS.check, { heading: 'Quick check', chip: 'Check', reveal: 'Show answer', revealTitle: 'Show the answer (Space)' }, 'a paper or a deck is asked for an answer, not a solution');
 });
 
 // ------------------------------------------------------------------------------------------------ the engine

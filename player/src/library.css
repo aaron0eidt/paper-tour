@@ -251,6 +251,11 @@
   background: #182238;
   border: 1px solid #304469;
 }
+.library-notice-actions {
+  display: flex;
+  gap: 16px;
+  flex: none;
+}
 .library-toolbar {
   display: flex;
   justify-content: space-between;

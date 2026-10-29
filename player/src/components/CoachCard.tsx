@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { hintLabel, moreHints } from '../coach';
 import type { Checkpoint } from '../types';
+import { CHECKPOINT_WORDS, type CheckpointKind } from './checkpointWords';
 import './coach.css';
 
 interface Props {
   checkpoint: Checkpoint;
+  /** An exercise's "Your turn" (the default) or a "Quick check" between the chapters of a paper or a deck. */
+  kind?: CheckpointKind;
   /** The learner is done trying (or gives up): the tour goes on and the next step reveals the answer. */
   onSolve(): void;
 }
@@ -15,9 +18,11 @@ function isTyping(target: EventTarget | null): boolean {
 
 /**
  * The pause where the learner tries first: the prompt, a hint button that gives the hints one at a time, and "Show
- * solution", which lets the tour go on. The reader keys it by step, so each checkpoint starts without hints.
+ * solution" ("Show answer" for a quick check), which lets the tour go on. The reader keys it by step, so each
+ * checkpoint starts without hints.
  */
-export function CoachCard({ checkpoint, onSolve }: Props) {
+export function CoachCard({ checkpoint, kind = 'try', onSolve }: Props) {
+  const words = CHECKPOINT_WORDS[kind];
   const [shown, setShown] = useState(0);
   const total = checkpoint.hints.length;
   const label = hintLabel(shown, total);
@@ -38,13 +43,13 @@ export function CoachCard({ checkpoint, onSolve }: Props) {
   }, []);
 
   return (
-    <section className="coach-card" role="region" aria-label="Your turn">
+    <section className="coach-card" role="region" aria-label={words.heading}>
       <header className="coach-head">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 20l4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20z" />
           <path d="M13.5 7.5l3 3" />
         </svg>
-        <span>Your turn</span>
+        <span>{words.heading}</span>
       </header>
       <p className="coach-prompt">{checkpoint.prompt}</p>
       {/* The region is there from the start, so a hint that arrives in it is read out. */}
@@ -69,8 +74,8 @@ export function CoachCard({ checkpoint, onSolve }: Props) {
             <span>{label}</span>
           </button>
         )}
-        <button type="button" className="coach-btn primary" onClick={onSolve} title="Show the solution (Space)">
-          <span>Show solution</span>
+        <button type="button" className="coach-btn primary" onClick={onSolve} title={words.revealTitle}>
+          <span>{words.reveal}</span>
         </button>
       </div>
     </section>

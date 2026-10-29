@@ -16,7 +16,8 @@ interface PendingUpload {
 }
 
 interface UploadPanelProps {
-  onUploaded(): void;
+  /** The upload is saved and its analysis queued; the document's id lets the library offer to open it at once. */
+  onUploaded(documentId: string): void;
   onChanged(): void;
   model: string;
   allowTraining: boolean;
@@ -137,7 +138,7 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
       setStage('idle');
       setFilename('');
       if (input.current) input.current.value = '';
-      onUploaded();
+      onUploaded(reservation.documentId);
     } catch (cause) {
       if (!active()) return;
       setError(uploadErrorMessage(cause));

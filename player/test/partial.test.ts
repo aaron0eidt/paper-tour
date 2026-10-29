@@ -7,7 +7,7 @@ import { flattenTour } from '../src/engine';
 import { followPartial } from '../src/library/followPartial';
 import type { PartialFollow, PartialSource } from '../src/library/followPartial';
 import { ApiRequestError } from '../src/library/client';
-import { acceptPartial, countSteps, currentStatus, growthOf, partialPath, playablePartial, stoppedCopy, writingLabel } from '../src/partialTour';
+import { acceptPartial, countSteps, currentStatus, growthOf, partialPath, playablePartial, stoppedCopy, withPlayableSteps, writingLabel } from '../src/partialTour';
 import type { HeldPartial } from '../src/partialTour';
 import { buildClock, wordAt } from '../src/tourClock';
 import type { Doc, Tour } from '../src/types';
@@ -148,6 +148,20 @@ await test('what the learner is told: writing, writing again, or why it stopped'
   eq([stopped.label, stopped.title], ['Stopped early', 'The tour stopped early']);
   if (!stopped.detail.includes('first 2 steps')) throw new Error(stopped.detail);
   if (!stoppedCopy(growthOf(held({ tour: leadingSteps(tour, 1), ready: 1 }), 'cancelled')!).detail.includes('the first step')) throw new Error('one step');
+});
+
+await test('after a retry the counts shown are the steps the learner can play, not the new attempt\'s fewer', () => {
+  // The reader keeps the steps of the attempt before while the new one catches up; the list shows them, so the counts must.
+  const retrying = growthOf(held({ tour: leadingSteps(tour, 2), ready: 2 }), 'generating');
+  eq([retrying?.steps, retrying?.planned], [2, 5]);
+  eq([withPlayableSteps(retrying, 4)?.steps, withPlayableSteps(retrying, 4)?.planned], [4, 5], 'the engine holds 4');
+  eq(withPlayableSteps(retrying, 4)?.phase, retrying?.phase, 'nothing else changes');
+  if (withPlayableSteps(retrying, 2) !== retrying) throw new Error('as many as the attempt has: the same object');
+  if (withPlayableSteps(retrying, 1) !== retrying) throw new Error('fewer: the same object');
+  if (withPlayableSteps(retrying, 0) !== retrying) throw new Error('no engine yet: the same object');
+  eq(withPlayableSteps(null, 4), null, 'no growth to show');
+  const stopped = withPlayableSteps(growthOf(held({ tour: leadingSteps(tour, 2), ready: 2 }), 'failed'), 4)!;
+  if (!stoppedCopy(stopped).detail.includes('first 4 steps')) throw new Error(stoppedCopy(stopped).detail);
 });
 
 await test('the status shown is the poll\'s while the generation runs, and the manifest\'s once it does not', () => {

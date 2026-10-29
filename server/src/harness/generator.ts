@@ -46,6 +46,18 @@ import { moveProblems } from './moves';
 import { imageParts, pool } from './calls';
 import { recordedCalls } from '../ai/recorded-calls';
 import { cardProblems, cardSchema, cleanCard, evidencePool, fallbackCard, repairTurn, type PaperCard } from './card';
+import {
+  CHECK_STEPS,
+  checkBrief,
+  checkMaterial,
+  checkSchema,
+  checkSites,
+  checkSteps,
+  checkTargets,
+  checkTask,
+  cleanCheck,
+  type CheckSite,
+} from './check';
 import type { BoardKind } from './board';
 import { boardStepsOf, degradeDirection, withoutBoards, type Degraded } from './degrade';
 import {
@@ -357,6 +369,8 @@ export class HarnessTourGenerator implements TourGenerator {
     }
     const { beats } = plan;
     if (!beats.length) throw new ProcessingError('invalid_tour', 'This document has no text a tour could explain.');
+    // Quick checks close a few chapters of a paper or a lecture; each is written once the chapter's steps are.
+    const sites = checkSites(plan, this.preset);
     await input.onEvent?.('plan.ready', {
       preset: this.preset,
       docType: plan.type,
@@ -377,6 +391,9 @@ export class HarnessTourGenerator implements TourGenerator {
             skipped: deckPlan.skipped,
             ...(uncovered.length ? { uncovered } : {}),
           }
+        : {}),
+      ...(sites.length
+        ? { checks: sites.map((site) => ({ chapter: site.chapter.id, after: beats[site.beats.at(-1)!].id })) }
         : {}),
     });
 
@@ -769,17 +786,20 @@ export class HarnessTourGenerator implements TourGenerator {
     // The tour as one step list per beat: a beat's own steps, or none for an omitted detail or a step that only read the
     // source aloud. Built once per beat, since a finished beat never changes.
     const beatSteps = new Map<number, Step[]>();
+    // The quick check that closes a beat's chapter (check.ts): written with the beat, and its steps follow the beat's own.
+    const quick = new Map<number, Step[]>();
+    const quickChecks: { id: string; chapter: string; kind: string; hints: number }[] = [];
+    const siteAt = new Map(sites.map((site) => [site.beats.at(-1)!, site]));
+    const ownSteps = (i: number, result: BeatResult): Step[] => {
+      if ('steps' in result) return result.steps;
+      if (beats[i].detail && !result.direction) return [];
+      const step = beatStep(beats[i], result.targets, result.direction, doc);
+      return readsSource(step.say, doc) ? [] : [step];
+    };
     const stepsOf = (i: number): Step[] => {
       const known = beatSteps.get(i);
       if (known) return known;
-      const result = results[i];
-      let out: Step[];
-      if ('steps' in result) out = result.steps;
-      else if (beats[i].detail && !result.direction) out = [];
-      else {
-        const step = beatStep(beats[i], result.targets, result.direction, doc);
-        out = readsSource(step.say, doc) ? [] : [step];
-      }
+      const out = [...ownSteps(i, results[i]), ...(quick.get(i) ?? [])];
       beatSteps.set(i, out);
       return out;
     };
@@ -832,7 +852,10 @@ export class HarnessTourGenerator implements TourGenerator {
 
     // Progressive tours: each time the next steps in tour order are complete, the tour of exactly those leading steps is
     // announced (assembled and checked like the final one, so that it can be played while the rest is written).
-    const planned = beats.reduce((n, beat) => n + (beat.unit ? unitOverhead(beat.unit) + beat.unit.steps : 1), 0);
+    // Counting the quick checks still to come; a check the writer skips takes its two steps off again.
+    let planned =
+      beats.reduce((n, beat) => n + (beat.unit ? unitOverhead(beat.unit) + beat.unit.steps : 1), 0) +
+      sites.length * CHECK_STEPS;
     let announced = 0;
     let announcing: Promise<void> = Promise.resolve();
     const announce = () => {
@@ -860,6 +883,80 @@ export class HarnessTourGenerator implements TourGenerator {
       const promise = new Promise<void>((resolve) => (done = resolve));
       return { promise, done };
     });
+    /**
+     * The steps of the quick check that closes a chapter (check.ts), written from the chapter's finished steps, so the
+     * beats before the last one are awaited first. A check is optional: nothing to ask about, an answer the model cannot
+     * fix or a provider fault costs the check, never the tour.
+     */
+    const closeChapter = async (site: CheckSite, last: () => Step[]): Promise<Step[]> => {
+      const skip = async (reason: string): Promise<Step[]> => {
+        planned -= CHECK_STEPS;
+        await input.onEvent?.('check.skipped', { chapter: site.chapter.id, reason });
+        return [];
+      };
+      const before = site.beats.slice(0, -1);
+      for (const i of before) await finished[i].promise;
+      signal.throwIfAborted();
+      if (before.some((i) => results[i] === undefined)) return skip('a step of the chapter failed');
+      let chapter: Step[];
+      try {
+        chapter = [...before.flatMap(stepsOf), ...last()];
+      } catch {
+        return skip('a step of the chapter could not be built');
+      }
+      const material = checkMaterial(
+        site.chapter.title,
+        chapter,
+        site.beats.map((i) => beats[i]),
+        doc,
+      );
+      if (!material.ready) return skip('too little to ask about');
+      const task: MuseMessage[] = [
+        ...prefix,
+        { role: 'user', content: [{ type: 'text', text: checkTask(language, checkBrief(material)) }] },
+      ];
+      const lastBeat = beats[site.beats.at(-1)!];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const completion = await call(
+            task,
+            'quick_check',
+            checkSchema(checkTargets(material)),
+            6_000,
+            'low',
+            signal,
+            { id: lastBeat.id, label: `Quick check: ${site.chapter.title}` },
+          );
+          const checked = cleanCheck(completion.value, material, doc);
+          if (checked.declined) return skip('nothing in the chapter to predict or recall');
+          if (checked.check) {
+            const { kind, hints, target } = checked.check;
+            quickChecks.push({ id: `check-${site.n}`, chapter: site.chapter.id, kind, hints: hints.length });
+            await input.onEvent?.('check.written', {
+              chapter: site.chapter.id,
+              check: `check-${site.n}`,
+              kind,
+              hints: hints.length,
+              target,
+            });
+            return checkSteps(checked.check, site.n, chapter, doc);
+          }
+          await input.onEvent?.('validation.failed', {
+            stage: 'check',
+            chapter: site.chapter.id,
+            problems: checked.problems,
+            attempt: attempt + 1,
+          });
+          task.push(...repairTurn(completion.value, checked.problems));
+        } catch (error) {
+          signal.throwIfAborted();
+          if (!recoverable(error)) throw error;
+          // The model's own fault gets the one retry; a provider fault ends the attempts.
+          if ((error as ProcessingError).transient) break;
+        }
+      }
+      return skip('no usable check');
+    };
     const write = async ({ beat, index }: { beat: Beat; index: number }) => {
       try {
         const overview = beat.detail
@@ -873,6 +970,13 @@ export class HarnessTourGenerator implements TourGenerator {
         await input.onEvent?.('beat.started', { beat: beat.id });
         try {
           const result = await direct(beat);
+          // The check follows the chapter's last step, and the beat counts as done only with it, so that the
+          // progressive tour never shows the chapter without it.
+          const site = siteAt.get(index);
+          if (site) {
+            const steps = await closeChapter(site, () => ownSteps(index, result));
+            if (steps.length) quick.set(index, steps);
+          }
           results[index] = result;
           if ('degraded' in result && result.degraded)
             await input.onEvent?.('beat.degraded', { beat: beat.id, ...result.degraded });
@@ -967,6 +1071,8 @@ export class HarnessTourGenerator implements TourGenerator {
               beat.detail && 'direction' in results[i] && !(results[i] as { direction: Direction | null }).direction,
           )
           .map((beat) => beat.id),
+        // The quick checks that close chapters (check.ts).
+        ...(quickChecks.length ? { quickChecks: [...quickChecks].sort((a, b) => a.id.localeCompare(b.id)) } : {}),
         // What steps lost so that the tour could play: their board, worked example or pen marks, and why.
         degraded: [
           ...beats.flatMap((beat, i) => {

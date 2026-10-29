@@ -3,7 +3,18 @@ import assert from 'node:assert/strict';
 import type { Step } from '../../shared/paper';
 import { config } from '../src/config';
 import { HarnessTourGenerator } from './harness-fixture';
-import { EXPLAIN, card, doc, input, planFor, provider, settings, texts, type Request } from './plan-fixture';
+import {
+  EXPLAIN,
+  card,
+  checkReply,
+  doc,
+  input,
+  planFor,
+  provider,
+  settings,
+  texts,
+  type Request,
+} from './plan-fixture';
 import { planBeats, type Beat } from '../src/harness/beats';
 import {
   beatTargets,
@@ -85,6 +96,8 @@ function narrator(problem: unknown[], seen: Request[] = []) {
   return (request: Request) => {
     if (request.name === 'paper_card') return card;
     if (request.name === 'visual_plan') return planFor(request);
+    // The quick checks of a standard paper tour are not what these tests are about: nothing to ask, nothing counted.
+    if (request.name === 'quick_check') return checkReply(request, { fits: false });
     seen.push(request);
     const cue = request.schema.properties.cues.items.properties;
     if (request.task.includes('STEP KIND: problem')) return problem[Math.min(problemCalls++, problem.length - 1)];
