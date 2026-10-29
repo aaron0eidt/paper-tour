@@ -40,6 +40,26 @@ export function checklistEvent(event: GenerationEvent): GenerationEvent | null {
     };
   } else if (['beat.started', 'beat.completed', 'beat.failed', 'beat.fallback', 'beat.omitted'].includes(event.type)) {
     compact = { beat: data.beat, outcome: data.outcome };
+  } else if (['tool.started', 'tool.completed'].includes(event.type)) {
+    const args = object(data.arguments),
+      output = object(data.output),
+      chapter = object(args.chapter);
+    const plan = data.plan ?? output.plan;
+    compact = {
+      callId: data.callId,
+      name: data.name,
+      chapterId: data.chapterId ?? output.chapterId ?? chapter.id,
+      chapterTitle: data.chapterTitle ?? chapter.title,
+      savedSteps: data.savedSteps ?? output.savedSteps,
+      published: data.published ?? output.published,
+      failed: data.failed ?? !!output.error,
+      plan: Array.isArray(plan)
+        ? plan.map((value) => {
+            const row = object(value);
+            return { id: row.id, title: row.title };
+          })
+        : undefined,
+    };
   } else if (['model.started', 'model.completed', 'model.failed'].includes(event.type)) {
     compact = { callId: data.callId, name: data.name };
   } else if (
@@ -104,10 +124,45 @@ export function generationChecklist(input: GenerationEvent[], status: string) {
         phase('understand').state = 'done';
         phase('plan').state = 'active';
       }
-      if (['beat_direction', 'exercise_solution'].includes(name))
-        phase('write').state = 'active';
+      if (['beat_direction', 'exercise_solution'].includes(name)) phase('write').state = 'active';
     }
     if (type === 'run.completed') published = true;
+    if (type === 'tool.started') {
+      if (['view_visuals', 'record_visual_observations'].includes(String(data.name)))
+        phase('understand').state = 'active';
+      if (data.name === 'set_tour_plan') phase('plan').state = 'active';
+      if (data.name === 'upsert_tour_chapter') {
+        phase('write').state = 'active';
+        const row = items.get(String(data.chapterId));
+        if (row) row.state = 'active';
+      }
+      if (data.name === 'finish_tour') phase('validate').state = 'active';
+    }
+    if (type === 'tool.completed' && !data.failed) {
+      if (data.name === 'set_tour_plan' && Array.isArray(data.plan)) {
+        for (const id of ['prepare', 'understand', 'plan']) phase(id).state = 'done';
+        const retained = new Set<string>();
+        for (const value of data.plan) {
+          const chapter = object(value),
+            id = text(chapter.id);
+          if (!id) continue;
+          retained.add(id);
+          if (!items.has(id)) items.set(id, { id, label: text(chapter.title) ?? 'Chapter', state: 'pending' });
+        }
+        for (const id of items.keys()) if (!retained.has(id)) items.delete(id);
+      }
+      if (data.name === 'upsert_tour_chapter') {
+        const id = String(data.chapterId),
+          row = items.get(id);
+        if (row) {
+          row.state = 'done';
+          row.detail = `${data.savedSteps} tour steps saved`;
+          trackedIds.add(id);
+          tracked = true;
+        }
+      }
+      if (data.published === true) published = true;
+    }
     if (type === 'plan.ready') {
       for (const id of ['prepare', 'understand', 'plan']) phase(id).state = 'done';
       items.clear();

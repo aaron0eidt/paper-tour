@@ -5,7 +5,7 @@ import { generationProgress } from '../../../shared/generationProgress';
 import { generationDiagnostics } from '../../../shared/generationDiagnostics';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GenerationEvent } from '../../../shared/activity';
-import { sseData } from '../../../shared/sse';
+import { readActivityStream } from '../library/activity';
 import type { AgentRun } from '../../../shared/agent';
 import { apiRequest, activityStream } from '../library/client';
 import './generationActivity.css';
@@ -146,15 +146,14 @@ export function GenerationActivity({
         let finished = false;
         try {
           const response = await activityStream(
-            `${agentRunId ? runPath : `/api/documents/${documentId}/generations/${generationId}`}/events?after=${cursor}`,
+            `${agentRunId ? runPath : `/api/documents/${documentId}/generations/${generationId}`}/events?format=ui&after=${cursor}`,
             controller.signal,
           );
           if (controller.signal.aborted) return;
           setConnected(true);
           setError('');
-          for await (const data of sseData(response.body!)) {
+          for await (const item of readActivityStream(response)) {
             if (controller.signal.aborted) return;
-            const item = JSON.parse(data) as { event?: GenerationEvent; status?: string; error?: string };
             if (item.event) {
               const event = item.event;
               cursor = event.id;

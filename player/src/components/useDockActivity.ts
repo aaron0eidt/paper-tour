@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { GenerationEvent } from '../../../shared/activity';
 import { checklistEvent } from '../../../shared/generationChecklist';
-import { sseData } from '../../../shared/sse';
+import { readActivityStream } from '../library/activity';
 import { activityStream } from '../library/client';
 
 /** Subscribe only when the checklist is open; diagnostics remain in the Activity dialog. */
@@ -30,14 +30,13 @@ export function useDockActivity(documentId: string | undefined, generationId: st
         let finished = false;
         try {
           const response = await activityStream(
-            `/api/documents/${documentId}/generations/${generationId}/events?after=${cursor}`,
+            `/api/documents/${documentId}/generations/${generationId}/events?format=ui&after=${cursor}`,
             controller.signal,
           );
           if (controller.signal.aborted) return;
           setError('');
-          for await (const data of sseData(response.body!)) {
+          for await (const item of readActivityStream(response)) {
             if (controller.signal.aborted) return;
-            const item = JSON.parse(data) as { event?: GenerationEvent; status?: string; error?: string };
             if (item.event) {
               cursor = item.event.id;
               // Avoid storing model prompts and token deltas in this small progress view.
