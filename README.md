@@ -157,6 +157,19 @@ usage, with Pause, Resume and Cancel controls. Limits in `.env.example` pause wo
 resuming grants another budget segment. An uncertain provider dispatch requires explicit resume.
 Provider prompt caching is measured separately from local image/observation reuse.
 
+All model generation and streaming now run through Vercel AI SDK 7. Structured tours and questions
+use `Output.object`; the persistent agent uses `ToolLoopAgent` with a single model step per durable
+job. Postgres/pg-boss still owns checkpoints and tool writes, so reconnecting does not replay writes.
+Meta's count/retrieve endpoints remain explicit provider capabilities, and its nonstandard voice
+endpoint implements the SDK transcription contract. The reader and its existing activity protocol
+remain compatible. See [the migration plan](notes/VERCEL-MIGRATION.md) for decisions and verification.
+
+For local SDK timing and token diagnostics, set `AI_SDK_DEVTOOLS=true` and run
+`npm --prefix server exec -- devtools`. Development dependencies are required. Traces contain only
+metadata: prompts, tool arguments, generated text, raw requests/replies and image bytes are omitted.
+This integration stays disabled in production. The normal private Activity view retains the existing
+document-owner access controls and user-facing details.
+
 Run `npm run test:smoke:muse` for an explicit live test with the configured local test account.
 It uploads a small diagram PDF and checks saved tours, source links and the agent journal when
 enabled; it uses the profile's selected model and consumes API tokens.
