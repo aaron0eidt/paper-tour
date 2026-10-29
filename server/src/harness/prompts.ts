@@ -5,7 +5,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@29';
+export const HARNESS_VERSION = 'paper-tour-harness@30';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -34,8 +34,8 @@ ${types}
 4. Write each "text" as one plain sentence of at most 30 words, in your own words.
 5. Pick key figures and formulas only if they are central to understanding; "why" says what the reader learns there.
    A formula listed as (no number) is a display equation without a printed number: choose it like any other.
-6. Write three questions a curious reader would ask after the tour, each at most 15 words; for an exercise sheet,
-   questions about the methods, such as why a step works.
+6. Write three questions a curious reader would ask after the tour, each at most 15 words, that the document itself
+   answers (the tutor answers from it); for an exercise sheet, questions about the methods, such as why a step works.
 7. Write a tour title of at most 8 words and the six chapter titles in ${JSON.stringify(language)}, worded to fit
    this document.`;
 }
