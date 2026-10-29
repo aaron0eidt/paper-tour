@@ -3,10 +3,47 @@
 // bundles this file for Node, no test framework needed).
 
 import katex from 'katex';
+import { canonicalDistribution } from '../../shared/distribution';
+import type { DistributionItem } from '../../shared/distribution';
+import type { PlotItem } from '../../shared/plot';
 import type { ScatterItem } from '../../shared/scatter';
+import { canonicalTimeline } from '../../shared/timeline';
 import type { ShapesItem } from '../../shared/shapes';
 import type { ScreenRect } from '../src/camera';
+import {
+  DISTRIBUTION_INK,
+  MORPH_MS,
+  areaPath,
+  columnPath,
+  barsAt,
+  curveAt,
+  distributionDescription,
+  distributionDuration,
+  distributionLayout,
+  liveProbability,
+  liveSummary,
+  mixInk,
+  morphEase,
+  percentText,
+  quantity,
+  regionPath,
+  regionStart,
+  regionText,
+  stageWanted,
+} from '../src/distribution';
 import { rectsOverlap } from '../src/labelLayout';
+import { PLOT_TIME, markStart, plotDescription, plotDuration, plotGeometry, pointStart } from '../src/plotView';
+import {
+  TIMELINE_TIME,
+  dateText,
+  distanceText,
+  positionText,
+  relax,
+  timelineArrival,
+  timelineDescription,
+  timelineDuration,
+  timelineGeometry,
+} from '../src/timeline';
 import {
   SCATTER_TIME,
   axisFraction,
@@ -53,7 +90,7 @@ function eq(actual: unknown, expected: unknown, what = 'value') {
   const e = JSON.stringify(expected);
   if (a !== e) throw new Error(`${what}: expected ${e}, got ${a}`);
 }
-function ok(condition: boolean, what: string) {
+function ok(condition: boolean, what = 'condition does not hold') {
   if (!condition) throw new Error(what);
 }
 
@@ -704,6 +741,322 @@ test('the shapes build left to right, a product lights up after its right operan
   ok(end >= termArrival(factors.terms.length - 1) + SHAPES_TIME.grow, 'ends after the last matrix');
   ok(end >= Math.max(...plan.contractions.map((c) => ghostStart(c)! + SHAPES_TIME.ghost)), 'and after the last ghost');
   eq(ghostStart({ result: null }), null, 'no result, no ghost');
+});
+
+// ----------------------------------------------------------------- timeline
+
+const timelineFonts = { tick: (t: string) => t.length * 6.2, label: (t: string) => t.length * 7, chip: (t: string) => t.length * 6.4 };
+const lease = () =>
+  canonicalTimeline({
+    kind: 'timeline',
+    title: 'Earliest exit',
+    unit: 'month',
+    source: 'document',
+    anchor: { label: 'Lease starts' },
+    events: [
+      { label: 'Notice allowed', after: 'Lease starts', offset: 3 },
+      { label: 'Earliest exit', after: 'Notice allowed', offset: 3 },
+      { label: 'Fixed term ends', after: 'Lease starts', offset: 12 },
+    ],
+    spans: [
+      { label: 'Too early to serve', from: 'Lease starts', to: 'Notice allowed', role: 'wait' },
+      { label: 'Notice runs', from: 'Notice allowed', to: 'Earliest exit', role: 'notice' },
+      { label: 'Fixed term', from: 'Lease starts', to: 'Fixed term ends', role: 'term' },
+    ],
+  });
+
+test('labels are spread to a pitch apart in the order of what they name, moving as little as they can', () => {
+  eq(relax([10, 100, 200], 38), [10, 100, 200], 'labels with room stay where they are');
+  const crowded = relax([100, 102, 104, 300], 38);
+  ok(crowded.every((y, i) => i === 0 || y - crowded[i - 1] >= 38 - 1e-9), 'at least a pitch apart');
+  ok(Math.abs(crowded.slice(0, 3).reduce((a, b) => a + b, 0) / 3 - 102) < 1e-9, 'the crowd stays centred on where it was');
+  eq(crowded[3], 300, 'a far label is left alone');
+  eq(relax([], 38), []);
+});
+
+test('a distance or a position reads as the document would write it', () => {
+  const month = { unit: 'month' as const };
+  eq(distanceText(month, 91.3125), '3 months');
+  eq(distanceText({ unit: 'day' }, 28), '28 days');
+  eq(distanceText({ unit: 'week' }, 14), '2 weeks');
+  eq(distanceText({ unit: 'step' }, 3), '3 steps');
+  eq(distanceText(month, 89), '3 months', 'a calendar quarter is not 91.3 days');
+  eq(positionText(month, 182.625), 'month 6');
+  eq(positionText({ unit: 'day' }, 14), 'day 14');
+  eq(positionText({ unit: 'day' }, -28), '28 days before');
+  eq(positionText(month, 0), 'start');
+  eq(positionText({ unit: 'step' }, 3), 'step 3');
+  eq(dateText('2022-01-31', 89, 'day', 'en-GB'), '30 Apr 2022');
+  eq(dateText('2022-01-31', 89, 'month', 'en-GB'), 'Apr 2022');
+  eq(dateText('2022-01-31', 400, 'year', 'en-GB'), '2023');
+  eq(dateText('2022-01-31', 89, 'day', 'en-GB', false), '30 Apr');
+});
+
+test('the timeline puts every part inside the board, labels clear of each other and spans in lanes that do not overlap', () => {
+  for (const width of [330, 438, 640]) {
+    const item = lease();
+    const g = timelineGeometry(item, { width, height: 600 }, timelineFonts);
+    eq(g.rows.length, 7, 'the anchor, three events and three spans');
+    eq(g.rows.filter((r) => r.kind === 'event').map((r) => r.part), [0, 1, 2]);
+    eq(g.rows.filter((r) => r.kind === 'span').map((r) => r.part), [3, 4, 5]);
+    const labels = [...g.rows].sort((a, b) => a.labelY - b.labelY);
+    for (let i = 1; i < labels.length; i++) ok(labels[i].labelY - labels[i - 1].labelY >= 38 - 1e-6, `${width}: labels ${i - 1} and ${i} keep a pitch`);
+    for (const row of g.rows) {
+      ok(row.labelY >= 0 && row.labelY + 19 <= g.height, `${width}: ${row.name} stays inside the height`);
+      ok(g.labelX + timelineFonts.label(row.name) <= g.width + 1, `${width}: ${row.name} fits the width`);
+    }
+    for (const t of g.ticks) ok(t.at >= g.top - 1e-6 && t.at <= g.bottom + 1e-6, `${width}: tick ${t.label} is on the axis`);
+    const spans = g.rows.filter((r) => r.kind === 'span');
+    for (const a of spans) for (const b of spans) if (a !== b && a.lane === b.lane) ok(a.y1 <= b.y0 + 1e-6 || b.y1 <= a.y0 + 1e-6, `${width}: spans share a lane without overlapping`);
+    ok(spans.find((r) => r.name === 'Fixed term')!.lane !== spans.find((r) => r.name === 'Too early to serve')!.lane, 'overlapping spans take other lanes');
+    const exit = g.rows.find((r) => r.name === 'Earliest exit')!;
+    const start = g.rows.find((r) => r.kind === 'anchor')!;
+    ok(exit.y > start.y, 'later is further down the axis');
+    eq(exit.chip, 'month 6', 'the computed position, not the model\'s words');
+  }
+});
+
+test('a dated timeline ticks and labels in dates, a step axis needs no second reading, a short board scrolls', () => {
+  const dated = canonicalTimeline({
+    kind: 'timeline',
+    unit: 'year',
+    source: 'illustrative',
+    anchor: { label: 'Start', date: '2026-03-01' },
+    events: [
+      { label: 'Review', after: 'Start', offset: 2 },
+      { label: 'End', after: 'Start', offset: 5, deadline: true },
+    ],
+  });
+  const g = timelineGeometry(dated, { width: 400, height: 500 }, timelineFonts);
+  ok(g.unitTitle === null, 'a dated board names no unit: the ticks are dates');
+  ok(g.ticks.every((t) => /^\d{4}$/.test(t.label)), g.ticks.map((t) => t.label).join(','));
+  ok(g.rows.find((r) => r.name === 'End')!.deadline, 'a deadline is kept');
+  const steps = canonicalTimeline({ kind: 'timeline', unit: 'step', source: 'illustrative', events: [{ label: 'One', at: 1 }, { label: 'Two', at: 2 }, { label: 'Three', at: 3 }] });
+  const sg = timelineGeometry(steps, { width: 400, height: 500 }, timelineFonts);
+  ok(sg.rows.every((r) => r.chip === ''), 'the tick already says the step');
+  ok(sg.ticks.every((t) => Number.isInteger(t.position)), 'steps are whole numbers');
+  eq(sg.ticks.map((t) => t.label), ['1', '2', '3'], 'from the first step used to the last, with no zero');
+  const short = timelineGeometry(lease(), { width: 330, height: 120 }, timelineFonts);
+  ok(short.height > 120, 'a board too short for its labels grows and scrolls rather than overlapping');
+  const [a, b] = [timelineGeometry(lease(), { width: 330, height: 700 }, timelineFonts), timelineGeometry(lease(), { width: 330, height: 700 }, timelineFonts)];
+  eq(a, b, 'the layout is a pure function of the item and the room');
+});
+
+test('the timeline builds down its axis, one part after another, and reads as a sentence', () => {
+  for (let i = 1; i < 7; i++) ok(timelineArrival(i) > timelineArrival(i - 1), 'rows arrive in order');
+  ok(timelineDuration(7) >= timelineArrival(6) + TIMELINE_TIME.bar, 'the build ends after the last bar');
+  ok(timelineDuration(7) > timelineDuration(3));
+  const text = timelineDescription(lease());
+  ok(text.startsWith('Earliest exit: from Lease starts; '), text);
+  ok(text.includes('Earliest exit, month 6') && text.includes('period Notice runs, 3 months'), text);
+});
+
+// -------------------------------------------------------------- distribution
+
+const bell = (): DistributionItem =>
+  canonicalDistribution({
+    kind: 'distribution',
+    x_label: 'reaction time (ms)',
+    source: 'document',
+    dists: [
+      { family: 'normal', label: 'Baseline', mean: 250, sd: 30 },
+      { family: 'normal', label: 'After training', mean: 230, sd: 20 },
+    ],
+    region: { from: 300 },
+  });
+const calls = (): DistributionItem =>
+  canonicalDistribution({
+    kind: 'distribution',
+    x_label: 'calls in a minute',
+    source: 'document',
+    dists: [
+      { family: 'poisson', label: 'Before', mean: 4 },
+      { family: 'poisson', label: 'After', mean: 6 },
+    ],
+    region: { from: 9 },
+  });
+const survey = (): DistributionItem =>
+  canonicalDistribution({
+    kind: 'distribution',
+    x_label: 'option',
+    source: 'document',
+    dists: [
+      { family: 'counts', label: 'Before', categories: ['A', 'B', 'C'], counts: [18, 54, 48] },
+      { family: 'counts', label: 'After', categories: ['A', 'B', 'C'], counts: [30, 42, 48] },
+    ],
+  });
+const distFonts = { tick: (t: string) => t.length * 6.2, title: (t: string) => t.length * 6.5 };
+
+test('chances read as percentages with three digits, and a tail keeps its two', () => {
+  eq(percentText(0.0477904), '4.78%');
+  eq(percentText(0.159), '15.9%');
+  eq(percentText(0.5), '50%');
+  eq(percentText(0.0002326), '0.023%');
+  eq(percentText(1e-8), '<0.0001%');
+  eq(percentText(0.99999), '>99.9%');
+  eq(percentText(0.0123), '1.23%');
+  eq(quantity(1234.5), '1230');
+  eq(quantity(-0.5), '−0.5');
+  eq(regionText({ from: 300, probabilities: [] }), 'P(X ≥ 300)');
+  eq(regionText({ to: 5, probabilities: [] }), 'P(X ≤ 5)');
+  eq(regionText({ from: 5, to: 8, probabilities: [] }), 'P(5 ≤ X ≤ 8)');
+});
+
+test('the morph follows the cues: dist-1 and dist-2 choose their own state, the region keeps the current one, silence morphs past the middle', () => {
+  const item = bell();
+  eq([stageWanted(item, 0, 0.9), stageWanted(item, 1, 0.1)], [0, 1]);
+  eq(stageWanted(item, 2, 0.9), null, 'the region does not say which state');
+  eq([stageWanted(item, null, 0.2), stageWanted(item, null, 0.45), stageWanted(item, null, 1)], [0, 1, 1]);
+  eq(stageWanted({ ...item, dists: [item.dists[0]] }, null, 1), 0, 'one distribution has nothing to morph to');
+  eq([morphEase(0), morphEase(0.5), morphEase(1)], [0, 0.5, 1]);
+  ok(morphEase(0.25) < 0.25 && morphEase(0.75) > 0.75, 'a shape settles slowly at both ends');
+  ok(MORPH_MS > 600 && MORPH_MS < 2000, 'a morph is slow enough to follow');
+  eq([mixInk(0), mixInk(1)], DISTRIBUTION_INK, 'the colour runs from the first ink to the second');
+  ok(/^#[0-9a-f]{6}$/.test(mixInk(0.5)), mixInk(0.5));
+});
+
+test('the readouts are the shared computation at the state on show: the tail counts down and the spread narrows', () => {
+  const item = bell();
+  const [before, after] = item.region!.probabilities;
+  ok(Math.abs(liveProbability(item, 0) - before) < 1e-5 && Math.abs(liveProbability(item, 1) - after) < 1e-5, 'both ends are the stored chances');
+  const middle = liveProbability(item, 0.5);
+  ok(middle < before && middle > after, 'it counts down in between');
+  eq(liveSummary(item, 0.5), { mean: 240, sd: 25 });
+  eq(liveSummary(item, 1), { mean: 230, sd: 20 });
+  eq(liveSummary(survey(), 0.5), null, 'categories have no mean');
+  eq(liveProbability(survey(), 0.5), 0);
+  const single = { ...item, dists: [item.dists[0]] };
+  ok(Math.abs(liveProbability(single, 1) - before) < 1e-6, 'a single distribution does not morph');
+});
+
+test('a continuous layout keeps its curve and its region between the axis and the top, from the left edge to the right', () => {
+  const item = bell();
+  const layout = distributionLayout(item, { width: 400, height: 300 }, distFonts);
+  ok(!layout.discrete && !layout.counts);
+  ok(layout.plot.left < layout.plot.right && layout.plot.top < layout.plot.bottom);
+  for (const t of layout.ticks) ok(t.at >= layout.plot.left - 1e-6 && t.at <= layout.plot.right + 1e-6, `tick ${t.label}`);
+  for (const state of [0, 0.5, 1]) {
+    const line = curveAt(item, layout, state);
+    ok(line.every(([x, y]) => x >= layout.plot.left - 0.1 && x <= layout.plot.right + 0.1 && y <= layout.plot.bottom + 0.1 && y >= layout.plot.top), `state ${state} stays inside`);
+    ok(Math.min(...line.map(([, y]) => y)) >= layout.plot.top, 'the scale holds the tallest state');
+  }
+  const narrow = curveAt(item, layout, 1);
+  const wide = curveAt(item, layout, 0);
+  ok(Math.min(...narrow.map(([, y]) => y)) < Math.min(...wide.map(([, y]) => y)), 'narrowing makes the curve taller');
+  eq(curveAt(item, layout, 1, 0).every(([, y]) => y === layout.plot.bottom), true, 'before it rises the curve lies on the axis');
+  const region = regionPath(item, layout, 0);
+  ok(region.startsWith('M') && region.endsWith('Z'));
+  const xs = [...region.matchAll(/[ML](-?[\d.]+) /g)].map((m) => Number(m[1]));
+  ok(Math.min(...xs) >= layout.x(300) - 0.1 && Math.max(...xs) <= layout.plot.right + 0.1, 'the region starts at its bound and runs to the end of the axis');
+  eq(regionPath({ ...item, region: undefined }, layout, 0), '');
+  ok(areaPath([[0, 5], [10, 2]], 20) === 'M0 20L0 5L10 2L10 20Z');
+});
+
+test('a discrete layout puts each whole number in its slot, with its bar clear of the next', () => {
+  const item = calls();
+  const layout = distributionLayout(item, { width: 400, height: 300 }, distFonts);
+  ok(layout.discrete && !layout.counts);
+  const bars = barsAt(item, layout, 1);
+  ok(bars.length >= 10 && bars[0].value === 0, 'from zero');
+  for (let i = 1; i < bars.length; i++) ok(bars[i].x >= bars[i - 1].x + bars[i - 1].width - 1e-6, 'bars do not overlap');
+  eq(bars.filter((b) => b.inRegion).map((b) => b.value).slice(0, 2), [9, 10], 'the region is from nine up');
+  ok(bars.every((b) => b.top <= layout.plot.bottom + 1e-6 && b.top >= layout.plot.top), 'inside the plot');
+  ok(bars[6].chance > bars[6 + 0].chance - 1e-12);
+  ok(columnPath(bars[4], layout.plot.bottom).startsWith('M'));
+  eq(columnPath({ ...bars[4], top: layout.plot.bottom }, layout.plot.bottom), '', 'a bar without height is not drawn');
+  const [first, second] = [barsAt(item, layout, 0), barsAt(item, layout, 1)];
+  ok(second[6].chance > first[6].chance && second[2].chance < first[2].chance, 'the mass moves right');
+});
+
+test('counts are categories under their bars, and a distribution reads as a sentence', () => {
+  const item = survey();
+  const layout = distributionLayout(item, { width: 400, height: 300 }, distFonts);
+  ok(layout.counts && layout.discrete);
+  eq(layout.categories.map((c) => c.lines.join(' ')), ['A', 'B', 'C']);
+  eq(layout.ticks.length, 0, 'the categories take the place of ticks');
+  const bars = barsAt(item, layout, 0);
+  eq(bars.map((b) => Math.round(b.chance * 100)), [15, 45, 40]);
+  ok(Math.abs(bars.reduce((sum, b) => sum + b.chance, 0) - 1) < 1e-9, 'shares add up to one');
+  eq(distributionDescription(bell()), 'reaction time (ms), Baseline to After training; P(X ≥ 300) is 4.78% then 0.023%'.replace(/^/, 'Distribution: '));
+});
+
+test('the distribution builds the first shape, then the region, and takes longer with one', () => {
+  const item = bell();
+  ok(distributionDuration(item) > regionStart(), 'the build ends after the region starts');
+  ok(distributionDuration(item) > distributionDuration({ ...item, region: undefined }) - 1, 'a region is part of the build');
+});
+
+// --------------------------------------------------------------------- plot
+
+const plotFonts = { tick: (t: string) => t.length * 6.2, label: (t: string) => t.length * 7, coords: (t: string) => t.length * 6.4 };
+const costPlot = (change: Partial<PlotItem> = {}): PlotItem => ({
+  kind: 'plot',
+  title: 'Steps against requests',
+  x: [1, 30],
+  y: [0, 600],
+  curves: [
+    { expression: 'x^2', label: 'n^2' },
+    { expression: '10*x', label: '10n' },
+  ],
+  marks: [
+    { type: 'crossing', curve: 1, other: 2, label: 'break-even' },
+    { type: 'value', curve: 1, at: 20 },
+  ],
+  points: [{ x: 5, y: 25 }, { x: 20, y: 400, label: 'run 3' }],
+  ...change,
+});
+
+test('the plot puts the marks the code found on their curves, with labels inside the plot and clear of each other', () => {
+  for (const width of [330, 438, 640]) {
+    const item = costPlot();
+    const g = plotGeometry(item, { width, height: 400 }, 1, plotFonts);
+    eq(g.paths.length, 2);
+    eq(g.marks.map((m) => [m.mark.index, m.mark.type]), [[0, 'crossing'], [1, 'value']]);
+    const [cross, value] = g.marks;
+    ok(Math.abs(cross.x - g.x(10)) < 0.2 && Math.abs(cross.y - g.y(100)) < 0.2, 'the crossing is at (10, 100)');
+    ok(Math.abs(value.x - g.x(20)) < 0.2 && Math.abs(value.y - g.y(400)) < 0.2, 'the value is at (20, 400)');
+    eq(cross.coords, '(10, 100)');
+    eq(value.name, 'value', 'a mark without a label is named by what it is');
+    for (const m of g.marks) {
+      ok(m.rect.left >= g.plot.left && m.rect.right <= g.plot.right + 4 && m.rect.top >= g.plot.top - 4 && m.rect.bottom <= g.plot.bottom, `${width}: ${m.name} stays inside the plot`);
+      ok(!(m.x > m.rect.left - 6 && m.x < m.rect.right + 6 && m.y > m.rect.top - 6 && m.y < m.rect.bottom + 6), `${width}: ${m.name} does not sit on its own dot`);
+    }
+    ok(!rectsOverlap(cross.rect, value.rect, 0), `${width}: labels clear of each other`);
+    eq(g.points.length, 2);
+    ok(g.points.every((p) => p.x >= g.plot.left && p.x <= g.plot.right && p.y >= g.plot.top && p.y <= g.plot.bottom), 'points inside');
+    ok(g.xTicks.every((t) => t.at >= g.plot.left - 1e-6 && t.at <= g.plot.right + 1e-6), 'ticks inside the range');
+  }
+});
+
+test('a log axis ticks on decades, a linear one that spans zero draws its zero line, and a plot with no marks keeps its probe', () => {
+  const loglog = costPlot({ x: [1, 1000], y: [0.5, 20000], curves: [{ expression: '0.5*x^1.5', label: 't' }], marks: [{ type: 'value', curve: 1, at: 100 }], points: undefined, x_scale: 'log', y_scale: 'log' });
+  const g = plotGeometry(loglog, { width: 438, height: 400 }, 1, plotFonts);
+  eq(g.xTicks.map((t) => t.label), ['1', '10', '100', '1k']);
+  ok(g.xTicks.every((t, i) => i === 0 || Math.abs((t.at - g.xTicks[i - 1].at) - (g.xTicks[1].at - g.xTicks[0].at)) < 0.5), 'decades are evenly spaced');
+  eq(g.zero, { x: null, y: null }, 'a log axis has no zero');
+  const parabola: PlotItem = { kind: 'plot', x: [-1, 5], y: [-2, 8], curves: [{ expression: 'x^2-4*x+3', label: 'e' }], marks: [{ type: 'root', curve: 1 }] };
+  const p = plotGeometry(parabola, { width: 438, height: 400 }, 1, plotFonts);
+  ok(p.zero.y !== null && Math.abs(p.zero.y - p.y(0)) < 1e-9 && p.zero.x !== null, 'zero lines');
+  eq(p.marks.length, 1);
+  const bare = plotGeometry({ ...parabola, marks: undefined }, { width: 438, height: 400 }, 1, plotFonts);
+  eq(bare.marks, []);
+});
+
+test('a sweep moves the marks with the parameter, and one that has gone is not drawn', () => {
+  const sweep: PlotItem = { kind: 'plot', x: [0, 5], y: [-5, 5], curves: [{ expression: 'x - a', label: 'x-a' }], parameter: { from: 1, to: 3 }, marks: [{ type: 'root', curve: 1 }] };
+  const at = (a: number) => plotGeometry(sweep, { width: 400, height: 300 }, a, plotFonts);
+  ok(Math.abs(at(1).marks[0].x - at(1).x(1)) < 0.2 && Math.abs(at(3).marks[0].x - at(3).x(3)) < 0.2);
+  eq(at(9).marks, [], 'past the sweep the root leaves the range');
+});
+
+test('the plot builds its curves, then its points, then its marks, and describes itself', () => {
+  const item = costPlot();
+  ok(pointStart(item, 0) > PLOT_TIME.axes && markStart(item, 0) > pointStart(item, 1), 'curves, points, marks');
+  ok(markStart(item, 1) > markStart(item, 0));
+  ok(plotDuration(item) >= markStart(item, 1) + PLOT_TIME.mark, 'the build ends after the last mark');
+  ok(plotDuration({ ...item, marks: undefined, points: undefined }) < plotDuration(item));
+  const text = plotDescription(item, 1);
+  ok(text.includes('break-even at x 10, y 100') && text.includes('measured points') && text.includes('run 3 (20, 400)'), text);
 });
 
 console.log(results.join('\n'));

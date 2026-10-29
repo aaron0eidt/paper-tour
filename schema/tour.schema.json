@@ -536,7 +536,7 @@
           "additionalProperties": false
         },
         {
-          "description": "Light up a formula term, flow node, bar, curve, scene object, heatmap row, scatter point or shapes matrix by index.",
+          "description": "Light up a formula term, flow node, bar, curve (then plot mark), scene object, heatmap row, scatter point, shapes matrix, timeline event (then span) or distribution (then its region) by index.",
           "properties": {
             "type": {
               "const": "board_focus"
@@ -791,6 +791,19 @@
               "type": "string",
               "maxLength": 80
             },
+            "x_scale": {
+              "enum": [
+                "linear",
+                "log"
+              ],
+              "description": "A log axis needs a range above zero."
+            },
+            "y_scale": {
+              "enum": [
+                "linear",
+                "log"
+              ]
+            },
             "curves": {
               "type": "array",
               "minItems": 1,
@@ -842,6 +855,93 @@
                   "type": "number",
                   "minimum": -1000,
                   "maximum": 1000
+                }
+              }
+            },
+            "source": {
+              "enum": [
+                "document",
+                "illustrative"
+              ],
+              "description": "document only when the expressions are the document's own; a plot is illustrative otherwise."
+            },
+            "marks": {
+              "type": "array",
+              "maxItems": 4,
+              "description": "Facts the code finds on the curves and draws as labelled points: a root, an extremum, a crossing of two curves, a value at a stated x.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "curve"
+                ],
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "root",
+                      "extremum",
+                      "crossing",
+                      "value"
+                    ]
+                  },
+                  "curve": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3
+                  },
+                  "other": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3,
+                    "description": "crossing: the curve it meets."
+                  },
+                  "which": {
+                    "enum": [
+                      "max",
+                      "min"
+                    ],
+                    "description": "extremum: the highest or lowest point."
+                  },
+                  "nth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "root or crossing: counted from the left."
+                  },
+                  "at": {
+                    "type": "number",
+                    "description": "value: the x whose value is read."
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 24
+                  }
+                }
+              }
+            },
+            "points": {
+              "type": "array",
+              "maxItems": 8,
+              "description": "Measured points from the document, drawn over the curves.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 24
+                  }
                 }
               }
             }
@@ -1332,6 +1432,298 @@
                     }
                   }
                 ]
+              }
+            }
+          }
+        },
+        {
+          "description": "Events, spans and deadlines on one axis. Every position is computed from the dates, offsets and lengths the document states: days from the anchor (from the first date without one), or the step on a step axis.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "unit",
+            "source",
+            "events"
+          ],
+          "properties": {
+            "kind": {
+              "const": "timeline"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "unit": {
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "year",
+                "step"
+              ]
+            },
+            "source": {
+              "enum": [
+                "document",
+                "illustrative"
+              ]
+            },
+            "anchor": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 28
+                },
+                "date": {
+                  "type": "string",
+                  "description": "YYYY-MM-DD."
+                }
+              }
+            },
+            "origin": {
+              "type": "string",
+              "description": "The date at position 0, when the board has dates."
+            },
+            "events": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "label",
+                  "position"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 28
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "YYYY, YYYY-MM or YYYY-MM-DD."
+                  },
+                  "at": {
+                    "type": "number"
+                  },
+                  "after": {
+                    "type": "string",
+                    "description": "The label of an event, or of the anchor, this is measured from."
+                  },
+                  "offset": {
+                    "type": "number"
+                  },
+                  "offset_unit": {
+                    "enum": [
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ]
+                  },
+                  "deadline": {
+                    "type": "boolean"
+                  },
+                  "position": {
+                    "type": "number",
+                    "description": "Computed: where it falls, in days from the anchor (steps on a step axis)."
+                  }
+                }
+              }
+            },
+            "spans": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "label",
+                  "from",
+                  "start",
+                  "end"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 28
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "length": {
+                    "type": "number"
+                  },
+                  "length_unit": {
+                    "enum": [
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ]
+                  },
+                  "role": {
+                    "enum": [
+                      "term",
+                      "notice",
+                      "wait",
+                      "window"
+                    ]
+                  },
+                  "start": {
+                    "type": "number",
+                    "description": "Computed, like an event's position."
+                  },
+                  "end": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "description": "One or two distributions drawn from their parameters (or from counts the document prints); the board morphs from the first to the second. The shaded region's chances are computed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "x_label",
+            "source",
+            "dists"
+          ],
+          "properties": {
+            "kind": {
+              "const": "distribution"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "x_label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "source": {
+              "enum": [
+                "document",
+                "illustrative"
+              ]
+            },
+            "dists": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "family",
+                  "label"
+                ],
+                "properties": {
+                  "family": {
+                    "enum": [
+                      "normal",
+                      "uniform",
+                      "binomial",
+                      "poisson",
+                      "exponential",
+                      "counts"
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 24
+                  },
+                  "mean": {
+                    "type": "number"
+                  },
+                  "sd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "min": {
+                    "type": "number"
+                  },
+                  "max": {
+                    "type": "number"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "p": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "exclusiveMaximum": 1
+                  },
+                  "rate": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "categories": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 16
+                    }
+                  },
+                  "counts": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 10,
+                    "items": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "region": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "probabilities"
+              ],
+              "properties": {
+                "from": {
+                  "type": "number"
+                },
+                "to": {
+                  "type": "number"
+                },
+                "probabilities": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "items": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "description": "Computed: the chance of the range under each distribution, in order."
+                }
               }
             }
           }

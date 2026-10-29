@@ -8,6 +8,10 @@ import type { ScatterItem } from './scatter';
 export type { ScatterItem } from './scatter';
 import type { ShapesItem } from './shapes';
 export type { ShapesItem, ShapesTerm } from './shapes';
+import type { TimelineItem } from './timeline';
+export type { TimelineItem, TimelineEvent, TimelineSpan } from './timeline';
+import type { DistributionItem } from './distribution';
+export type { DistributionItem, DistributionSpec } from './distribution';
 // TypeScript mirror of schema/doc.schema.json and schema/tour.schema.json (version 0.1).
 // The schemas are the source of truth; keep these in sync with them.
 
@@ -300,6 +304,8 @@ export type BoardItem =
   | HeatmapItem
   | ScatterItem
   | ShapesItem
+  | TimelineItem
+  | DistributionItem
   | { kind: 'formula'; title?: string; latex: string; terms: FormulaTerm[] }
   | { kind: 'flow'; title?: string; nodes: { id: string; label: string; color?: Color }[]; edges: [string, string][] }
   | {
@@ -318,8 +324,8 @@ export interface BoardAction {
 }
 
 /**
- * Light up one part of the board item, by index: a formula term, flow node, bar, curve, scene object, heatmap row,
- * scatter point or shapes matrix.
+ * Light up one part of the board item, by index: a formula term, flow node, bar, curve (then plot mark), scene object,
+ * heatmap row, scatter point, shapes matrix, timeline event (then span) or distribution (then its region).
  */
 export interface BoardFocusAction {
   type: 'board_focus';

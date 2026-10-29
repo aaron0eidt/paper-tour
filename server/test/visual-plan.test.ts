@@ -136,6 +136,24 @@ test('a kind appears once (a formula or a plot twice), and the earliest steps ke
   );
 });
 
+test('a timeline and a distribution are planned like the other kinds: one line in the catalog, and each only once', () => {
+  const task = visualPlanTask('en-US');
+  assert.match(task, /- timeline: the dates, notice periods, deadlines and terms a document states/);
+  assert.match(task, /- distribution: how uncertainty is spread and changes/);
+  for (const kind of ['timeline', 'distribution']) {
+    const wanted = { beats: ids.map((id) => entry(id, kind)) };
+    const { plan, adjusted } = cleanVisualPlan(wanted, beats);
+    assert.deepEqual(
+      [...plan!].filter(([, v]) => v.visual === kind).map(([id]) => id),
+      ['problem-1'],
+      kind,
+    );
+    assert.match(adjusted[0].reason, new RegExp(`at most 1 ${kind} board$`));
+    // They are the picture itself: no worked-example sequence is forced on their steps.
+    assert.deepEqual(exampleRules(beat('problem-1'), plan!.get('problem-1')), { offered: false, required: false });
+  }
+});
+
 test('at most about 60 percent of the steps get a board; extras become none, keeping the earliest in tour order', () => {
   const kinds = ['heatmap', 'scatter', 'shapes', 'plot', 'formula', 'bars', 'flow', 'scene'];
   const { plan, adjusted } = cleanVisualPlan({ beats: ids.map((id, i) => entry(id, kinds[i])) }, beats);
@@ -628,7 +646,14 @@ test('only earlier steps count: the steps of one beat, and the frames of one exa
 
 /** The same plot for two steps: formula and plot may appear twice, so only the duplicate check can drop it. */
 const plotBoard = {
-  plot: { kind: 'plot', x: [0, 4], y: [0, 16], x_label: 'pump hours', y_label: 'litres', curves: [{ expression: 'x^2', label: 'x^2' }] },
+  plot: {
+    kind: 'plot',
+    x: [0, 4],
+    y: [0, 16],
+    x_label: 'pump hours',
+    y_label: 'litres',
+    curves: [{ expression: 'x^2', label: 'x^2' }],
+  },
 };
 
 test('a duplicate board is dropped when the tour is assembled, and recorded like any dropped board', async () => {

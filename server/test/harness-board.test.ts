@@ -800,11 +800,14 @@ test('every direction can choose a useful native board without changing its sour
       'heatmap',
       'scatter',
       'shapes',
+      'timeline',
+      'distribution',
       'example',
       'say',
       'cues',
     ]);
-    for (const id of ['term-1', 'node-1', 'bar-1', 'curve-1']) assert.ok(cue(kind).target.enum.includes(id));
+    for (const id of ['term-1', 'node-1', 'bar-1', 'curve-1', 'mark-1', 'event-1', 'span-1', 'dist-2', 'region'])
+      assert.ok(cue(kind).target.enum.includes(id), id);
   }
   assert.deepEqual(cue('formula').action.enum, ['board_focus']);
   assert.deepEqual(cue('figure').action.enum, ['arrow', 'circle', 'box', 'board_focus']);

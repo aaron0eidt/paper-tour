@@ -63,6 +63,19 @@ export interface BoardState {
 }
 
 export const EMPTY_BOARD: BoardState = { key: null, item: null, focus: null };
+/** The board kinds this player draws; a saved tour may carry a kind it does not (a removed one), which is skipped. */
+export const BOARD_KINDS: readonly string[] = [
+  'formula',
+  'flow',
+  'bars',
+  'plot',
+  'scene',
+  'heatmap',
+  'scatter',
+  'shapes',
+  'timeline',
+  'distribution',
+];
 
 /** A board's animation clock follows speech, including pause, restart and silent step previews. */
 export interface BoardPlayback {
@@ -138,7 +151,7 @@ export function isBoard(a: Action): a is BoardControl {
 export function boardAfter(board: BoardState, a: BoardControl, key: string, current: boolean): BoardState {
   // Older saved tours may contain removed video boards. Skip them without opening an empty panel or stalling playback.
   if (a.type === 'board')
-    return ['formula', 'flow', 'bars', 'plot', 'scene', 'heatmap', 'scatter', 'shapes'].includes(a.item.kind)
+    return BOARD_KINDS.includes(a.item.kind)
       ? { key, item: a.item, focus: null }
       : EMPTY_BOARD;
   if (a.type === 'board_clear') return EMPTY_BOARD;

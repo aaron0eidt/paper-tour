@@ -5,7 +5,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@27';
+export const HARNESS_VERSION = 'paper-tour-harness@28';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -52,7 +52,7 @@ const CUE_HELP: Record<string, string> = {
 const FOCUS_HELP: Record<BoardKind, string> = {
   scene:
     'board_focus lights up object-1, object-2 etc by its position in the scene objects array, while stable object IDs identify the same quantity across frames.',
-  plot: 'board_focus lights up curve-1, curve-2 or curve-3 while you explain its behaviour.',
+  plot: 'board_focus lights up curve-1, curve-2 or curve-3 while you explain its behaviour, and mark-1, mark-2 and so on, the computed points, in the order you listed them (its guides to the axes draw in).',
   formula: 'board_focus lights up one term of your formula while you name it: target term-1 is the first term.',
   flow: 'board_focus lights up one stage of your flow while you speak about it: its target is that node id.',
   bars: 'board_focus lights up one bar while you mention it: target bar-1 is the first bar.',
@@ -61,6 +61,10 @@ const FOCUS_HELP: Record<BoardKind, string> = {
   scatter: 'board_focus lights up one point while you mention it: target point-1 is the first point.',
   shapes:
     'board_focus lights up one matrix while you name it: target matrix-1 is the first matrix, matrix-2 the second; operators are not targets.',
+  timeline:
+    'board_focus lights up one event while you name it (target event-1 is the first event) or one span (target span-1 is the first span, the first period you listed).',
+  distribution:
+    'board_focus target dist-1 is the first distribution; dist-2 morphs the board into the second while you explain what changes; region lights up the shaded range with its chance.',
 };
 const REGION_HELP = `When the image is attached, use exact "bounds": [left,top,right,bottom] between 0 and 1, relative
    to the chosen TARGET. Use its supplied image-frame locations. Prefer a detected text ID or panel for the exact
@@ -87,6 +91,24 @@ export const BOARD_EXAMPLES = {
     },
     say: 'This illustrative response turns an input into a value between zero and one. The horizontal axis is the input and the vertical axis is the response. As the scale increases, the transition becomes gentler: the same change in input has a smaller effect near the middle. This is a function illustration, not a measured result.',
     cues: [{ action: 'board_focus', target: 'curve-1', label: '', anchor: 'the transition becomes gentler' }],
+  },
+  plotMarks: {
+    plan: 'The point is where one cost overtakes the other; a crossing mark makes that a fact on the plot.',
+    plot: {
+      kind: 'plot',
+      title: 'Illustrative cost against size',
+      x: [1, 30],
+      y: [0, 400],
+      x_label: 'size',
+      y_label: 'cost',
+      curves: [
+        { expression: 'x^2', label: 'x^2' },
+        { expression: '12*x', label: '12x' },
+      ],
+      marks: [{ type: 'crossing', curve: 1, other: 2, label: 'break-even' }],
+    },
+    say: 'Two costs grow at different speeds. For small sizes the steady cost is the larger one, but the quadratic cost catches up at the break-even size and stays above it from then on. These curves are illustrative, not measured.',
+    cues: [{ action: 'board_focus', target: 'mark-1', label: '', anchor: 'the break-even size' }],
   },
   formula: {
     plan: 'The weighted sum, the bias, then the squashing.',
@@ -201,6 +223,50 @@ export const BOARD_EXAMPLES = {
       { action: 'board_focus', target: 'matrix-3', label: '', anchor: 'outputs of width h' },
     ],
   },
+  timeline: {
+    plan: 'The point is how the two periods start together but run for very different lengths; a timeline shows it.',
+    timeline: {
+      kind: 'timeline',
+      title: 'Returns and warranty',
+      unit: 'day',
+      source: 'document',
+      anchor: { label: 'Delivery' },
+      events: [
+        { label: 'Free returns end', after: 'Delivery', offset: 30 },
+        { label: 'Refund paid', after: 'Free returns end', offset: 14 },
+        { label: 'Warranty ends', after: 'Delivery', offset: 2, offset_unit: 'year', deadline: true },
+      ],
+      spans: [
+        { label: 'Return window', from: 'Delivery', to: 'Free returns end', role: 'window' },
+        { label: 'Warranty', from: 'Delivery', to: 'Warranty ends', role: 'term' },
+      ],
+    },
+    say: 'The return window and the warranty both start at delivery, but they run for very different lengths. A return has to be made early, and the refund follows shortly after. The warranty lasts far longer, and its end is the last date that matters.',
+    cues: [
+      { action: 'board_focus', target: 'span-1', label: '', anchor: 'the return window' },
+      { action: 'board_focus', target: 'event-3', label: '', anchor: 'its end is the last date' },
+    ],
+  },
+  distribution: {
+    plan: 'The point is how a wider spread makes a long wait likely; two shapes of the same quantity and one shaded tail show it.',
+    distribution: {
+      kind: 'distribution',
+      title: 'Waiting time with a second counter',
+      x_label: 'waiting time (min)',
+      source: 'illustrative',
+      dists: [
+        { family: 'exponential', label: 'One counter', mean: 8 },
+        { family: 'exponential', label: 'Two counters', mean: 4 },
+      ],
+      region: { from: 10 },
+    },
+    say: 'Most customers wait only a short time, but a few wait very long, and that long tail is what the shaded range measures. Adding a second counter halves the average wait. The tail shrinks much faster than the average does: waiting more than ten minutes goes from fairly common to rare. The values are illustrative.',
+    cues: [
+      { action: 'board_focus', target: 'dist-1', label: '', anchor: 'a few wait very long' },
+      { action: 'board_focus', target: 'dist-2', label: '', anchor: 'Adding a second counter' },
+      { action: 'board_focus', target: 'region', label: '', anchor: 'waiting more than ten minutes' },
+    ],
+  },
   pen: [
     {
       action: 'arrow',
@@ -224,7 +290,12 @@ const example = (value: unknown) => `EXAMPLE from another document: ${JSON.strin
 
 export const BOARD_TASK: Record<BoardKind, string> = {
   scene: `BOARD: a native scene combines positioned text, math, rectangles, circles, arrows, vectors, numeric matrices and safe function plots. Keep objects stable across example frames so positions and values transform instead of replacing the whole illustration. Use normalized boxes x,y,w,h inside0..1; arrow/vector w,h are signed endpoint deltas. Keep text readable, avoid overlapping foreground content, and explicitly mark unlabeled axes/containers background:true. No executable code or media.`,
-  plot: `BOARD: an illustrative function plot, never claimed as measured data, for a shape that matters (saturation, decay, periodicity, a crossover); curves that are all straight lines are rejected. Fill plot with kind plot, x/y increasing finite ranges, 1-3 curves with expression and a short LaTeX label. Expressions use x, optional parameter a, pi/e, + - * / ^, parentheses, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max or softmax(x,0). No code, properties or unknown functions. Optional parameter {from,to} sweeps a; omit for fixed curves. Explain what changes and why, and use curve-1 etc for focus.`,
+  plot: `BOARD: an illustrative function plot, never claimed as measured data, for a shape that matters (saturation, decay, periodicity, a crossover); curves that are all straight lines are rejected. Fill plot with kind plot, x/y increasing finite ranges, 1-3 curves with expression and a short LaTeX label. Expressions use x, optional parameter a, pi/e, + - * / ^, parentheses, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max or softmax(x,0). No code, properties or unknown functions. Optional parameter {from,to} sweeps a; omit for fixed curves. Explain what changes and why, and use curve-1 etc for focus.
+- marks (at most 4) are facts about the curves that the code finds and draws as labelled points with guides to the axes: root (curve; where it crosses zero), extremum (curve and which, max or min, inside the range), crossing (curve and other; where two curves meet) or value (curve and at, the x the document states). root and crossing count from the left with nth (default 1; a crossing at the left edge of the range counts, so start the range after it to skip it). Ask for a mark when the point is a fact about the curves (the break-even, the peak, the zero, where one cost overtakes another) and never give a position or write its number: the code finds it, and a mark that does not exist is refused. label is optional, a few words. Focus a mark with mark-1 and so on. With marks, the plot may hold straight lines, since their crossing is the point.
+- points (at most 8) are measurements printed in the evidence, drawn over the curves; copy x and y exactly as printed and never invent one.
+- x_scale or y_scale log for values that span orders of magnitude (that range must be above zero).
+- source document only when the expressions are the document's own formula; otherwise leave it out and the plot is labelled illustrative.
+${example(BOARD_EXAMPLES.plotMarks)}`,
   formula: `BOARD SUGGESTION, NOT A REQUIREMENT: use a formula board for the meaning of the equation's terms. For how the output changes, prefer a function plot instead; a term list alone cannot explain response shape or sensitivity.
 - When function behaviour explains the equation better, you may instead supply an optional "plot" object: kind "plot", x/y finite increasing ranges, curves [{expression,label}], optional x_label/y_label (LaTeX) and parameter {from,to} for a. Safe expressions: x, a, pi/e, + - * / ^, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max, softmax(x,0). Focus curve-1 etc. Say this is an illustrative function, not measured data. Explain how an input or parameter changes the output; do not merely read symbols.
 - "formula.latex" is the whole equation in clean LaTeX that KaTeX can render. The extracted text is often garbled:
@@ -270,6 +341,20 @@ ${example(BOARD_EXAMPLES.scatter)}`,
 - A matrix has a LaTeX name and rows and cols, each a symbol such as n or d_k or a number; a vector has cols 1. Use the document's own names and dimensions.
 - An op is times (the columns on its left must equal the rows on its right), plus or hadamard (equal shapes), equals (the next matrix is the computed result, so it must have the computed shape) or apply (a function such as softmax, named in label, that keeps the shape).
 ${example(BOARD_EXAMPLES.shapes)}`,
+  timeline: `BOARD (optional): a timeline lays out events, periods and deadlines on one axis: the dates, notice periods and time limits of a lease, contract, letter or form, the steps of a protocol or procedure, or the history of a field. It shows when things happen and how the periods stack, which the page does not.
+- Fill "timeline" with kind timeline, unit (day, week, month or year for a calendar; step for ordered events with no time between them), source, 2-8 events and up to 4 spans. Every label is distinct and at most 28 characters.
+- Place each event ONE way, as the document writes it: "date" (YYYY-MM-DD), "at" (a position from the anchor, such as a step number) or "after" (the label of another event or of the anchor) with "offset" (negative for before) in the unit of the axis or in "offset_unit". "Within 14 days of the notice" is after the notice, offset 14, offset_unit day. The code resolves every position and adds the periods up, so never work out a date, an end or a total yourself.
+- "anchor" is the reference mark and zero of the axis: the day a notice is served, the start of the term or today. Give it a date only when the document does.
+- A span is a period from an event to another event (from, to) or from an event for a length (from, length, length_unit). Its role is term (a period that runs), notice, wait (time in which nothing can be done yet) or window (when something is allowed). The code prints each span's length, so leave the length out of its label; a number in a label that the resolved length contradicts is refused.
+- deadline true marks a limit that must be met.
+- source document: every period, count and date is printed in the evidence above, in digits or in words. State only what the document writes, as written, and never a verdict on what the reader should do; leave out a clause whose period is ambiguous. source illustrative: an invented case, said so in the title and in "say".
+${example(BOARD_EXAMPLES.timeline)}`,
+  distribution: `BOARD (optional): a distribution board draws one or two distributions from their parameters, or from counts the document prints, and morphs the first into the second: a spread that narrows as the sample grows, a shift between before and after, a prior that becomes a posterior, a rate that changes. A shaded region reads the chance of a range, computed by the code.
+- Fill "distribution" with kind distribution, x_label (what is measured, with its unit), source and 1-2 dists. Each dist has a family and a short label (Before, Prior, n = 100): normal (mean, sd), uniform (min, max), binomial (n, p with p between 0 and 1), poisson (mean), exponential (mean or rate) or counts (categories and counts copied from the document). Two dists are of one kind (both continuous or both discrete) and differ enough for the morph to show something.
+- "region" {from, to} shades that range of the axis (one bound for a tail) and shows its chance under the distribution on show; the code computes it, so never write a probability yourself.
+- source document: parameters or counts printed in the evidence above (a chance may be printed as a percentage, a spread as a variance). source illustrative: invented values that explain a mechanism, said so in the title and in "say".
+- Use it for the shape of uncertainty and how it changes, not for one number (bars), for a trade-off between two quantities (scatter) or for scores of several items (heatmap).
+${example(BOARD_EXAMPLES.distribution)}`,
 };
 
 const FORMULA_DETAIL_TASK = `BOARD: the learner already saw the symbolic equation. This detail MUST author a numerical example sequence (the example field) showing actual inputs, a calculation/transformation and its output. Do not supply another copy of the parent formula with different term highlights. Choose a small case that reveals this particular operation's effect and its simplifying assumptions. Show the values changing at the relevant spoken anchors; a concrete substituted formula, connected flow, changing bars or a function plot may each be appropriate. Spend the explanation on why the intermediate changes lead to the result, and what the example does and does not establish.`;
@@ -350,7 +435,7 @@ export function directTask(
   return [
     `TASK: write ONE step of a guided tour in ${JSON.stringify(language)} and say what to point at.`,
     brief,
-    'NATIVE BOARD CHOICE: when the brief has a VISUAL FOR THIS STEP line, draw exactly that visual (or no board when it says none); otherwise a step may draw one top-level board, whatever the suggested board below. Choose the kind that shows what the document is trying to show at this step. Relations, weights, masks, a grid of results or a formula over two indices→heatmap. A trade-off between two quantities measured in the document→scatter (its own numbers, never illustrative). How matrix dimensions combine through an operation→shapes. How an output responds to an input or parameter, when the shape matters (saturation, decay, periodicity, a crossover; never a straight line)→plot. The parts of an equation→formula. One key comparison on a single metric→bars. A real dependency structure with a branch, a merge or a loop that the page does not draw→flow (a chain of boxes is a list). Vector/matrix transformations with actual values or combined visual explanations→scene. A scene contains objects with stable id,type,x,y,w,h, optional color/text/values/plot/background. Types text/math/rect/circle/arrow/vector/matrix/plot are native, positions normalized0..1; vectors/arrows use signed endpoint deltas. Use stable IDs and meaningful motion across example frames. To place a vector, arrow or circle on a plot, set plotId to that plot object ID and give x,y and endpoint deltas in its DATA domain; never guess normalized canvas alignment with axes. Unbound shapes use normalized canvas units. Scene matrix values need source evidence or checked example provenance. A vector/matrix teaching example should transform its actual coordinates or values, not just move a title. Coordinates are layout, never substitute for declaring a numeric value in text or a matrix. Use example.frames for a numerical worked transformation; never also supply a top-level board. A step that reports results (a result or a table) draws only the document’s own numbers in bars, heatmap or scatter, copied exactly from the quoted evidence. Plot expressions use the safe functions listed in the example contract, variable x and optional parameter a.',
+    'NATIVE BOARD CHOICE: when the brief has a VISUAL FOR THIS STEP line, draw exactly that visual (or no board when it says none); otherwise a step may draw one top-level board, whatever the suggested board below. Choose the kind that shows what the document is trying to show at this step. Relations, weights, masks, a grid of results or a formula over two indices→heatmap. A trade-off between two quantities measured in the document→scatter (its own numbers, never illustrative). How matrix dimensions combine through an operation→shapes. How an output responds to an input or parameter, when the shape matters (saturation, decay, periodicity, a crossover; never a straight line)→plot. Dates, notice periods, deadlines, the steps of a procedure→timeline. A spread that narrows or shifts, before and after, the chance of a tail→distribution. The parts of an equation→formula. One key comparison on a single metric→bars. A real dependency structure with a branch, a merge or a loop that the page does not draw→flow (a chain of boxes is a list). Vector/matrix transformations with actual values or combined visual explanations→scene. A scene contains objects with stable id,type,x,y,w,h, optional color/text/values/plot/background. Types text/math/rect/circle/arrow/vector/matrix/plot are native, positions normalized0..1; vectors/arrows use signed endpoint deltas. Use stable IDs and meaningful motion across example frames. To place a vector, arrow or circle on a plot, set plotId to that plot object ID and give x,y and endpoint deltas in its DATA domain; never guess normalized canvas alignment with axes. Unbound shapes use normalized canvas units. Scene matrix values need source evidence or checked example provenance. A vector/matrix teaching example should transform its actual coordinates or values, not just move a title. Coordinates are layout, never substitute for declaring a numeric value in text or a matrix. Use example.frames for a numerical worked transformation; never also supply a top-level board. A step that reports results (a result or a table) draws only the document’s own numbers in bars, heatmap or scatter, copied exactly from the quoted evidence. Plot expressions use the safe functions listed in the example contract, variable x and optional parameter a.',
     EXAMPLE_TASK,
     'FIGURE CHECK: before finalizing, verify every left/right/up/down statement against the actual axis labels, axis direction and the compared points. A desirable corner is not necessarily the trajectory of a parameter sweep. Separate direction of movement from whether each metric improves. Preserve multi-objective trade-offs instead of replacing a two-axis source plot with a one-metric chart that hides the cost; a scatter keeps both axes. Describe dominance only for the configurations and matched conditions the paper supports. If the needed positions are not clear, state the grounded metric relationship without inventing a spatial direction.',
     SOURCE_VISUAL_POLICY,

@@ -192,14 +192,19 @@ test('the sheet plan offers the tasks, never a formula, and names the method as 
   );
   const item = (visualPlanSchema(tasks, { sheet: true }) as any).properties.beats.items;
   assert.deepEqual(item.properties.beat.enum, ['exercise-ex1.a', 'exercise-ex1.b', 'exercise-ex2']);
-  assert.deepEqual(item.properties.visual.enum, ['none', ...BOARD_KINDS.filter((k) => k !== 'formula')]);
+  assert.deepEqual(item.properties.visual.enum, [
+    'none',
+    ...BOARD_KINDS.filter((k) => k !== 'formula' && k !== 'timeline'),
+  ]);
   const text = visualPlanTask('en-US', { sheet: true });
   assert.match(text, /solves it line by line on the board in formulas/);
   assert.match(text, /never plan a formula/);
   assert.match(text, /At most one visual per task/);
   assert.match(text, /never the result/);
-  for (const kind of BOARD_KINDS.filter((k) => k !== 'formula')) assert.match(text, new RegExp(`- ${kind}: `), kind);
+  for (const kind of BOARD_KINDS.filter((k) => k !== 'formula' && k !== 'timeline'))
+    assert.match(text, new RegExp(`- ${kind}: `), kind);
   assert.doesNotMatch(text, /- formula: /);
+  assert.doesNotMatch(text, /- timeline: /, 'a sheet has no dates to lay out');
   // The brief gives every part its name and its task, which is what the picture is set up from.
   const brief = visualPlanBrief(card('en'), tasks, sheet);
   assert.match(brief, /THE TASKS OF THE SHEET, in order:/);

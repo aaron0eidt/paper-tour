@@ -236,7 +236,9 @@ export function boardSignature(item: BoardItem): string | null {
       return `plot|${item.curves
         .map((c) => squash(c.expression))
         .sort()
-        .join(',')}`;
+        .join(
+          ',',
+        )}|${(item.marks ?? []).map((m) => `${m.type}${m.curve}${m.other ?? ''}${m.which ?? ''}${m.at ?? ''}`).join(',')}`;
     case 'heatmap':
       return `heatmap|${item.rows.join(',')}|${item.cols.join(',')}|${item.values.map((row) => row.map(round).join(',')).join(';')}`;
     case 'scatter':
@@ -246,6 +248,18 @@ export function boardSignature(item: BoardItem): string | null {
         .join(',')}`;
     case 'shapes':
       return `shapes|${JSON.stringify(item.terms)}`;
+    case 'timeline':
+      return `timeline|${item.events
+        .map((e) => `${squash(e.label)}:${round(e.position)}`)
+        .sort()
+        .join(',')}`;
+    case 'distribution':
+      return `distribution|${item.dists
+        .map(
+          (d) =>
+            `${d.family}:${d.mean ?? ''}:${d.sd ?? ''}:${d.min ?? ''}:${d.max ?? ''}:${d.n ?? ''}:${d.p ?? ''}:${d.rate ?? ''}:${(d.counts ?? []).join(',')}`,
+        )
+        .join(';')}`;
     case 'scene': {
       const content = item.objects.flatMap((o) => [
         ...(o.text ? [`${o.type}:${squash(o.text)}`] : []),

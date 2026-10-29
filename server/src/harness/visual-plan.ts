@@ -44,16 +44,17 @@ export interface PlanOptions {
   sheet?: boolean;
 }
 /** The kinds an exercise sheet's plan offers: a formula is what the solution lines already are. */
-export const sheetKinds = () => BOARD_KINDS.filter((kind) => kind !== 'formula');
+export const sheetKinds = () => BOARD_KINDS.filter((kind) => kind !== 'formula' && kind !== 'timeline');
 
 /** Planned kinds that show a relationship themselves: a worked-example sequence is never forced on their steps. */
-const RELATIONAL_KINDS: readonly string[] = ['heatmap', 'scatter', 'shapes', 'plot'];
+const RELATIONAL_KINDS: readonly string[] = ['heatmap', 'scatter', 'shapes', 'plot', 'timeline', 'distribution'];
 /** The kinds that show a worked case's mechanism, best first, which the frames of a step planned as a formula may add. */
 const MECHANISM_KINDS: readonly BoardKind[] = ['plot', 'scene', 'flow', 'bars'];
 
 /**
  * Whether a step may carry a worked example (example frames) and whether it must. Without a plan a step may always, and
- * a formula detail must. A planned relationship (heatmap, scatter, shapes, plot) is the visual itself, with no example.
+ * a formula detail must. A planned relationship (heatmap, scatter, shapes, plot, timeline, distribution) is the visual
+ * itself, with no example.
  * A step planned without a board has example frames only when it must have a worked example.
  */
 export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolean; required: boolean } {
@@ -110,14 +111,28 @@ const KINDS_HELP: Record<BoardKind, string> = {
   scatter:
     'a trade-off or relationship between two quantities measured in the document (quality against cost, accuracy against size, speed against error; two columns of a results table), at least three points (two are a comparison: use bars), never made-up points, with the better corner marked.',
   shapes: 'how matrix or vector dimensions combine in an operation, and which dimension disappears or appears.',
-  plot: 'how a formula responds to its input or a parameter when the shape matters (saturation, decay, periodicity, a crossover), never a straight line.',
+  plot: 'how a formula responds to its input or a parameter when the shape matters (saturation, decay, periodicity, a crossover), never a straight line; its roots, peak and crossings are marked.',
+  timeline: 'the dates, notice periods, deadlines and terms a document states, or the ordered steps of a procedure.',
+  distribution:
+    'how uncertainty is spread and changes: a bell curve that narrows or shifts, a Poisson or binomial, the chance of a tail.',
   formula: 'the parts of a key equation, each with its role.',
   bars: 'one key comparison on a single metric.',
   flow: 'a real dependency structure with a branch, a merge or a loop that the page does not draw; a chain of steps is a list, not a flow.',
   scene: 'vectors or geometry (angles, projections, distances) when geometry is the point.',
 };
 /** The kinds in the order the task lists them: the ones that show relationships come first. */
-const KINDS_ORDER: BoardKind[] = ['heatmap', 'scatter', 'shapes', 'plot', 'formula', 'bars', 'flow', 'scene'];
+const KINDS_ORDER: BoardKind[] = [
+  'heatmap',
+  'scatter',
+  'shapes',
+  'plot',
+  'timeline',
+  'distribution',
+  'formula',
+  'bars',
+  'flow',
+  'scene',
+];
 
 /** The plan call's response schema: one entry per step, in tour order. */
 export function visualPlanSchema(beats: Beat[], { sheet }: PlanOptions = {}) {
@@ -167,9 +182,11 @@ const SHEET_KINDS_HELP: Partial<Record<BoardKind, string>> = {
     'geometry: a point or a vector in the plane or the complex plane, an angle, a triangle, a projection, with labelled objects.',
   scatter: 'the (x, y) data points a task lists, when it prints at least three.',
   flow: 'a procedure or tree with a real branch or loop (a probability tree, a case split, an algorithm).',
+  distribution:
+    'the distribution a probability task is about (a normal, binomial, Poisson or exponential with the parameters the task gives), never with the range the task asks the chance of shaded.',
 };
 /** The kinds an exercise sheet's plan lists, in the order the task names them. */
-const SHEET_ORDER: BoardKind[] = ['heatmap', 'shapes', 'scene', 'plot', 'bars', 'scatter', 'flow'];
+const SHEET_ORDER: BoardKind[] = ['heatmap', 'shapes', 'scene', 'plot', 'distribution', 'bars', 'scatter', 'flow'];
 
 /** The task of the plan call for an exercise sheet: a visual only where the method gains from one. */
 function sheetPlanTask(language: string): string {
@@ -204,8 +221,8 @@ point is simple.
 ${kinds}
 2. About half the steps get a visual. Never two visuals of the same data or idea. Diversity comes first: use as
    many different kinds as fit, each kind once (formula and plot at most twice), and with five or more visuals at
-   least four different kinds. Prefer heatmap, scatter, shapes and plot where they fit, since they show
-   relationships rather than single numbers. A figure step usually teaches on the figure itself.
+   least four different kinds. Prefer heatmap, scatter, shapes, plot, timeline and distribution where they fit, since
+   they show relationships rather than single numbers. A figure step usually teaches on the figure itself.
 3. For each visual, "idea" says in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks.
    "data" says exactly which numbers, symbols or labels it uses (at most ${DATA_WORDS} words): document values copied
    as printed, anything else marked illustrative. A step that reports results (a result or a table) uses only the

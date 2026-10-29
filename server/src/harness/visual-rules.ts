@@ -43,6 +43,11 @@ const PLACEHOLDER = new RegExp(
     'index',
     'obj',
     'object',
+    'event',
+    'step',
+    'stage',
+    'period',
+    'date',
     'x',
     'y',
     'z',
@@ -117,8 +122,26 @@ export function groundedProblems(item: BoardItem, { results }: { results: boolea
   } else if (item.kind === 'bars') {
     // Bars always copy their values from the evidence (checkBars), so only their labels can be placeholders.
     if (numbered(item.bars.map((bar) => bar.label))) problems.push(placeholders('bars'));
+  } else if (item.kind === 'timeline') {
+    if (results && item.source !== 'document')
+      problems.push(
+        'this step reports the document’s results, so a timeline must use its own dates and periods: set source to document and take every period as written in the evidence, or leave the board out',
+      );
+    if (numbered([...item.events.map((event) => event.label), ...(item.anchor ? [item.anchor.label] : [])]))
+      problems.push(placeholders('events'));
+  } else if (item.kind === 'distribution') {
+    if (results && item.source !== 'document')
+      problems.push(
+        'this step reports the document’s results, so a distribution must use its own parameters or counts: set source to document and copy them exactly as printed in the evidence, or leave the board out',
+      );
+    const counted = item.dists.flatMap((dist) => dist.categories ?? []);
+    if (counted.length && numbered(counted)) problems.push(placeholders('categories'));
   } else if (item.kind === 'plot') {
-    if (item.curves.every((curve) => straight(curve.expression, item)))
+    // Two straight lines that cross, or measured points over a line, are a plot of a fact: the mark or the data is the point.
+    const fact =
+      (item.marks ?? []).some((mark) => mark.type === 'crossing' || mark.type === 'root') ||
+      (item.points?.length ?? 0) >= 3;
+    if (!fact && item.curves.every((curve) => straight(curve.expression, item)))
       problems.push(
         'every curve is a straight line in x, which a sentence says as well as a plot; plot a relationship whose shape matters (saturation, decay, periodicity, a crossover) or leave the board out',
       );

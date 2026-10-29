@@ -1,5 +1,5 @@
 import { SCENE_SCHEMA, SCENE_MAX_OBJECTS, sceneProblems, type SceneItem } from '../../../shared/scene';
-import { PLOT_SCHEMA, plotProblems } from '../../../shared/plot';
+import { PLOT_BOARD_SCHEMA, PLOT_LIMITS, plotProblems, type PlotItem } from '../../../shared/plot';
 import {
   HEATMAP_LIMITS,
   HEATMAP_SCHEMA,
@@ -9,6 +9,19 @@ import {
 } from '../../../shared/heatmap';
 import { SCATTER_LIMITS, SCATTER_SCHEMA, canonicalScatter, scatterProblems } from '../../../shared/scatter';
 import { SHAPES_LIMITS, SHAPES_SCHEMA, canonicalShapes, shapesProblems } from '../../../shared/shapes';
+import {
+  TIMELINE_LIMITS,
+  TIMELINE_SCHEMA,
+  canonicalTimeline,
+  timelineProblems,
+  timelineQuotes,
+} from '../../../shared/timeline';
+import {
+  DISTRIBUTION_SCHEMA,
+  canonicalDistribution,
+  distributionProblems,
+  distributionQuotes,
+} from '../../../shared/distribution';
 import katex, { type KatexOptions } from 'katex';
 import type { BoardItem } from '../../../shared/paper';
 
@@ -405,28 +418,117 @@ function checkScene(raw: unknown, evidence: string): BoardCheck {
   return { item: problems.length ? null : item, problems };
 }
 
-function checkPlot(raw: unknown): BoardCheck {
+/** Constants in an expression that a document's own formula would print: the small ones every formula uses are free. */
+const FREE_CONSTANTS = [0, 1, 2, 10];
+
+/** A plot of the document's own formula prints its constants, and measured points are always printed. */
+function plotEvidence(item: PlotItem, evidence: string): string[] {
+  const problems: string[] = [];
+  if (item.points?.length)
+    problems.push(
+      ...unprinted(
+        item.points.flatMap((point, i) => [
+          { where: `point ${i + 1} x`, value: point.x },
+          { where: `point ${i + 1} y`, value: point.y },
+        ]),
+        evidence,
+        'points',
+        { fix: 'or leave the point out: a point is a measurement, never an invented one' },
+      ),
+    );
+  if (item.source === 'document')
+    problems.push(
+      ...unprinted(
+        [
+          ...item.curves.flatMap((curve, i) =>
+            numbersIn(curve.expression)
+              .filter((n) => !FREE_CONSTANTS.includes(n))
+              .map((value) => ({ where: `curve ${i + 1} constant`, value })),
+          ),
+          ...(item.marks ?? []).flatMap((mark, i) =>
+            mark.type === 'value' && mark.at !== undefined ? [{ where: `mark ${i + 1} at`, value: mark.at }] : [],
+          ),
+        ],
+        evidence,
+        'source',
+        { fix: 'or set source to illustrative: document is for the document’s own formula' },
+      ),
+    );
+  return problems;
+}
+
+/** A plot: the shared check (ranges, scales, expressions, marks that exist, points inside the axes), then the evidence for points. */
+function checkPlot(raw: unknown, evidence = ''): BoardCheck {
   const item = isObj(raw) ? { ...raw, kind: 'plot' as const } : raw;
   const problems = plotProblems(item);
+  if (!problems.length) problems.push(...plotEvidence(item as PlotItem, evidence));
   return { item: problems.length ? null : (item as BoardItem), problems };
 }
 
 /** Empty lists are how a model says "no board": a missing value, or an array with nothing in it. */
 const blank = (v: unknown) => v === undefined || (Array.isArray(v) && !v.length);
 
+/** Numbers written out in words ("three months", "a fortnight", "third"), which a period or a step in a document often is. */
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  fifteen: 15,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  sixty: 60,
+  ninety: 90,
+  fortnight: 14,
+  first: 1,
+  second: 2,
+  third: 3,
+  fourth: 4,
+  fifth: 5,
+  sixth: 6,
+  seventh: 7,
+  eighth: 8,
+  ninth: 9,
+  tenth: 10,
+};
+function numbersInWords(source: string): number[] {
+  const out = [...source.toLowerCase().matchAll(/\b[a-z]+\b/g)].flatMap((m) =>
+    Object.hasOwn(NUMBER_WORDS, m[0]) ? [NUMBER_WORDS[m[0]]] : [],
+  );
+  // "a month" and "a week" are one; "a fortnight" is also two weeks.
+  if (/\b(?:an?|per|each|every)\s+(?:day|week|month|year)/i.test(source)) out.push(1);
+  if (/\bfortnight/i.test(source)) out.push(2);
+  return out;
+}
+
 /**
  * What a board that claims the document's own numbers is told when some are not printed in `evidence`: the first few by
- * position, then how to fix it. Empty when every value is printed.
+ * position, then how to fix it. Empty when every value is printed. A value may also count as printed through one of its
+ * `alternatives` (a variance printed for a spread, a percentage for a chance), or, with `words`, written out in words.
  */
-function unprinted(values: { where: string; value: number }[], evidence: string, field: string): string[] {
-  const printed = numbersIn(evidence);
-  const missing = values.filter(({ value }) => !printed.some((n) => sameNumber(n, value)));
+function unprinted(
+  values: { where: string; value: number; alternatives?: number[] }[],
+  evidence: string,
+  field: string,
+  { fix = 'or set source to illustrative and say so in the title', words = false } = {},
+): string[] {
+  const printed = [...numbersIn(evidence), ...(words ? numbersInWords(evidence) : [])];
+  const missing = values.filter(
+    ({ value, alternatives = [] }) => ![value, ...alternatives].some((v) => printed.some((n) => sameNumber(n, v))),
+  );
   if (!missing.length) return [];
   const shown = missing.slice(0, 3).map(({ where, value }) => `${where} = ${value}`);
   const more = missing.length > shown.length ? ` (and ${missing.length - shown.length} more)` : '';
-  return [
-    `${field}: not printed in the evidence: ${shown.join('; ')}${more}. Copy numbers exactly as printed, or set source to illustrative and say so in the title`,
-  ];
+  return [`${field}: not printed in the evidence: ${shown.join('; ')}${more}. Copy numbers exactly as printed, ${fix}`];
 }
 
 /**
@@ -488,6 +590,34 @@ function checkShapes(raw: unknown): BoardCheck {
     if (error) problems.push(`term ${i + 1}: the name "${name}" cannot be rendered as LaTeX: ${error}`);
   });
   return { item: problems.length ? null : canonicalShapes(item), problems };
+}
+
+/**
+ * A timeline: the shared check resolves every position from the dates, offsets and lengths the model wrote (cycles,
+ * unknown references and a number in a label that the resolved length contradicts are refused); the periods and dates of
+ * a document's own timeline must be printed in the evidence, in digits or in words.
+ */
+function checkTimeline(raw: unknown, evidence: string): BoardCheck {
+  if (isObj(raw) && blank(raw.events)) return none();
+  const item = isObj(raw) ? { ...raw, kind: 'timeline' as const } : raw;
+  const problems = timelineProblems(item);
+  if (problems.length) return { item: null, problems };
+  const checked = canonicalTimeline(item);
+  if (checked.source === 'document')
+    problems.push(...unprinted(timelineQuotes(checked), evidence, 'events', { words: true }));
+  return { item: problems.length ? null : checked, problems };
+}
+
+/** One or two distributions: parameter domains, one kind of axis and a region from the shared check; document parameters must be printed. */
+function checkDistribution(raw: unknown, evidence: string): BoardCheck {
+  if (isObj(raw) && blank(raw.dists)) return none();
+  const item = isObj(raw) ? { ...raw, kind: 'distribution' as const } : raw;
+  const problems = distributionProblems(item);
+  if (problems.length) return { item: null, problems };
+  const checked = canonicalDistribution(item);
+  if (checked.source === 'document')
+    problems.push(...unprinted(distributionQuotes(checked), evidence, 'dists', { words: true }));
+  return { item: problems.length ? null : checked, problems };
 }
 
 /** Dispatch schema-validated tool data through the same checks in tours, examples and Q&A. */
@@ -604,10 +734,13 @@ const BOARD_TOOLS = {
     parts: (item) => (item.kind === 'bars' ? partIds('bar', item.bars.length) : []),
   },
   plot: {
-    schema: () => PLOT_SCHEMA,
+    schema: () => PLOT_BOARD_SCHEMA,
     check: checkPlot,
-    focusIds: partIds('curve', PLOT_SCHEMA.properties.curves.maxItems),
-    parts: (item) => (item.kind === 'plot' ? partIds('curve', item.curves.length) : []),
+    focusIds: [...partIds('curve', PLOT_LIMITS.curves), ...partIds('mark', PLOT_LIMITS.marks)],
+    parts: (item) =>
+      item.kind === 'plot'
+        ? [...partIds('curve', item.curves.length), ...partIds('mark', item.marks?.length ?? 0)]
+        : [],
   },
   scene: {
     schema: () => SCENE_SCHEMA,
@@ -633,6 +766,22 @@ const BOARD_TOOLS = {
     focusIds: partIds('matrix', SHAPES_LIMITS.matrices),
     parts: (item) =>
       item.kind === 'shapes' ? partIds('matrix', item.terms.filter((term) => term.kind === 'matrix').length) : [],
+  },
+  timeline: {
+    schema: () => TIMELINE_SCHEMA,
+    check: checkTimeline,
+    focusIds: [...partIds('event', TIMELINE_LIMITS.events[1]), ...partIds('span', TIMELINE_LIMITS.spans)],
+    parts: (item) =>
+      item.kind === 'timeline'
+        ? [...partIds('event', item.events.length), ...partIds('span', item.spans?.length ?? 0)]
+        : [],
+  },
+  distribution: {
+    schema: () => DISTRIBUTION_SCHEMA,
+    check: checkDistribution,
+    focusIds: ['dist-1', 'dist-2', 'region'],
+    parts: (item) =>
+      item.kind === 'distribution' ? [...partIds('dist', item.dists.length), ...(item.region ? ['region'] : [])] : [],
   },
 } satisfies Record<BoardKind, BoardTool>;
 

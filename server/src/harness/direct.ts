@@ -122,7 +122,7 @@ export { boardPartIds, boardPart } from './board';
 export { tableLines } from '../../../shared/tableTargets';
 
 /** Planned kinds whose numbers come from the document, so their board may only copy what the evidence prints. */
-const NUMERIC_KINDS: readonly string[] = ['bars', 'heatmap', 'scatter'];
+const NUMERIC_KINDS: readonly string[] = ['bars', 'heatmap', 'scatter', 'timeline', 'distribution'];
 
 export { exampleRules };
 

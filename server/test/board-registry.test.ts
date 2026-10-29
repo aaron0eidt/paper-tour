@@ -56,6 +56,25 @@ const inputs = {
       { kind: 'matrix', name: 'B', rows: 'k', cols: 'n' },
     ],
   },
+  timeline: {
+    unit: 'month',
+    source: 'illustrative',
+    anchor: { label: 'Start' },
+    events: [
+      { label: 'Notice allowed', after: 'Start', offset: 3 },
+      { label: 'Earliest exit', after: 'Notice allowed', offset: 3 },
+    ],
+    spans: [{ label: 'Notice runs', from: 'Notice allowed', to: 'Earliest exit', role: 'notice' }],
+  },
+  distribution: {
+    x_label: 'waiting time (min)',
+    source: 'illustrative',
+    dists: [
+      { family: 'exponential', label: 'One counter', mean: 8 },
+      { family: 'exponential', label: 'Two counters', mean: 4 },
+    ],
+    region: { from: 10 },
+  },
 } satisfies Record<BoardKind, unknown>;
 
 test('each registered visualization dispatches to its own validator and offers usable focus IDs', () => {
@@ -74,6 +93,36 @@ test('each registered visualization dispatches to its own validator and offers u
     );
     assert.equal(boardPart(checked.item, 'not-a-part'), -1, kind);
   }
+});
+
+test('a plot, a timeline and a distribution offer their parts in the order the board lights them', () => {
+  const plot = checkBoard('plot', {
+    x: [0, 20],
+    y: [0, 400],
+    curves: [
+      { expression: 'x*x', label: 'square' },
+      { expression: '10*x', label: 'line' },
+    ],
+    marks: [{ type: 'crossing', curve: 1, other: 2, nth: 2 }],
+  }).item!;
+  assert.deepEqual(boardPartIds('plot'), ['curve-1', 'curve-2', 'curve-3', 'mark-1', 'mark-2', 'mark-3', 'mark-4']);
+  assert.equal(boardPart(plot, 'curve-2'), 1);
+  assert.equal(boardPart(plot, 'mark-1'), 2);
+  assert.equal(boardPart(plot, 'mark-2'), -1, 'a mark that was not asked for is not a part');
+  const timeline = checkBoard('timeline', inputs.timeline).item!;
+  assert.deepEqual(
+    [boardPart(timeline, 'event-2'), boardPart(timeline, 'span-1'), boardPart(timeline, 'span-2')],
+    [1, 2, -1],
+    'the events come first, then the spans',
+  );
+  const distribution = checkBoard('distribution', inputs.distribution).item!;
+  assert.deepEqual(
+    ['dist-1', 'dist-2', 'region'].map((id) => boardPart(distribution, id)),
+    [0, 1, 2],
+  );
+  const single = checkBoard('distribution', { ...inputs.distribution, dists: [inputs.distribution.dists[0]] }).item!;
+  assert.equal(boardPart(single, 'dist-2'), -1);
+  assert.equal(boardPart(single, 'region'), 1);
 });
 
 test('flow focus follows actual displayed node order rather than numeric ID order', () => {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { findAnchor } from '../src/harness/assemble';
-import { boardParts, boardPartIds, checkBoard, type BoardKind } from '../src/harness/board';
+import { boardPart, boardParts, boardPartIds, checkBoard, type BoardKind } from '../src/harness/board';
 import { BOARD_EXAMPLES, SHARED_RULES, directTask } from '../src/harness/prompts';
 import { groundedProblems } from '../src/harness/visual-rules';
 import { SOURCE_VISUAL_POLICY } from '../src/muse/visual-policy';
@@ -188,12 +188,20 @@ test('shapes without terms means no board', () => {
 const ACTIONS = ['highlight', 'box', 'spotlight', 'note', 'arrow', 'circle', 'board_focus'];
 const prompt = (board?: BoardKind, detail = false) =>
   directTask('en', 'BRIEF', { actions: ACTIONS, board, words: 120, detail });
-const NEW_KINDS = ['heatmap', 'scatter', 'shapes'] as const;
-const FOCUS = { heatmap: 'row-1', scatter: 'point-1', shapes: 'matrix-1' } as const;
+const NEW_KINDS = ['heatmap', 'scatter', 'shapes', 'timeline', 'distribution'] as const;
+const FOCUS = {
+  heatmap: 'row-1',
+  scatter: 'point-1',
+  shapes: 'matrix-1',
+  timeline: 'event-1',
+  distribution: 'dist-1',
+} as const;
 const HEADER = {
   heatmap: 'BOARD (optional): a heatmap shows',
   scatter: 'BOARD (optional): a scatter plot shows',
   shapes: 'BOARD (optional): shapes shows',
+  timeline: 'BOARD (optional): a timeline lays out',
+  distribution: 'BOARD (optional): a distribution board draws',
 } as const;
 
 test('the prompt of a heatmap, scatter or shapes step explains the kind, its data rules, its focus and an example', () => {
@@ -225,14 +233,14 @@ test('the focus line is only offered when the step may light up board parts', ()
 
 test('the examples the model is shown pass the checks of its own answers and cue real parts', () => {
   // A scatter is the document's own measured numbers, so its example prints them in its evidence.
-  const printed = BOARD_EXAMPLES.scatter.scatter.points.map((point) => `${point.x} ${point.y}`).join(' ');
+  const printed = {
+    scatter: BOARD_EXAMPLES.scatter.scatter.points.map((point) => `${point.x} ${point.y}`).join(' '),
+    // A timeline of the document's own periods prints them too.
+    timeline: 'Free returns within 30 days of delivery, a refund within 14 days of that, and a warranty of 2 years.',
+  } as Record<string, string>;
   for (const kind of NEW_KINDS) {
     const example = BOARD_EXAMPLES[kind];
-    const { item, problems } = checkBoard(
-      kind,
-      (example as Record<string, unknown>)[kind],
-      kind === 'scatter' ? printed : '',
-    );
+    const { item, problems } = checkBoard(kind, (example as Record<string, unknown>)[kind], printed[kind] ?? '');
     assert.deepEqual(problems, [], kind);
     assert.ok(item, kind);
     assert.deepEqual(groundedProblems(item, { results: false }), [], `${kind} meets the rules for a tour step`);
@@ -240,9 +248,10 @@ test('the examples the model is shown pass the checks of its own answers and cue
     for (const cue of example.cues) {
       assert.ok(findAnchor(example.say, cue.anchor) !== null, `${kind}: ${cue.anchor}`);
       assert.ok(boardPartIds(kind).includes(cue.target), `${kind}: ${cue.target}`);
-      assert.ok(Number(cue.target.split('-')[1]) <= parts, `${kind}: ${cue.target} is one of ${parts} parts`);
+      assert.ok(boardPart(item, cue.target) >= 0, `${kind}: ${cue.target} is one of ${parts} parts`);
     }
-    if (kind !== 'scatter') assert.match(example.say, /illustrative/, `${kind} labels its values illustrative`);
+    if (kind !== 'scatter' && kind !== 'timeline')
+      assert.match(example.say, /illustrative/, `${kind} labels its values illustrative`);
   }
 });
 
@@ -251,6 +260,8 @@ test('the representation guidance names the new kinds and what they show, and st
   assert.match(text, /Relations, weights, masks, a grid of results or a formula over two indices→heatmap/);
   assert.match(text, /A trade-off between two quantities measured in the document→scatter/);
   assert.match(text, /How matrix dimensions combine through an operation→shapes/);
+  assert.match(text, /Dates, notice periods, deadlines, the steps of a procedure→timeline/);
+  assert.match(text, /A spread that narrows or shifts, before and after, the chance of a tail→distribution/);
   assert.match(text, /One key comparison on a single metric→bars/);
   assert.match(text, /A real dependency structure with a branch, a merge or a loop that the page does not draw→flow/);
   assert.match(text, /no board is better than a weak one/);
@@ -264,7 +275,7 @@ test('the representation guidance names the new kinds and what they show, and st
   assert.match(SOURCE_VISUAL_POLICY, /grounded bars only for one key comparison on a single metric/);
   assert.match(SOURCE_VISUAL_POLICY, /a flow only for a real dependency/);
   // Questions and worked-example frames cannot draw the newer kinds, so the policy they share does not offer them.
-  assert.doesNotMatch(SOURCE_VISUAL_POLICY, /heatmap|scatter|shapes/);
+  assert.doesNotMatch(SOURCE_VISUAL_POLICY, /heatmap|scatter|shapes|timeline|distribution/);
 });
 
 test('narration explains what the text leaves implicit instead of paraphrasing what is highlighted', () => {

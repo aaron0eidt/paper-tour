@@ -1,7 +1,7 @@
 // Engine tests with a fake narrator and fake timers. Run with `npm test` (esbuild bundles this
 // file for Node, no test framework needed).
 
-import { FADE_MS, TourEngine, boardPlayback, flattenTour } from '../src/engine';
+import { BOARD_KINDS, EMPTY_BOARD, FADE_MS, TourEngine, boardAfter, boardPlayback, flattenTour } from '../src/engine';
 import type { EngineState, Timers } from '../src/engine';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from '../src/narration/narrator';
 import { SilentNarrator } from '../src/narration/silent';
@@ -1041,6 +1041,24 @@ await test('a checkpoint at the last step written waits for the learner, then fo
   eq([engine.getState().awaiting, engine.getState().waiting], [true, false], 'the learner is asked first');
   engine.reveal();
   eq(engine.getState().waiting, true, 'then it waits for the step that follows');
+});
+
+await test('the board kinds the player draws include the timeline and the distribution; an unknown kind is skipped', () => {
+  for (const kind of ['formula', 'flow', 'bars', 'plot', 'scene', 'heatmap', 'scatter', 'shapes', 'timeline', 'distribution'])
+    eq(BOARD_KINDS.includes(kind), true, kind);
+  const timeline = {
+    kind: 'timeline',
+    unit: 'step',
+    source: 'illustrative',
+    events: [
+      { label: 'One', at: 1, position: 1 },
+      { label: 'Two', at: 2, position: 2 },
+    ],
+  } as BoardItem;
+  const shown = boardAfter(EMPTY_BOARD, { type: 'board', item: timeline }, '0:1', true);
+  eq([shown.key, shown.item?.kind, shown.focus], ['0:1', 'timeline', null]);
+  eq(boardAfter(shown, { type: 'board_focus', part: 2 }, '0:2', true).focus, 2, 'a focus on a span or the region is just an index');
+  eq(boardAfter(EMPTY_BOARD, { type: 'board', item: { kind: 'video' } as unknown as BoardItem }, '0:1', true), EMPTY_BOARD);
 });
 
 console.log(results.join('\n'));

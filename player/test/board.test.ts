@@ -147,10 +147,10 @@ test('items that cannot be drawn are skipped with a warning', () => {
   eq(checkBoardItem({ kind: 'flow', nodes: [{ id: 'a', label: 'A' }], edges: [] }, 'step "s"', warn), null, 'one box');
   const oneBar = { kind: 'bars', bars: [{ label: 'x', value: 1 }, { label: 'y', value: Number.NaN }] };
   eq(checkBoardItem(oneBar, 'step "s"', warn), null, 'one number');
-  eq(checkBoardItem({ kind: 'timeline' }, 'step "s"', warn), null, 'unknown kind');
+  eq(checkBoardItem({ kind: 'video' }, 'step "s"', warn), null, 'unknown kind');
   eq(checkBoardItem(null, 'step "s"', warn), null, 'missing');
   eq(warnings.length, 5, 'warnings');
-  ok(warnings[3].includes('"timeline"') && warnings[3].includes('step "s"'), 'names the kind and the step');
+  ok(warnings[3].includes('"video"') && warnings[3].includes('step "s"'), 'names the kind and the step');
 });
 
 test('a flow drops boxes without labels, edges to unknown boxes and self-loops', () => {
@@ -766,6 +766,58 @@ test('cubic-bezier matches CSS: linear, ease and the board ease-out', () => {
   const samples = Array.from({ length: 21 }, (_, i) => out(i / 20));
   ok(samples.every((v, i) => i === 0 || v >= samples[i - 1]), 'monotonic');
   ok(samples[0] === 0 && samples[20] === 1 && samples[10] > 0.85, 'quick to start, soft to land');
+});
+
+test('a timeline and a distribution are checked and resolved with the shared code, so a saved tour cannot disagree with the server', () => {
+  warnings.length = 0;
+  const lease = {
+    kind: 'timeline',
+    unit: 'month',
+    source: 'illustrative',
+    anchor: { label: 'Start' },
+    events: [
+      { label: 'Notice allowed', after: 'Start', offset: 3 },
+      { label: 'Earliest exit', after: 'Notice allowed', offset: 3 },
+    ],
+    spans: [{ label: 'Notice runs', from: 'Notice allowed', to: 'Earliest exit', role: 'notice' }],
+  };
+  const timeline = checkBoardItem(lease, 'step "s"', warn);
+  ok(timeline?.kind === 'timeline', 'a valid timeline is kept');
+  eq(timeline?.kind === 'timeline' && timeline.events.map((e) => e.position), [91.3125, 182.625], 'positions are computed, not taken from the file');
+  eq(checkBoardItem({ ...lease, events: [{ label: 'A', after: 'B', offset: 1 }, { label: 'B', after: 'A', offset: 1 }] }, 'step "s"', warn), null, 'a cycle is skipped');
+  ok(warnings.at(-1)!.includes('each measured from another'), warnings.at(-1) ?? '');
+  const bell = {
+    kind: 'distribution',
+    x_label: 'reaction time (ms)',
+    source: 'illustrative',
+    dists: [
+      { family: 'normal', label: 'Before', mean: 250, sd: 30 },
+      { family: 'normal', label: 'After', mean: 230, sd: 20 },
+    ],
+    region: { from: 300 },
+  };
+  const distribution = checkBoardItem(bell, 'step "s"', warn);
+  ok(distribution?.kind === 'distribution' && distribution.region!.probabilities.length === 2, 'the region\'s chances are computed');
+  eq(checkBoardItem({ ...bell, dists: [bell.dists[0], { family: 'binomial', label: 'x', n: 5, p: 0.5 }] }, 'step "s"', warn), null, 'discrete and continuous cannot share an axis');
+  eq(sourceTag(timeline!)?.text, 'illustrative');
+  eq(sourceTag(distribution!)?.text, 'illustrative');
+  eq(sourceTag({ ...bell, source: 'document' } as never), null, 'a document\'s own numbers carry no tag');
+});
+
+test('a plot keeps its marks and points, and one whose mark cannot be found is skipped', () => {
+  warnings.length = 0;
+  const plot = {
+    kind: 'plot',
+    x: [0, 20],
+    y: [0, 400],
+    curves: [{ expression: 'x*x', label: 'n^2' }, { expression: '10*x', label: '10n' }],
+    marks: [{ type: 'crossing', curve: 1, other: 2, nth: 2 }],
+    points: [{ x: 5, y: 25 }],
+  };
+  const kept = checkBoardItem(plot, 'step "s"', warn);
+  ok(kept?.kind === 'plot' && kept.marks?.length === 1 && kept.points?.length === 1, 'marks and points are kept');
+  eq(checkBoardItem({ ...plot, marks: [{ type: 'root', curve: 1, nth: 4 }] }, 'step "s"', warn), null);
+  ok(warnings.at(-1)!.includes('has only'), warnings.at(-1) ?? '');
 });
 
 console.log(results.join('\n'));
