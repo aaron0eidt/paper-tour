@@ -238,6 +238,17 @@ export function revealView(rect: BBox, view: View, layout: Layout, vp: Viewport,
   return clampView({ cx: view.cx + dx / view.s, cy: view.cy + dy / view.s, s: view.s }, layout, vp, insets);
 }
 
+/**
+ * A slide shown whole: the page fits the free area with a small margin, and centres in it. Slides are read as they are
+ * printed, so a deck never zooms to a text column the way a paper does.
+ */
+export function slideView(page: PageBox, layout: Layout, vp: Viewport, insets: Insets = NO_INSETS): View {
+  const free = freeArea(vp, insets);
+  const margin = clamp(Math.min(free.width, free.height) * 0.025, 6, 24);
+  const s = clamp(Math.min((free.width - 2 * margin) / page.width, (free.height - 2 * margin) / page.height), MIN_ZOOM, MAX_ZOOM);
+  return viewAt({ x: page.x + page.width / 2, y: page.y + page.height / 2 }, s, layout, vp, insets);
+}
+
 /** Top of the first page at reading zoom. */
 export function initialView(layout: Layout, vp: Viewport, insets: Insets = NO_INSETS): View {
   const p = layout.pages[0];
@@ -254,6 +265,8 @@ const medianHeight = (rects: BBox[]) => {
 export interface Frame {
   view: View;
   rect: BBox;
+  /** The page the target is on. */
+  page: number;
 }
 
 export interface CameraOptions {
@@ -263,6 +276,8 @@ export interface CameraOptions {
   insets?: Insets;
   /** The other marks shown while the move holds. */
   also?: AlsoTarget[];
+  /** A deck: a focus shows the whole slide, and a zoom still goes into it even beside the board. */
+  slide?: boolean;
 }
 
 export function frameFor(action: CameraAction, resolver: Resolver, layout: Layout, vp: Viewport, options: CameraOptions = {}): Frame | null {
@@ -287,13 +302,16 @@ export function frameFor(action: CameraAction, resolver: Resolver, layout: Layou
     ...(column ? { column: [page.x + column[0], page.x + column[1]] as [number, number] } : {}),
   };
   const rect = also.length ? union([target.rect, ...also]) : target.rect;
+  // A slide is framed whole, and the whole slide is what the card above it must not cover.
+  if (options.slide && action.type === 'focus')
+    return { view: slideView(page, layout, vp, options.insets), rect: [page.x, page.y, page.x + page.width, page.y + page.height], page: target.page };
   // Text focus keeps the page legible in context. Deliberate zoom commands can
   // inspect detail, except while a side explanation needs the full paper width.
   const view =
-    action.type === 'focus' || options.fitWidth
+    action.type === 'focus' || (options.fitWidth && !options.slide)
       ? focusView(target.rect, page, layout, vp, opts)
       : zoomView(target.rect, action.padding ?? DEFAULT_ZOOM_PADDING, layout, vp, opts);
-  return { view, rect };
+  return { view, rect, page: target.page };
 }
 
 export function cameraView(action: CameraAction, resolver: Resolver, layout: Layout, vp: Viewport, options: CameraOptions = {}): View | null {

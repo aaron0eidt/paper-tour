@@ -44,8 +44,42 @@ export function paperLike(doc: Doc): boolean {
   );
 }
 
-/** The type when no model said otherwise: tasks found by ingestion make a sheet, a paper's layout a paper. */
+/** The type when no model said otherwise: tasks found by ingestion make a sheet, slides a lecture, a paper's layout a paper. */
 export function guessType(doc: Doc): DocType {
   if (doc.exercises?.length) return 'exercise_sheet';
+  if (deckLike(doc)) return 'lecture';
   return paperLike(doc) ? 'research_paper' : 'other';
+}
+
+/** The pages of a slide deck are mostly landscape and carry little text: a few lines a slide, against a paper's page. */
+const DECK_MIN_PAGES = 4;
+const DECK_LANDSCAPE = 0.8;
+const DECK_MAX_MEDIAN_WORDS = 120;
+
+const decks = new WeakMap<Doc, boolean>();
+
+/**
+ * Whether the document is a slide deck: ingestion said so, or most pages are landscape and the median page holds little
+ * text. Decided from the document alone, so the same document is a deck for every stage and every call.
+ */
+export function deckLike(doc: Doc): boolean {
+  const known = decks.get(doc);
+  if (known !== undefined) return known;
+  const layout = (doc.source as { layout?: string }).layout;
+  let deck = layout === 'slides';
+  if (!deck && layout === undefined && doc.pages.length >= DECK_MIN_PAGES) {
+    const landscape = doc.pages.filter((p) => p.width > p.height).length / doc.pages.length;
+    const sentences = new Map(doc.sentences.map((s) => [s.id, s.text]));
+    const words = doc.pages
+      .map((page) =>
+        doc.blocks
+          .filter((b) => b.page === page.n && b.type !== 'header_footer')
+          .flatMap((b) => b.sentences)
+          .reduce((n, id) => n + (sentences.get(id)?.split(/\s+/).filter(Boolean).length ?? 0), 0),
+      )
+      .sort((a, b) => a - b);
+    deck = landscape >= DECK_LANDSCAPE && words[Math.floor(words.length / 2)] <= DECK_MAX_MEDIAN_WORDS;
+  }
+  decks.set(doc, deck);
+  return deck;
 }

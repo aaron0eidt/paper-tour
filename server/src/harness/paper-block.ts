@@ -1,5 +1,6 @@
 import type { Doc, DocExercise, DocExercisePart, DocSentence } from '../../../shared/paper';
-import { paperLike } from './doctype';
+import { deckLike, paperLike } from './doctype';
+import { DECK_PROSE, slideCards } from './deck';
 import { equationTag } from './equations';
 
 /** Block types whose sentences a tour may speak about and highlight (headings appear as section lines). */
@@ -11,7 +12,8 @@ const PROSE = new Set(['paragraph', 'footnote']);
 const PROSE_OUTSIDE_PAPERS = new Set([...PROSE, 'title', 'authors', 'other']);
 
 export function proseSentences(doc: Doc): DocSentence[] {
-  const prose = paperLike(doc) ? PROSE : PROSE_OUTSIDE_PAPERS;
+  // A deck's slide titles are content too: a slide with a picture and a title has nothing else a tour could cite.
+  const prose = deckLike(doc) ? DECK_PROSE : paperLike(doc) ? PROSE : PROSE_OUTSIDE_PAPERS;
   const types = new Map(doc.blocks.map((b) => [b.id, b.type]));
   return doc.sentences.filter((s) => prose.has(types.get(s.block) ?? ''));
 }
@@ -68,13 +70,33 @@ function exerciseLines(doc: Doc): string[] {
  * cache it as a shared prefix.
  */
 export function paperBlock(doc: Doc): string {
-  const lines = [`TITLE: ${doc.source.title ?? 'Untitled document'}`, `PAGES: ${doc.pages.length}`, ''];
+  const deck = deckLike(doc);
+  const lines = [
+    `TITLE: ${doc.source.title ?? 'Untitled document'}`,
+    `PAGES: ${doc.pages.length}${deck ? ' (a slide deck: each page is one slide)' : ''}`,
+    '',
+  ];
   const prose = new Set(proseSentences(doc).map((s) => s.id));
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const sectionTitle = new Map(doc.sections.map((s) => [s.id, `${s.number ? `${s.number} ` : ''}${s.title}`]));
   let section: string | undefined;
-  lines.push('TEXT (reading order):');
-  for (const block of doc.blocks) {
+  if (deck) {
+    // Every slide is listed, also one with a title and a picture only, so that each can be named by its number.
+    lines.push("SLIDES (in order; a slide's title sentence is in brackets after its number):");
+    for (const slide of slideCards(doc)) {
+      const note =
+        slide.role !== 'content'
+          ? ` (${slide.role} slide)`
+          : slide.picture
+            ? ' (hardly any text: a picture, plot, table or code)'
+            : '';
+      lines.push(
+        `## SLIDE ${slide.page}${slide.titleId ? ` [${slide.titleId}]` : ''}: ${slide.title || 'no title'}${note}`,
+      );
+      for (const { id, text } of slide.body) if (prose.has(id)) lines.push(`[${id}] ${text}`);
+    }
+  } else lines.push('TEXT (reading order):');
+  for (const block of deck ? [] : doc.blocks) {
     const ids = block.sentences.filter((id) => prose.has(id));
     if (!ids.length) continue;
     if (block.section !== section) {

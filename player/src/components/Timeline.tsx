@@ -116,6 +116,20 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
                   <span key={fs.index} className="tl-tick" style={{ left: `${((clock.steps[fs.index].start - c.start) / c.length) * 100}%` }} />
                 ))}
             </div>
+            {/* A checkpoint pauses where its narration ends; the mark fills once the tour has come that far. */}
+            {steps
+              .filter((fs) => fs.chapterIndex === c.index && fs.checkpoint)
+              .map((fs) => {
+                const at = clock.steps[fs.index].start + clock.steps[fs.index].speech;
+                return (
+                  <span
+                    key={fs.index}
+                    className={`tl-pause${shown >= at ? ' reached' : ''}`}
+                    style={{ left: `calc((100% - var(--tl-gap)) * ${Math.min(1, (at - c.start) / c.length)})` }}
+                    aria-hidden="true"
+                  />
+                );
+              })}
           </div>
         );
       })}

@@ -108,9 +108,30 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A checkpoint: a ring on the rail where the tour waits for the learner. It sits within the chapter's width, left of
+   the gap that ends it. */
+.tl-pause {
+  position: absolute;
+  top: 8.5px;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  background: var(--panel);
+  transition: background-color 160ms ease;
+  pointer-events: none;
+}
+
+.tl-pause.reached {
+  background: var(--accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tl-rail,
-  .tl-thumb {
+  .tl-thumb,
+  .tl-pause {
     transition: none;
   }
 }

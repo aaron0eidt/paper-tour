@@ -80,6 +80,7 @@ export const KEY_HELP: { keys: string[]; does: string }[] = [
   { keys: ['Home', 'End'], does: 'First or last step' },
   { keys: ['R'], does: 'Replay this sentence' },
   { keys: ['M'], does: 'Mute or unmute' },
+  { keys: ['H'], does: 'A hint, when you are asked to try' },
   { keys: ['/'], does: 'Ask a question' },
   { keys: ['D'], does: 'Show element IDs' },
   { keys: ['?'], does: 'This list' },

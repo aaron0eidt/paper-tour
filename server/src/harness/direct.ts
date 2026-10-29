@@ -3,6 +3,7 @@ import { tableTextBlocks, tableLines } from '../../../shared/tableTargets';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
 import type { Beat } from './beats';
+import { deckBrief } from './deck';
 import { BOARD_KINDS, LEGACY_BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
 import type { DocType } from './doctype';
 import { proseSentences } from './paper-block';
@@ -242,11 +243,12 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
     };
   }
   const first = sentences.get(beat.evidence[0]);
-  const page = first?.page ?? 1;
+  const page = first?.page ?? beat.page ?? 1;
+  // A step on several slides may point at any of them; any other step at the page of its first sentence.
   const blocks = new Set(
     beat.evidence
       .map((id) => sentences.get(id))
-      .filter((s) => s?.page === page)
+      .filter((s) => (beat.slides ? beat.slides.includes(s?.page ?? 0) : s?.page === page))
       .map((s) => s!.block),
   );
   const ids = doc.blocks.filter((b) => blocks.has(b.id)).flatMap((b) => b.sentences);
@@ -296,12 +298,13 @@ function cueTargets(actions: CueAction[], targets: BeatTargets): string[] {
 
 /**
  * The spoken length a step aims for: an overview step makes its point in about 50 to 90 words, a detail step adds one
- * worked case in about 90 to 140. The learner reads the page; the voice only says what the page does not.
+ * worked case in about 90 to 140. The learner reads the page; the voice only says what the page does not. A planned
+ * step (a claim's move, a slide) brings its own range.
  */
-const sayWords = (beat: Beat) => (beat.detail ? 140 : 90);
-const sayShortest = (beat: Beat) => (beat.detail ? 90 : 50);
+const sayWords = (beat: Beat) => beat.say?.[1] ?? (beat.detail ? 140 : 90);
+const sayShortest = (beat: Beat) => beat.say?.[0] ?? (beat.detail ? 90 : 50);
 /** The most words a step may have before it is sent back for a rewrite: a margin over what it aims for. */
-export const sayLimit = (beat: Beat) => (beat.detail ? 175 : 115);
+export const sayLimit = (beat: Beat) => (beat.say ? Math.round(beat.say[1] * 1.35) : beat.detail ? 175 : 115);
 
 /** What the beat's task offers the model: its cue actions, its board, the spoken length it aims for and its tone. */
 export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets, visual?: StepVisual): DirectOptions {
@@ -310,7 +313,10 @@ export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets,
     actions: actionsFor(beat, targets, visual),
     ...(board ? { board } : {}),
     words: sayWords(beat),
+    ...(beat.say ? { fewest: beat.say[0] } : {}),
     detail: beat.detail,
+    ...(beat.move ? { move: beat.move } : {}),
+    ...(beat.slides ? { slides: true } : {}),
     ...(type ? { type } : {}),
   };
 }
@@ -416,7 +422,7 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
       .filter(Boolean)
       .map((s) => `[${s!.id}] ${s!.text}`);
   const lines = [`STEP KIND: ${beat.kind}${beat.detail ? ' (a closer look at one important detail)' : ''}`];
-  if (beat.kind === 'figure' || beat.kind === 'formula') {
+  if ((beat.kind === 'figure' || beat.kind === 'formula') && !beat.move) {
     lines.push(
       beat.detail
         ? 'TEACHING ROLE: build on the preceding overview with one concrete mechanism, worked example or contrast. Explain a new causal link and why it matters. Never restate the overview.'
@@ -424,6 +430,11 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
     );
   }
   if (beat.role) lines.push(`THIS STEP OF THE TOUR: ${beat.role}`);
+  if (beat.claim)
+    lines.push(
+      `CLAIM ${beat.claim.n} OF ${beat.claim.of}: ${beat.claim.text}`,
+      ...(beat.claim.scope ? [`SCOPE OF ITS EVIDENCE: ${beat.claim.scope}`] : []),
+    );
   lines.push(`POINT TO MAKE: ${beat.point}`);
   if (visual) {
     const demanded = visual.visual === 'none' && exampleRules(beat, visual).required;
@@ -479,6 +490,15 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
     lines.push(
       `Page ${equation.page} is attached: read the typeset equation${equation.number ? ` (${equation.number})` : ''} there.`,
     );
+  } else if (beat.slides) {
+    lines.push(...deckBrief(beat, doc));
+    const more = (beat.boardEvidence ?? []).filter((id) => !beat.evidence.includes(id));
+    if (more.length) lines.push('MORE NUMBERS FOR THE BARS ONLY (other steps speak about them):', ...quote(more));
+    const data = (targets.visualEvidence ?? []).filter((id) => !more.includes(id));
+    if (data.length)
+      lines.push('SENTENCES WITH THE NUMBERS OF THE PLANNED VISUAL (for its board only):', ...quote(data));
+    const table = doc.figures.find((f) => f.id === targets.table);
+    if (table) lines.push(...cells(table));
   } else {
     lines.push('EVIDENCE:', ...quote(beat.evidence));
     const more = (beat.boardEvidence ?? []).filter((id) => !beat.evidence.includes(id));
@@ -493,8 +513,9 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
     );
     if (beat.page) lines.push(`Page ${beat.page} is attached: read the formula there.`);
   }
+  if (beat.slides && (figure || equation)) lines.push(...deckBrief(beat, doc));
   lines.push(...(beat.notes ?? []));
-  if (beat.kind === 'takeaway')
+  if (beat.kind === 'takeaway' || beat.questions)
     lines.push(
       'This is the last step. End by inviting the learner to ask a question, and mention one of these:',
       ...(beat.questions ?? []).map((q) => `- ${q}`),

@@ -20,6 +20,8 @@ export interface Layout {
   pages: PageBox[];
   width: number;
   height: number;
+  /** A deck: every slide lies on the same spot, and the stage shows one of them at a time. */
+  deck?: boolean;
 }
 
 export function layoutPages(sizes: PageSize[]): Layout {
@@ -31,6 +33,23 @@ export function layoutPages(sizes: PageSize[]): Layout {
     return box;
   });
   return { pages, width: maxW + 2 * DOC_MARGIN, height: y - PAGE_GAP + DOC_MARGIN };
+}
+
+/**
+ * A deck: the slides lie on top of each other, centred on the largest one. A slide change is then a cross-fade on the
+ * spot (no camera flight down a stack), and the camera is free to zoom into whichever slide is showing.
+ */
+export function layoutDeck(sizes: PageSize[]): Layout {
+  const maxW = Math.max(1, ...sizes.map((s) => s.width));
+  const maxH = Math.max(1, ...sizes.map((s) => s.height));
+  const pages = sizes.map((s, i) => ({
+    n: i + 1,
+    x: DOC_MARGIN + (maxW - s.width) / 2,
+    y: DOC_MARGIN + (maxH - s.height) / 2,
+    width: s.width,
+    height: s.height,
+  }));
+  return { pages, width: maxW + 2 * DOC_MARGIN, height: maxH + 2 * DOC_MARGIN, deck: true };
 }
 
 export function toStage(layout: Layout, page: number, r: BBox): BBox {

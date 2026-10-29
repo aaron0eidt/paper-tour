@@ -214,7 +214,17 @@ test('a valid scatter becomes its canonical item with its points as focus parts'
 });
 
 test('scatter problems name the point or axis to fix', () => {
-  has(scatterWith({ points: [{ label: 'only', x: 1, y: 2 }] }), /^points: give 2 to 10 points, not 1$/);
+  has(scatterWith({ points: [{ label: 'only', x: 1, y: 2 }] }), /^points: give 3 to 10 points, not 1$/);
+  // Two points are a comparison, which bars show better.
+  has(
+    scatterWith({
+      points: [
+        { label: 'a', x: 1, y: 2 },
+        { label: 'b', x: 2, y: 3 },
+      ],
+    }),
+    /^points: give 3 to 10 points, not 2$/,
+  );
   has(scatterWith({ points: Array.from({ length: 11 }, (_, i) => ({ label: `p${i}`, x: i, y: i })) }), /not 11/);
   has(scatterWith({ x_label: '' }), /^x_label: give plain words with the unit, 1 to 40 characters/);
   has(scatterWith({ y_label: 'y'.repeat(41) }), /^y_label: /);
@@ -225,6 +235,7 @@ test('scatter problems name the point or axis to fix', () => {
       points: [
         { label: 'a', x: 1, y: 1 },
         { label: 'a', x: 2, y: 2 },
+        { label: 'c', x: 3, y: 3 },
       ],
     }),
     /point 2: the label "a" is used twice/,
@@ -234,6 +245,7 @@ test('scatter problems name the point or axis to fix', () => {
       points: [
         { label: 'x'.repeat(25), x: 1, y: 1 },
         { label: 'b', x: 2, y: 2 },
+        { label: 'c', x: 3, y: 3 },
       ],
     }),
     /longer than 24 characters/,
@@ -243,6 +255,7 @@ test('scatter problems name the point or axis to fix', () => {
       points: [
         { label: 'a', x: 1, y: NaN },
         { label: 'b', x: 2, y: 2 },
+        { label: 'c', x: 3, y: 3 },
       ],
     }),
     /point 1: x and y must both be finite/,
@@ -253,6 +266,7 @@ test('scatter problems name the point or axis to fix', () => {
       points: [
         { label: 'zero', x: 0, y: 1 },
         { label: 'b', x: 2, y: 2 },
+        { label: 'c', x: 3, y: 3 },
       ],
     }),
     /x_log: .*"zero" has x = 0/,
@@ -263,6 +277,7 @@ test('scatter problems name the point or axis to fix', () => {
       points: [
         { label: 'a', x: 5, y: 1 },
         { label: 'b', x: 5, y: 2 },
+        { label: 'c', x: 5, y: 3 },
       ],
     }),
     /every point has the same x/,
@@ -452,8 +467,11 @@ test('the saved-tour schema accepts the checked items of the new kinds and rejec
   const items = [
     checkBoard('heatmap', { ...heatmap(), normalize: 'rows', view: 'links', scale: 'sequential' }).item,
     checkBoard('heatmap', { ...heatmap(), source: 'formula', expression: 'x/a', values: undefined }).item,
-    checkBoard('scatter', { ...scatter(), x_log: true, points: scatter().points.map((p) => ({ ...p, series: 'run' })) }, SCATTER_EVIDENCE)
-      .item,
+    checkBoard(
+      'scatter',
+      { ...scatter(), x_log: true, points: scatter().points.map((p) => ({ ...p, series: 'run' })) },
+      SCATTER_EVIDENCE,
+    ).item,
     checkBoard('shapes', shapes(m('A', 'n', 'k'), op('times'), m('B', 'k', 'm'), op('equals'), m('C', 'n', 'm'))).item,
   ];
   for (const item of items) {

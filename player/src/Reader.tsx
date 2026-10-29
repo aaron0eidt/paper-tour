@@ -1,10 +1,12 @@
 import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView } from './camera';
+import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView, slideView } from './camera';
 import type { View } from './camera';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
-import { layoutPages } from './layout';
+import { layoutDeck, layoutPages } from './layout';
+import { clampSlide, readerMode, stepSlides, stepsBySlide } from './deck';
+import { coverVisible, lengthLabel, recapVisible } from './tourSummary';
 import { loadManifest, loadPaper } from './load';
 import type { Loaded } from './load';
 import { createNarrator, SilentNarrator, useBrowserVoices } from './narration';
@@ -17,12 +19,15 @@ import { keyBelongsTo, keyCommand } from './keys';
 import type { KeyTarget } from './keys';
 import { buildClock } from './tourClock';
 import { BoardSplit } from './components/Board';
+import { CoachCard } from './components/CoachCard';
 import { ControlBar } from './components/ControlBar';
+import { Filmstrip } from './components/Filmstrip';
 import type { DebugPage } from './components/PageView';
 import { Problems } from './components/Problems';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import { TourGeneration } from './components/TourGeneration';
+import { TourCover, TourEnd } from './components/TourCards';
 import { TourDockStatus } from './components/TourDockStatus';
 import { isTourGenerationActive } from './library/tourGeneration';
 import { apiRequest, ApiRequestError, getSupabase } from './library/client';
@@ -31,7 +36,7 @@ import type { OverlayEntry } from './engine';
 import { positionFromView, viewFromPosition } from './readerState';
 import { AskPanel } from './ask/AskPanel';
 import type { AskContext } from './ask/AskPanel';
-import { answerTour, visualShown } from './ask/answer';
+import { answerTour, openQuestions, visualShown } from './ask/answer';
 import type { AskAnswer, AskSource } from './ask/api';
 import type { RegionSelection } from './ask/regionSelection';
 import { useRegionSnap } from './ask/useRegionSnap';
@@ -142,6 +147,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     selectionCheckpoint.current = null;
   }, [documentId, params.paper]);
   const [currentPage, setCurrentPage] = useState(1);
+  const currentPageRef = useRef(1);
+  currentPageRef.current = currentPage;
   const [zoomPercent, setZoomPercent] = useState(100);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [manifestRefresh, setManifestRefresh] = useState(0);
@@ -294,7 +301,16 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // a PDF borrowed by another refresh, and StrictMode's effect replay must keep it alive.
   usePdfDocument(loaded?.pdf);
 
-  const layout = useMemo(() => (loaded?.pdf && loaded.sizes.length ? layoutPages(loaded.sizes) : null), [loaded]);
+  // The tour says what the document is: a lecture plays as a deck, one slide at a time; anything else as a paper.
+  const deck = useMemo(() => readerMode(loaded?.tour, loaded?.sizes ?? []) === 'deck', [loaded]);
+  const layout = useMemo(
+    () => (loaded?.pdf && loaded.sizes.length ? (deck ? layoutDeck(loaded.sizes) : layoutPages(loaded.sizes)) : null),
+    [loaded, deck],
+  );
+  // A deck shows one slide: the page the camera last went to.
+  const [slide, setSlide] = useState(1);
+  const slideRef = useRef(1);
+  const slideNow = deck && layout ? clampSlide(slide, layout.pages.length) : undefined;
   // The chosen region snaps to the object inside it; a question about it carries the object's box once that is found.
   const regionSnap = useRegionSnap(askSource, regionSelection, (page) => layout?.pages[page - 1], loadedAnalysisId);
   const resolver = useMemo(() => (loaded ? new Resolver(loaded.doc, loaded.sizes) : null), [loaded]);
@@ -353,14 +369,24 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       try {
         const vp = camera.viewport;
         const fitWidth = retarget ? fitSourceWidth.current || !!framed.current?.fitWidth : fitSourceWidth.current;
-        // Targets are framed above the ask dock, together with the other marks the step shows meanwhile.
-        const target = cmd.action ? frameFor(cmd.action, resolver, layout, vp, { fitWidth, insets: camera.insets, also: cmd.also }) : null;
-        const view = cmd.action ? target?.view : initialView(layout, vp, camera.insets);
+        // Targets are framed above the ask dock, together with the other marks the step shows meanwhile. In a deck a
+        // target is framed as its whole slide.
+        const target = cmd.action
+          ? frameFor(cmd.action, resolver, layout, vp, { fitWidth, insets: camera.insets, also: cmd.also, slide: layout.deck })
+          : null;
+        // Before any camera move a deck shows its first slide whole, a paper the top of its first page.
+        const first = layout.pages[0];
+        const rect: BBox | undefined = target?.rect ?? (layout.deck && first ? [first.x, first.y, first.x + first.width, first.y + first.height] : undefined);
+        const view = cmd.action ? target?.view : layout.deck && first ? slideView(first, layout, vp, camera.insets) : initialView(layout, vp, camera.insets);
         if (!view) return;
+        if (layout.deck) {
+          slideRef.current = cmd.action ? (target?.page ?? 1) : 1;
+          setSlide(slideRef.current);
+        }
         if (instant) camera.jumpTo(view);
         else if (retarget) camera.retargetTo(view);
         else camera.animateTo(view);
-        framed.current = { cmd, view: camera.targetView, fitWidth, rect: target?.rect };
+        framed.current = { cmd, view: camera.targetView, fitWidth, rect };
       } catch (err) {
         console.warn('[camera] could not frame', cmd.action, err);
       }
@@ -539,7 +565,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (!layout) return;
     if (!restoredView.current) {
       restoredView.current = true;
-      camera.jumpTo(viewFromPosition(layout, camera.viewport, savedPosition.current, camera.insets));
+      if (layout.deck) {
+        // A deck comes back on the slide it was left on, shown whole.
+        const page = clampSlide(savedPosition.current?.page ?? 1, layout.pages.length);
+        frame({ seq: 0, key: null, action: page > 1 ? { type: 'focus', target: `page${page}` } : null }, true);
+      } else camera.jumpTo(viewFromPosition(layout, camera.viewport, savedPosition.current, camera.insets));
       return;
     }
     // While the camera still shows the target it last framed, the new size (the board opening or
@@ -547,7 +577,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     // reflow preserves the page-relative reading position, including restored/manual navigation.
     const last = framed.current;
     if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating, true);
-    else if (fitSourceWidth.current || last?.fitWidth) {
+    else if (!layout.deck && (fitSourceWidth.current || last?.fitWidth)) {
       const view = fitWidthView(camera.targetView, layout, camera.viewport, camera.insets);
       if (camera.animating) camera.retargetTo(view);
       else camera.jumpTo(view);
@@ -580,14 +610,33 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     frame(last.cmd, false, camera.animating);
   }, [camera, layout, frame, revealRegion]);
 
+  // The cover shows before the first play; the end card after the last step. `restored` is the step a saved place brought
+  // the tour to, so the cover can offer to continue there.
+  const [coverGone, setCoverGone] = useState(false);
+  const [restored, setRestored] = useState<number | null>(null);
+  const [endGone, setEndGone] = useState(false);
+  const [asked, setAsked] = useState<string[]>([]);
+  const [askRequest, setAskRequest] = useState<{ id: number; question: string } | null>(null);
   useEffect(() => {
     if (!engine) return;
+    setCoverGone(false);
+    setEndGone(false);
+    setAsked([]);
+    let at: number | null = null;
     const saved = savedPosition.current;
     if (saved?.stepId && manifest?.selectedTour?.id === saved.tourId) {
       const index = engine.steps.findIndex((step) => step.step.id === saved.stepId);
-      if (index >= 0) engine.goTo(index);
+      if (index >= 0) {
+        engine.goTo(index);
+        at = index;
+      }
     }
+    setRestored(at);
   }, [engine, manifest?.selectedTour?.id]);
+  useEffect(() => {
+    if (mainState.status === 'playing') setCoverGone(true);
+    if (mainState.status !== 'ended') setEndGone(false);
+  }, [mainState.status]);
 
   const selectedTourId = manifest?.selectedTour?.id ?? null;
   const save = useCallback(
@@ -633,7 +682,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (!layout) return;
     const update = () => {
       setZoomPercent(Math.round(camera.getView().s * 100));
-      const position = positionFromView(layout, camera.getView());
+      const position = positionFromView(layout, camera.getView(), slideRef.current);
       setCurrentPage(position.page);
       if (now.current.away) return;
       checkpointRef.current = { ...position, ...tourCheckpoint.current };
@@ -656,11 +705,36 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     // A status change can arrive before the camera has returned from an answer. The settled
     // camera subscription records the new checkpoint; never flush an intermediate answer view.
     if (now.current.away || camera.animating) return;
-    const value = { ...positionFromView(layout, camera.getView()), ...tourCheckpoint.current };
+    const value = { ...positionFromView(layout, camera.getView(), slideRef.current), ...tourCheckpoint.current };
     checkpointRef.current = value;
     clearTimeout(pendingSave.current);
     pendingSave.current = setTimeout(() => void saveRef.current(value), 1000);
   }, [mainState.index, mainState.status, selectedTourId, layout, camera]);
+  // A slide change moves nothing on the stage, so the camera never settles on it: the counter and the saved place follow it here.
+  useEffect(() => {
+    if (!layout?.deck || slideNow === undefined) return;
+    setCurrentPage(slideNow);
+    if (!restoredView.current || now.current.away) return;
+    const value = { ...positionFromView(layout, camera.getView(), slideNow), ...tourCheckpoint.current };
+    checkpointRef.current = value;
+    clearTimeout(pendingSave.current);
+    pendingSave.current = setTimeout(() => void saveRef.current(value), 1000);
+  }, [layout, camera, slideNow]);
+  // The tour arrived and says how to read the document (a deck, or a paper): frame where the learner is in that layout.
+  const shownAs = useRef(deck);
+  useEffect(() => {
+    if (shownAs.current === deck) return;
+    shownAs.current = deck;
+    if (!layout || !restoredView.current) return;
+    framed.current = null;
+    if (deck) {
+      const page = clampSlide(currentPageRef.current, layout.pages.length);
+      frame({ seq: 0, key: null, action: page > 1 ? { type: 'focus', target: `page${page}` } : null }, true);
+    } else {
+      const saved = { page: slideRef.current, pageOffset: 0, zoom: null, tourId: null, stepId: null };
+      camera.jumpTo(viewFromPosition(layout, camera.viewport, saved, camera.insets));
+    }
+  }, [deck, layout, camera, frame]);
   useEffect(() => {
     const flush = () => {
       if (!checkpointRef.current || !documentId || !accessTokenRef.current) return;
@@ -831,10 +905,44 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     [active, speed, params.rate],
   );
 
+  const cardState = { hasTour: !!engine, status: mainState.status, index: mainState.index, preview: mainState.preview, restored, aside: !!answer || !!away };
+  const coverOpen = coverVisible({ ...cardState, dismissed: coverGone });
+  const endOpen = recapVisible({ ...cardState, dismissed: endGone });
+  // A step that asks the learner to try first: its card shows while the tour waits.
+  const coachStep = state.awaiting ? active?.steps[state.index] : undefined;
+  const onAsked = useCallback(
+    (question: string) => {
+      if (question) setAsked((list) => [...list, question]);
+      setAside();
+    },
+    [setAside],
+  );
+
   const errors = problems.filter((p) => p.level === 'error');
   const steps = engine?.steps ?? [];
+  // A deck's slides, with the tour's steps on each (the filmstrip's dots), and the one step the tour is on.
+  const slidesOfSteps = useMemo(() => (deck && engine && resolver ? stepSlides(engine.steps, resolver) : []), [deck, engine, resolver]);
+  const stepsOn = useMemo(() => stepsBySlide(slidesOfSteps), [slidesOfSteps]);
+  const tourStep = mainState.status === 'idle' ? null : mainState.index;
+  // The slide the tour goes to next is drawn ahead, so the change to it finds it ready.
+  const ahead = useMemo(() => {
+    const next = slidesOfSteps[(tourStep ?? -1) + 1];
+    return next === undefined ? [] : [next];
+  }, [slidesOfSteps, tourStep]);
+  // A slide picked in the deck: the tour goes to the first step there, or the slide is just shown.
+  const pickSlide = (page: number) => {
+    if (!layout) return;
+    const n = clampSlide(page, layout.pages.length);
+    setSelection([]);
+    leaveAnswer();
+    const first = stepsOn.get(n)?.[0];
+    if (engine && first !== undefined) return engine.goTo(first);
+    engine?.pause();
+    frame({ seq: 1, key: `page${n}`, action: { type: 'focus', target: `page${n}` } }, false);
+  };
   const goPage = (page: number) => {
     if (!layout) return;
+    if (layout.deck) return pickSlide(page);
     const p = layout.pages[Math.max(0, Math.min(layout.pages.length - 1, page - 1))];
     if (!p) return;
     active?.pause();
@@ -1036,14 +1144,14 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           <button
             disabled={!layout || currentPage <= 1}
             onClick={() => goPage(currentPage - 1)}
-            aria-label="Previous page"
+            aria-label={deck ? 'Previous slide' : 'Previous page'}
           >
             ‹
           </button>
           <label>
-            Page{' '}
+            {deck ? 'Slide' : 'Page'}{' '}
             <input
-              aria-label="Page number"
+              aria-label={deck ? 'Slide number' : 'Page number'}
               type="number"
               key={currentPage}
               defaultValue={currentPage}
@@ -1062,7 +1170,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           <button
             disabled={!layout || currentPage >= (loaded?.sizes.length ?? 0)}
             onClick={() => goPage(currentPage + 1)}
-            aria-label="Next page"
+            aria-label={deck ? 'Next slide' : 'Next page'}
           >
             ›
           </button>
@@ -1119,6 +1227,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             disabled={!layout}
             onClick={() => {
               if (!layout) return;
+              // A deck fits the whole slide; a paper, its width.
+              if (layout.deck) return frame({ seq: 0, key: null, action: { type: 'focus', target: `page${currentPage}` } }, false);
               const p = layout.pages[currentPage - 1];
               if (p)
                 camera.animateTo({
@@ -1128,7 +1238,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 });
             }}
           >
-            Fit width
+            {deck ? 'Fit slide' : 'Fit width'}
           </button>
           {!!selection.length && <button onClick={() => setSelection([])}>Clear selection</button>}
           {manifest?.analysis && (
@@ -1160,6 +1270,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           )}
         </div>
         {layout ? (
+          <>
           <BoardSplit board={state.board} playback={boardPlayback(state, active?.steps ?? [])}>
             <div className="ask-stage">
               <Stage
@@ -1169,6 +1280,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 scene={scene}
                 debugPages={debug ? debugPages : null}
                 marks={marks}
+                slide={slideNow}
+                ahead={ahead}
                 onViewportChange={onViewportChange}
                 onInsetsChange={onInsetsChange}
                 onCopyId={onCopyId}
@@ -1178,8 +1291,43 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 onSelectRegion={acceptRegionSelection}
                 onCancelSelection={cancelRegionSelection}
               />
+              {coverOpen && engine && clock && (
+                <TourCover
+                  tour={engine.tour}
+                  steps={engine.steps.length}
+                  length={lengthLabel(clock.total)}
+                  resumeAt={restored !== null ? restored + 1 : null}
+                  onStart={() => {
+                    setSelection([]);
+                    if (restored !== null && restored > 0) engine.goTo(0);
+                    engine.play();
+                  }}
+                  onResume={() => engine.play()}
+                  onBrowse={() => setCoverGone(true)}
+                />
+              )}
+              {endOpen && engine && (
+                <TourEnd
+                  tour={engine.tour}
+                  questions={loaded?.doc ? openQuestions(engine.tour.suggested_questions, asked) : []}
+                  onReplayChapter={(step) => {
+                    setSelection([]);
+                    engine.goTo(step);
+                    engine.play();
+                  }}
+                  onReplay={() => {
+                    setSelection([]);
+                    engine.play();
+                  }}
+                  onAsk={(question) => setAskRequest((last) => ({ id: (last?.id ?? 0) + 1, question }))}
+                  onClose={() => setEndGone(true)}
+                />
+              )}
               {loaded?.doc && (
                 <div className="ask-lane">
+                  {coachStep?.checkpoint && (
+                    <CoachCard key={coachStep.step.id} checkpoint={coachStep.checkpoint} onSolve={() => active?.reveal()} />
+                  )}
                   <AskPanel
                     className="ask-dock"
                     tourStatus={
@@ -1196,7 +1344,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     tourId={documentId ? selectedTourId : null}
                     context={askContext}
                     suggestions={prepared?.tour.suggested_questions}
-                    ended={mainState.status === 'ended'}
+                    ended={mainState.status === 'ended' && !endOpen}
+                    request={askRequest}
                     away={!!away}
                     answering={answerState.status === 'playing'}
                     answerPaused={!!answer && answerState.status === 'paused'}
@@ -1212,7 +1361,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     onSelectRegion={beginRegionSelection}
                     onClearRegion={clearRegionSelection}
                     onCancelSelection={cancelRegionSelection}
-                    onAsk={setAside}
+                    onAsk={onAsked}
                     onAnswer={onAnswer}
                     onResume={backToTour}
                   />
@@ -1220,6 +1369,17 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               )}
             </div>
           </BoardSplit>
+          {layout.deck && (
+            <Filmstrip
+              pdf={loaded?.pdf ?? null}
+              sizes={loaded?.sizes ?? []}
+              slide={slideNow ?? 1}
+              stepsOn={stepsOn}
+              step={tourStep}
+              onPick={pickSlide}
+            />
+          )}
+          </>
         ) : (
           <div className="viewport loading">{fatal ? `Could not load the paper: ${fatal}` : 'Loading paper…'}</div>
         )}

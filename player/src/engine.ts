@@ -2,7 +2,8 @@
 // so it can be driven by tests with a fake narrator and fake timers.
 
 import { DEFAULT_HOLD_MS, DEFAULT_SPEAKER, splitWords } from './types';
-import type { Action, BoardControl, BoardItem, CameraAction, OverlayAction, Step, Tour } from './types';
+import type { Action, BoardControl, BoardItem, CameraAction, Checkpoint, OverlayAction, Step, Tour } from './types';
+import { normalizeCheckpoint } from './coach';
 import type { AlsoTarget } from './camera';
 import { sentenceStart, sentenceStarts } from './narration/narrator';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from './narration/narrator';
@@ -26,6 +27,8 @@ export interface FlatStep {
   words: string[];
   /** Initial camera at zero, then actions sorted by at_word; ties keep tour order. */
   schedule: ScheduledAction[];
+  /** The learner tries this before the next step reveals it: the tour pauses after the narration. */
+  checkpoint: Checkpoint | null;
 }
 
 export interface OverlayEntry {
@@ -77,6 +80,8 @@ export interface EngineState {
   board: BoardState;
   /** A silent seek shows all of the selected step's actions, rather than an in-progress word. */
   preview?: boolean;
+  /** The step's narration is done and its checkpoint waits for the learner: paused until the answer is asked for. */
+  awaiting?: boolean;
 }
 
 /** Progress over the current board's narrated interval, not a separate wall clock. */
@@ -177,7 +182,7 @@ export function flattenTour(tour: Tour): FlatStep[] {
         .sort((a, b) => a.at - b.at || a.i - b.i)
         .map(({ key, at, action }): ScheduledAction => ({ key, at, action }));
       keepInFrame(schedule);
-      out.push({ index, chapterIndex, indexInChapter, step, words: splitWords(step.say), schedule });
+      out.push({ index, chapterIndex, indexInChapter, step, words: splitWords(step.say), schedule, checkpoint: normalizeCheckpoint(step.checkpoint) });
     });
   });
   return out;
@@ -213,6 +218,8 @@ export class TourEngine {
   private nextAction = 0;
   private narrationDone = false;
   private preview = false;
+  /** Paused at a checkpoint after its step's narration. */
+  private awaiting = false;
 
   constructor(tour: Tour, opts: EngineOptions) {
     this.tour = tour;
@@ -240,10 +247,17 @@ export class TourEngine {
 
   play(): void {
     if (this.status === 'playing' || !this.steps.length) return;
+    // Play at a checkpoint is "show me": the next step reveals the answer.
+    if (this.awaiting) return this.proceed();
     if (this.status === 'ended') this.startStep(0);
     // A pause in the middle of a step goes on from there; a silent preview plays the step from its start.
     else if (this.status === 'paused' && !this.preview && this.word >= 0) this.resume();
     else this.startStep(this.index);
+  }
+
+  /** The learner is done trying (or gives up): go on to the step that reveals the answer. */
+  reveal(): void {
+    if (this.awaiting) this.proceed();
   }
 
   pause(): void {
@@ -358,6 +372,7 @@ export class TourEngine {
       camera: this.camera,
       board: this.board,
       preview: this.preview,
+      awaiting: this.awaiting,
     };
   }
 
@@ -368,6 +383,7 @@ export class TourEngine {
 
   private stopRun(): void {
     this.token++;
+    this.awaiting = false;
     this.preparation?.abort();
     this.preparation = null;
     const handle = this.handle;
@@ -577,6 +593,13 @@ export class TourEngine {
     // Actions with at_word beyond the narration (or skipped by sparse word events) fire now.
     this.fireUpTo(Infinity);
     this.word = fs.words.length - 1;
+    if (fs.checkpoint) {
+      // The learner tries first: nothing advances until they ask for the answer (play, next or "Show solution").
+      this.awaiting = true;
+      this.status = 'paused';
+      this.emit();
+      return;
+    }
     this.emit();
     if (token !== this.token) return;
     this.holdTimer = this.timers.setTimeout(() => {
@@ -584,6 +607,11 @@ export class TourEngine {
       this.holdTimer = null;
       this.advance();
     }, fs.step.hold_ms ?? DEFAULT_HOLD_MS);
+  }
+
+  private proceed(): void {
+    this.awaiting = false;
+    this.advance();
   }
 
   private advance(): void {

@@ -44,6 +44,7 @@ const inputs = {
     y_label: 'score',
     points: [
       { label: 'cheap', x: 1, y: 40 },
+      { label: 'fair', x: 4, y: 58 },
       { label: 'pricey', x: 9, y: 70 },
     ],
     source: 'illustrative',
@@ -84,7 +85,7 @@ test('flow focus follows actual displayed node order rather than numeric ID orde
 });
 
 test('the newer kinds dispatch with the evidence, so document values must be printed and illustrative ones need not be', () => {
-  const printed = 'Table 2: tiny 3 and 28, small 9 and 21. Weights 0.9 0.1 0.2 0.8.';
+  const printed = 'Table 2: tiny 3 and 28, small 9 and 21, large 40 and 15. Weights 0.9 0.1 0.2 0.8.';
   const document = {
     heatmap: {
       ...inputs.heatmap,
@@ -99,6 +100,7 @@ test('the newer kinds dispatch with the evidence, so document values must be pri
       points: [
         { label: 'tiny', x: 3, y: 28 },
         { label: 'small', x: 9, y: 21 },
+        { label: 'large', x: 40, y: 15 },
       ],
       source: 'document',
     },

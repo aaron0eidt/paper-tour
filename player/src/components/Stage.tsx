@@ -3,7 +3,7 @@ import type { MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { transformOf, unproject } from '../camera';
 import type { Camera, ScreenRect, View } from '../camera';
 import { nextPlan } from '../canvasPlan';
-import type { Plan } from '../canvasPlan';
+import type { DeckSlides, Plan } from '../canvasPlan';
 import type { Layout } from '../layout';
 import type { PDFDocumentProxy } from '../pdf';
 import type { Scene } from '../scene';
@@ -25,6 +25,10 @@ interface Props {
   debugPages: Map<number, DebugPage> | null;
   /** Which mark the voice is on, and how far along its passage the narration is. */
   marks?: MarkPlayback;
+  /** A deck: the slide showing (a page number); the others are out of sight. Without it the pages are a stack. */
+  slide?: number;
+  /** A deck: the slides the tour goes to next, drawn ahead so the change finds them ready. */
+  ahead?: readonly number[];
   onViewportChange(): void;
   /** What floats over the stage (the ask dock) changed in size, after it settled. */
   onInsetsChange?(): void;
@@ -38,6 +42,10 @@ interface Props {
 }
 
 const PLAN_THROTTLE_MS = 150;
+// How long a slide stays beneath the one fading in over it (the fade is 260ms in styles.css), and how long the old one
+// holds on for a slide that is slow to draw before it goes anyway.
+const SLIDE_FADE_MS = 300;
+const SLIDE_GIVE_UP_MS = 1700;
 // Between the ask dock and what the camera frames, and how long the dock must hold still before a frame follows it.
 const DOCK_GAP = 10;
 const DOCK_SETTLE_MS = 160;
@@ -54,7 +62,7 @@ const mid = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y)
 
 const STILL: MarkPlayback = { current: null, sweep: 1 };
 
-export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, onViewportChange, onInsetsChange, onCopyId, selecting = false, regionSelection, regionSnap, onSelectRegion, onCancelSelection }: Props) {
+export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, slide, ahead, onViewportChange, onInsetsChange, onCopyId, selecting = false, regionSelection, regionSnap, onSelectRegion, onCancelSelection }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -69,6 +77,37 @@ export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, o
     if (!selecting) { regionDrag.current = null; setDraftRegion(null); }
   }, [selecting]);
   const [plan, setPlan] = useState<Plan>({ scales: [], details: [] });
+  // A deck: the slide that was showing stays beneath the new one while it fades in, then goes. The slide it left is
+  // worked out while rendering, so no frame shows the old one already fading out.
+  const [turn, setTurn] = useState<{ slide: number | undefined; leaving: number | null }>({ slide, leaving: null });
+  if (turn.slide !== slide) setTurn({ slide, leaving: slide === undefined ? null : (turn.slide ?? null) });
+  const leaving = turn.slide === slide ? turn.leaving : (turn.slide ?? null);
+  // A new slide fades in over the old one once it is drawn, so a slide that is slow to draw never shows as a blank page.
+  const [drawn, setDrawn] = useState<ReadonlySet<number>>(() => new Set());
+  const onDrawn = useCallback(
+    (n: number, yes: boolean) => setDrawn((now) => (now.has(n) === yes ? now : new Set(yes ? [...now, n] : [...now].filter((p) => p !== n)))),
+    [],
+  );
+  const ready = slide !== undefined && drawn.has(slide);
+  useEffect(() => {
+    if (turn.leaving === null) return;
+    const timer = setTimeout(
+      () => setTurn((now) => (now.slide === turn.slide ? { slide: now.slide, leaving: null } : now)),
+      ready ? SLIDE_FADE_MS : SLIDE_GIVE_UP_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [turn, ready]);
+  const shown = useRef<DeckSlides>({ showing: [], ahead: [] });
+  shown.current =
+    slide === undefined
+      ? { showing: [], ahead: [] }
+      : { showing: leaving !== null && leaving !== slide ? [slide, leaving] : [slide], ahead: (ahead ?? []).filter((n) => n !== slide && n !== leaving) };
+  // A slide change moves nothing on the stage, so no camera frame plans its canvases: do it here.
+  const shownKey = `${shown.current.showing.join(',')}|${shown.current.ahead.join(',')}`;
+  useLayoutEffect(() => {
+    if (!layout.deck) return;
+    setPlan((prev) => nextPlan(prev, layout, camera, camera.getView(), false, window.devicePixelRatio || 1, shown.current));
+  }, [layout, camera, shownKey]);
   const [occlusions, setOcclusions] = useState<ScreenRect[]>([]);
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
@@ -88,10 +127,17 @@ export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, o
     let settle: ReturnType<typeof setTimeout> | undefined;
     const measure = () => {
       const bounds = viewport.getBoundingClientRect();
-      const cards = [...host.querySelectorAll('.ask-card, .ask-language-menu')];
-      const dock = host.querySelector('.ask-card')?.getBoundingClientRect();
-      // A card in the lower half of the stage is the dock; the camera keeps targets above it.
-      const bottom = dock && dock.height && dock.top - bounds.top > bounds.height / 2 ? Math.ceil(bounds.bottom - dock.top + DOCK_GAP) : 0;
+      const cards = [...host.querySelectorAll('.ask-card, .ask-language-menu, .coach-card')];
+      // The cards in the lower half of the stage are the dock (the question bar, and the "Your turn" card above it);
+      // the camera keeps targets above the highest of them.
+      const ask = host.querySelector('.ask-card')?.getBoundingClientRect();
+      const coach = host.querySelector('.coach-card')?.getBoundingClientRect();
+      const docked = [
+        ask && ask.height && ask.top - bounds.top > bounds.height / 2 ? ask : null,
+        coach && coach.height && coach.bottom - bounds.top > bounds.height / 2 ? coach : null,
+      ].filter((r): r is DOMRect => !!r);
+      const top = docked.length ? Math.min(...docked.map((r) => r.top)) : null;
+      const bottom = top === null ? 0 : Math.ceil(bounds.bottom - top + DOCK_GAP);
       if (camera.setInsets({ top: 0, right: 0, bottom, left: 0 })) {
         clearTimeout(settle);
         settle = setTimeout(() => onInsetsChangeRef.current?.(), DOCK_SETTLE_MS);
@@ -153,7 +199,7 @@ export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, o
       const now = performance.now();
       if (!moving || now - lastPlan > PLAN_THROTTLE_MS) {
         lastPlan = now;
-        setPlan((prev) => nextPlan(prev, layout, camera, view, moving, window.devicePixelRatio || 1));
+        setPlan((prev) => nextPlan(prev, layout, camera, view, moving, window.devicePixelRatio || 1, shown.current));
       }
     };
     apply(camera.getView(), false);
@@ -294,7 +340,8 @@ export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, o
   const beginRegion = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!event.isPrimary || event.button !== 0) return;
     const start = regionPoint(event);
-    const page = layout.pages.find((p) => start[0] >= p.x && start[0] <= p.x + p.width && start[1] >= p.y && start[1] <= p.y + p.height);
+    // The slides of a deck overlap: the one showing is the one the learner means.
+    const page = layout.pages.find((p) => (!layout.deck || p.n === slide) && start[0] >= p.x && start[0] <= p.x + p.width && start[1] >= p.y && start[1] <= p.y + p.height);
     if (!page) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -337,7 +384,9 @@ export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, o
             current={marks.current}
             spotlight={scene.spotlight}
             spotlightLeaving={scene.spotlightLeaving}
-            debug={debugPages?.get(box.n) ?? null}
+            debug={layout.deck && box.n !== slide ? null : (debugPages?.get(box.n) ?? null)}
+            slide={slide === undefined ? undefined : box.n === slide ? 'current' : box.n === leaving ? 'leaving' : 'hidden'}
+            onDrawn={slide === undefined ? undefined : onDrawn}
           />
         ))}
         {shownRegion && regionPage && (

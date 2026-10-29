@@ -53,6 +53,12 @@ export const SNAP_MIN_CONFIDENCE = 0.6;
 export const SNAP_MAX_OVERSHOOT = 0.15;
 /** The most of the drag box the object may fill; a mask that fills it is the background, not an object. */
 export const SNAP_MAX_AREA = 0.9;
+/**
+ * The least of the object that must be ink, as a share of its pixels (inkShare in ai/sam.ts): a mask over blank paper
+ * can be confident, but the page under it is nothing. Fitted on figures, tables, equations and text of eight real
+ * documents: their regions held 2.2 to 77 percent ink, blank paper none.
+ */
+export const SNAP_MIN_INK = 0.01;
 /** The crop around the drag: the box grown by this fraction of its size on every side, at least MIN_MARGIN points. */
 const CROP_MARGIN = 0.3;
 const MIN_MARGIN = 10;
@@ -143,12 +149,16 @@ export function validateSnap(
   };
 }
 
-/** The checks on what SAM returned, all in image pixels: null when the object may replace the drag box. */
+/**
+ * The checks on what SAM returned, all in image pixels: null when the object may replace the drag box. `ink` is the
+ * share of the object that is ink, when the crop's ink was rendered; without it that check is skipped.
+ */
 export function snapRejection(
-  found: { confidence?: number; bbox: PixelBox; area: number },
+  found: { confidence?: number; bbox: PixelBox; area: number; ink?: number },
   drag: PixelBox,
 ): SnapFailure | null {
   if (found.confidence === undefined || found.confidence < SNAP_MIN_CONFIDENCE) return 'low_confidence';
+  if (found.ink !== undefined && found.ink < SNAP_MIN_INK) return 'no_object';
   const width = drag.right - drag.left;
   const height = drag.bottom - drag.top;
   const overshoot = Math.max(
@@ -260,10 +270,10 @@ export class SnapService {
     const active = this.active.get(who.scope) ?? 0;
     if (active >= MAX_ACTIVE) return { ok: false, reason: 'busy' };
     this.active.set(who.scope, active + 1);
-    const timings: Record<string, number> = {};
+    const measures: Record<string, number> = {};
     let result: SnapResult;
     try {
-      result = await this.find(source, page, box, muse, timings, signal);
+      result = await this.find(source, page, box, muse, measures, signal);
     } finally {
       const left = (this.active.get(who.scope) ?? 1) - 1;
       if (left > 0) this.active.set(who.scope, left);
@@ -274,11 +284,11 @@ export class SnapService {
       this.cache.set(key, result);
       if (this.cache.size > CACHE_SIZE) this.cache.delete(this.cache.keys().next().value!);
     }
-    this.record(who.log, page.n, result, timings);
+    this.record(who.log, page.n, result, measures);
     return result;
   }
 
-  private record(who: Record<string, unknown>, page: number, result: SnapResult, timings: Record<string, number>) {
+  private record(who: Record<string, unknown>, page: number, result: SnapResult, measures: Record<string, number>) {
     const log = this.options.log ?? ((event) => console.log(JSON.stringify(event)));
     log({
       event: result.ok ? 'snap_done' : 'snap_rejected',
@@ -287,7 +297,7 @@ export class SnapService {
       ...(result.ok
         ? { confidence: result.confidence, ms: result.ms, cached: result.cached === true }
         : { reason: result.reason }),
-      ...timings,
+      ...measures,
     });
   }
 
@@ -296,7 +306,7 @@ export class SnapService {
     page: { n: number; width: number; height: number },
     box: BBox,
     muse: () => Promise<MuseConfig>,
-    timings: Record<string, number>,
+    measures: Record<string, number>,
     signal?: AbortSignal,
   ): Promise<SnapResult> {
     const fail = (reason: SnapFailure): SnapResult => ({ ok: false, reason });
@@ -321,7 +331,7 @@ export class SnapService {
       console.warn(JSON.stringify({ event: 'snap_render_failed', page: page.n }));
       return fail('render_failed');
     }
-    timings.renderMs = Date.now() - rendering;
+    measures.renderMs = Date.now() - rendering;
     const size = crop ? jpegSize(Buffer.from(crop.dataUrl.slice(crop.dataUrl.indexOf(',') + 1), 'base64')) : null;
     if (!crop || !size) return fail('render_failed');
     // The crop is size.width x size.height pixels for the rectangle (cx1, cy1)-(cx2, cy2) in points.
@@ -363,10 +373,16 @@ export class SnapService {
       if (error instanceof ProcessingError) return fail(FAILURES[error.code] ?? 'unavailable');
       throw error;
     }
-    timings.samMs = Date.now() - calling;
-    const outline = mask && maskOutline(mask, centre);
+    measures.samMs = Date.now() - calling;
+    // The crop's ink counts only when it is of this very image (the same size); else the check is skipped.
+    const ink = crop.ink && crop.ink.width === size.width && crop.ink.height === size.height ? crop.ink : undefined;
+    const outline = mask && maskOutline(mask, centre, undefined, ink);
     if (!mask || !outline) return fail('no_object');
-    const rejected = snapRejection({ confidence: mask.confidence, bbox: outline.bbox, area: outline.area }, drag);
+    if (outline.ink !== undefined) measures.ink = Math.round(outline.ink * 10000) / 10000;
+    const rejected = snapRejection(
+      { confidence: mask.confidence, bbox: outline.bbox, area: outline.area, ink: outline.ink },
+      drag,
+    );
     if (rejected) return fail(rejected);
     const x = (px: number) => round(cx1 + px / sx);
     const y = (py: number) => round(cy1 + py / sy);

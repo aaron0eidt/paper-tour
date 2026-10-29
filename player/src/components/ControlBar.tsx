@@ -139,7 +139,13 @@ export function ControlBar({
         >
           <PrevIcon />
         </button>
-        <button className="play-btn" onClick={onToggle} disabled={disabled} aria-label={playing ? 'Pause' : 'Play'}>
+        <button
+          className="play-btn"
+          onClick={onToggle}
+          disabled={disabled}
+          aria-label={playing ? 'Pause' : state.awaiting ? 'Show solution' : 'Play'}
+          title={state.awaiting ? 'Show the solution' : undefined}
+        >
           {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
         <button

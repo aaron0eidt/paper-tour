@@ -560,11 +560,11 @@ test('a heatmap, scatter or shapes item is checked with the shared rules and kep
   );
   eq(formula, { kind: 'heatmap', rows: ['a', 'b'], cols: ['x', 'y', 'z'], values: [[1, 2, 3], [2, 4, 6]], expression: 'x * a', source: 'formula' }, 'values computed');
   const scatter = checkBoardItem(
-    { kind: 'scatter', x_label: 'cost ($)', y_label: 'yield (%)', source: 'document', points: [{ label: 'A', x: 1, y: 2 }, { label: 'B', x: 3, y: 5 }] },
+    { kind: 'scatter', x_label: 'cost ($)', y_label: 'yield (%)', source: 'document', points: [{ label: 'A', x: 1, y: 2 }, { label: 'B', x: 3, y: 5 }, { label: 'C', x: 6, y: 7 }] },
     'step "s"',
     warn,
   );
-  eq((scatter as { points: unknown[] }).points.length, 2, 'scatter points');
+  eq((scatter as { points: unknown[] }).points.length, 3, 'scatter points');
   const shapes = checkBoardItem(
     {
       kind: 'shapes',

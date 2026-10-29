@@ -70,7 +70,7 @@ export function anchorWord(say: string, anchor: string): number {
 }
 
 /** Marks on a figure or equation share the step's colour: blue while explaining the method, green for the evidence. */
-const markColor = (beat: Beat): Color => (beat.arc === 'evidence' ? 'green' : 'blue');
+const markColor = (beat: Beat): Color => (beat.arc === 'evidence' || beat.move === 'evidence' ? 'green' : 'blue');
 
 /** A mark's label: at most 4 words, else none, since a cut-off label reads worse than no label. */
 function markLabel(label: string): { label?: string } {
@@ -100,9 +100,12 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
   const color = markColor(beat);
   const board = direction?.board;
   const example = direction?.example;
-  const actions: Action[] = [
-    beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: beat.evidence[0] },
-  ];
+  // A slide without a sentence to point at is shown whole.
+  const first = beat.evidence[0] ?? (beat.page ? `page${beat.page}` : '');
+  const actions: Action[] = [beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: first }];
+  // A step on several slides moves the camera when a highlight is on another slide than the one on screen.
+  const pageOf = new Map(beat.slides ? doc.sentences.map((s) => [s.id, s.page]) : []);
+  let shown = beat.slides ? (pageOf.get(first) ?? beat.page) : undefined;
   // The board item appears with the step; a formula step also outlines its equation on the page.
   if (board) actions.push({ type: 'board', item: board });
   if (example) actions.push(...exampleActions(example));
@@ -122,6 +125,11 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
       if (found === null || highlightedHere.has(cue.target)) continue;
       highlights++;
       highlightedHere.add(cue.target);
+      const slide = pageOf.get(cue.target);
+      if (slide !== undefined && slide !== shown) {
+        actions.push({ type: 'focus', target: cue.target, ...timing });
+        shown = slide;
+      }
       actions.push({ type: 'highlight', targets: [cue.target], color: beat.tint ?? COLORS[beat.kind], ...timing });
     } else if (cue.action === 'board_focus') {
       // A part lights up when the narration names it: never without its board or anchor, nor twice in a row or at once.
@@ -293,9 +301,9 @@ export function dropRepeatedBoards(
 
 /**
  * A sentence the tour opens and closes with, such as a contract's "this is not legal advice": it leads the first step,
- * whose cues move on by its words, and ends the last.
+ * whose cues move on by its words, and ends the last (unless the tour is only begun: `closing` false).
  */
-export function frameSteps(steps: Step[][], frame: string): Step[][] {
+export function frameSteps(steps: Step[][], frame: string, closing = true): Step[][] {
   const out = steps.map((list) => [...list]);
   const firstBeat = out.findIndex((list) => list.length);
   if (firstBeat < 0 || !frame.trim()) return out;
@@ -306,6 +314,7 @@ export function frameSteps(steps: Step[][], frame: string): Step[][] {
     say: `${frame} ${first.say}`,
     actions: first.actions.map((a) => (isCamera(a) ? a : { ...a, at_word: (a.at_word ?? 0) + shift })),
   };
+  if (!closing) return out;
   const lastBeat = out.length - 1 - [...out].reverse().findIndex((list) => list.length);
   const last = out[lastBeat].at(-1)!;
   out[lastBeat][out[lastBeat].length - 1] = { ...last, say: `${last.say} ${frame}` };
@@ -359,6 +368,7 @@ export function assembleTour(
     paper: documentId,
     doc_sha256: doc.source.sha256,
     level: plan.type === 'research_paper' ? 'grad' : 'intro',
+    doc_type: plan.type,
     voices: { host: { lang: language, rate: 1 } },
     chapters,
     preset,

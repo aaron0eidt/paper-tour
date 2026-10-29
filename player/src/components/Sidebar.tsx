@@ -80,6 +80,7 @@ export function Sidebar({ tour, steps, state, docTitle, onJump, children, header
                           >
                             <span className="step-dot" />
                             <span className="step-text">{stepLabel(s.step.say)}</span>
+                            {s.checkpoint && <span className="step-try" aria-label="Your turn">Try</span>}
                           </button>
                         </li>
                       );

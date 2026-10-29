@@ -41,6 +41,7 @@ const scatter = (change: Record<string, unknown> = {}) => ({
   points: [
     { label: 'fixed schedule', x: 0, y: 0 },
     { label: 'probe network', x: 18.2, y: 31.4 },
+    { label: 'timer valves', x: 2.1, y: 18.2 },
   ],
   source: 'document',
   ...change,
@@ -731,7 +732,7 @@ test('a step loses its board and board cues but keeps its narration and page cue
 // ------------------------------------------------------------------------------------------------------- the prompts
 
 test('the prompts and the visual plan state the rules briefly', () => {
-  assert.equal(HARNESS_VERSION, 'paper-tour-harness@25');
+  assert.equal(HARNESS_VERSION, 'paper-tour-harness@26');
   const prompt = (board?: Parameters<typeof directTask>[2]['board']) =>
     directTask('en', 'BRIEF', { actions: ['highlight', 'board_focus'], board, words: 120 });
   assert.match(prompt(), /A step that reports results \(a result or a table\) draws only the document’s own numbers/);

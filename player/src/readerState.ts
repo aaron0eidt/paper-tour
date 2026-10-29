@@ -3,9 +3,12 @@ import type { Layout } from './layout';
 import type { Insets, View, Viewport } from './camera';
 import { initialView, MAX_USER_ZOOM, MIN_ZOOM } from './camera';
 
-/** Store page-relative coordinates, so reopening survives a different viewport or page layout. */
-export function positionFromView(layout: Layout, view: View): Pick<ReaderState, 'page' | 'pageOffset' | 'zoom'> {
-  const page = layout.pages.find((p) => view.cy <= p.y + p.height) ?? layout.pages.at(-1);
+/**
+ * Store page-relative coordinates, so reopening survives a different viewport or page layout. A deck's slides lie on
+ * the same spot, so the view alone cannot say which one shows: `slide` does.
+ */
+export function positionFromView(layout: Layout, view: View, slide?: number): Pick<ReaderState, 'page' | 'pageOffset' | 'zoom'> {
+  const page = (layout.deck && slide ? layout.pages[slide - 1] : undefined) ?? layout.pages.find((p) => view.cy <= p.y + p.height) ?? layout.pages.at(-1);
   if (!page) return { page: 1, pageOffset: 0, zoom: null };
   return { page: page.n, pageOffset: Math.max(0, Math.min(1, (view.cy - page.y) / page.height)), zoom: view.s };
 }

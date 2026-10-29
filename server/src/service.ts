@@ -27,6 +27,7 @@ import { Database, type Db } from './db';
 import { HttpError, missing, ProcessingError } from './errors';
 import { BUCKET, type FileStorage } from './storage';
 import { ensureTourGeneration, generationSummary } from './tour-worker';
+import { partialView, type TourPartialView } from './tour-partial';
 import type { TourImage } from './tour-generator';
 import type { MuseConfig } from './config';
 import type { SettingsService } from './settings';
@@ -66,6 +67,13 @@ export interface Library {
   list(owner: string): Promise<DocumentSummary[]>;
   models(owner?: string): Promise<ModelCatalog>;
   activity?(owner: string, id: string, generationId: string, after: string): Promise<GenerationActivity>;
+  /** The leading steps of a tour still being written (tour-partial.ts); `held` is what the reader already has. */
+  partial?(
+    owner: string,
+    id: string,
+    generationId: string,
+    held?: { after: number; attempt: string },
+  ): Promise<TourPartialView>;
   resumeConfigured?(owner: string): Promise<void>;
   reserve(owner: string, filename: string, size: number, selection?: TourModelSelection): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
@@ -148,6 +156,15 @@ export class DocumentService implements Library {
       status: generation.status,
       events: rows.map((r) => ({ id: r.id, type: r.type, data: r.data, at: iso(r.created_at) })),
     };
+  }
+  async partial(
+    owner: string,
+    id: string,
+    generationId: string,
+    held?: { after: number; attempt: string },
+  ): Promise<TourPartialView> {
+    await this.owned(owner, id);
+    return (await partialView(this.db.pool, id, generationId, held)) ?? missing();
   }
   async agentRun(owner: string, id: string, runId: string) {
     await this.owned(owner, id);

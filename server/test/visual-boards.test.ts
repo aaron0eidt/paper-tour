@@ -127,9 +127,13 @@ test('a scatter of the document’s coordinates is accepted when they are printe
     points: [
       { label: 'small', x: 65e6, y: 71 },
       { label: 'large', x: 1024, y: 80 },
+      { label: 'base', x: 300, y: 75 },
     ],
   });
-  assert.deepEqual(checkBoard('scatter', big, 'a 65M model scores 71 and a 1,024 unit one 80').problems, []);
+  assert.deepEqual(
+    checkBoard('scatter', big, 'a 65M model scores 71, a 1,024 unit one 80 and a 300 unit one 75').problems,
+    [],
+  );
 });
 
 test('a scatter of document coordinates that are not printed is refused with the points to fix', () => {
@@ -147,6 +151,7 @@ test('illustrative scatter points need no evidence, but all points on one value 
     points: [
       { label: 'a', x: 1, y: 5 },
       { label: 'b', x: 2, y: 5 },
+      { label: 'c', x: 3, y: 5 },
     ],
   });
   has(checkBoard('scatter', flat, '').problems, /every point has the same y/);

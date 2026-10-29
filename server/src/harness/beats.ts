@@ -3,6 +3,7 @@ import type { BoardKind } from './board';
 import { ARCS, type Arc, type CardItem, type CardRef, type PaperCard } from './card';
 import type { DocType } from './doctype';
 import type { Unit } from './exercise';
+import type { Move } from './moves';
 import { indexElements } from '../elements';
 
 export const PRESETS = ['quick', 'standard', 'deep'] as const;
@@ -50,6 +51,16 @@ export interface Beat {
   page?: number;
   /** An exercise beat's part and its plan. */
   unit?: Unit;
+  /** What the step does in a claim's argument; its narration follows that move's grammar (moves.ts). */
+  move?: Move;
+  /** The claim a step of a claim-organised paper tour belongs to, and how far its evidence reaches. */
+  claim?: { n: number; of: number; text: string; scope?: string };
+  /** The spoken length the step aims for, fewest and most words; the kind's default when unset. */
+  say?: [number, number];
+  /** A slide step: the pages (slides) it covers, the lead slide first. */
+  slides?: number[];
+  /** Earlier slides the step connects back to, which the narration names. */
+  callbacks?: number[];
 }
 
 export interface PlanChapter {

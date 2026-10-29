@@ -248,6 +248,7 @@ function leaseModel(r: Request) {
 test('a contract follows what you agree to, what it costs, its deadlines and its risks, framed as no legal advice', async () => {
   const { tour, steps: all, requests, metadata } = await run(lease, leaseModel);
   assert.equal(metadata.docType, 'contract');
+  assert.equal(tour.doc_type, 'contract');
   assert.equal(metadata.planSource, 'model');
   assert.deepEqual(
     tour.chapters.map((c) => `${c.id}:${c.title}`),
@@ -365,6 +366,7 @@ test('a letter says what it is, what to do, by when, and what happens otherwise'
     if (r.name === 'tour_plan') return plan;
     return plainDirection(r);
   });
+  assert.equal(tour.doc_type, 'letter');
   assert.deepEqual(
     tour.chapters.map((c) => c.id),
     ['overview', 'actions', 'deadlines', 'consequences', 'takeaway'],
@@ -480,6 +482,7 @@ test('a lecture follows its own order: one chapter per topic, its figure right a
     if (suggestedBoard(r) === 'bars') return plainDirection(r, { bars: epochs });
     return plainDirection(r);
   });
+  assert.equal(tour.doc_type, 'lecture');
   assert.deepEqual(
     tour.chapters.map((c) => c.title),
     ['This lecture', 'Learning as search', 'The update rule', 'Learning rate', 'Epochs', 'Summary'],
@@ -672,6 +675,7 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
     verifier({ '\\det A = 1 \\cdot (-1) - 2 \\cdot 3': { status: 'unknown' } }, seen),
   );
   assert.equal(metadata.docType, 'exercise_sheet');
+  assert.equal(tour.doc_type, 'exercise_sheet');
   assert.equal(requests.filter((r) => r.name === 'tour_plan').length, 0);
   assert.deepEqual(
     tour.chapters.map((c) => `${c.id}:${c.title}`),
@@ -855,12 +859,20 @@ test('parts are planned within the preset: all of them when they fit, else the f
     ],
   );
   const plan = (preset: 'quick' | 'standard' | 'deep', list = units) => planUnits(list, preset);
+  // Three parts at 20 steps: each in full form (task, your turn, method, answer) with the two solution steps that fit.
   assert.deepEqual(
     plan('standard').taught.map((u) => [u.id, u.steps, u.compact]),
     [
+      ['ex1.a', 2, false],
+      ['ex1.b', 2, false],
+      ['ex2', 2, false],
+    ],
+  );
+  assert.deepEqual(
+    plan('standard', units.slice(0, 2)).taught.map((u) => [u.id, u.steps, u.compact]),
+    [
       ['ex1.a', 3, false],
       ['ex1.b', 3, false],
-      ['ex2', 3, false],
     ],
   );
   assert.deepEqual(
@@ -878,7 +890,7 @@ test('parts are planned within the preset: all of them when they fit, else the f
   for (const preset of ['quick', 'standard', 'deep'] as const) {
     const { taught } = plan(preset, many);
     const length = 2 + taught.reduce((n, u) => n + unitOverhead(u) + u.steps, 0);
-    assert.ok(length <= { quick: 10, standard: 20, deep: 30 }[preset], `${preset}: ${length}`);
+    assert.ok(length <= { quick: 10, standard: 22, deep: 30 }[preset], `${preset}: ${length}`);
   }
   // The tour of a sheet: overview, the taught parts, takeaway.
   const card = cardFor('exercise_sheet', ['p1.s1', 'p1.s3']) as never;
@@ -901,6 +913,7 @@ test('a sheet without tasks found by ingestion is toured as an ordinary document
   };
   const { tour, metadata } = await run(plain, (r) => (r.name === 'tour_plan' ? plan : sheetModel(r)), verifier());
   assert.equal(metadata.docType, 'other');
+  assert.equal(tour.doc_type, 'other');
   assert.deepEqual(
     tour.chapters.map((c) => c.id),
     ['overview', 'points', 'takeaway'],

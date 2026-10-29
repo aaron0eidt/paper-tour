@@ -14,6 +14,7 @@ import { ProcessingError } from './errors';
 import type { Enqueue } from './service';
 import type { FileStorage } from './storage';
 import type { TourGenerator, TourImage, TourProgress } from './tour-generator';
+import { clearPartial, partialSink } from './tour-partial';
 import { isContributorModel } from './muse/models';
 const execute = promisify(execFile);
 
@@ -350,6 +351,8 @@ export class TourWorker {
           "update tour_generations set status='generating',stage='preparing',model=$2,error=null,error_code=null,updated_at=now() where id=$1",
           [generationId, generator.model],
         );
+        // Each attempt writes its own partial tour; the last one's steps may differ.
+        await clearPartial(this.db.pool, generationId);
         signal.throwIfAborted();
         folder = await mkdtemp(resolve(tmpdir(), 'paper-tour-generation-'));
         const input = { documentId, analysisId, uploadPath: row.upload_path as string, doc: row.doc as Doc, folder };
@@ -369,13 +372,17 @@ export class TourWorker {
             [generationId, progress.stage, progress.imagesDone, progress.imagesTotal],
           );
         };
+        // Partial tours go to their own store (tour-partial.ts); the rest of the events to the journal.
+        const onEvent = partialSink(this.db.pool, generationId, input.doc, record, (event) =>
+          console.warn(JSON.stringify({ event, documentId, generationId })),
+        );
         const generated = await generator.generate(
           {
             documentId,
             analysisId,
             doc: input.doc,
             images,
-            onEvent: record,
+            onEvent,
           },
           onProgress,
           signal,
@@ -419,6 +426,8 @@ export class TourWorker {
           });
           await tx.query('update documents set updated_at=now() where id=$1', [documentId]);
         });
+        // The finished tour is the tour of record; a partial is no longer served and is cleared when this succeeds.
+        await clearPartial(this.db.pool, generationId);
         console.log(
           JSON.stringify({
             event: 'tour_ready',

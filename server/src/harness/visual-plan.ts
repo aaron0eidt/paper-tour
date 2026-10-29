@@ -33,7 +33,7 @@ const KINDS_HELP: Record<BoardKind, string> = {
   heatmap:
     'how every item relates to every other (weights, attention, alignment, similarity, correlation, confusion), a mask, a grid of results over two settings, or a formula’s value over two indices.',
   scatter:
-    'a trade-off or relationship between two quantities measured in the document (quality against cost, accuracy against size, speed against error; two columns of a results table), never made-up points, with the better corner marked.',
+    'a trade-off or relationship between two quantities measured in the document (quality against cost, accuracy against size, speed against error; two columns of a results table), at least three points (two are a comparison: use bars), never made-up points, with the better corner marked.',
   shapes: 'how matrix or vector dimensions combine in an operation, and which dimension disappears or appears.',
   plot: 'how a formula responds to its input or a parameter when the shape matters (saturation, decay, periodicity, a crossover), never a straight line.',
   formula: 'the parts of a key equation, each with its role.',

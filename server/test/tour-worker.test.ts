@@ -5,6 +5,7 @@ import { Database } from '../src/db';
 import { DocumentService, type Enqueue } from '../src/service';
 import { AnalysisWorker, type PreparedAnalysis } from '../src/worker';
 import { TourWorker, imagePreparationFailure, isMissingStorageObject, safeTourDiagnostics } from '../src/tour-worker';
+import { savePartial } from '../src/tour-partial';
 import { ProcessingError, HttpError } from '../src/errors';
 import type { Config } from '../src/config';
 import type { FileStorage } from '../src/storage';
@@ -384,6 +385,233 @@ test(
           (await db.query('select count(*) from tours where document_id=$1', [fresh.documentId])).rows[0].count,
           '0',
         );
+      });
+      await t.test(
+        'progressive tours: partials are kept for the running generation, never regress, and end with the finished tour',
+        async () => {
+          const fresh = await fixture();
+          const task = await generation(fresh.analysisId);
+          // A playable tour of the first n steps, as the generator emits it.
+          const leading = (n: number, sha = doc.source.sha256): Tour => ({
+            ...tour,
+            doc_sha256: sha,
+            chapters: [
+              {
+                id: 'start',
+                title: 'Start',
+                steps: Array.from({ length: n }, (_, i) => ({
+                  id: `s${i + 1}`,
+                  say: 'Attention weights.',
+                  actions: [{ type: 'highlight' as const, targets: ['p1.s1'] }],
+                })),
+              },
+            ],
+          });
+          const rows = async () =>
+            (
+              await db.query('select attempt,ready,planned,tour from tour_generation_partials where generation_id=$1', [
+                task.id,
+              ])
+            ).rows;
+          const seen: { ready: number; planned: number; steps: number | null; status: string }[] = [];
+          const viewed = async (held?: { after: number; attempt: string }) => {
+            const view = await service.partial(owner, fresh.documentId, task.id, held);
+            return { view, steps: view.tour?.chapters.flatMap((c) => c.steps).length ?? null };
+          };
+          const writer = new TourWorker(
+            db,
+            storage,
+            c,
+            {
+              ...generator,
+              async generate(input) {
+                const emit = (n: number, extra: Record<string, unknown> = {}) =>
+                  input.onEvent!('tour.partial', { tour: leading(n), ready: n, planned: 3, ...extra });
+                assert.equal((await rows()).length, 0, 'an attempt starts without a partial');
+                assert.deepEqual(
+                  await viewed().then(({ view }) => [view.status, view.ready, view.tour, view.attempt]),
+                  ['generating', 0, null, null],
+                );
+                await emit(1);
+                const first = await viewed();
+                seen.push({
+                  ready: first.view.ready,
+                  planned: first.view.planned,
+                  steps: first.steps,
+                  status: first.view.status,
+                });
+                await emit(2);
+                const second = await viewed();
+                seen.push({
+                  ready: second.view.ready,
+                  planned: second.view.planned,
+                  steps: second.steps,
+                  status: second.view.status,
+                });
+                assert.equal(second.view.attempt, first.view.attempt, 'steps append within one attempt');
+                // Late, repeated, foreign and malformed partials change nothing.
+                await emit(1);
+                await emit(2);
+                await input.onEvent!('tour.partial', { tour: leading(3, 'b'.repeat(64)), ready: 3, planned: 3 });
+                await input.onEvent!('tour.partial', { tour: { title: 'half' }, ready: 3, planned: 3 });
+                await input.onEvent!('tour.partial', { tour: leading(3), ready: 0, planned: 3 });
+                const stored = await rows();
+                assert.equal(stored.length, 1);
+                assert.equal(stored[0].ready, 2);
+                assert.equal(stored[0].tour.chapters[0].steps.length, 2);
+                // A client that holds this partial gets the counts only; another attempt or an older one gets the tour.
+                const held = await viewed({ after: 2, attempt: second.view.attempt! });
+                assert.equal(held.view.tour, null);
+                assert.equal(held.view.ready, 2);
+                assert.equal((await viewed({ after: 1, attempt: second.view.attempt! })).steps, 2);
+                assert.equal((await viewed({ after: 2, attempt: randomUUID() })).steps, 2);
+                await emit(3, { planned: 2 });
+                const third = await viewed();
+                assert.deepEqual(
+                  [third.view.ready, third.view.planned, third.steps],
+                  [3, 3, 3],
+                  'planned is raised to ready',
+                );
+                return generator.generate(input);
+              },
+            },
+            async () => [image],
+          );
+          await writer.generate(fresh.documentId, fresh.analysisId, task.id);
+          assert.deepEqual(seen, [
+            { ready: 1, planned: 3, steps: 1, status: 'generating' },
+            { ready: 2, planned: 3, steps: 2, status: 'generating' },
+          ]);
+          // The finished tour replaces the partial: nothing of it is left or served, and it is the tour of record.
+          assert.equal((await generation(fresh.analysisId)).status, 'ready');
+          assert.equal((await rows()).length, 0);
+          const done = await service.partial(owner, fresh.documentId, task.id);
+          assert.deepEqual(
+            [done.status, done.ready, done.planned, done.tour, done.attempt],
+            ['ready', 0, 0, null, null],
+          );
+          const manifest = await service.manifest(owner, fresh.documentId);
+          assert.equal(done.tourId, manifest.selectedTour?.id);
+          assert.equal(manifest.selectedTour?.tour.chapters[0].steps.length, 1, 'the finished tour is the generator’s');
+          assert.equal(
+            (await db.query('select count(*) from tours where document_id=$1', [fresh.documentId])).rows[0].count,
+            '1',
+            'a partial is never a tours row',
+          );
+          // A late write cannot bring a partial back to a finished generation.
+          assert.equal(await savePartial(db.pool, task.id, { tour: leading(2), ready: 2, planned: 3 }), false);
+          assert.equal((await rows()).length, 0);
+          // The journal says how far the tour was, never what it said.
+          const journal = (await service.activity(owner, fresh.documentId, task.id, '0')).events.filter(
+            (event) => event.type === 'tour.partial',
+          );
+          assert.deepEqual(
+            journal.map((event) => event.data),
+            [
+              { ready: 1, planned: 3 },
+              { ready: 2, planned: 3 },
+              { ready: 3, planned: 3 },
+            ],
+          );
+          // Only the owner, and only through the document the generation belongs to.
+          await assert.rejects(
+            () => service.partial(other, fresh.documentId, task.id),
+            (error) => error instanceof HttpError && error.status === 404,
+          );
+          await assert.rejects(
+            () => service.partial(owner, fresh.documentId, randomUUID()),
+            (error) => error instanceof HttpError && error.status === 404,
+          );
+          const another = await fixture();
+          await assert.rejects(
+            () => service.partial(owner, another.documentId, task.id),
+            (error) => error instanceof HttpError && error.status === 404,
+          );
+          await db.transaction(async (tx) => {
+            await tx.query('set local role authenticated');
+            await tx.query("select set_config('request.jwt.claim.sub',$1,true)", [owner]);
+            await assert.rejects(() => tx.query('select * from tour_generation_partials'), /permission denied/);
+          });
+        },
+      );
+      await t.test(
+        'progressive tours: a failed attempt serves nothing and the retry starts a new partial',
+        async () => {
+          const fresh = await fixture();
+          const task = await generation(fresh.analysisId);
+          const partialTour: Tour = { ...tour };
+          const attempts: string[] = [];
+          let attempt = 0;
+          const flaky = new TourWorker(
+            db,
+            storage,
+            c,
+            {
+              ...generator,
+              async generate(input) {
+                await input.onEvent!('tour.partial', { tour: partialTour, ready: 1, planned: 4 });
+                const {
+                  rows: [stored],
+                } = await db.query('select attempt from tour_generation_partials where generation_id=$1', [task.id]);
+                attempts.push(stored.attempt);
+                if (!attempt++) throw new ProcessingError('muse_rate_limited', 'try again', true);
+                return generator.generate(input);
+              },
+            },
+            async () => [image],
+          );
+          await assert.rejects(() => flaky.generate(fresh.documentId, fresh.analysisId, task.id, false));
+          assert.equal((await generation(fresh.analysisId)).status, 'queued');
+          const waiting = await service.partial(owner, fresh.documentId, task.id);
+          assert.deepEqual([waiting.status, waiting.tour, waiting.ready, waiting.attempt], ['queued', null, 0, null]);
+          await flaky.generate(fresh.documentId, fresh.analysisId, task.id, true);
+          assert.equal(attempts.length, 2);
+          assert.notEqual(attempts[0], attempts[1], 'a retry is a new attempt');
+          assert.equal((await generation(fresh.analysisId)).status, 'ready');
+          assert.equal(
+            (await db.query('select count(*) from tour_generation_partials where generation_id=$1', [task.id])).rows[0]
+              .count,
+            '0',
+          );
+        },
+      );
+      await t.test('progressive tours: partials written at the same time leave the longest one', async () => {
+        const fresh = await fixture();
+        const task = await generation(fresh.analysisId);
+        const concurrent = new TourWorker(
+          db,
+          storage,
+          c,
+          {
+            ...generator,
+            async generate(input) {
+              await Promise.all(
+                [2, 1, 3, 1, 2].map((n) =>
+                  input.onEvent!('tour.partial', {
+                    tour: {
+                      ...tour,
+                      chapters: [
+                        {
+                          id: 'c',
+                          title: 'C',
+                          steps: Array.from({ length: n }, (_, i) => ({ ...tour.chapters[0].steps[0], id: `s${i}` })),
+                        },
+                      ],
+                    },
+                    ready: n,
+                    planned: 3,
+                  }),
+                ),
+              );
+              const stored = (await service.partial(owner, fresh.documentId, task.id)).tour!;
+              assert.equal(stored.chapters[0].steps.length, 3);
+              return generator.generate(input);
+            },
+          },
+          async () => [image],
+        );
+        await concurrent.generate(fresh.documentId, fresh.analysisId, task.id);
+        assert.equal((await generation(fresh.analysisId)).status, 'ready');
       });
       await t.test("generation RLS hides another owner's progress and provenance", async () => {
         await db.transaction(async (tx) => {

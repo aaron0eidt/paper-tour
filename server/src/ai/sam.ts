@@ -7,6 +7,7 @@ import {
 } from '@meta-sam/parser';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
+import type { InkMap } from '../tour-generator';
 import { modelBaseUrl, providerFetch } from './provider';
 
 /** Meta's SAM 3.1 answers a box prompt in a median 1.2 s (p90 2.2 s); a drag that waits longer keeps its rectangle. */
@@ -328,23 +329,87 @@ export function normalizeRing(ring: Point[]): Point[] {
   return [...ordered.slice(start), ...ordered.slice(0, start)];
 }
 
-/** What the reader draws: the object's outline in image pixels, with the pixel box and area it came from. */
+/**
+ * A raster with the holes of its set pixels filled: those the outside cannot reach without crossing a set pixel
+ * (the outside moves along edges, the pixels join diagonally, as in outerContour).
+ */
+export function fillHoles(pixels: Uint8Array, width: number, height: number): Uint8Array {
+  const outside = new Uint8Array(pixels.length);
+  const stack = new Int32Array(pixels.length);
+  let top = 0;
+  const enter = (x: number, y: number) => {
+    const at = y * width + x;
+    if (pixels[at] || outside[at]) return;
+    outside[at] = 1;
+    stack[top++] = at;
+  };
+  for (let x = 0; x < width; x++) {
+    enter(x, 0);
+    enter(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    enter(0, y);
+    enter(width - 1, y);
+  }
+  while (top) {
+    const at = stack[--top];
+    const x = at % width;
+    const y = (at - x) / width;
+    if (x > 0) enter(x - 1, y);
+    if (x < width - 1) enter(x + 1, y);
+    if (y > 0) enter(x, y - 1);
+    if (y < height - 1) enter(x, y + 1);
+  }
+  const filled = new Uint8Array(pixels.length);
+  for (let i = 0; i < filled.length; i++) filled[i] = outside[i] ? 0 : 1;
+  return filled;
+}
+
+/**
+ * The share of an object's pixels that are ink, 0 to 1: how much of what the mask covers differs from the paper.
+ * The object is the mask's component with its holes filled, because a mask often leaves out the glyphs and lines
+ * inside it, which are the ink. Undefined when the ink map is not of the image the mask was made on.
+ */
+export function inkShare(pixels: Uint8Array, mask: SamMask, ink: InkMap): number | undefined {
+  const { left, top } = mask.bounds;
+  if (ink.bits.length < Math.ceil((ink.width * ink.height) / 8)) return undefined;
+  const filled = fillHoles(pixels, mask.width, mask.height);
+  let covered = 0;
+  let inked = 0;
+  for (let i = 0; i < filled.length; i++) {
+    if (!filled[i]) continue;
+    const x = left + (i % mask.width);
+    const y = top + Math.floor(i / mask.width);
+    if (x < 0 || y < 0 || x >= ink.width || y >= ink.height) return undefined;
+    covered++;
+    const bit = y * ink.width + x;
+    if ((ink.bits[bit >> 3] >> (7 - (bit & 7))) & 1) inked++;
+  }
+  return covered ? inked / covered : undefined;
+}
+
+/**
+ * What the reader draws: the object's outline in image pixels, with the pixel box and area it came from, and, when
+ * the image's ink was given, the share of the object that is ink (inkShare).
+ */
 export interface MaskOutline {
   polygon: Point[];
   bbox: PixelBox;
   area: number;
+  ink?: number;
 }
 
 /**
  * The outline of the object under the seed: its connected component, the external contour (holes from text and
  * lines are filled), simplified, in image pixels. Null for an empty mask or a sliver with no three-point outline.
  */
-export function maskOutline(mask: SamMask, seed: Point, tolerance = SIMPLIFY_PX): MaskOutline | null {
+export function maskOutline(mask: SamMask, seed: Point, tolerance = SIMPLIFY_PX, ink?: InkMap): MaskOutline | null {
   const component = maskComponent(mask, seed);
   if (!component) return null;
   const contour = outerContour(component.pixels, mask.width, mask.height);
   const ring = simplifyRing(contour, tolerance);
   if (ring.length < 3) return null;
   const polygon = normalizeRing(ring.map(([x, y]): Point => [mask.bounds.left + x, mask.bounds.top + y]));
-  return { polygon, bbox: component.bbox, area: component.area };
+  const share = ink ? inkShare(component.pixels, mask, ink) : undefined;
+  return { polygon, bbox: component.bbox, area: component.area, ...(share === undefined ? {} : { ink: share }) };
 }

@@ -1,5 +1,5 @@
 import { getLivePage, isPdfOpen } from '../pdfLifetime';
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Detail } from '../canvasPlan';
 import { BLOCK_COLORS, MARKER, STROKE } from '../colors';
@@ -31,6 +31,10 @@ interface Props {
   spotlight: boolean;
   spotlightLeaving?: boolean;
   debug: DebugPage | null;
+  /** A deck's slide: the one showing, the one fading out, or hidden. Without it the page is one of a stack. */
+  slide?: 'current' | 'leaving' | 'hidden';
+  /** A deck: this page now has (or no longer has) its canvas, so the slide before it can stay until it is there. */
+  onDrawn?(n: number, drawn: boolean): void;
 }
 
 function roundedRect([x0, y0, x1, y1]: BBox, r: number): string {
@@ -44,6 +48,8 @@ function roundedRect([x0, y0, x1, y1]: BBox, r: number): string {
 const rectProps = ([x0, y0, x1, y1]: BBox) => ({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
 
 const PREVIEW_SCALE = 1;
+// A slide that gets no canvas this long shows anyway.
+const SLIDE_GIVE_UP_MS = 1500;
 const BOX_RADIUS = 5;
 // Concentric with box corners (holes are padded SPOT_PAD - BOX_PAD more), so a box on the
 // spotlit target is never clipped at its corners.
@@ -68,10 +74,24 @@ function sweepSpans(rects: BBox[]): [number, number][] {
 }
 
 /** One page: a pdf.js canvas with SVG layers on top that use page points directly via viewBox. */
-export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes, current = null, spotlight, spotlightLeaving, debug }: Props) {
+export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes, current = null, spotlight, spotlightLeaving, debug, slide, onDrawn }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const { width: w, height: h } = box;
+  // A slide comes in once its canvas is there (or, if it never gets one, after a moment), never as a blank white page.
+  const [drawn, setDrawn] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
+  const notified = useRef(false);
+  useEffect(() => {
+    if (!drawn && !notified.current) return;
+    notified.current = drawn;
+    onDrawn?.(box.n, drawn);
+  }, [drawn, box.n, onDrawn]);
+  useEffect(() => {
+    if (slide !== 'current' || drawn) return setGaveUp(false);
+    const timer = setTimeout(() => setGaveUp(true), SLIDE_GIVE_UP_MS);
+    return () => clearTimeout(timer);
+  }, [slide, drawn]);
 
   // Render into a fresh canvas and swap it in when done, so the old one stays visible meanwhile.
   useEffect(() => {
@@ -80,6 +100,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
     if (!pdf || scale <= 0) {
       for (const c of host.querySelectorAll('canvas')) c.width = c.height = 0; // free memory now
       host.replaceChildren();
+      setDrawn(false);
       return;
     }
     let cancelled = false;
@@ -96,6 +117,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
           if (cancelled || !isPdfOpen(pdf)) return;
           for (const c of host.querySelectorAll('canvas')) c.width = c.height = 0;
           host.replaceChildren(canvas);
+          setDrawn(true);
         }
       })
       .catch((err) => {
@@ -145,7 +167,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
 
   const viewBox = `0 0 ${w} ${h}`;
   return (
-    <div className="page" style={{ left: box.x, top: box.y, width: w, height: h }} data-page={box.n}>
+    <div className={slide ? `page slide slide-${slide}${drawn || gaveUp ? ' ready' : ''}` : 'page'} style={{ left: box.x, top: box.y, width: w, height: h }} data-page={box.n} aria-hidden={slide === 'hidden' ? true : undefined}>
       <div className="page-canvas" ref={hostRef} />
       <div className="page-detail" ref={detailRef} />
 

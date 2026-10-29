@@ -4,6 +4,8 @@ import { encodeSegmentationMask } from '../node_modules/@meta-sam/parser/dist/ma
 import type { MuseConfig } from '../src/config';
 import { ProcessingError } from '../src/errors';
 import {
+  fillHoles,
+  inkShare,
   maskComponent,
   maskOutline,
   normalizeRing,
@@ -17,6 +19,7 @@ import {
   type SamMask,
   type SamPrompt,
 } from '../src/ai/sam';
+import type { InkMap } from '../src/tour-generator';
 
 const KEY = 'unit-test-key-never-logged';
 const config: MuseConfig = {
@@ -339,4 +342,76 @@ test('the outline of a mask is in image pixels, offset by the mask bounds', () =
   assert.equal(outline.area, 32);
   assert.equal(maskOutline(maskOf(['..', '..']), [0, 0]), null, 'an empty mask');
   assert.equal(maskOutline(maskOf(['##', '##']), [0, 0]), null, 'a speck within the tolerance has no outline');
+});
+
+/** An ink map from rows of "#" (ink) and "." (paper): a bit a pixel, row by row, the high bit first. */
+function inkOf(rows: string[]): InkMap {
+  const width = rows[0].length;
+  const bits = new Uint8Array(Math.ceil((width * rows.length) / 8));
+  rows
+    .join('')
+    .split('')
+    .forEach((c, i) => {
+      if (c === '#') bits[i >> 3] |= 1 << (7 - (i & 7));
+    });
+  return { width, height: rows.length, bits };
+}
+
+test('the holes of a raster are filled, but an opening to the outside is not', () => {
+  const filled = (rows: string[]) => {
+    const { raster, width, height } = maskOf(rows);
+    return Array.from({ length: height }, (_, y) =>
+      Array.from(fillHoles(raster, width, height).slice(y * width, (y + 1) * width), (v) => (v ? '#' : '.')).join(''),
+    );
+  };
+  assert.deepEqual(filled(['#####', '#...#', '#.#.#', '#...#', '#####']), [
+    '#####',
+    '#####',
+    '#####',
+    '#####',
+    '#####',
+  ]);
+  assert.deepEqual(filled(['....', '.##.', '....']), ['....', '.##.', '....'], 'nothing to fill');
+  assert.deepEqual(
+    filled(['#####', '#...#', '#...#', '#....']),
+    ['#####', '#...#', '#...#', '#....'],
+    'a gap in the wall',
+  );
+  assert.deepEqual(
+    filled(['.###.', '#...#', '#...#', '.###.']),
+    ['.###.', '#####', '#####', '.###.'],
+    'a ring that touches only at corners is closed',
+  );
+  assert.deepEqual(filled(['.#.', '#.#', '.#.']), ['.#.', '###', '.#.'], 'so is a diamond of single pixels');
+  assert.deepEqual(filled(['###', '#.#', '###']), ['###', '###', '###'], 'a hole against the raster edge');
+  assert.deepEqual(filled(['....', '....']), ['....', '....'], 'an empty raster');
+  assert.deepEqual(filled(['#']), ['#']);
+});
+
+test('the share of ink is measured over the object with its holes filled, in image pixels', () => {
+  // A box with its text left out of the mask (the holes), as SAM masks often are: the text is the ink.
+  const mask = maskOf(['######', '#....#', '#....#', '######'], 2, 1);
+  const component = maskComponent(mask, [3, 2])!;
+  const ink = inkOf(['........', '........', '..#..#..', '...##...', '........', '........']);
+  // The object covers 6 x 4 = 24 pixels at (2, 1); four of them are ink: (2, 2), (5, 2), (3, 3) and (4, 3).
+  assert.equal(inkShare(component.pixels, mask, ink), 4 / 24);
+  assert.equal(
+    inkShare(component.pixels, mask, inkOf(['........', '........', '........', '........', '........', '........'])),
+    0,
+  );
+  assert.equal(
+    inkShare(component.pixels, mask, inkOf(['########', '########', '########', '########', '########', '########'])),
+    1,
+  );
+  // An ink map of another image, or one the mask reaches out of, is no measure.
+  assert.equal(inkShare(component.pixels, mask, inkOf(['....', '....', '....'])), undefined);
+  assert.equal(inkShare(component.pixels, mask, { width: 8, height: 6, bits: new Uint8Array(2) }), undefined);
+  // The outline carries the share when it is given the ink, and nothing otherwise.
+  assert.equal(maskOutline(mask, [3, 2], undefined, ink)!.ink, 4 / 24);
+  assert.equal('ink' in maskOutline(mask, [3, 2])!, false);
+  assert.equal(
+    'ink' in maskOutline(mask, [3, 2], undefined, inkOf(['....']))!,
+    false,
+    'a measure of another size is dropped',
+  );
 });

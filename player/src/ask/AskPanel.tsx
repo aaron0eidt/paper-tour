@@ -34,6 +34,8 @@ export interface AskPanelProps {
   away?: boolean;
   /** An answer is playing: its follow-ups wait until it ends, so the tray covers less of what it shows. */
   answering?: boolean;
+  /** A question to ask now, from outside the field (a suggestion on the tour's end card); a new id asks again. */
+  request?: { id: number; question: string } | null;
   /** A question was sent: set the tour aside. */
   onAsk?(question: string): void;
   /** Play the answer; the panel never drives an engine itself. */
@@ -191,6 +193,15 @@ export function AskPanel(props: AskPanelProps) {
     },
     [busy, voiceBusy, source, tourId, history, language],
   );
+
+  // A question picked outside the field goes through the same flow as one typed in it.
+  const askNow = useRef(ask);
+  askNow.current = ask;
+  const requestedId = props.request?.id;
+  useEffect(() => {
+    const question = latest.current.request?.question;
+    if (requestedId !== undefined && question) void askNow.current(question);
+  }, [requestedId]);
 
   const stop = () => request.current?.abort();
   // Back to the tour folds the panel away and hands the keyboard back to the player; the conversation stays.

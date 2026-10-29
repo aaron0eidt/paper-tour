@@ -301,6 +301,35 @@ export async function createApp(options: Options) {
             }
           },
         );
+      // The leading steps of a tour still being written; the contract is TourPartialView in tour-partial.ts.
+      api.get<{ Params: { id: string; generationId: string }; Querystring: { after?: string; attempt?: string } }>(
+        '/documents/:id/generations/:generationId/partial',
+        {
+          schema: {
+            params: {
+              type: 'object',
+              required: ['id', 'generationId'],
+              properties: { id: uuid, generationId: uuid },
+            },
+            querystring: {
+              type: 'object',
+              additionalProperties: false,
+              properties: { after: { type: 'string', pattern: '^[0-9]{1,6}$' }, attempt: uuid },
+            },
+          },
+        },
+        async (req, reply) => {
+          if (!service.partial) throw new HttpError(503, 'partial_unavailable', 'Partial tours are unavailable.');
+          const { after, attempt } = req.query;
+          reply.header('Cache-Control', 'no-store');
+          return service.partial(
+            owner(req),
+            req.params.id,
+            req.params.generationId,
+            after !== undefined && attempt ? { after: Number(after), attempt } : undefined,
+          );
+        },
+      );
       api.get<{ Params: { id: string; runId: string } }>(
         '/documents/:id/agent-runs/:runId',
         { schema: { params: { type: 'object', required: ['id', 'runId'], properties: { id: uuid, runId: uuid } } } },

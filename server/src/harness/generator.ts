@@ -19,6 +19,30 @@ import {
   tourSeconds,
 } from './assemble';
 import { paperPlan, type Beat, type Preset, type TourPlan } from './beats';
+import {
+  claimContext,
+  claimPlan,
+  claimSentenceIds,
+  claimsEvent,
+  claimsSchema,
+  claimsTask,
+  cleanClaims,
+  type Claim,
+} from './claims';
+import {
+  attachUncovered,
+  cleanDeckPlan,
+  deckSchema,
+  deckTask,
+  deckTourPlan,
+  fallbackDeckPlan,
+  namesCallback,
+  slideCards,
+  slideText,
+  type DeckPlan,
+} from './deck';
+import { deckLike, type DocType } from './doctype';
+import { moveProblems } from './moves';
 import { imageParts, pool } from './calls';
 import { recordedCalls } from '../ai/recorded-calls';
 import { cardProblems, cardSchema, cleanCard, evidencePool, fallbackCard, repairTurn, type PaperCard } from './card';
@@ -45,6 +69,7 @@ import {
   solveTask,
   unitBrief,
   unitFallback,
+  unitOverhead,
   unitSteps,
   type Solution,
 } from './exercise';
@@ -194,14 +219,107 @@ export class HarnessTourGenerator implements TourGenerator {
     const cardSource = usable ? 'model' : 'fallback';
     if (!usable) card = { ...fallbackCard(doc), ...(card ? { doc_type: card.doc_type } : {}) };
 
-    // B. Plan the beats for the kind of document: a paper's argument or a sheet's parts in code, the arc of the other
-    // kinds with one call, all sized by the preset. A sheet without tasks found by ingestion is toured as "other".
-    const type = card!.doc_type;
+    // B. Plan the beats for the kind of document: a paper's claims (one call) or its argument in code, a deck slide by
+    // slide (one call), a sheet's parts in code, the arc of the other kinds with one call, all sized by the preset. A
+    // sheet without tasks found by ingestion is toured as "other".
+    const sheet = card!.doc_type === 'exercise_sheet' && Boolean(doc.exercises?.length);
+    const deck = !sheet && deckLike(doc) && ['lecture', 'other', 'research_paper'].includes(card!.doc_type);
+    const type: DocType = deck ? 'lecture' : card!.doc_type;
     let plan: TourPlan;
     let planSource = 'code';
-    if (type === 'exercise_sheet' && doc.exercises?.length) plan = exercisePlan(card!, doc, this.preset);
-    else if (type === 'research_paper') plan = paperPlan(card!, doc, this.preset);
-    else {
+    let claims: Claim[] | null = null;
+    let deckPlan: DeckPlan | null = null;
+    let uncovered: number[] = [];
+    if (sheet) plan = exercisePlan(card!, doc, this.preset);
+    else if (deck) {
+      const slides = slideCards(doc);
+      const title = card!.title || doc.source.title || 'the lecture';
+      const task: MuseMessage[] = [
+        ...prefix,
+        { role: 'user', content: [{ type: 'text', text: deckTask(language, slides, this.preset, title) }] },
+      ];
+      // The plan with the fewest faults is kept: a repair that is worse than the first answer does not replace it.
+      let best: { plan: DeckPlan; problems: string[] } | null = null;
+      for (let attempt = 0; attempt < 2 && !(best && !best.problems.length); attempt++) {
+        try {
+          const completion = await call(
+            task,
+            'deck_plan',
+            deckSchema(slides.length, this.preset),
+            8_000,
+            'medium',
+            signal,
+          );
+          const checked = cleanDeckPlan(completion.value, slides, this.preset);
+          if (checked.plan && (!best || checked.problems.length <= best.problems.length))
+            best = { plan: checked.plan, problems: checked.problems };
+          if (checked.problems.length) {
+            await input.onEvent?.('validation.failed', {
+              stage: 'deck',
+              problems: checked.problems,
+              attempt: attempt + 1,
+            });
+            task.push(...repairTurn(completion.value, checked.problems));
+          }
+        } catch (error) {
+          signal.throwIfAborted();
+          if (!recoverable(error)) throw error;
+          if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
+        }
+      }
+      planSource = best ? 'model' : 'fallback';
+      const tied = attachUncovered(best?.plan ?? fallbackDeckPlan(slides, this.preset, title), slides, this.preset);
+      deckPlan = tied.plan;
+      uncovered = tied.left;
+      plan = deckTourPlan(tied.plan, card!, doc);
+    } else if (type === 'research_paper') {
+      // The paper's claims: what the authors state in at least two of the abstract, the introduction and the
+      // conclusion, with the evidence for each. Without usable claims the tour follows the paper's argument instead.
+      const context = claimContext(doc);
+      if (context) {
+        const task: MuseMessage[] = [
+          ...prefix,
+          { role: 'user', content: [{ type: 'text', text: claimsTask(language, context, this.preset) }] },
+        ];
+        const sentenceIds = claimSentenceIds(doc, context);
+        for (let attempt = 0; attempt < 2 && !claims; attempt++) {
+          try {
+            const completion = await call(
+              task,
+              'claims',
+              claimsSchema(doc, sentenceIds, this.preset),
+              10_000,
+              'medium',
+              signal,
+            );
+            const checked = cleanClaims(completion.value, doc, context, this.preset);
+            claims = checked.claims;
+            if (!claims) {
+              await input.onEvent?.('validation.failed', {
+                stage: 'claims',
+                problems: checked.problems,
+                attempt: attempt + 1,
+              });
+              task.push(...repairTurn(completion.value, checked.problems));
+            }
+          } catch (error) {
+            signal.throwIfAborted();
+            if (!recoverable(error)) throw error;
+            if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
+          }
+        }
+      }
+      const byClaims = claims ? claimPlan(claims, card!, doc, this.preset) : null;
+      // A claim plan too thin to teach (no evidence to point at) is no plan.
+      if (byClaims && byClaims.beats.length >= 4) {
+        plan = byClaims;
+        planSource = 'claims';
+        await input.onEvent?.('claims.ready', { claims: claimsEvent(claims!) });
+      } else {
+        claims = null;
+        plan = paperPlan(card!, doc, this.preset);
+      }
+    } else {
       const arcType: ArcType = type === 'exercise_sheet' ? 'other' : type;
       const schema = arcSchema(arcType, doc, evidenceIds, this.preset);
       const page1 = keyImages.filter((image) => image.targetId === 'page1');
@@ -238,14 +356,22 @@ export class HarnessTourGenerator implements TourGenerator {
       docType: plan.type,
       cardSource,
       planSource,
-      beats: beats.map(({ id, kind, arc, target, point, detail }) => ({
+      beats: beats.map(({ id, kind, arc, target, point, detail, move, slides }) => ({
         id,
         kind,
         arc,
         label: point,
         detail: !!detail,
         ...(target ? { target } : {}),
+        ...(move ? { move } : {}),
+        ...(slides ? { slides } : {}),
       })),
+      ...(deckPlan
+        ? {
+            skipped: deckPlan.skipped,
+            ...(uncovered.length ? { uncovered } : {}),
+          }
+        : {}),
     });
 
     // B2. Plan the side-board visuals of the whole tour with one call that sees every beat, so each step gets the picture
@@ -318,7 +444,7 @@ export class HarnessTourGenerator implements TourGenerator {
             id: beat.id,
             label: beat.point,
           });
-          const { solution, problems } = cleanSolution(completion.value, unit);
+          const { solution, problems } = cleanSolution(completion.value, unit, doc);
           if (!solution) {
             await input.onEvent?.('validation.failed', {
               stage: 'solution',
@@ -364,6 +490,12 @@ export class HarnessTourGenerator implements TourGenerator {
       const targets = beatTargets(beat, doc, visual);
       const image = beatImage(beat, doc, input.images);
       if (image && image.kind !== 'page') targets.imaged = image.targetId;
+      // A step on slides sees the page of each (up to three), so that code, plots and tables on them are explained.
+      const pages = (beat.slides ?? [])
+        .slice(0, 3)
+        .flatMap((n) => input.images.find((i) => i.kind === 'page' && i.targetId === `page${n}`) ?? [])
+        .filter((page) => page !== image);
+      const seen = [...(image ? [image] : []), ...pages];
       if (image?.kind === 'figure') {
         const started = Date.now();
         targets.measured = await this.measureFigure(image, signal);
@@ -387,10 +519,7 @@ export class HarnessTourGenerator implements TourGenerator {
         beatBrief(beat, doc, targets, visual) +
         (overview ? `\nPRECEDING OVERVIEW (already heard; do not repeat):\n${overview}` : '');
       const text = directTask(language, brief, options);
-      const task: MuseMessage[] = [
-        ...prefix,
-        { role: 'user', content: [{ type: 'text', text }, ...imageParts(image ? [image] : [])] },
-      ];
+      const task: MuseMessage[] = [...prefix, { role: 'user', content: [{ type: 'text', text }, ...imageParts(seen)] }];
       let direction: Direction | null = null;
       const example = exampleRules(beat, visual);
       let requireExample = example.required;
@@ -481,17 +610,36 @@ export class HarnessTourGenerator implements TourGenerator {
             continue;
           }
           if (next && !rewrites && attempt < 2) {
-            const highlighted = highlightedSentences(next, beat, targets).flatMap((id) => sentenceText.get(id) ?? []);
+            // A step on slides is held against the slides' whole text, which the learner can read; any other against
+            // the sentences it highlights.
+            const highlighted = beat.slides
+              ? slideText(beat, doc)
+              : highlightedSentences(next, beat, targets).flatMap((id) => sentenceText.get(id) ?? []);
             const share = restatedShare(next.say, highlighted);
-            if (share >= RESTATEMENT_SHARE) {
+            const moves = moveProblems(next.say, beat.move);
+            const callback =
+              beat.slides && !namesCallback(next.say, beat, doc)
+                ? [
+                    `This step builds on slide ${beat.callbacks![0]}: name it once as "slide ${beat.callbacks![0]}" and say in one clause how it sets this step up.`,
+                  ]
+                : [];
+            const repairs = [...(share >= RESTATEMENT_SHARE ? [RESTATEMENT_REPAIR] : []), ...moves, ...callback];
+            if (repairs.length) {
               rewrites++;
               rewriting = true;
-              await input.onEvent?.('beat.restates', {
-                beat: beat.id,
-                share: Number(share.toFixed(2)),
-                attempt: attempt + 1,
-              });
-              task.push(...repairTurn(completion.value, [RESTATEMENT_REPAIR]));
+              if (share >= RESTATEMENT_SHARE)
+                await input.onEvent?.('beat.restates', {
+                  beat: beat.id,
+                  share: Number(share.toFixed(2)),
+                  attempt: attempt + 1,
+                });
+              if (moves.length || callback.length)
+                await input.onEvent?.('beat.guarded', {
+                  beat: beat.id,
+                  problems: [...moves, ...callback],
+                  attempt: attempt + 1,
+                });
+              task.push(...repairTurn(completion.value, repairs));
             }
           }
           if (!next)
@@ -516,80 +664,43 @@ export class HarnessTourGenerator implements TourGenerator {
       const settled = degradeDirection(direction);
       return { targets, direction: settled.direction, ...(settled.degraded ? { degraded: settled.degraded } : {}) };
     };
-    // Detail calls receive their actual overview, not a parallel guess at what it
-    // might say. Independent calls in each stage still share the same worker pool.
-    const write = async ({ beat, index }: { beat: Beat; index: number }) => {
-      const started = Date.now();
-      await input.onEvent?.('beat.started', { beat: beat.id });
-      try {
-        const result = await direct(beat);
-        results[index] = result;
-        if ('degraded' in result && result.degraded)
-          await input.onEvent?.('beat.degraded', { beat: beat.id, ...result.degraded });
-        const outcome =
-          'steps' in result
-            ? result.solved
-              ? 'directed'
-              : 'fallback'
-            : result.direction
-              ? result.degraded
-                ? 'degraded'
-                : 'directed'
-              : beat.detail
-                ? 'omitted'
-                : 'fallback';
-        await input.onEvent?.('beat.completed', { beat: beat.id, outcome, durationMs: Date.now() - started });
-      } catch (error) {
-        await input.onEvent?.('beat.failed', {
-          beat: beat.id,
-          code: signal.aborted ? 'cancelled' : error instanceof ProcessingError ? error.code : 'generation_error',
-          durationMs: Date.now() - started,
-        });
-        throw error;
-      }
-    };
-    const indexed = beats.map((beat, index) => ({ beat, index }));
-    await pool(
-      indexed.filter(({ beat }) => !beat.detail),
-      6,
-      write,
-      (error) => siblings.abort(error),
-    );
-    await pool(
-      indexed.filter(({ beat }) => beat.detail),
-      6,
-      write,
-      (error) => siblings.abort(error),
-    );
-
-    // F. Assemble and validate in code. A contract's first and last steps say that the tour is no legal advice.
-    await progress('validating', beats.length, beats.length);
-    const steps = beats.map((beat, i) => {
+    // The tour as one step list per beat: a beat's own steps, or none for an omitted detail or a step that only read the
+    // source aloud. Built once per beat, since a finished beat never changes.
+    const beatSteps = new Map<number, Step[]>();
+    const stepsOf = (i: number): Step[] => {
+      const known = beatSteps.get(i);
+      if (known) return known;
       const result = results[i];
-      if ('steps' in result) return result.steps;
-      if (beat.detail && !result.direction) return [];
-      const step = beatStep(beat, result.targets, result.direction, doc);
-      if (!readsSource(step.say, doc)) return [step];
-      return [];
-    });
-    if (!steps.some((part) => part.length))
-      throw new ProcessingError(
-        'invalid_tour',
-        'The writer only repeated the source after repair. Try generating again.',
+      let out: Step[];
+      if ('steps' in result) out = result.steps;
+      else if (beats[i].detail && !result.direction) out = [];
+      else {
+        const step = beatStep(beats[i], result.targets, result.direction, doc);
+        out = readsSource(step.say, doc) ? [] : [step];
+      }
+      beatSteps.set(i, out);
+      return out;
+    };
+    /** The tour of the first `count` beats, assembled like the final one; the final one closes its frame, a part does not. */
+    const buildTour = (count: number) => {
+      const lists = beats.slice(0, count).map((_, i) => stepsOf(i));
+      // A board that repeats an earlier step's data is dropped with its cues; the narration stays.
+      const repeats = dropRepeatedBoards(
+        lists,
+        new Set(beats.slice(0, count).flatMap((beat, i) => (beat.unit ? [i] : []))),
       );
-    // A board that repeats an earlier step's data is dropped with its cues; the narration stays.
-    const repeats = dropRepeatedBoards(steps, new Set(beats.flatMap((beat, i) => (beat.unit ? [i] : []))));
-    if (repeats.dropped.length) await input.onEvent?.('board.duplicate', { dropped: repeats.dropped });
-    let tour = assembleTour(
-      card!,
-      plan,
-      plan.frame ? frameSteps(repeats.steps, plan.frame) : repeats.steps,
-      doc,
-      input.documentId,
-      language,
-      this.preset,
-    );
-    const directions = results.map((result) => ('direction' in result ? result.direction : null));
+      const whole = count === beats.length;
+      const tour = assembleTour(
+        card!,
+        whole ? plan : { ...plan, beats: beats.slice(0, count) },
+        plan.frame ? frameSteps(repeats.steps, plan.frame, whole) : repeats.steps,
+        doc,
+        input.documentId,
+        language,
+        this.preset,
+      );
+      return { tour, repeats, lists };
+    };
     const check = (candidate: Tour) => [
       ...tourProblems(candidate, doc),
       ...boardProblems(candidate),
@@ -597,22 +708,122 @@ export class HarnessTourGenerator implements TourGenerator {
         chapter.steps.flatMap((step) => narrationProblems(step.say).map((problem) => `${step.id}: ${problem}`)),
       ),
     ];
-    let problems = check(tour);
-    // The last rung of the ladder: a board that passed its own checks but not the tour's goes, with its cues, from the
-    // steps the problems name. The tour only fails when its other contents do.
-    const late: { beat: string; dropped: ['board']; problems: string[] }[] = [];
-    const named = boardStepsOf(tour, problems);
-    if (named.size) {
-      const bare = settleBoards(withoutBoards(tour, new Set(named.keys())));
-      if (!check(bare).length) {
-        tour = bare;
-        problems = [];
-        for (const [beat, why] of named) {
-          late.push({ beat, dropped: ['board'], problems: why.slice(0, 8) });
-          await input.onEvent?.('beat.degraded', late.at(-1)!);
+    /**
+     * The last rung of the ladder: a board that passed its own checks but not the tour's goes, with its cues, from the
+     * steps the problems name. The tour only fails when its other contents do.
+     */
+    const settle = (candidate: Tour) => {
+      let tour = candidate;
+      let problems = check(tour);
+      const late: { beat: string; dropped: ['board']; problems: string[] }[] = [];
+      const named = boardStepsOf(tour, problems);
+      if (named.size) {
+        const bare = settleBoards(withoutBoards(tour, new Set(named.keys())));
+        if (!check(bare).length) {
+          tour = bare;
+          problems = [];
+          for (const [beat, why] of named) late.push({ beat, dropped: ['board'], problems: why.slice(0, 8) });
         }
       }
+      return { tour, problems, late };
+    };
+
+    // Progressive tours: each time the next steps in tour order are complete, the tour of exactly those leading steps is
+    // announced (assembled and checked like the final one, so that it can be played while the rest is written).
+    const planned = beats.reduce((n, beat) => n + (beat.unit ? unitOverhead(beat.unit) + beat.unit.steps : 1), 0);
+    let announced = 0;
+    let announcing: Promise<void> = Promise.resolve();
+    const announce = () => {
+      announcing = announcing.then(async () => {
+        let ready = 0;
+        while (ready < beats.length && results[ready] !== undefined) ready++;
+        if (ready <= announced || signal.aborted) return;
+        announced = ready;
+        try {
+          const settled = settle(buildTour(ready).tour);
+          const count = settled.tour.chapters.reduce((n, chapter) => n + chapter.steps.length, 0);
+          if (count && !settled.problems.length)
+            await input.onEvent?.('tour.partial', { tour: settled.tour, ready: count, planned });
+        } catch {
+          // A part that cannot be built is skipped; the final tour is written from the finished beats either way.
+        }
+      });
+      return announcing;
+    };
+
+    // Detail calls receive their actual overview, not a parallel guess at what it might say: a detail waits for it, and
+    // the steps are written in tour order so that the leading ones finish first. Calls share one worker pool.
+    const finished = beats.map(() => {
+      let done!: () => void;
+      const promise = new Promise<void>((resolve) => (done = resolve));
+      return { promise, done };
+    });
+    const write = async ({ beat, index }: { beat: Beat; index: number }) => {
+      try {
+        const overview = beat.detail
+          ? beats.findIndex((b) => !b.detail && b.kind === beat.kind && b.target === beat.target)
+          : -1;
+        if (overview >= 0 && overview < index) {
+          await finished[overview].promise;
+          signal.throwIfAborted();
+        }
+        const started = Date.now();
+        await input.onEvent?.('beat.started', { beat: beat.id });
+        try {
+          const result = await direct(beat);
+          results[index] = result;
+          if ('degraded' in result && result.degraded)
+            await input.onEvent?.('beat.degraded', { beat: beat.id, ...result.degraded });
+          const outcome =
+            'steps' in result
+              ? result.solved
+                ? 'directed'
+                : 'fallback'
+              : result.direction
+                ? result.degraded
+                  ? 'degraded'
+                  : 'directed'
+                : beat.detail
+                  ? 'omitted'
+                  : 'fallback';
+          await input.onEvent?.('beat.completed', { beat: beat.id, outcome, durationMs: Date.now() - started });
+          void announce();
+        } catch (error) {
+          await input.onEvent?.('beat.failed', {
+            beat: beat.id,
+            code: signal.aborted ? 'cancelled' : error instanceof ProcessingError ? error.code : 'generation_error',
+            durationMs: Date.now() - started,
+          });
+          throw error;
+        }
+      } finally {
+        finished[index].done();
+      }
+    };
+    try {
+      await pool(
+        beats.map((beat, index) => ({ beat, index })),
+        6,
+        write,
+        (error) => siblings.abort(error),
+      );
+    } finally {
+      // No announcement outlives the generation, whether it succeeded or failed.
+      await announcing;
     }
+
+    // F. Assemble and validate in code. A contract's first and last steps say that the tour is no legal advice.
+    await progress('validating', beats.length, beats.length);
+    if (!beats.some((_, i) => stepsOf(i).length))
+      throw new ProcessingError(
+        'invalid_tour',
+        'The writer only repeated the source after repair. Try generating again.',
+      );
+    const { tour: assembled, repeats } = buildTour(beats.length);
+    if (repeats.dropped.length) await input.onEvent?.('board.duplicate', { dropped: repeats.dropped });
+    const { tour, problems, late } = settle(assembled);
+    for (const drop of late) await input.onEvent?.('beat.degraded', drop);
+    const directions = results.map((result) => ('direction' in result ? result.direction : null));
     if (problems.length) {
       await input.onEvent?.('validation.failed', { stage: 'assemble', problems });
       throw new ProcessingError('invalid_tour', 'The generated tour did not pass document validation.');
@@ -630,6 +841,17 @@ export class HarnessTourGenerator implements TourGenerator {
         docType: plan.type,
         cardSource,
         planSource,
+        ...(claims ? { claims: claimsEvent(claims) } : {}),
+        ...(deckPlan
+          ? {
+              deck: {
+                story: deckPlan.story,
+                steps: deckPlan.beats.map((step) => step.slides),
+                skipped: deckPlan.skipped,
+                uncovered,
+              },
+            }
+          : {}),
         paperCard: card,
         fallbackBeats: beats
           .filter((_, i) => {

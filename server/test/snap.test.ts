@@ -14,6 +14,7 @@ import type { Library } from '../src/service';
 import {
   cropRect,
   jpegSize,
+  SNAP_MIN_INK,
   snapRejection,
   SnapService,
   snapService,
@@ -22,7 +23,7 @@ import {
   type SnapResult,
   type SnapSettings,
 } from '../src/snap';
-import type { TourImage } from '../src/tour-generator';
+import type { InkMap, TourImage } from '../src/tour-generator';
 
 const KEY = 'unit-test-key-never-logged';
 const config: MuseConfig = {
@@ -69,6 +70,21 @@ test('the guards pass an object inside the box and reject what the spike’s bad
   // More than 0.9 of the box is the background, not an object.
   assert.equal(snapRejection({ ...inside, area: 18000 }, drag), null);
   assert.equal(snapRejection({ ...inside, area: 18001 }, drag), 'too_large');
+});
+
+test('an object that is nearly all paper is no object, however sure the model is', () => {
+  const drag = { left: 100, top: 100, right: 300, bottom: 200 };
+  const inside = { confidence: 0.77, bbox: { left: 110, top: 105, right: 290, bottom: 195 }, area: 12000 };
+  assert.equal(SNAP_MIN_INK, 0.01);
+  assert.equal(snapRejection({ ...inside, ink: 0.01 }, drag), null, 'one percent of ink passes');
+  assert.equal(snapRejection({ ...inside, ink: 0.0099 }, drag), 'no_object');
+  assert.equal(snapRejection({ ...inside, ink: 0 }, drag), 'no_object');
+  assert.equal(snapRejection({ ...inside, ink: 0.4 }, drag), null);
+  assert.equal(snapRejection({ ...inside, ink: undefined }, drag), null, 'without a measure the other guards decide');
+  // Blank paper says what it is whichever way the blob is shaped; a doubtful model is still doubtful first.
+  assert.equal(snapRejection({ ...inside, ink: 0, area: 19000 }, drag), 'no_object');
+  assert.equal(snapRejection({ ...inside, ink: 0, bbox: { ...inside.bbox, left: 10 } }, drag), 'no_object');
+  assert.equal(snapRejection({ ...inside, ink: 0, confidence: 0.5 }, drag), 'low_confidence');
 });
 
 test('the crop is the box grown by 30 percent a side, at least 10 points, clamped to the page', () => {
@@ -125,13 +141,22 @@ test('the size of a crop is read from its JPEG header', () => {
 // ------------------------------------------------------------- the service
 
 const POINTS_TO_PIXELS = 6;
-/** The crop a renderer would make: the rectangle at 6 pixels to the point, as a JPEG with a real header. */
-const cropImage = (selection: RegionSelection): TourImage[] => {
+/** An ink map of the given size from a painter that says which pixels are ink. */
+function inkMap(width: number, height: number, isInk: (x: number, y: number) => boolean): InkMap {
+  const bits = new Uint8Array(Math.ceil((width * height) / 8));
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++) if (isInk(x, y)) bits[(y * width + x) >> 3] |= 1 << (7 - ((y * width + x) & 7));
+  return { width, height, bits };
+}
+/**
+ * The crop a renderer would make: the rectangle at 6 pixels to the point, as a JPEG with a real header; with ink when
+ * a painter is given (the renderer's own map is the size of the crop).
+ */
+const cropImage = (selection: RegionSelection, isInk?: (x: number, y: number) => boolean): TourImage[] => {
   const [x1, y1, x2, y2] = selection.rect;
-  const header = jpegHeader(
-    Math.round((x2 - x1) * 612 * POINTS_TO_PIXELS),
-    Math.round((y2 - y1) * 792 * POINTS_TO_PIXELS),
-  );
+  const width = Math.round((x2 - x1) * 612 * POINTS_TO_PIXELS);
+  const height = Math.round((y2 - y1) * 792 * POINTS_TO_PIXELS);
+  const header = jpegHeader(width, height);
   return [
     { targetId: `page${selection.page}`, kind: 'page', page: selection.page, label: 'page', dataUrl: 'data:,' },
     {
@@ -140,6 +165,7 @@ const cropImage = (selection: RegionSelection): TourImage[] => {
       page: selection.page,
       label: 'crop',
       dataUrl: `data:image/jpeg;base64,${header.toString('base64')}`,
+      ...(isInk ? { ink: inkMap(width, height, isInk) } : {}),
     },
   ];
 };
@@ -310,6 +336,99 @@ test('the guards turn bad snaps into reasons, and the same box is not asked agai
   }
 });
 
+/**
+ * Where the object of BOX lands in its crop's pixels: the crop is (70, 182)-(230, 278) points at 6 pixels to the point,
+ * the drag box (180, 108)-(780, 468) in it, and objectReply(shot, 0.1) the box shrunk by a tenth of its size.
+ */
+const OBJECT = { left: 240, top: 144, right: 720, bottom: 432 };
+const inObject = (x: number, y: number) => x >= OBJECT.left && x < OBJECT.right && y >= OBJECT.top && y < OBJECT.bottom;
+/** Ink like text or lines: a small share of the pixels where it is. */
+const sparse = (x: number, y: number) => x % 5 === 0 && y % 4 === 0;
+
+test('a confident outline over blank paper is no object, and the same box is not asked again', async () => {
+  // The seen case: 0.77 on an empty part of the page. Whatever the page holds lies outside the object or nowhere.
+  const cases: [string, (x: number, y: number) => boolean][] = [
+    ['nothing at all', () => false],
+    ['ink only beside the object', (x, y) => !inObject(x, y) && sparse(x, y)],
+    ['a speck of ink', (x, y) => x === 400 && y === 300],
+  ];
+  for (const [name, isInk] of cases) {
+    const { service, shots, events } = setup((shot) => objectReply(shot, 0.1, 0.77), {
+      options: { images: async (selection) => cropImage(selection, isInk) },
+    });
+    assert.deepEqual(await service.snap('alice', DOCUMENT, own()), { ok: false, reason: 'no_object' }, name);
+    assert.deepEqual(await service.snap('alice', DOCUMENT, own()), { ok: false, reason: 'no_object' }, name);
+    assert.equal(shots.length, 1, name);
+    assert.equal(events[0].event, 'snap_rejected');
+    assert.equal(events[0].reason, 'no_object');
+    assert.ok((events[0].ink as number) < SNAP_MIN_INK, `${name}: ${events[0].ink}`);
+  }
+});
+
+test('an outline over real ink passes, however thin the ink and whether or not the mask covers it', async () => {
+  const cases: [string, (x: number, y: number) => boolean, Parameters<typeof objectReply>[1]][] = [
+    ['text or lines', (x, y) => inObject(x, y) && sparse(x, y), 0.1],
+    ['ink at the paper’s edge of the page too', (x, y) => sparse(x, y), 0.1],
+    ['a filled box', (x, y) => inObject(x, y), 0.1],
+    ['the bare minimum', (x, y) => inObject(x, y) && x % 10 === 0 && y % 10 === 0, 0.1],
+  ];
+  for (const [name, isInk, inset] of cases) {
+    const { service, events } = setup((shot) => objectReply(shot, inset), {
+      options: { images: async (selection) => cropImage(selection, isInk) },
+    });
+    const result = okResult(await service.snap('alice', DOCUMENT, own()));
+    assert.deepEqual(result.bbox, [110, 206, 190, 254], name);
+    assert.ok((events[0].ink as number) >= SNAP_MIN_INK, `${name}: ${events[0].ink}`);
+  }
+});
+
+test('ink the mask leaves out, like the text inside a box, still counts for the object', async () => {
+  const hole = { left: 300, top: 200, right: 660, bottom: 380 };
+  const inHole = (x: number, y: number) => x >= hole.left && x < hole.right && y >= hole.top && y < hole.bottom;
+  const { service, events } = setup(
+    (shot) => {
+      // The object of objectReply(shot, 0.1) but for a hole where the ink is, as SAM leaves out glyphs.
+      const left = OBJECT.left;
+      const top = OBJECT.top;
+      const width = OBJECT.right - left;
+      const height = OBJECT.bottom - top;
+      const raster = new Uint8Array(width * height).fill(1);
+      for (let y = hole.top; y < hole.bottom; y++)
+        for (let x = hole.left; x < hole.right; x++) raster[(y - top) * width + (x - left)] = 0;
+      const { payload } = encodeSegmentationMask(raster, width, height);
+      return reply(
+        `<0f>0<|box;x1=${left};y1=${top};x2=${OBJECT.right - 1};y2=${OBJECT.bottom - 1};w=${shot.image.width};h=${shot.image.height};c=0.9|>` +
+          `<|mask;x=0;y=0;c=0.9;data=${height},${width},${payload}|>\n`,
+      );
+    },
+    { options: { images: async (selection) => cropImage(selection, inHole) } },
+  );
+  okResult(await service.snap('alice', DOCUMENT, own()));
+  // The hole is 360 x 180 of the 480 x 288 object.
+  assert.ok(Math.abs((events[0].ink as number) - (360 * 180) / (480 * 288)) < 0.001, String(events[0].ink));
+});
+
+test('without a usable measure of the ink the other guards decide, as before', async () => {
+  const cases: [string, (selection: RegionSelection) => TourImage[]][] = [
+    ['no ink map', (selection) => cropImage(selection)],
+    [
+      'an ink map of another size',
+      (selection) =>
+        cropImage(selection, () => false).map((image) =>
+          image.ink ? { ...image, ink: inkMap(10, 10, () => false) } : image,
+        ),
+    ],
+  ];
+  for (const [name, images] of cases) {
+    const { service, events } = setup((shot) => objectReply(shot, 0.1), {
+      options: { images: async (selection) => images(selection) },
+    });
+    okResult(await service.snap('alice', DOCUMENT, own()));
+    assert.equal(events[0].event, 'snap_done', name);
+    assert.equal('ink' in events[0], false, name);
+  }
+});
+
 test('the object kept is the one under the centre of the drag, not a stray beside it', async () => {
   const { service } = setup((shot) => {
     const { left, top, right, bottom } = shot.box;
@@ -456,12 +575,14 @@ test(
   async () => {
     const { fetcher, shots } = fakeSam((shot) => objectReply(shot, 0.1));
     const settings: SnapSettings = { base: config, transport: fetcher, resolveMuse: async () => ({ config }) };
+    const events: Record<string, unknown>[] = [];
     const service = new SnapService({ demoRoot: undefined } as unknown as SnapLibrary, settings, {
-      log: () => undefined,
+      log: (event) => events.push(event),
     });
     // Figure 1 of "Attention Is All You Need" is on page 3 and spans (196.5, 72.5)-(415.5, 394).
     const box: BBox = [250, 120, 360, 200];
     const result = okResult(await service.demoSnap('attention', { page: 3, box }));
+    assert.ok((events[0].ink as number) > 0.1, `the figure's pixels are ink: ${events[0].ink}`);
     const long = Math.max(shots[0].image.width, shots[0].image.height);
     assert.ok(long >= 1000 && long <= 2000, `${shots[0].image.width} x ${shots[0].image.height}`);
     // The mask is the box shrunk by a tenth, so its outline must come back to those points (to a pixel or two).
@@ -469,6 +590,35 @@ test(
     assert.ok(Math.abs(x1 - 261) < 1 && Math.abs(x2 - 349) < 1, `${result.bbox}`);
     assert.ok(Math.abs(y1 - 128) < 1 && Math.abs(y2 - 192) < 1, `${result.bbox}`);
     assert.equal(result.polygon.length, 4);
+  },
+);
+
+test(
+  'a confident outline on blank paper of the real PDF is no object, and one on text is kept',
+  { skip: !existsSync(python) || !existsSync(attention) },
+  async () => {
+    // The model is sure of whatever it is asked about (0.77, as seen on an empty area of a page).
+    const { fetcher, shots } = fakeSam((shot) => objectReply(shot, 0.1, 0.77));
+    const settings: SnapSettings = { base: config, transport: fetcher, resolveMuse: async () => ({ config }) };
+    const events: Record<string, unknown>[] = [];
+    const service = new SnapService({ demoRoot: undefined } as unknown as SnapLibrary, settings, {
+      log: (event) => events.push(event),
+    });
+    // The top margin of page 1 and the left margin of page 3 hold nothing; a paragraph of page 1 is text.
+    for (const [page, box] of [
+      [1, [100, 10, 200, 50]],
+      [3, [20, 300, 150, 380]],
+    ] as [number, BBox][]) {
+      assert.deepEqual(
+        await service.demoSnap('attention', { page, box }),
+        { ok: false, reason: 'no_object' },
+        `${box}`,
+      );
+      assert.equal(events.at(-1)!.ink, 0);
+    }
+    assert.equal(shots.length, 2);
+    okResult(await service.demoSnap('attention', { page: 1, box: [60, 400, 200, 470] }));
+    assert.ok((events.at(-1)!.ink as number) > SNAP_MIN_INK);
   },
 );
 

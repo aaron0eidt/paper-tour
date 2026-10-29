@@ -2,9 +2,10 @@ import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
 import { EXAMPLE_TASK } from './example';
 import type { BoardKind } from './board';
 import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
+import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@25';
+export const HARNESS_VERSION = 'paper-tour-harness@26';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -259,7 +260,8 @@ ${example(BOARD_EXAMPLES.bars)}`,
 - Options: scale diverging for signed values; normalize rows when the values are raw scores and the point is how a softmax turns each row into weights that sum to one; mask upper on a square grid where each row sees only the columns up to its own number; view links to draw curves from the focused row to every column (at most 8 columns); unit.
 ${example(BOARD_EXAMPLES.heatmap)}`,
   scatter: `BOARD (optional): a scatter plot shows a trade-off or relationship between two measured quantities: quality against cost or size, accuracy against speed, precision against recall, a parameter sweep, or any two columns of a results table.
-- Fill "scatter" with kind scatter, source, x_label and y_label (plain words with the unit) and 2-10 points, each with a distinct short label naming a real method, setting or system (never "point 1"), x and y.
+- Fill "scatter" with kind scatter, source, x_label and y_label (plain words with the unit) and 3-10 points, each with a distinct short label naming a real method, setting or system (never "point 1"), x and y.
+- Use at least three points: two values are a comparison, which bars show better.
 - source document: coordinates copied exactly as printed in the evidence above, with at least two different values on each axis. A scatter shows measured quantities only, so source illustrative is rejected. When the brief lists READY SCATTER BOARDS built from a table, start from one: its points are already checked.
 - Options: x_log or y_log when values span orders of magnitude (all above zero); better says which corner is better (up-left, up-right, down-left or down-right); series names a group, at most 3, and the points of a series are joined in order, as in a sweep of one parameter.
 ${example(BOARD_EXAMPLES.scatter)}`,
@@ -277,21 +279,40 @@ export interface DirectOptions {
   actions: readonly string[];
   board?: BoardKind;
   words: number;
+  /** The fewest words a planned step aims for; 50 (90 for a detail) when unset. */
+  fewest?: number;
+  /** What the step does in a claim's argument, which adds that move's grammar to the rules. */
+  move?: Move;
+  /** A step on the slides of a lecture deck, which is narrated as the lecturer would say it. */
+  slides?: boolean;
   /** The kind of document, which sets the tone; a research paper by default. */
   type?: DocType;
   detail?: boolean;
 }
 
-export function directTask(language: string, brief: string, { actions, board, words, type, detail }: DirectOptions) {
+/** How a slide step speaks: the lecturer's explanation, connected into the story, never the bullets read out. */
+const SLIDE_VOICE = [
+  'LECTURER VOICE: explain these slides as the lecturer would say them aloud, spoken to the learner as a tutor about "the lecture" and "this slide", never as the lecturer\'s own "I". The first sentence says what these slides do in the story of the lecture. Then give the because and the so-what the slides leave unsaid (why it matters, what it costs, what it sets up); the learner reads the bullets, so never list them or reword them.',
+  'Connect this step to the one before it in one clause and never recap an earlier step. Name an earlier slide only when the brief gives a CALLBACK, and then say its number once ("slide 13"). Add at most one small example or analogy, labelled as one.',
+  'A slide that is mostly an image (code, a plot, a table, a diagram) is explained from its attached image: what the code does and why, in plain words and never line by line; what the axes and marks of a plot show and what to notice in them; what a table compares. State only what the image shows, and leave out what you cannot read.',
+];
+
+export function directTask(
+  language: string,
+  brief: string,
+  { actions, board, words, fewest, move, slides, type, detail }: DirectOptions,
+) {
   const pen = actions.includes('arrow') || actions.includes('circle');
   const page = actions.filter((a) => CUE_HELP[a]);
   const help = page.map((a) => CUE_HELP[a]);
   if (board && actions.includes('board_focus')) help.push(FOCUS_HELP[board]);
   const rules = [
-    `"say" is ${detail ? 90 : 50}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
+    `"say" is ${fewest ?? (detail ? 90 : 50)}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
     'The highlight shows where the point is written, so never read it out or paraphrase it, and skip what a reader gets from it at a glance. State the point in one plain sentence, then explain what the text leaves implicit: why it holds, how it works, what it changes, what would happen without it. Add one concrete example or analogy only when it makes the idea click, labelled illustrative.',
     'No rhetorical questions, invented stories, hooks or suspense. Preserve the document’s qualifications and keep its statements apart from labelled illustrative explanations. Use the source outline for continuity without inventing a narrative arc.',
   ];
+  if (move) rules.push(MOVE_RULES);
+  if (slides) rules.push(...SLIDE_VOICE);
   rules.push(
     'Trace operation order only from visible arrows or the mathematical expression and supporting text. Spatial position alone is not execution order. If the order is uncertain, describe the relationship without inventing first/then steps.',
   );

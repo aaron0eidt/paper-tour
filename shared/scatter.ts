@@ -16,7 +16,8 @@ export interface ScatterItem {
 
 export const SCATTER_LIMITS = {
   title: 60,
-  points: [2, 10],
+  // Two points are a comparison, which bars show better; a relationship needs a third.
+  points: [3, 10],
   pointLabel: 24,
   series: 3,
   axisLabel: [1, 40],
@@ -57,7 +58,7 @@ export const SCATTER_SCHEMA = {
       type: 'array',
       minItems: SCATTER_LIMITS.points[0],
       maxItems: SCATTER_LIMITS.points[1],
-      description: '2-10 points, each a named result with its x and y.',
+      description: '3-10 points, each a named result with its x and y.',
       items: {
         type: 'object',
         additionalProperties: false,
