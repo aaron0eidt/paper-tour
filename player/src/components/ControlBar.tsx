@@ -9,6 +9,8 @@ import { DEFAULT_SPEAKER } from '../types';
 import type { Voice } from '../types';
 import { isGoogleVoice, pickVoice, voiceId } from '../narration/voices';
 import { KEY_HELP } from '../keys';
+import { NotClear } from '../ask/NotClear';
+import type { NotClearProps } from '../ask/NotClear';
 import { KeyboardIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon, VolumeIcon } from './icons';
 import '../voiceSettings.css';
 
@@ -36,6 +38,8 @@ interface Props {
   selectedVoiceId?: string;
   onVoiceChange?(id: string): void;
   voiceConfig?: Voice;
+  /** "Not clear?" beside the audio settings; none while there is no step to ask about. */
+  unclear?: NotClearProps | null;
 }
 
 export function ControlBar({
@@ -60,6 +64,7 @@ export function ControlBar({
   selectedVoiceId = '',
   onVoiceChange,
   voiceConfig,
+  unclear,
 }: Props) {
   const disabled = !steps.length;
   const current = steps[state.index];
@@ -215,6 +220,7 @@ export function ControlBar({
       </div>
 
       <div className="settings">
+        {unclear && <NotClear {...unclear} />}
         <details className="playback-options" ref={audioPanel}>
           <summary aria-label="Audio settings" title="Voice and playback speed">
             <svg

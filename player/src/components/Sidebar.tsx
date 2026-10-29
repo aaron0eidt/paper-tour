@@ -49,7 +49,7 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
       <header className="sidebar-head">
         {header}
         <div className="brand">Paper Tour</div>
-        <h1 className="tour-title">{tour?.title ?? docTitle ?? 'Untitled paper'}</h1>
+        <h1 className="tour-title">{tour?.title?.trim() || docTitle || 'Untitled paper'}</h1>
         {tour && (
           <div className="progress" aria-label={`${done} of ${whole} steps done`}>
             <div className="progress-bar">

@@ -6,7 +6,7 @@ import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutDeck, layoutPages } from './layout';
 import { clampSlide, readerMode, stepSlides, stepsBySlide } from './deck';
-import { coverVisible, lengthLabel, recapVisible } from './tourSummary';
+import { coverVisible, lengthLabel, readerTitle, recapVisible } from './tourSummary';
 import { loadManifest, loadPaper } from './load';
 import type { Loaded } from './load';
 import { createNarrator, SilentNarrator, useBrowserVoices } from './narration';
@@ -42,6 +42,9 @@ import { AskPanel } from './ask/AskPanel';
 import type { AskContext } from './ask/AskPanel';
 import { answerTour, openQuestions, visualShown } from './ask/answer';
 import type { AskAnswer, AskSource } from './ask/api';
+import { prefetchWanted } from './ask/prefetch';
+import { unclearOffered, unclearQuestion } from './ask/unclear';
+import type { Unclear } from './ask/unclear';
 import type { RegionSelection } from './ask/regionSelection';
 import { useRegionSnap } from './ask/useRegionSnap';
 import { SelectionPreview } from './ask/SelectionPreview';
@@ -385,6 +388,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // the stage, the board and the control bar show whichever is playing, the sidebar always the tour.
   const [answer, setAnswer] = useState<TourEngine | null>(null);
   const [away, setAway] = useState<Away | null>(null);
+  // "Not clear?": the step the choices are open for (the tour is held there), and whether it was playing.
+  const [unclearAt, setUnclearAt] = useState<number | null>(null);
+  const unclearHold = useRef<{ playing: boolean } | null>(null);
   const mainState = useSyncExternalStore(engine?.subscribe ?? noSubscribe, engine?.getState ?? idleState);
   const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
   const state = answer ? answerState : mainState;
@@ -549,6 +555,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   useEffect(() => {
     dropAnswer();
     setAway(null);
+    unclearHold.current = null;
+    setUnclearAt(null);
   }, [engine, dropAnswer]);
   useEffect(() => () => now.current.answer?.destroy(), []);
 
@@ -571,6 +579,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     const { engine: main, answer: playing, away: was } = now.current;
     const regionCheckpoint = selectionCheckpoint.current;
     selectionCheckpoint.current = null;
+    // "Not clear?" holds the tour while it is open; a question asked from it goes on from where the tour was playing.
+    const held = unclearHold.current;
+    unclearHold.current = null;
+    setUnclearAt(null);
     setSelectingRegion(false);
     playing?.pause();
     if (!was) {
@@ -579,7 +591,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         framed: last && camera.targetView === last.view ? last : null,
         view: camera.targetView,
         playing:
-          main?.getState().status === 'playing' || (regionCheckpoint?.engine === main && regionCheckpoint.playing),
+          main?.getState().status === 'playing' ||
+          (regionCheckpoint?.engine === main && regionCheckpoint.playing) ||
+          !!held?.playing,
       };
       now.current.away = next;
       setAway(next);
@@ -960,8 +974,71 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   useEffect(() => () => camera.destroy(), [camera]);
 
+  // "Not clear?" is offered on a step of the tour that is under way: not before it starts, after it ends, while the
+  // learner is asked to try, or while a question has set it aside. Opening it holds the tour on the step; Escape goes on
+  // from there, and a choice asks about the step through the ask flow, so its answer plays as a short tour and "Back to
+  // the tour" returns to the step.
+  const canUnclear = unclearOffered({
+    asking: !!loaded?.doc && !!engine,
+    status: mainState.status,
+    awaiting: mainState.awaiting,
+    aside: !!answer || !!away || selectingRegion,
+  });
+  const openUnclear = useCallback(() => {
+    const { engine: main } = now.current;
+    if (!main || main.getState().status === 'idle') return;
+    unclearHold.current = { playing: main.getState().status === 'playing' };
+    main.pause();
+    setUnclearAt(main.getState().index);
+  }, []);
+  const closeUnclear = useCallback((resume: boolean) => {
+    const held = unclearHold.current;
+    unclearHold.current = null;
+    setUnclearAt(null);
+    const { engine: main, answer: playing, away: aside } = now.current;
+    if (resume && held?.playing && main && !playing && !aside) main.play();
+  }, []);
+  const chooseUnclear = useCallback(
+    (kind: Unclear) => {
+      const { engine: main } = now.current;
+      const here = main?.steps[main.getState().index];
+      if (!here) return closeUnclear(false);
+      setUnclearAt(null);
+      // The hold stays: asking sets the tour aside and remembers whether it was playing.
+      setAskRequest((last) => ({ id: (last?.id ?? 0) + 1, question: unclearQuestion(kind, here.step.say) }));
+    },
+    [closeUnclear],
+  );
+  // The learner moved on (played, picked a step, asked something else, a new tour): the choices go without a say.
+  useEffect(() => {
+    if (unclearAt === null) return;
+    if (canUnclear && mainState.status === 'paused' && mainState.index === unclearAt) return;
+    unclearHold.current = null;
+    setUnclearAt(null);
+  }, [unclearAt, canUnclear, mainState.status, mainState.index]);
+
+  // The last step of a finished tour asks for the answers to its suggested questions in the background (AskPanel keeps
+  // them), so that picking one plays at once; the end card marks the ones that are ready.
+  const [readyQuestions, setReadyQuestions] = useState<string[]>([]);
+  const onReady = useCallback(
+    (list: string[]) => setReadyQuestions((was) => (was.join('\n') === list.join('\n') ? was : list)),
+    [],
+  );
+  const prefetchOn = prefetchWanted({
+    finished: !!loaded?.doc && !!engine && !growing && !fromPartial,
+    steps: engine?.steps.length ?? 0,
+    index: mainState.index,
+    status: mainState.status,
+    preview: mainState.preview,
+    aside: !!answer || !!away || selectingRegion || !!regionSelection,
+  });
+  const prefetchQuestions = useMemo(
+    () => (prefetchOn && engine ? openQuestions(engine.tour.suggested_questions, asked) : []),
+    [prefetchOn, engine, asked],
+  );
+
   // Keyboard (keys.ts): Space plays and pauses, the arrows step (Shift: by sentence), [ and ] jump chapters, R replays the
-  // sentence. They steer an answer while one plays. Nothing fires while the learner types, and a focused button keeps only
+  // sentence, U asks "Not clear?". They steer an answer while one plays. Nothing fires while the learner types, and a focused button keeps only
   // Space and Enter, so the arrows work after a click on Play.
   const [helpOpen, setHelpOpen] = useState(false);
   useEffect(() => {
@@ -971,13 +1048,16 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         setHelpOpen(false);
         return;
       }
-      if (e.defaultPrevented || selectingRegion || e.altKey || e.ctrlKey || e.metaKey) return;
+      // The choices of "Not clear?" hold the tour on its step: only they (and Escape) act while they are open.
+      if (e.defaultPrevented || selectingRegion || unclearAt !== null || e.altKey || e.ctrlKey || e.metaKey) return;
       if (keyBelongsTo(e.target as KeyTarget | null, e.key)) return;
       const command = keyCommand(e.key, e.shiftKey);
       if (!command) return;
       e.preventDefault();
       const tour = active;
-      if (command === 'ids') setDebug((d) => !d);
+      if (command === 'unclear') {
+        if (canUnclear) openUnclear();
+      } else if (command === 'ids') setDebug((d) => !d);
       else if (command === 'mute') setMuted((m) => !m);
       else if (command === 'help') setHelpOpen((open) => !open);
       else if (tour) {
@@ -999,7 +1079,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, navigationOpen, helpOpen, selectingRegion]);
+  }, [active, navigationOpen, helpOpen, selectingRegion, unclearAt, canUnclear, openUnclear]);
 
   const onCopyId = useCallback((id: string) => {
     void copyText(id);
@@ -1012,9 +1092,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   }, [toast]);
 
   useEffect(() => {
-    const title = tourSource?.title ?? loaded?.doc?.source.title;
+    const title =
+      tourSource?.title?.trim() ||
+      readerTitle({ doc: loaded?.doc?.source.title, file: manifest?.document.originalFilename ?? loaded?.doc?.source.file });
     if (title) document.title = `${title} · Paper Tour`;
-  }, [loaded, tourSource?.title]);
+  }, [loaded, tourSource?.title, manifest?.document.originalFilename]);
 
   // A chapter chip names the chapter the tour has just entered; it stays a moment, then goes.
   const [chip, setChip] = useState<{ number: number; title: string } | null>(null);
@@ -1225,7 +1307,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         steps={steps}
         state={mainState}
         growth={growth}
-        docTitle={manifest?.document.title ?? loaded?.doc?.source.title}
+        docTitle={readerTitle({
+          doc: manifest?.document.title ?? loaded?.doc?.source.title,
+          tour: tourSource?.title,
+          file: manifest?.document.originalFilename ?? loaded?.doc?.source.file,
+        })}
         onJump={(i) => {
           setNavigationOpen(false);
           setSelection([]);
@@ -1453,6 +1539,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                   tour={engine.tour}
                   stopped={growth?.phase === 'stopped' ? growth : null}
                   questions={loaded?.doc ? openQuestions(engine.tour.suggested_questions, asked) : []}
+                  ready={readyQuestions}
                   onReplayChapter={(step) => {
                     setSelection([]);
                     engine.goTo(step);
@@ -1490,6 +1577,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     suggestions={prepared?.tour.suggested_questions}
                     ended={mainState.status === 'ended' && !endOpen}
                     request={askRequest}
+                    prefetch={prefetchOn ? { questions: prefetchQuestions, stamp: `${mainState.index}:${mainState.status}` } : null}
+                    onReady={onReady}
                     away={!!away}
                     answering={answerState.status === 'playing'}
                     answerPaused={!!answer && answerState.status === 'paused'}
@@ -1579,6 +1668,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             selectedVoiceId={browserVoices.selectedVoiceId}
             onVoiceChange={browserVoices.setSelectedVoiceId}
             voiceConfig={active.tour.voices?.[active.steps[state.index]?.step.speaker ?? 'host']}
+            unclear={
+              canUnclear ? { open: unclearAt !== null, onOpen: openUnclear, onClose: closeUnclear, onChoose: chooseUnclear } : null
+            }
           />
         )}
       </main>

@@ -26,6 +26,24 @@ export function lengthLabel(ms: number): string {
   return minutes < 0.75 ? 'under a minute' : `about ${Math.round(minutes)} min`;
 }
 
+/** A file's name as a title: no folders, no extension, underscores read as spaces. */
+function fileTitle(file: string): string {
+  const name = file.split(/[\\/]/).pop() ?? '';
+  return name.replace(/\.[a-z0-9]{1,5}$/i, '').replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * What to call the document: its own title, else the tour's (slides rarely have one), else the file's name; undefined
+ * when there is none of them. A title that is only blanks is no title.
+ */
+export function readerTitle(parts: { doc?: string | null; tour?: string | null; file?: string | null }): string | undefined {
+  return (
+    [parts.doc, parts.tour].map((title) => title?.trim()).find(Boolean) ||
+    (parts.file ? fileTitle(parts.file) : '') ||
+    undefined
+  );
+}
+
 export function stepsLabel(count: number): string {
   return count === 1 ? '1 step' : `${count} steps`;
 }

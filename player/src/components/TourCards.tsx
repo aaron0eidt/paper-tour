@@ -119,6 +119,8 @@ interface EndProps {
   stopped?: Growth | null;
   /** Suggested questions the learner has not asked yet. */
   questions: string[];
+  /** The ones among them whose answers are ready, and play at once. */
+  ready?: readonly string[];
   /** Play the tour again from a chapter's first step. */
   onReplayChapter(step: number): void;
   onReplay(): void;
@@ -127,7 +129,7 @@ interface EndProps {
   onClose(): void;
 }
 
-export function TourEnd({ tour, stopped, questions, onReplayChapter, onReplay, onAsk, onClose }: EndProps) {
+export function TourEnd({ tour, stopped, questions, ready = [], onReplayChapter, onReplay, onAsk, onClose }: EndProps) {
   const takeaways = chapterTakeaways(tour);
   const [list, more] = useScrollCue<HTMLOListElement>(takeaways.length);
   // Escape closes the recap, unless a field or menu has just used it.
@@ -181,11 +183,22 @@ export function TourEnd({ tour, stopped, questions, onReplayChapter, onReplay, o
           <div className="tour-next">
             <h3>Keep exploring</h3>
             <div className="tour-chips">
-              {questions.map((question) => (
-                <button type="button" className="tour-chip" key={question} title={question} onClick={() => onAsk(question)}>
-                  <span>{question}</span>
-                </button>
-              ))}
+              {questions.map((question) => {
+                const instant = ready.includes(question);
+                return (
+                  <button
+                    type="button"
+                    className={`tour-chip${instant ? ' ready' : ''}`}
+                    key={question}
+                    title={instant ? `${question} (answer ready)` : question}
+                    aria-label={instant ? `${question} (answer ready)` : undefined}
+                    onClick={() => onAsk(question)}
+                  >
+                    <span>{question}</span>
+                    {instant && <i className="ready-dot" aria-hidden="true" />}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

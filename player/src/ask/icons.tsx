@@ -67,6 +67,14 @@ export const AnswerIcon = ({ answerable }: { answerable: Answerable }) => (
   </Line>
 );
 
+/** A question mark in a ring: "Not clear?". */
+export const HelpIcon = () => (
+  <Line size={16}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M9.7 9.7a2.4 2.4 0 1 1 3.5 2.1c-.7.4-1.2.9-1.2 1.7M12 16.6h.01" />
+  </Line>
+);
+
 export const AlertIcon = () => (
   <Line size={15}>
     <circle cx="12" cy="12" r="8.5" />

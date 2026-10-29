@@ -8,6 +8,7 @@ import type { KeyTarget } from '../src/keys';
 import { markPlayback } from '../src/marks';
 import { sentenceStart, sentenceStarts } from '../src/narration/narrator';
 import { buildClock, formatTime, timeAt, wordAt } from '../src/tourClock';
+import { readerTitle } from '../src/tourSummary';
 import type { Tour } from '../src/types';
 
 const results: string[] = [];
@@ -87,6 +88,8 @@ test('keys: the reader\'s shortcuts', () => {
   eq(keyCommand('R'), 'replay');
   eq(keyCommand('m'), 'mute');
   eq(keyCommand('?'), 'help');
+  eq(keyCommand('u'), 'unclear');
+  eq(keyCommand('U'), 'unclear');
   eq(keyCommand('x'), null);
   eq(keyCommand('Enter'), null);
 });
@@ -188,6 +191,22 @@ test('timeline: times read as minutes and seconds', () => {
   eq(formatTime(61_000), '1:01');
   eq(formatTime(3_725_000), '1:02:05');
   eq(formatTime(-5), '0:00');
+});
+
+// ------------------------------------------------------------------------------------------------ titles
+
+test('title: the document\'s own, else the tour\'s, else the file\'s name', () => {
+  eq(readerTitle({ doc: 'Attention Is All You Need', tour: 'How Attention Works', file: 'paper.pdf' }), 'Attention Is All You Need');
+  eq(readerTitle({ tour: 'Classifying Data with KNN', file: 'lecture.pdf' }), 'Classifying Data with KNN', 'slides have no title');
+  eq(readerTitle({ doc: null, tour: undefined, file: 'Week_03_KNN slides.pdf' }), 'Week 03 KNN slides', 'the name of the file');
+  eq(readerTitle({ file: 'folder/scans\\Tenancy Agreement.PDF' }), 'Tenancy Agreement', 'no folders, no extension');
+});
+
+test('title: blanks are no title, and with nothing to go on there is none', () => {
+  eq(readerTitle({ doc: '   ', tour: '', file: 'notes.pdf' }), 'notes');
+  eq(readerTitle({ doc: '  Padded  ' }), 'Padded');
+  eq(readerTitle({ doc: '', tour: ' ', file: '' }), undefined);
+  eq(readerTitle({}), undefined);
 });
 
 console.log(results.join('\n'));

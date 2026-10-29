@@ -278,6 +278,16 @@
   -webkit-line-clamp: 2;
 }
 
+/* An answer that is ready plays at once. */
+.ask-chip .ready-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6fd6a1;
+  box-shadow: 0 0 0 3px rgba(111, 214, 161, 0.16);
+}
+
 .ask-chip:hover {
   border-color: rgba(126, 166, 255, 0.4);
   background: rgba(126, 166, 255, 0.08);

@@ -13,6 +13,7 @@ export type KeyCommand =
   | 'replay'
   | 'mute'
   | 'ids'
+  | 'unclear'
   | 'help';
 
 /** What a key press means for the tour; null when it means nothing here. */
@@ -47,6 +48,9 @@ export function keyCommand(key: string, shift = false): KeyCommand | null {
     case 'd':
     case 'D':
       return 'ids';
+    case 'u':
+    case 'U':
+      return 'unclear';
     case '?':
       return 'help';
     default:
@@ -82,6 +86,7 @@ export const KEY_HELP: { keys: string[]; does: string }[] = [
   { keys: ['M'], does: 'Mute or unmute' },
   { keys: ['H'], does: 'A hint, when you are asked to try' },
   { keys: ['/'], does: 'Ask a question' },
+  { keys: ['U'], does: 'Not clear? Simpler, an example, a term or deeper' },
   { keys: ['D'], does: 'Show element IDs' },
   { keys: ['?'], does: 'This list' },
 ];
