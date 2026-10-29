@@ -10,6 +10,7 @@ import type { DirectOptions } from './prompts';
 import {
   BOUNDS_SCHEMA,
   exactBounds,
+  faultyVisualCues,
   figureFrameText,
   figureTextTargets,
   measuredCueTargets,
@@ -18,6 +19,7 @@ import {
   type MeasuredTarget,
 } from './visual-grounding';
 import { visualLine, type StepVisual } from './visual-plan';
+import { groundedCheck, reportsResults } from './visual-rules';
 
 export const CUE_ACTIONS = ['highlight', 'box', 'spotlight', 'note', 'arrow', 'circle', 'board_focus'] as const;
 /** Room for source cues and board emphasis in the same explanation. */
@@ -490,8 +492,9 @@ const ajv = new Ajv2020({ strict: false, allErrors: true });
 
 /**
  * Keep a direction whose shape and narration are usable; drop just the cues with an action or target this beat may not
- * use. The board is checked here too: one that fails comes back as `boardProblems`, without the board. A planned step
- * keeps only its planned board, and an example only when its plan allows one.
+ * use. The board is checked here too, against the rules for a tour step (visual-rules.ts): one that fails comes back as
+ * `boardProblems`, without the board. A planned step keeps only its planned board, and an example only when its plan
+ * allows one. Pen marks that cannot be drawn as asked are left out and come back as `visualProblems`.
  */
 export function cleanDirection(
   value: unknown,
@@ -515,12 +518,11 @@ export function cleanDirection(
     if (c.action === 'board_focus') return parts.has(c.target);
     return visuals.has(c.target);
   };
-  const visualProblems = visualCueProblems(
-    d.cues,
-    targets.imaged === beat.target ? targets.imaged : undefined,
-    targets.measured,
-  );
-  const expanded = d.cues.flatMap((c) => {
+  const imaged = targets.imaged === beat.target ? targets.imaged : undefined;
+  const visualProblems = visualCueProblems(d.cues, imaged, targets.measured);
+  const faulty = new Set(faultyVisualCues(d.cues, imaged, targets.measured));
+  const expanded = d.cues.flatMap((c, i) => {
+    if (faulty.has(i)) return [];
     const measured = measuredCueTargets(c.target, (c as Cue & { members?: unknown }).members, targets.measured ?? []);
     return measured.length
       ? measured.map((t) => ({ ...c, target: t.target, bounds: t.region, region: undefined }))
@@ -551,9 +553,10 @@ export function cleanDirection(
   const example: { example?: WorkedExample; problems: string[] } = rules.offered
     ? checkExample(d.example, say, requireExample || rules.required || claimsNumericExample(say))
     : { problems: [] };
+  const results = reportsResults(beat, targets.table);
   const candidates = plannedKinds(visual)
     .filter((kind) => d[kind] !== undefined && d[kind] !== null)
-    .map((kind) => ({ kind, check: checkBoard(kind, d[kind], targets.evidence) }));
+    .map((kind) => ({ kind, check: groundedCheck(checkBoard(kind, d[kind], targets.evidence), results) }));
   const boards = candidates.filter((c) => c.check.item);
   const boardProblems = candidates.flatMap((c) => c.check.problems.map((p) => `${c.kind}: ${p}`));
   if (boards.length > 1)

@@ -36,7 +36,7 @@ export interface Beat {
   target?: string;
   detail?: boolean;
   questions?: string[];
-  /** The side-board item the beat may draw: a formula's terms, a method's flow or a result's numbers as bars. */
+  /** The side-board item the beat may draw: a formula's terms or a result's numbers as bars. */
   board?: BoardKind;
   /** Highlight colour; by kind when unset. */
   tint?: Color;
@@ -135,10 +135,11 @@ function mechanismEvidence(item: CardItem, doc: Doc): string[] {
 export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   const deep = preset === 'deep';
   const beats: Omit<Beat, 'id'>[] = [];
-  // The board a beat may draw: a method as a flow, a result's numbers as bars (formulas and figures below).
+  // The board a beat may draw: a result's numbers as bars (formulas and figures below). A method gets none: a chain of
+  // stages is a list, and a flow with a branch or a loop is for the visual plan to choose.
   const boards: Partial<Record<BeatKind, BoardKind>> = { result: 'bars' };
   const text = (kind: BeatKind, arc: Arc, item: CardItem | undefined) => {
-    const board = kind === 'method' ? 'flow' : boards[kind];
+    const board = boards[kind];
     if (item?.text && item.evidence.length)
       beats.push({
         kind,
@@ -171,7 +172,7 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   const figure = (ref: CardRef | undefined) => {
     if (!ref) return;
     const arc = figureArc(ref);
-    // A table's numbers may become bars, and a diagram of the method a simplified flow; a results plot draws on itself.
+    // A table's numbers may become bars; the figure of a method or a results plot is taught on the page.
     const table = doc.figures.find((f) => f.id === ref.id)?.kind === 'table';
     const board: BoardKind | undefined = table ? 'bars' : undefined;
     const beat: Omit<Beat, 'id'> = {

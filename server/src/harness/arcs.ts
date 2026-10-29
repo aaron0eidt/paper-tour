@@ -82,17 +82,7 @@ export const ARC_SPECS: Record<ArcType, ArcSpec[]> = {
       ),
       board: 'bars',
     },
-    {
-      ...point(
-        'deadlines',
-        'deadlines, notice periods, the term and how to end it',
-        0,
-        sizes(1, 2, 3),
-        'pink',
-        'Deadlines',
-      ),
-      board: 'flow',
-    },
+    point('deadlines', 'deadlines, notice periods, the term and how to end it', 0, sizes(1, 2, 3), 'pink', 'Deadlines'),
     point(
       'risks',
       'risks and catches: penalties, liability, automatic renewals and anything easy to miss',
@@ -105,10 +95,7 @@ export const ARC_SPECS: Record<ArcType, ArcSpec[]> = {
   ],
   letter: [
     overview('who writes, about what, and why the reader gets this letter or form'),
-    {
-      ...point('actions', 'what the reader must do, one action per item, in order', 1, sizes(1, 2, 3), 'blue', 'To do'),
-      board: 'flow',
-    },
+    point('actions', 'what the reader must do, one action per item, in order', 1, sizes(1, 2, 3), 'blue', 'To do'),
     point('deadlines', 'by when: every date or period the reader must meet', 0, sizes(1, 1, 2), 'pink', 'By when'),
     point(
       'consequences',
@@ -199,7 +186,7 @@ export function arcTask(type: ArcType, language: string, preset: Preset) {
     type === 'lecture'
       ? [
           `Each topic has a "title" of at most 5 words in ${lang}. "board" draws the topic on a side board: formula when
-   it centres on one formula, flow for a process with stages, bars for numbers the lecture compares, else none.
+   it centres on one formula, flow for a process with a branch, merge or loop, bars for numbers the lecture compares, else none.
    "visual" is the ID of a figure or equation the topic is about, or "".`,
         ]
       : type === 'contract'
@@ -296,7 +283,7 @@ function position(doc: Doc, item: ArcItem): number {
 /**
  * The beats and chapters of the type's arc. A lecture follows its own order, one chapter per topic, with the topic's
  * figure or equation right after it; the other types keep the arc's chapters, and each chapter's first step may draw
- * the chapter's board (a contract's costs as bars, its deadlines as a timeline, a letter's to-dos as a flow).
+ * the chapter's board (a contract's costs as bars).
  */
 export function arcTourPlan(
   plan: ArcPlan,

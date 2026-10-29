@@ -1,5 +1,5 @@
 import { claimsNumericExample } from './example';
-import type { Doc, Step } from '../../../shared/paper';
+import type { Doc, Step, Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
@@ -14,6 +14,7 @@ import {
   boardProblems,
   dropRepeatedBoards,
   frameSteps,
+  settleBoards,
   tourProblems,
   tourSeconds,
 } from './assemble';
@@ -21,6 +22,7 @@ import { paperPlan, type Beat, type Preset, type TourPlan } from './beats';
 import { imageParts, pool } from './calls';
 import { recordedCalls } from '../ai/recorded-calls';
 import { cardProblems, cardSchema, cleanCard, evidencePool, fallbackCard, repairTurn, type PaperCard } from './card';
+import { boardStepsOf, degradeDirection, withoutBoards, type Degraded } from './degrade';
 import {
   beatBrief,
   beatTargets,
@@ -81,9 +83,12 @@ function beatImage(beat: Beat, doc: Doc, images: TourImage[]): TourImage | undef
   return images.find((i) => i.targetId === beat.target && i.kind !== 'page');
 }
 
-/** What stage C gives back for a beat: a directed step, or an exercise part's steps. */
+/**
+ * What stage C gives back for a beat: a directed step, with what it lost on the way (degrade.ts), or an exercise
+ * part's steps.
+ */
 type BeatResult =
-  | { targets: BeatTargets; direction: Direction | null }
+  | { targets: BeatTargets; direction: Direction | null; degraded?: Degraded }
   | { steps: Step[]; solved: boolean; checks: LineCheck[] };
 
 const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused']);
@@ -392,8 +397,8 @@ export class HarnessTourGenerator implements TourGenerator {
       // A step that mostly restates its highlighted sentences is sent back once; until then its direction is kept.
       let rewrites = 0;
       let rewriting = false;
-      // The model can correct its complete direction twice, with all validation
-      // faults in each reply. Required visuals are never silently discarded.
+      // The model can correct its complete direction twice, with all validation faults in each reply. What still fails
+      // afterwards is dropped and flagged (degradeDirection), never published and never a reason to fail the tour.
       for (
         let attempt = 0;
         attempt < 3 &&
@@ -502,20 +507,14 @@ export class HarnessTourGenerator implements TourGenerator {
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
         }
       }
-      if (!direction && requireExample)
-        throw new ProcessingError(
-          'worked_example_failed',
-          'The worked example could not be authored after two corrections; no incomplete example was published.',
-        );
-      if (direction?.boardProblems?.some((problem) => problem.startsWith('scene:')))
-        throw new ProcessingError('scene_invalid', direction.boardProblems.join(' '));
-      if (direction?.exampleProblems?.length)
-        throw new ProcessingError('worked_example_failed', direction.exampleProblems.join(' '));
-      if (direction?.visualProblems?.length)
-        throw new ProcessingError('visual_grounding_failed', direction.visualProblems.join(' '));
       await progress('writing', ++directed, beats.length);
-      if (!direction) await input.onEvent?.(beat.detail ? 'beat.omitted' : 'beat.fallback', { beat: beat.id });
-      return { targets, direction };
+      if (!direction) {
+        await input.onEvent?.(beat.detail ? 'beat.omitted' : 'beat.fallback', { beat: beat.id });
+        return { targets, direction };
+      }
+      // A board, example or pen mark that still fails is dropped; the narration and the page cues stay.
+      const settled = degradeDirection(direction);
+      return { targets, direction: settled.direction, ...(settled.degraded ? { degraded: settled.degraded } : {}) };
     };
     // Detail calls receive their actual overview, not a parallel guess at what it
     // might say. Independent calls in each stage still share the same worker pool.
@@ -525,13 +524,17 @@ export class HarnessTourGenerator implements TourGenerator {
       try {
         const result = await direct(beat);
         results[index] = result;
+        if ('degraded' in result && result.degraded)
+          await input.onEvent?.('beat.degraded', { beat: beat.id, ...result.degraded });
         const outcome =
           'steps' in result
             ? result.solved
               ? 'directed'
               : 'fallback'
             : result.direction
-              ? 'directed'
+              ? result.degraded
+                ? 'degraded'
+                : 'directed'
               : beat.detail
                 ? 'omitted'
                 : 'fallback';
@@ -577,7 +580,7 @@ export class HarnessTourGenerator implements TourGenerator {
     // A board that repeats an earlier step's data is dropped with its cues; the narration stays.
     const repeats = dropRepeatedBoards(steps, new Set(beats.flatMap((beat, i) => (beat.unit ? [i] : []))));
     if (repeats.dropped.length) await input.onEvent?.('board.duplicate', { dropped: repeats.dropped });
-    const tour = assembleTour(
+    let tour = assembleTour(
       card!,
       plan,
       plan.frame ? frameSteps(repeats.steps, plan.frame) : repeats.steps,
@@ -587,13 +590,29 @@ export class HarnessTourGenerator implements TourGenerator {
       this.preset,
     );
     const directions = results.map((result) => ('direction' in result ? result.direction : null));
-    const problems = [
-      ...tourProblems(tour, doc),
-      ...boardProblems(tour),
-      ...tour.chapters.flatMap((chapter) =>
+    const check = (candidate: Tour) => [
+      ...tourProblems(candidate, doc),
+      ...boardProblems(candidate),
+      ...candidate.chapters.flatMap((chapter) =>
         chapter.steps.flatMap((step) => narrationProblems(step.say).map((problem) => `${step.id}: ${problem}`)),
       ),
     ];
+    let problems = check(tour);
+    // The last rung of the ladder: a board that passed its own checks but not the tour's goes, with its cues, from the
+    // steps the problems name. The tour only fails when its other contents do.
+    const late: { beat: string; dropped: ['board']; problems: string[] }[] = [];
+    const named = boardStepsOf(tour, problems);
+    if (named.size) {
+      const bare = settleBoards(withoutBoards(tour, new Set(named.keys())));
+      if (!check(bare).length) {
+        tour = bare;
+        problems = [];
+        for (const [beat, why] of named) {
+          late.push({ beat, dropped: ['board'], problems: why.slice(0, 8) });
+          await input.onEvent?.('beat.degraded', late.at(-1)!);
+        }
+      }
+    }
     if (problems.length) {
       await input.onEvent?.('validation.failed', { stage: 'assemble', problems });
       throw new ProcessingError('invalid_tour', 'The generated tour did not pass document validation.');
@@ -624,16 +643,26 @@ export class HarnessTourGenerator implements TourGenerator {
               beat.detail && 'direction' in results[i] && !(results[i] as { direction: Direction | null }).direction,
           )
           .map((beat) => beat.id),
+        // What steps lost so that the tour could play: their board, worked example or pen marks, and why.
+        degraded: [
+          ...beats.flatMap((beat, i) => {
+            const result = results[i];
+            return 'degraded' in result && result.degraded ? [{ beat: beat.id, ...result.degraded }] : [];
+          }),
+          ...late,
+        ],
         visualPlan: visuals
           ? { source: 'model', beats: visualPlanEvent(visuals, plannable), ...(adjusted.length ? { adjusted } : {}) }
           : { source: 'fallback' },
         boards: {
           shown: directions.flatMap((direction, i) =>
-            direction?.example
-              ? direction.example.frames.map((frame, n) => `${beats[i].id}:frame-${n + 1}:${frame.item.kind}`)
-              : direction?.board && !repeats.dropped.some((drop) => drop.step === beats[i].id)
-                ? [`${beats[i].id}:${direction.board.kind}`]
-                : [],
+            late.some((drop) => drop.beat === beats[i].id)
+              ? []
+              : direction?.example
+                ? direction.example.frames.map((frame, n) => `${beats[i].id}:frame-${n + 1}:${frame.item.kind}`)
+                : direction?.board && !repeats.dropped.some((drop) => drop.step === beats[i].id)
+                  ? [`${beats[i].id}:${direction.board.kind}`]
+                  : [],
           ),
           dropped: [
             ...directions.flatMap((direction, i) =>
@@ -643,6 +672,7 @@ export class HarnessTourGenerator implements TourGenerator {
               beat: drop.step,
               problems: [`${drop.kind}: it repeats the board of step ${drop.repeats}`],
             })),
+            ...late.map(({ beat, problems }) => ({ beat, problems })),
           ],
         },
         ...(plan.type === 'exercise_sheet'

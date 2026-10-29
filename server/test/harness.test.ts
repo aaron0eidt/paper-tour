@@ -371,8 +371,9 @@ test('a failed repair cannot publish a verbatim fallback from the paper card', a
   await assert.rejects(run, (error) => error instanceof ProcessingError && error.code === 'invalid_tour');
 });
 
-test('deep formula details correct their concrete sequence within two repairs and never publish a symbolic-only example', async () => {
+test('deep formula details correct their concrete sequence within two repairs; a still failing one is dropped and flagged, never published as a symbolic-only example', async () => {
   let attempts = 0;
+  const events: { type: string; data: Record<string, unknown> }[] = [];
   const run = (correct: boolean) =>
     new HarnessTourGenerator(
       settings,
@@ -387,7 +388,12 @@ test('deep formula details correct their concrete sequence within two repairs an
         }
         return goodModel(request);
       }),
-    ).generate(input);
+    ).generate({
+      ...input,
+      onEvent: async (type, data) => {
+        events.push({ type, data });
+      },
+    });
   const corrected = await run(true);
   assert.equal(attempts, 2);
   const detail = steps(corrected.tour).find((step) => step.id === 'formula-2')!;
@@ -396,12 +402,29 @@ test('deep formula details correct their concrete sequence within two repairs an
     [false, '2+2=4'],
   );
   assert.ok(!(corrected.metadata.omittedDetails as string[]).includes('formula-2'));
+  assert.deepEqual(corrected.metadata.degraded, []);
+  assert.ok(!events.some((event) => event.type === 'beat.degraded'));
   attempts = 0;
-  await assert.rejects(
-    run(false),
-    (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
+  const dropped = await run(false);
+  assert.equal(attempts, 3, 'two corrections, then the example is given up');
+  // The tour still plays: the detail keeps its narration and its page cues, with no board and no example.
+  const bare = steps(dropped.tour).find((step) => step.id === 'formula-2')!;
+  assert.equal(bare.say, exampleSay);
+  assert.ok(!bare.actions.some((a) => a.type === 'board' || a.type === 'board_focus'));
+  assert.ok(bare.actions.some((a) => a.type === 'box' && a.target === 'eq1'));
+  // And the loss is visible, in the metadata and in the events.
+  const flagged = (dropped.metadata.degraded as { beat: string; dropped: string[]; problems: string[] }[]).filter(
+    (d) => d.beat === 'formula-2',
   );
-  assert.equal(attempts, 3);
+  assert.equal(flagged.length, 1);
+  assert.deepEqual(flagged[0].dropped, ['example']);
+  assert.match(flagged[0].problems.join(' '), /needs example frames/);
+  const event = events.filter((e) => e.type === 'beat.degraded' && e.data.beat === 'formula-2').at(-1)!;
+  assert.deepEqual(event.data.dropped, ['example']);
+  assert.equal(
+    events.filter((e) => e.type === 'beat.completed' && e.data.beat === 'formula-2').at(-1)!.data.outcome,
+    'degraded',
+  );
 });
 
 test('a fatal beat request records the failed planned item before rejecting the generation', async () => {
@@ -538,7 +561,7 @@ test('decoder padding is repaired before a tour can publish it', async () => {
   assert.ok(steps(result.tour).every((step) => !/\p{Cf}{8,}/u.test(step.say)));
 });
 
-test('a non-formula beat cannot silently remove its numerical example during repair', async () => {
+test('a non-formula beat cannot silently remove its numerical example during repair: it is dropped visibly', async () => {
   let attempts = 0;
   const generator = new HarnessTourGenerator(
     settings,
@@ -554,9 +577,13 @@ test('a non-formula beat cannot silently remove its numerical example during rep
       return goodModel(request);
     }),
   );
-  await assert.rejects(
-    generator.generate(input),
-    (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
-  );
+  const { tour, metadata } = await generator.generate(input);
   assert.equal(attempts, 3);
+  const method = steps(tour).find((step) => step.id === 'method-1')!;
+  assert.equal(method.say, SAY);
+  assert.ok(!method.actions.some((a) => a.type === 'board'));
+  assert.deepEqual(
+    (metadata.degraded as { beat: string; dropped: string[] }[]).map((d) => [d.beat, ...d.dropped]),
+    [['method-1', 'example']],
+  );
 });

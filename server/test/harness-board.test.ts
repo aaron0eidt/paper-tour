@@ -10,6 +10,7 @@ import { checkBars, checkFlow, checkFormula, numbersIn } from '../src/harness/bo
 import { REGION_NAMES, regionOf, beatTargets, cleanDirection } from '../src/harness/direct';
 import { beatStep } from '../src/harness/assemble';
 import { BOARD_EXAMPLES } from '../src/harness/prompts';
+import { groundedProblems } from '../src/harness/visual-rules';
 import type { MeasuredTarget } from '../src/harness/visual-grounding';
 
 test('plots and successive source cues survive assembly, including in later steps using the same passages', () => {
@@ -278,6 +279,8 @@ const METHOD_FLOW = {
     { from: 'node-2', to: 'node-3' },
   ],
 };
+/** What the model draws for the method step: a loop, since a chain of boxes is rejected as a list. */
+const METHOD_LOOP = { ...METHOD_FLOW, edges: [...METHOD_FLOW.edges, { from: 'node-3', to: 'node-2' }] };
 const METHOD_CUES = [
   { action: 'highlight', target: 'p1.s3', label: '', anchor: 'A planner splits' },
   { action: 'board_focus', target: 'node-2', label: '', anchor: 'goes to the writer' },
@@ -294,7 +297,7 @@ const good: Script = {
   formula: () => ({ plan: 'p', formula: FORMULA, say: FORMULA_SAY, cues: FORMULA_CUES }),
   figure: () => ({ plan: 'p', say: FIGURE_SAY, cues: FIGURE_CUES }),
   table: () => ({ plan: 'p', bars: TABLE_BARS, say: TABLE_SAY, cues: TABLE_CUES }),
-  method: () => ({ plan: 'p', flow: METHOD_FLOW, say: METHOD_SAY, cues: METHOD_CUES }),
+  method: () => ({ plan: 'p', flow: METHOD_LOOP, say: METHOD_SAY, cues: METHOD_CUES }),
   result: () => ({ plan: 'p', bars: noBars, say: SAY, cues: resultCues }),
 };
 
@@ -565,14 +568,14 @@ test('named regions map to normalised boxes for pen marks', () => {
   assert.deepEqual(regionOf('right-half'), [0.5, 0, 1, 1]);
 });
 
-test('the plan gives formulas, methods, results and tables a board, and stays concise', () => {
+test('the plan gives formulas, results and tables a board, and stays concise', () => {
   const beats = planBeats(card, doc, 'standard');
   assert.deepEqual(
     beats.map((b) => `${b.id}:${b.board ?? '-'}`),
     [
       'problem-1:-',
       'idea-1:-',
-      'method-1:flow',
+      'method-1:-',
       'formula-1:formula',
       'figure-1:-',
       'figure-2:bars',
@@ -819,10 +822,11 @@ test('the examples the model is shown pass the same checks as its own answers', 
   for (const cue of formula.cues) assert.notEqual(findAnchor(formula.say, cue.anchor), null, cue.anchor);
   assert.deepEqual(checkBars(bars.bars, bars.bars.bars.map((b) => b.value).join(' ')).problems, []);
   assert.deepEqual(checkFlow(flow.flow).problems, []);
+  assert.deepEqual(groundedProblems(checkFlow(flow.flow).item!, { results: false }), [], 'it is not a chain');
   for (const cue of pen) assert.ok((REGION_NAMES as readonly string[]).includes(cue.region), cue.region);
 });
 
-test('measured diagrams repair invalid targeting once and refuse an uncorrected guess', async () => {
+test('measured diagrams repair invalid targeting once; an uncorrected guess is dropped and flagged, not published', async () => {
   const measured: MeasuredTarget = {
     id: 'measured:fig1:1',
     target: 'fig1',
@@ -857,9 +861,14 @@ test('measured diagrams repair invalid targeting once and refuse an uncorrected 
     [{ target: 'fig1', region: measured.region }],
   );
   assert.ok(result.requests.some((r) => r.task.includes('this diagram has measured geometry')));
+  assert.deepEqual(result.metadata.degraded, []);
   calls = 0;
-  await assert.rejects(
-    generate(
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const requests: Request[] = [];
+  const stubborn = await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider(
       {
         ...good,
         figure: () => {
@@ -867,11 +876,33 @@ test('measured diagrams repair invalid targeting once and refuse an uncorrected 
           return { plan: 'p', say: FIGURE_SAY, cues: [guessed] };
         },
       },
-      detector,
+      requests,
     ),
-    /measured geometry/,
+    undefined,
+    detector,
+  ).generate({
+    ...input,
+    onEvent: async (type, data) => {
+      events.push({ type, data });
+    },
+  });
+  assert.equal(calls, 3, 'two failed repairs end the correction loop; the guess is never published');
+  const figure = stubborn.tour.chapters.flatMap((c) => c.steps).find((s) => s.id === 'figure-1')!;
+  assert.equal(figure.say, FIGURE_SAY, 'the narration stays');
+  // The guessed box is gone; the figure is still outlined as a whole, and the step is flagged.
+  assert.deepEqual(
+    figure.actions.filter((a) => a.type === 'box').map((a) => ({ target: a.target, region: a.region })),
+    [{ target: 'fig1', region: undefined }],
   );
-  assert.equal(calls, 3, 'two failed repairs are surfaced without a fallback or an unbounded model loop');
+  const flagged = (stubborn.metadata.degraded as { beat: string; dropped: string[]; problems: string[] }[]).filter(
+    (d) => d.beat === 'figure-1',
+  );
+  assert.equal(flagged.length, 1);
+  assert.deepEqual(flagged[0].dropped, ['marks']);
+  assert.match(flagged[0].problems.join(' '), /measured geometry/);
+  const event = events.find((e) => e.type === 'beat.degraded' && e.data.beat === 'figure-1')!;
+  assert.deepEqual(event.data.dropped, ['marks']);
+  assert.equal(events.find((e) => e.type === 'beat.completed' && e.data.beat === 'figure-1')!.data.outcome, 'degraded');
 });
 
 test('scientific evidence retains magnitude and does not allow a different tiny value', () => {

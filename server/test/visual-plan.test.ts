@@ -208,7 +208,9 @@ test('a planned step offers only its own board, and a step planned without one o
   // The suggestion of the kind is replaced by the plan.
   assert.equal(directOptions(method, 'research_paper', undefined, heat).board, 'heatmap');
   assert.equal(directOptions(method, 'research_paper', undefined, none).board, undefined);
-  assert.equal(directOptions(method, 'research_paper').board, 'flow');
+  // A method step suggests no board of its own: a chain of stages is a list.
+  assert.equal(directOptions(method, 'research_paper').board, undefined);
+  assert.equal(directOptions(beat('result-1'), 'research_paper').board, 'bars');
 });
 
 test('the brief of a planned step carries its visual line', () => {
@@ -269,6 +271,7 @@ test('a planned step keeps only its planned board, and a step planned without on
     edges: [
       { from: 'node-1', to: 'node-2' },
       { from: 'node-2', to: 'node-3' },
+      { from: 'node-3', to: 'node-1' },
     ],
   };
   const bars = {
@@ -317,6 +320,7 @@ function model(
     return direct(request, EXPLAIN, boards[id] ?? {});
   };
 }
+/** A flow with a loop: the valve's effect is read again by the probe. A chain of the same boxes would be rejected. */
 const flowBoard = {
   flow: {
     title: 'A reading reaches a valve',
@@ -328,6 +332,7 @@ const flowBoard = {
     edges: [
       { from: 'node-1', to: 'node-2' },
       { from: 'node-2', to: 'node-3' },
+      { from: 'node-3', to: 'node-1' },
     ],
   },
 };

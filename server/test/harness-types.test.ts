@@ -238,23 +238,10 @@ const COSTS = {
     { label: 'Deposit', value: 2850 },
   ],
 };
-const TIMELINE = {
-  title: 'From start to end',
-  nodes: [
-    { id: 'node-1', label: 'Starts 1 Nov 2026' },
-    { id: 'node-2', label: '12-month minimum' },
-    { id: 'node-3', label: '3 months notice' },
-  ],
-  edges: [
-    { from: 'node-1', to: 'node-2' },
-    { from: 'node-2', to: 'node-3' },
-  ],
-};
 function leaseModel(r: Request) {
   if (r.name === 'paper_card') return cardFor('contract', ['p1.s2', 'p1.s3', 'p2.s2']);
   if (r.name === 'tour_plan') return leasePlan;
   if (suggestedBoard(r) === 'bars') return plainDirection(r, { bars: COSTS });
-  if (suggestedBoard(r) === 'flow') return plainDirection(r, { flow: TIMELINE });
   return plainDirection(r);
 }
 
@@ -310,7 +297,8 @@ test('a contract follows what you agree to, what it costs, its deadlines and its
   const highlight = all[0].actions.find((a) => a.type === 'highlight')!;
   assert.equal(highlight.at_word, findAnchor(all[0].say, 'explains the point'));
   assert.deepEqual(all[0].actions[0], { type: 'focus', target: 'p1.s2' });
-  // Costs: one chart of every amount in the chapter, from the sentences of both cost points; deadlines: a timeline.
+  // Costs: one chart of every amount in the chapter, from the sentences of both cost points; deadlines are a list of
+  // dates, which the page and the voice carry without a board.
   const cost = all.find((s) => s.id === 'point-2')!;
   const bars = cost.actions.find((a) => a.type === 'board');
   assert.equal(bars?.type === 'board' && bars.item.kind === 'bars' && bars.item.bars.length, 3);
@@ -320,7 +308,11 @@ test('a contract follows what you agree to, what it costs, its deadlines and its
   assert.match(costBrief, /OTHER STEPS IN THIS CHAPTER \(leave their points to them\): The deposit is EUR 2,850\./);
   assert.deepEqual(types(all.find((s) => s.id === 'point-3')!).slice(0, 2), ['focus', 'board_clear']);
   const deadline = all.find((s) => s.id === 'point-4')!;
-  assert.ok(deadline.actions.some((a) => a.type === 'board' && a.item.kind === 'flow'));
+  assert.ok(!types(deadline).includes('board'));
+  assert.ok(
+    directions.every((r) => !r.brief.includes('a flow is useful only')),
+    'no step is steered to a flow',
+  );
   assert.equal(tour.level, 'intro');
   assert.deepEqual(tour.suggested_questions, cardFor('contract', ['p1.s1']).suggested_questions);
 });
@@ -348,7 +340,7 @@ const letter = makeDoc('Exampleton City Council', 1, [
   ['p1.b3', 'paragraph', { 'p1.s3': 'You can upload them at the online portal with your reference number.' }],
   ['p1.b4', 'paragraph', { 'p1.s4': 'If we do not receive them, we may have to refuse your claim.' }],
 ]);
-test('a letter says what it is, what to do as a flow of steps, by when, and what happens otherwise', async () => {
+test('a letter says what it is, what to do, by when, and what happens otherwise', async () => {
   const plan = {
     plan: 'p',
     chapter_titles: {
@@ -371,7 +363,6 @@ test('a letter says what it is, what to do as a flow of steps, by when, and what
   } = await run(letter, (r) => {
     if (r.name === 'paper_card') return cardFor('letter', ['p1.s1', 'p1.s2', 'p1.s4']);
     if (r.name === 'tour_plan') return plan;
-    if (suggestedBoard(r) === 'flow') return plainDirection(r, { flow: TIMELINE });
     return plainDirection(r);
   });
   assert.deepEqual(
@@ -382,8 +373,9 @@ test('a letter says what it is, what to do as a flow of steps, by when, and what
     all.map((s) => s.id),
     ['overview-1', 'point-1', 'point-2', 'point-3', 'point-4', 'takeaway-1'],
   );
-  assert.ok(types(all[1]).includes('board'));
-  assert.ok(!types(all[2]).includes('board'));
+  // To-dos in order are a list, which a chain of boxes would only repeat: no board, and no steer to one.
+  assert.ok(all.every((step) => !types(step).includes('board')));
+  assert.ok(requests.every((r) => !r.brief.includes('a flow is useful only')));
   assert.ok(!all[0].say.includes('legal advice'));
   assert.ok(
     requests

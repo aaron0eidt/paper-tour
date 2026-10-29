@@ -32,12 +32,12 @@ const KINDS_HELP: Record<BoardKind, string> = {
   heatmap:
     'how every item relates to every other (weights, attention, alignment, similarity, correlation, confusion), a mask, a grid of results over two settings, or a formula’s value over two indices.',
   scatter:
-    'a trade-off or relationship between two measured quantities from the document (quality against cost, accuracy against size, speed against error), with the better corner marked.',
+    'a trade-off or relationship between two quantities measured in the document (quality against cost, accuracy against size, speed against error), never made-up points, with the better corner marked.',
   shapes: 'how matrix or vector dimensions combine in an operation, and which dimension disappears or appears.',
-  plot: 'how a formula responds to its input or a parameter (saturation, scaling, decay, periodicity), with a parameter sweep or contrasting curves.',
+  plot: 'how a formula responds to its input or a parameter when the shape matters (saturation, decay, periodicity, a crossover), never a straight line.',
   formula: 'the parts of a key equation, each with its role.',
   bars: 'one key comparison on a single metric.',
-  flow: 'a real dependency structure (branches, merges, feedback) that the page does not draw.',
+  flow: 'a real dependency structure with a branch, a merge or a loop that the page does not draw; a chain of steps is a list, not a flow.',
   scene: 'vectors or geometry (angles, projections, distances) when geometry is the point.',
 };
 /** The kinds in the order the task lists them: the ones that show relationships come first. */
@@ -95,7 +95,9 @@ ${kinds}
    relationships rather than single numbers. A figure step usually teaches on the figure itself.
 3. For each visual, "idea" says in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks.
    "data" says exactly which numbers, symbols or labels it uses (at most ${DATA_WORDS} words): document values copied
-   as printed, anything else marked illustrative. Never present invented numbers as the document's.
+   as printed, anything else marked illustrative. A step that reports results (a result or a table) uses only the
+   document's own numbers, which its evidence quotes; illustrative values only explain a mechanism. Labels are real
+   items (words of an example sentence, settings, methods), never "item 1".
 4. Answer with one entry per step, in tour order. For none, leave "idea" and "data" empty.`;
 }
 

@@ -194,6 +194,12 @@ function boardSettler() {
   };
 }
 
+/** The tour's board hygiene run again over its steps in order, after steps lost their boards. */
+export function settleBoards(tour: Tour): Tour {
+  const settle = boardSettler();
+  return { ...tour, chapters: tour.chapters.map((chapter) => ({ ...chapter, steps: chapter.steps.map(settle) })) };
+}
+
 const round = (n: number) => String(Number(n.toPrecision(6)));
 const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
 

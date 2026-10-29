@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { findAnchor } from '../src/harness/assemble';
 import { boardParts, boardPartIds, checkBoard, type BoardKind } from '../src/harness/board';
 import { BOARD_EXAMPLES, SHARED_RULES, directTask } from '../src/harness/prompts';
+import { groundedProblems } from '../src/harness/visual-rules';
 import { SOURCE_VISUAL_POLICY } from '../src/muse/visual-policy';
 
 // The server side of the heatmap, scatter and shapes boards: grounding in the evidence and the prompts that teach them.
@@ -218,28 +219,35 @@ test('the focus line is only offered when the step may light up board parts', ()
 });
 
 test('the examples the model is shown pass the checks of its own answers and cue real parts', () => {
+  // A scatter is the document's own measured numbers, so its example prints them in its evidence.
+  const printed = BOARD_EXAMPLES.scatter.scatter.points.map((point) => `${point.x} ${point.y}`).join(' ');
   for (const kind of NEW_KINDS) {
     const example = BOARD_EXAMPLES[kind];
-    const { item, problems } = checkBoard(kind, (example as Record<string, unknown>)[kind], '');
+    const { item, problems } = checkBoard(
+      kind,
+      (example as Record<string, unknown>)[kind],
+      kind === 'scatter' ? printed : '',
+    );
     assert.deepEqual(problems, [], kind);
     assert.ok(item, kind);
+    assert.deepEqual(groundedProblems(item, { results: false }), [], `${kind} meets the rules for a tour step`);
     const parts = boardParts(item);
     for (const cue of example.cues) {
       assert.ok(findAnchor(example.say, cue.anchor) !== null, `${kind}: ${cue.anchor}`);
       assert.ok(boardPartIds(kind).includes(cue.target), `${kind}: ${cue.target}`);
       assert.ok(Number(cue.target.split('-')[1]) <= parts, `${kind}: ${cue.target} is one of ${parts} parts`);
     }
-    assert.match(example.say, /illustrative/, `${kind} labels its values illustrative`);
+    if (kind !== 'scatter') assert.match(example.say, /illustrative/, `${kind} labels its values illustrative`);
   }
 });
 
 test('the representation guidance names the new kinds and what they show, and stops steering toward bars and flows', () => {
   const text = prompt();
   assert.match(text, /Relations, weights, masks, a grid of results or a formula over two indices→heatmap/);
-  assert.match(text, /A trade-off or relationship between two measured quantities→scatter/);
+  assert.match(text, /A trade-off between two quantities measured in the document→scatter/);
   assert.match(text, /How matrix dimensions combine through an operation→shapes/);
   assert.match(text, /One key comparison on a single metric→bars/);
-  assert.match(text, /A real dependency structure the page does not draw→flow/);
+  assert.match(text, /A real dependency structure with a branch, a merge or a loop that the page does not draw→flow/);
   assert.match(text, /no board is better than a weak one/);
   assert.match(text, /Never repeat the same data twice/);
   assert.doesNotMatch(text, /Actively choose a visual teaching method for every step/);
