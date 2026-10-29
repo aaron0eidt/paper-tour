@@ -338,6 +338,14 @@ export type OverlayAction = HighlightAction | BoxAction | SpotlightAction | Note
 export type BoardControl = BoardAction | BoardFocusAction | BoardClearAction;
 export type Action = CameraAction | OverlayAction | ClearAction | BoardControl;
 
+/** A pause where the learner tries first: the step asks, hints come one at a time, and the next step reveals the answer. */
+export interface Checkpoint {
+  /** What the learner should try, in one or two sentences. */
+  prompt: string;
+  /** Up to three hints, from a nudge to almost the answer. */
+  hints: string[];
+}
+
 export interface Step {
   id: string;
   speaker?: string;
@@ -345,6 +353,8 @@ export interface Step {
   hold_ms?: number;
   audio?: StepAudio;
   actions: Action[];
+  /** The learner tries this before the next step reveals it (exercise sheets, quick checks). */
+  checkpoint?: Checkpoint;
 }
 
 export interface Chapter {
@@ -364,6 +374,8 @@ export interface Tour {
   preset?: 'quick' | 'standard' | 'deep';
   /** Questions offered to the learner when the tour ends. */
   suggested_questions?: string[];
+  /** The kind of document, so the reader can pick its mode; a lecture deck plays slide by slide. */
+  doc_type?: 'research_paper' | 'exercise_sheet' | 'lecture' | 'contract' | 'letter' | 'other';
   chapters: Chapter[];
 }
 
