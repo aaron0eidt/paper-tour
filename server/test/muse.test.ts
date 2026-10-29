@@ -92,6 +92,7 @@ function draft(id = 'fig1') {
     ],
   };
 }
+const userInput = [{ role: 'user' as const, content: 'test' }];
 function response(value: unknown, finish = 'stop') {
   return new Response(
     JSON.stringify({
@@ -143,7 +144,7 @@ test('provider errors stay safe and distinguish retryable failures', async () =>
       async () => new Response('echo unit-test-key and private paper', { status }),
     );
     await assert.rejects(
-      client.complete([], 'test', {}, 512),
+      client.complete(userInput, 'test', {}, 512),
       (error: unknown) =>
         error instanceof ProcessingError &&
         error.code === code &&
@@ -156,7 +157,7 @@ test('provider errors stay safe and distinguish retryable failures', async () =>
 test('truncated, refused and malformed responses cannot become saved tours', async () => {
   for (const envelope of [null, [], { choices: null }]) {
     await assert.rejects(
-      new MuseClient(settings, async () => new Response(JSON.stringify(envelope))).complete([], 'test', {}, 512),
+      new MuseClient(settings, async () => new Response(JSON.stringify(envelope))).complete(userInput, 'test', {}, 512),
       assertCode('muse_invalid_response'),
     );
   }
@@ -164,18 +165,18 @@ test('truncated, refused and malformed responses cannot become saved tours', asy
     new MuseClient(
       settings,
       provider(() => response({}, 'length')),
-    ).complete([], 'test', {}, 512),
+    ).complete(userInput, 'test', {}, 512),
     assertCode('muse_output_truncated'),
   );
   await assert.rejects(
-    new MuseClient(settings, async () => new Response('not JSON')).complete([], 'test', {}, 512),
+    new MuseClient(settings, async () => new Response('not JSON')).complete(userInput, 'test', {}, 512),
     assertCode('muse_invalid_response'),
   );
   await assert.rejects(
     new MuseClient(
       settings,
       async () => new Response(JSON.stringify({ choices: [{ message: { refusal: 'No' } }] })),
-    ).complete([], 'test', {}, 512),
+    ).complete(userInput, 'test', {}, 512),
     assertCode('muse_refused'),
   );
 });
@@ -186,7 +187,7 @@ test('missing credentials do not make a provider request; insecure endpoints are
     calls++;
     return response({});
   });
-  await assert.rejects(client.complete([], 'test', {}, 512), assertCode('muse_not_configured'));
+  await assert.rejects(client.complete(userInput, 'test', {}, 512), assertCode('muse_not_configured'));
   assert.equal(calls, 0);
   for (const baseUrl of [
     'http://public.example/v1',
@@ -513,7 +514,7 @@ test('streamed Muse output survives split UTF-8/CRLF frames and records real del
     assert.equal(body.stream, true); assert.equal(body.stream_options.include_usage, true);
     return new Response(new ReadableStream({ start(controller) { for (let i = 0; i < bytes.length; i++) controller.enqueue(bytes.slice(i, i + 1)); controller.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
   };
-  const completion = await new MuseClient(settings, transport).complete([], 'test', {}, 100, undefined, async (delta) => { chunks.push(delta); }, async (usage) => { usages.push(usage); });
+  const completion = await new MuseClient(settings, transport).complete(userInput, 'test', {}, 100, undefined, async (delta) => { chunks.push(delta); }, async (usage) => { usages.push(usage); });
   assert.deepEqual(usages, [{ promptTokens: 10, completionTokens: 5, totalTokens: 15, cachedInputTokens: 8 }]);
   assert.equal(completion.usage.cachedInputTokens, 8);
   assert.equal(chunks.join(''), text); assert.deepEqual(completion.value, { explanation: 'Größe β' }); assert.equal(completion.usage.totalTokens, 15);
@@ -522,7 +523,7 @@ test('streamed Muse output survives split UTF-8/CRLF frames and records real del
 test('interrupted or truncated streams cannot become accepted model responses', async () => {
   for (const suffix of ['', 'data: [DONE]\n\n', `data: ${JSON.stringify({ choices: [{ finish_reason: 'length' }] })}\n\n`, `data: ${JSON.stringify({ choices: [{ finish_reason: 'length' }] })}\n\ndata: [DONE]\n\n`]) {
     const wire = `data: ${JSON.stringify({ choices: [{ delta: { content: '{"ok":true}' } }] })}\n\n${suffix}`;
-    await assert.rejects(new MuseClient(settings, async () => new Response(wire, { headers: { 'content-type': 'text/event-stream' } })).complete([], 'test', {}, 100, undefined, async () => {}), assertCode(suffix.includes('length') ? 'muse_output_truncated' : 'muse_invalid_response'));
+    await assert.rejects(new MuseClient(settings, async () => new Response(wire, { headers: { 'content-type': 'text/event-stream' } })).complete(userInput, 'test', {}, 100, undefined, async () => {}), assertCode(suffix.includes('length') ? 'muse_output_truncated' : 'muse_invalid_response'));
   }
 });
 

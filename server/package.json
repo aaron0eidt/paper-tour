@@ -15,9 +15,12 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "4.0.104",
+    "@ai-sdk/openai-compatible": "3.0.80",
     "@fastify/cors": "^10.1.0",
     "@fastify/static": "^10.1.8",
     "@supabase/supabase-js": "^2.58.0",
+    "ai": "7.0.156",
     "ajv": "^8.20.0",
     "fastify": "^5.6.1",
     "katex": "0.19.0",
@@ -29,6 +32,12 @@
     "@types/node": "^22.18.0",
     "@types/pg": "^8.15.5",
     "prettier": "^3.6.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "@ai-sdk/devtools": "1.0.59"
+  },
+  "overrides": {
+    "@ai-sdk/devtools": {
+      "@hono/node-server": "2.1.5"
+    }
   }
 }

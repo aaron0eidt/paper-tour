@@ -1,7 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { MuseConfig } from '../config';
 import type { TokenUsage } from '../../../shared/activity';
-import { sseData } from '../../../shared/sse';
+import { streamAgentStep } from '../ai/response-agent';
+import { modelError } from '../ai/provider';
 import { ProcessingError } from '../errors';
 export interface ResponseItem {
   type: string;
@@ -135,47 +136,17 @@ export class ResponsesClient {
     return result;
   }
   async create(input: object, observer: ResponseObserver, signal?: AbortSignal): Promise<AgentResponse> {
-    const response = await this.historyRequest(
-      '',
-      { ...input, model: this.config.model, store: true, stream: true },
-      signal,
-    );
-    if (!response.headers.get('content-type')?.includes('text/event-stream')) {
-      const result = this.validate(await response.json());
-      await observer.created(result.id);
-      return result;
-    }
-    if (!response.body) throw new ProcessingError('invalid_response', 'Meta returned an empty stream.');
-    let bytes = 0;
-    let pending = '',
-      flushed = Date.now();
     try {
-      for await (const text of sseData(response.body)) {
-        if (text === '[DONE]') continue;
-        bytes += text.length;
-        if (bytes > 16 * 1024 * 1024)
-          throw new ProcessingError('response_limit', 'The response stream exceeded its limit.');
-        const event = JSON.parse(text);
-        if (event.type === 'response.created') await observer.created(String(event.response.id));
-        if (event.type === 'response.output_item.added' && event.item?.type === 'function_call')
-          await observer.toolStarted?.(String(event.item.call_id), String(event.item.name));
-        if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
-          pending += event.delta;
-          if (pending.length >= 4096 || Date.now() - flushed >= 500) {
-            await observer.delta(pending);
-            pending = '';
-            flushed = Date.now();
-          }
-        }
-        if (['response.completed', 'response.failed', 'response.incomplete'].includes(event.type))
-          return this.validate(event.response);
-      }
-    } finally {
-      if (pending) await observer.delta(pending);
+      signal?.throwIfAborted();
+      return await streamAgentStep(
+        this.config,
+        input as Record<string, unknown>,
+        async (_url, init) => this.historyRequest('', JSON.parse(String(init?.body)), init?.signal ?? signal),
+        observer,
+        signal,
+      );
+    } catch (error) {
+      throw modelError(error, signal);
     }
-    throw new ProcessingError(
-      'response_uncertain',
-      'The model stream was interrupted; its stored response must be checked.',
-    );
   }
 }

@@ -455,6 +455,7 @@ export class PaperAgent {
             const request: Record<string, unknown> = {
               instructions: AGENT_INSTRUCTIONS,
               tools: WIRE_TOOLS,
+              ...(step.phase === 'root' ? { tool_choice: 'none' } : {}),
               reasoning: { effort: 'medium' },
               input: await hydrateImages(step.input, this.storage, visuals),
               ...(previous && !localHistory ? { previous_response_id: previous } : {}),
