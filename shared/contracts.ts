@@ -23,6 +23,29 @@ export interface TourGenerationSummary {
   model: string;
   tourId: string | null;
 }
+/**
+ * What GET /api/documents/:id/generations/:generationId/partial[?after=N&attempt=ID] returns (server/src/tour-partial.ts):
+ * the leading steps of a tour still being written, so the reader can play them before the rest exists.
+ *
+ * - Poll while `status` is `queued` or `generating`; on `ready` the finished tour comes through the manifest (`tourId`).
+ * - `tour`, `ready`, `planned` and `attempt` are set only while `generating` with a partial stored; otherwise `tour` and
+ *   `attempt` are null and the counts are 0.
+ * - `tour` is a playable tour of the first `ready` steps. Within one attempt steps only append and keep their ids.
+ * - `attempt` names one run of the generator. After a retry it changes and the steps may differ.
+ * - A client that holds a partial sends `after` (its ready) and `attempt`; while both still match, `tour` is null and
+ *   only the counts come back.
+ */
+export interface TourPartialView {
+  generationId: string;
+  status: TourGenerationStatus;
+  stage: TourGenerationStage;
+  /** The finished tour once status is `ready`. */
+  tourId: string | null;
+  attempt: string | null;
+  ready: number;
+  planned: number;
+  tour: Tour | null;
+}
 export interface TourModelSelection {
   model?: string;
   allowTraining?: boolean;

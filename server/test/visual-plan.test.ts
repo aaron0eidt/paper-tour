@@ -158,10 +158,14 @@ test('a plan without a usable entry is null, with the reasons for one repair', (
     assert.equal(plan, null);
     assert.ok(problems.length);
   }
-  // Exercise parts are taught from their own solutions, so the plan never covers them.
+  // A tour with exercise parts is a sheet's: the plan covers its tasks and parts, not its overview and takeaway.
   const withUnit = [...beats, { ...beat('problem-1'), id: 'exercise-1', unit: {} as never }];
   assert.deepEqual(
     plannableBeats(withUnit).map((b) => b.id),
+    ['exercise-1'],
+  );
+  assert.deepEqual(
+    plannableBeats(beats).map((b) => b.id),
     ids,
   );
 });

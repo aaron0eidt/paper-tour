@@ -859,6 +859,190 @@ await test('silent narrator starts at the given word', async () => {
   eq(seen, [2, 3], 'only the words from there');
 });
 
+// ------------------------------------------------------------ a tour that is still being written
+
+/** The tour of its first `count` steps, as a partial tour is: the chapters that have none yet are not there. */
+function leading(count: number): Tour {
+  let left = count;
+  return {
+    ...tour,
+    chapters: tour.chapters
+      .map((chapter) => {
+        const steps = chapter.steps.slice(0, Math.max(0, left));
+        left -= steps.length;
+        return { ...chapter, steps };
+      })
+      .filter((chapter) => chapter.steps.length),
+  };
+}
+
+function growing(count: number) {
+  const timers = new FakeTimers();
+  const narrator = new FakeNarrator();
+  const engine = new TourEngine(leading(count), { narrator, timers, open: true });
+  return { engine, timers, narrator };
+}
+
+await test('new steps join a playing tour without touching what plays', () => {
+  const { engine, narrator } = growing(2);
+  engine.play();
+  narrator.last.cb.onWord(2);
+  const before = engine.getState();
+  const calls = narrator.calls.length;
+  eq(engine.extend(leading(4), true), true);
+  const after = engine.getState();
+  eq([engine.steps.length, engine.tour.chapters.length], [4, 2], 'the new steps are there');
+  eq([after.status, after.index, after.word], [before.status, before.index, before.word], 'the place');
+  eq(keys(after), keys(before), 'the marks');
+  eq(after.camera, before.camera, 'the camera');
+  eq(after.board, before.board, 'the board');
+  eq(narrator.calls.length, calls, 'the voice is not started again');
+  eq(after.revision, (before.revision ?? 0) + 1, 'it says that the tour grew');
+  eq(engine.steps[3].chapterIndex, 1);
+});
+
+await test('a tour that played everything written waits for the next step, and goes on when it comes', () => {
+  const { engine, timers, narrator } = growing(2);
+  engine.play();
+  finishStep(narrator, timers);
+  finishStep(narrator, timers);
+  let s = engine.getState();
+  eq([s.status, s.index, s.waiting], ['playing', 1, true], 'waiting, not ended');
+  const marks = keys(s);
+  timers.tick(5000);
+  s = engine.getState();
+  eq([s.status, s.waiting, keys(s)], ['playing', true, marks], 'it keeps waiting, the marks stay');
+  engine.extend(leading(3), true);
+  s = engine.getState();
+  eq([s.status, s.index, s.waiting], ['playing', 2, false], 'the next step plays');
+  eq(narrator.last.req.text, 'nine ten');
+  // Waiting once more at the new last step.
+  finishStep(narrator, timers);
+  eq(engine.getState().waiting, true);
+});
+
+await test('closing a tour that waits ends it; a tour that is not open ends after its last step', () => {
+  const { engine, timers, narrator } = growing(2);
+  engine.play();
+  finishStep(narrator, timers);
+  finishStep(narrator, timers);
+  eq(engine.getState().waiting, true);
+  engine.close();
+  let s = engine.getState();
+  eq([s.status, s.waiting], ['ended', false]);
+  const finished = new TourEngine(leading(2), { narrator: new FakeNarrator(), timers: new FakeTimers() });
+  eq(finished.getState().waiting, false);
+  const t = new FakeTimers();
+  const n = new FakeNarrator();
+  const plain = new TourEngine(leading(2), { narrator: n, timers: t });
+  plain.play();
+  finishStep(n, t);
+  finishStep(n, t);
+  s = plain.getState();
+  eq([s.status, s.waiting], ['ended', false]);
+});
+
+await test('pausing while it waits is a pause: nothing is skipped when the step arrives or the learner plays', () => {
+  const { engine, timers, narrator } = growing(2);
+  engine.play();
+  finishStep(narrator, timers);
+  finishStep(narrator, timers);
+  engine.pause();
+  let s = engine.getState();
+  eq([s.status, s.waiting], ['paused', false]);
+  engine.extend(leading(3), true);
+  eq(engine.getState().status, 'paused', 'the new step does not start by itself');
+  engine.play();
+  timers.tick(1000);
+  s = engine.getState();
+  eq([s.status, s.index], ['playing', 2], 'play goes on to the new step');
+});
+
+await test('going elsewhere while it waits leaves the wait', () => {
+  const { engine, timers, narrator } = growing(2);
+  engine.play();
+  finishStep(narrator, timers);
+  finishStep(narrator, timers);
+  engine.goTo(0);
+  const s = engine.getState();
+  eq([s.status, s.index, s.waiting], ['playing', 0, false]);
+});
+
+await test('steps that are not the ones held are refused, and nothing changes', () => {
+  const { engine } = growing(2);
+  engine.play();
+  const other = leading(3);
+  other.chapters[0].steps[1] = { ...other.chapters[0].steps[1], id: 'renamed' };
+  const before = engine.getState();
+  eq(engine.extend(other, true), false);
+  eq([engine.steps.length, engine.getState()], [2, before], 'untouched');
+  const moved = leading(3);
+  moved.chapters = [{ ...moved.chapters[0], steps: moved.chapters[0].steps.slice(0, 1) }, { id: 'c1b', title: 'Rest', steps: [moved.chapters[0].steps[1], ...moved.chapters[1].steps] }];
+  eq(engine.extend(moved, true), false, 'a step in another chapter');
+});
+
+await test('a version that is not longer (the tour written again, still catching up) keeps what is held', () => {
+  const { engine } = growing(3);
+  engine.play();
+  eq(engine.extend(leading(2), true), true);
+  eq([engine.steps.length, engine.tour.chapters.flatMap((c) => c.steps).length], [3, 3]);
+  engine.extend(leading(2), false);
+  eq(engine.getState().revision, 2);
+});
+
+await test('steps already shown stay as shown; the ones after them come from the new version', () => {
+  const { engine } = growing(3);
+  engine.play();
+  engine.next();
+  const finished = structuredClone(leading(4));
+  finished.chapters[0].steps[0].say = 'rewritten before';
+  finished.chapters[0].steps[1].say = 'rewritten now';
+  finished.chapters[1].steps[0].say = 'rewritten after';
+  engine.extend(finished, false);
+  eq(engine.steps.map((fs) => fs.step.say), ['one two three four five', 'six seven eight', 'rewritten after', 'eleven']);
+  eq(engine.tour.chapters.flatMap((c) => c.steps).map((st) => st.say)[2], 'rewritten after');
+});
+
+await test('before the first play the whole version is replaced', () => {
+  const { engine } = growing(2);
+  const finished = structuredClone(leading(4));
+  finished.chapters[0].steps[0].say = 'a new first step';
+  engine.extend(finished, false);
+  eq(engine.steps[0].words.length, 4);
+  eq(engine.getState().status, 'idle');
+});
+
+await test('a tour that ended goes on from its old end when more arrives', () => {
+  const { engine, timers, narrator } = growing(2);
+  engine.play();
+  finishStep(narrator, timers);
+  finishStep(narrator, timers);
+  engine.close();
+  eq(engine.getState().status, 'ended');
+  engine.extend(leading(3), true);
+  let s = engine.getState();
+  eq([s.status, s.index], ['paused', 1], 'paused on the old last step');
+  engine.play();
+  timers.tick(1000);
+  s = engine.getState();
+  eq([s.status, s.index], ['playing', 2]);
+  eq(narrator.last.req.text, 'nine ten');
+});
+
+await test('a checkpoint at the last step written waits for the learner, then for the next step', () => {
+  const checked = structuredClone(leading(2));
+  checked.chapters[0].steps[1].checkpoint = { prompt: 'Try it', solution_step: 'c' } as never;
+  const timers = new FakeTimers();
+  const narrator = new FakeNarrator();
+  const engine = new TourEngine(checked, { narrator, timers, open: true });
+  engine.play();
+  finishStep(narrator, timers);
+  narrator.last.cb.onEnd();
+  eq([engine.getState().awaiting, engine.getState().waiting], [true, false], 'the learner is asked first');
+  engine.reveal();
+  eq(engine.getState().waiting, true, 'then it waits for the step that follows');
+});
+
 console.log(results.join('\n'));
 if (failures) throw new Error(`${failures} test(s) failed`);
 console.log(`\nall ${results.length} engine tests passed`);

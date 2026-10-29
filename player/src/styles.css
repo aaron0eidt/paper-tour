@@ -184,6 +184,58 @@ kbd {
   box-shadow: 0 0 0 3px rgba(126, 166, 255, 0.25);
 }
 
+/* After the last step written of a tour still being written: what it waits for, or why it stopped. */
+.chapter-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 8px 8px 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.chapter-pending i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pending-pulse 1.6s ease-in-out infinite;
+}
+
+.chapter-pending span {
+  display: grid;
+  gap: 1px;
+}
+
+.chapter-pending small {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.chapter-pending.stopped {
+  display: grid;
+  gap: 2px;
+  border-style: solid;
+}
+
+.chapter-pending.stopped strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+@keyframes pending-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
 /* A step that asks the learner to try first. */
 .step-try {
   flex: none;
@@ -798,6 +850,34 @@ button:disabled {
 .w {
   color: var(--faint);
   transition: color 160ms ease;
+}
+
+/* The tour has played all that is written and waits for the next step. */
+.writing-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 550;
+  animation: writing-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.writing-status i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pending-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes writing-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
 }
 
 .w.spoken {

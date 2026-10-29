@@ -18,13 +18,34 @@ export function proseSentences(doc: Doc): DocSentence[] {
   return doc.sentences.filter((s) => prose.has(types.get(s.block) ?? ''));
 }
 
+/**
+ * The name stored for a task without any points note, which older ingestions kept as its title: "20:" and
+ * "25: 5,10,5,5 pts." name nothing, "Simplifying, 4 points" is "Simplifying". Empty when no name is left.
+ */
+export function taskTitle(title: string | undefined): string {
+  const unit = '(?:bonuspunkte|punkte|punkt|pkt|pts|pt|points?|marks?|bp|p)';
+  const number = '\\d{1,3}(?:[.,]\\d{1,2})?';
+  const points = new RegExp(
+    `(?<![\\w.,])${number}(?:\\s*[:=]\\s*${number}(?:\\s*[,;+/]\\s*${number})*|(?:\\s*\\+\\s*${number})*)\\s*${unit}\\b\\.?`,
+    'giu',
+  );
+  const name = (title ?? '')
+    .replace(points, ' ')
+    .replace(/(?<![\w.,])\d{1,3}\s*:(?=\s|$)/g, ' ')
+    .replace(/[([]\s*[)\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:.\u2013\u2014-]+|[\s,;:.\u2013\u2014-]+$/g, '');
+  return /\p{L}{2,}/u.test(name) ? name : '';
+}
+
 /** A task's printed name, without its points or the statement run in after it: "Aufgabe 1: Lineare Gleichungen". */
 export function taskName(doc: Doc, task: DocExercise): string {
   const text = (doc.blocks.find((b) => b.id === task.block)?.text ?? '').replace(/\s+/g, ' ').trim();
   const at = text.indexOf(task.number);
   let name = at > 0 ? text.slice(0, at + task.number.length) : at === 0 ? (/^\S+\s*\S+/.exec(text)?.[0] ?? '') : '';
   name = name.replace(/[.:\s]+$/, '') || task.number;
-  return task.title && name.length < 40 ? `${name}: ${task.title}` : name;
+  const title = taskTitle(task.title);
+  return title && name.length < 40 ? `${name}: ${title}` : name;
 }
 
 /**

@@ -4,13 +4,15 @@ import type { Step } from '../../shared/paper';
 import { config } from '../src/config';
 import { HarnessTourGenerator } from './harness-fixture';
 import { EXPLAIN, card, doc, input, planFor, provider, settings, texts, type Request } from './plan-fixture';
-import { planBeats } from '../src/harness/beats';
+import { planBeats, type Beat } from '../src/harness/beats';
 import {
   beatTargets,
   cleanDirection,
   directOptions,
   directionSchema,
   highlightedSentences,
+  lengthProblems,
+  sayCap,
   sayLimit,
   type Direction,
 } from '../src/harness/direct';
@@ -229,4 +231,96 @@ test('a new setup creates standard tours unless the preset is set', () => {
     for (const name of Object.keys(process.env)) if (!(name in keep)) delete process.env[name];
     Object.assign(process.env, keep);
   }
+});
+
+// ------------------------------------------------------------------------------------------------ the length cap
+
+/** Narration of n words that explains and shares nothing with the document. */
+const SPOKEN = [
+  'gardens',
+  'need',
+  'steady',
+  'care',
+  'because',
+  'roots',
+  'drink',
+  'slowly',
+  'while',
+  'leaves',
+  'breathe',
+];
+const spoken = (n: number) => `${Array.from({ length: n }, (_, i) => SPOKEN[(i * 7) % SPOKEN.length]).join(' ')}.`;
+
+test('each step kind has a cap a little over the words it aims for', () => {
+  const overview = beat('method-1');
+  const detail = { ...beat('formula-1'), detail: true };
+  const claim: Beat = { ...overview, say: [40, 80] };
+  const slide: Beat = { ...overview, say: [35, 120] };
+  assert.deepEqual([overview, detail, claim, slide].map(sayCap), [104, 161, 92, 138]);
+  // The cap is under the limit above which a step is refused outright.
+  for (const b of [overview, detail, claim, slide]) assert.ok(sayCap(b) < sayLimit(b));
+  assert.deepEqual(lengthProblems(spoken(sayCap(overview)), overview), []);
+  const long = lengthProblems(spoken(sayCap(overview) + 1), overview);
+  assert.equal(long.length, 1);
+  assert.match(long[0], /This step is 105 spoken words; say it in at most 90\./);
+  assert.match(long[0], /cut the least important sentence/);
+  assert.deepEqual(lengthProblems(spoken(144), slide).length, 1);
+});
+
+test('a step over its cap is sent back once to be shortened, and the shorter version is kept', async () => {
+  const seen: Request[] = [];
+  const events: { type: string; data: Record<string, any> }[] = [];
+  const { tour, metadata } = await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider(narrator([answer(spoken(110)), answer(spoken(70))], seen)),
+  ).generate({
+    ...input,
+    onEvent: async (type, data) => {
+      events.push({ type, data });
+    },
+  });
+  const calls = problemCalls(seen);
+  assert.equal(calls.length, 2);
+  assert.ok(!calls[0].task.includes('This step is 110 spoken words'));
+  assert.ok(calls[1].task.includes('This step is 110 spoken words; say it in at most 90.'));
+  assert.equal(steps(tour)[0].say, spoken(70));
+  assert.deepEqual((metadata as { fallbackBeats: string[] }).fallbackBeats, []);
+  const flagged = events.filter((e) => e.type === 'beat.guarded');
+  assert.equal(flagged.length, 1);
+  assert.equal(flagged[0].data.beat, 'problem-1');
+  assert.match(flagged[0].data.problems[0], /110 spoken words/);
+});
+
+test('a step is shortened once: a rewrite that is not shorter does not replace it, and a step within its cap is left alone', async () => {
+  const seen: Request[] = [];
+  const { tour } = await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider(narrator([answer(spoken(110)), answer(spoken(114))], seen)),
+  ).generate(input);
+  assert.equal(problemCalls(seen).length, 2);
+  assert.equal(steps(tour)[0].say, spoken(110));
+  // At the cap itself nothing is asked again.
+  const within: Request[] = [];
+  await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider(narrator([answer(spoken(sayCap(beat('problem-1'))))], within)),
+  ).generate(input);
+  assert.equal(problemCalls(within).length, 1);
+});
+
+test('a step over the limit is still refused, as before, and the cap shares the single rewrite with the other checks', async () => {
+  const seen: Request[] = [];
+  const { tour } = await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider(
+      narrator([answer(spoken(sayLimit(beat('problem-1')) + 5)), answer(spoken(110)), answer(spoken(60))], seen),
+    ),
+  ).generate(input);
+  // Refused outright, then over the cap and rewritten once, then kept.
+  assert.equal(problemCalls(seen).length, 3);
+  assert.equal(steps(tour)[0].say, spoken(60));
 });

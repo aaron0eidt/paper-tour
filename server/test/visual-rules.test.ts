@@ -732,7 +732,7 @@ test('a step loses its board and board cues but keeps its narration and page cue
 // ------------------------------------------------------------------------------------------------------- the prompts
 
 test('the prompts and the visual plan state the rules briefly', () => {
-  assert.equal(HARNESS_VERSION, 'paper-tour-harness@26');
+  assert.equal(HARNESS_VERSION, 'paper-tour-harness@27');
   const prompt = (board?: Parameters<typeof directTask>[2]['board']) =>
     directTask('en', 'BRIEF', { actions: ['highlight', 'board_focus'], board, words: 120 });
   assert.match(prompt(), /A step that reports results \(a result or a table\) draws only the document’s own numbers/);
@@ -755,5 +755,6 @@ test('the prompts and the visual plan state the rules briefly', () => {
   assert.match(plan, /never made-up points/);
   // Merged into the existing text rather than appended: the prompts stay close to their size before the rules.
   assert.ok(prompt().length < 19_700, `${prompt().length} characters`);
-  assert.ok(plan.length < 2_700, `${plan.length} characters`);
+  // The rule on worked-example frames (they count toward the kind limits) added one numbered point.
+  assert.ok(plan.length < 2_900, `${plan.length} characters`);
 });

@@ -135,6 +135,46 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* What a tour still being written says about the rest, and what a tour that stopped says about what it has. */
+.tour-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.tour-note i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: tour-note-pulse 1.6s ease-in-out infinite;
+}
+
+.tour-note.stopped {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tour-note strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+@keyframes tour-note-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
 /* ---------------------------------------------------------------- cover */
 
 .tour-chapters {

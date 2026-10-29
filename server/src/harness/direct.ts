@@ -1,10 +1,10 @@
-import { checkExample, claimsNumericExample, EXAMPLE_SCHEMA, type WorkedExample } from './example';
+import { checkExample, claimsNumericExample, exampleSchema, type WorkedExample } from './example';
 import { tableTextBlocks, tableLines } from '../../../shared/tableTargets';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
 import type { Beat } from './beats';
 import { deckBrief } from './deck';
-import { BOARD_KINDS, LEGACY_BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
+import { BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
 import type { DocType } from './doctype';
 import { proseSentences } from './paper-block';
 import type { DirectOptions } from './prompts';
@@ -20,7 +20,7 @@ import {
   type MeasuredTarget,
 } from './visual-grounding';
 import { distinctive, gridOf, resultTable, tableText, tableViews, viewsFor, viewText, type TableView } from './tables';
-import { visualLine, type StepVisual } from './visual-plan';
+import { exampleKinds, exampleRules, visualLine, type StepVisual } from './visual-plan';
 import { groundedCheck, reportsResults } from './visual-rules';
 
 export const CUE_ACTIONS = ['highlight', 'box', 'spotlight', 'note', 'arrow', 'circle', 'board_focus'] as const;
@@ -124,20 +124,7 @@ export { tableLines } from '../../../shared/tableTargets';
 /** Planned kinds whose numbers come from the document, so their board may only copy what the evidence prints. */
 const NUMERIC_KINDS: readonly string[] = ['bars', 'heatmap', 'scatter'];
 
-/** Planned kinds that show a relationship themselves: a worked-example sequence is never forced on their steps. */
-const RELATIONAL_KINDS: readonly string[] = ['heatmap', 'scatter', 'shapes', 'plot'];
-
-/**
- * Whether a step may carry a worked example (example frames) and whether it must. Without a plan a step may always,
- * and a formula detail must. A planned relationship (heatmap, scatter, shapes, plot) is the visual itself, with no
- * example. A step planned without a board has example frames only when it must have a worked example.
- */
-export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolean; required: boolean } {
-  const detail = beat.kind === 'formula' && !!beat.detail;
-  if (!visual) return { offered: true, required: detail };
-  if (RELATIONAL_KINDS.includes(visual.visual)) return { offered: false, required: false };
-  return { offered: visual.visual !== 'none' || detail, required: detail };
-}
+export { exampleRules };
 
 /** The board kinds a step's direction offers: its planned kind alone, none when it is planned without a board. */
 const plannedKinds = (visual?: StepVisual) =>
@@ -146,7 +133,7 @@ const plannedKinds = (visual?: StepVisual) =>
 /** Board parts a board_focus cue may light up: those of the planned board, and of an example's frames when offered. */
 function focusParts(beat: Beat, visual?: StepVisual): string[] {
   if (!visual) return BOARD_KINDS.flatMap(boardPartIds);
-  const kinds = [...plannedKinds(visual), ...(exampleRules(beat, visual).offered ? LEGACY_BOARD_KINDS : [])];
+  const kinds = [...plannedKinds(visual), ...(exampleRules(beat, visual).offered ? exampleKinds(visual) : [])];
   return [...new Set(kinds.flatMap(boardPartIds))];
 }
 
@@ -306,6 +293,24 @@ const sayShortest = (beat: Beat) => beat.say?.[0] ?? (beat.detail ? 90 : 50);
 /** The most words a step may have before it is sent back for a rewrite: a margin over what it aims for. */
 export const sayLimit = (beat: Beat) => (beat.say ? Math.round(beat.say[1] * 1.35) : beat.detail ? 175 : 115);
 
+/**
+ * A step may run this far past the most words it aims for before it is sent back once to be shortened (the hard limit
+ * above rejects it outright). The caps per step kind are those aims: an overview 90, a detail 140, a claim's move or a
+ * slide step its own.
+ */
+export const SAY_MARGIN = 1.15;
+export const sayCap = (beat: Beat) => Math.ceil(sayWords(beat) * SAY_MARGIN);
+
+/** The repair for narration past its cap, or none: how long it is, how long it may be, and what to cut. */
+export function lengthProblems(say: string, beat: Beat): string[] {
+  const words = say.split(/\s+/).filter(Boolean).length;
+  return words > sayCap(beat)
+    ? [
+        `This step is ${words} spoken words; say it in at most ${sayWords(beat)}. Keep the point and the "because" and cut the least important sentence or example.`,
+      ]
+    : [];
+}
+
 /** What the beat's task offers the model: its cue actions, its board, the spoken length it aims for and its tone. */
 export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets, visual?: StepVisual): DirectOptions {
   const board = visual ? plannedKinds(visual)[0] : beat.board;
@@ -327,6 +332,7 @@ export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets,
  */
 export function directionSchema(beat: Beat, targets: BeatTargets, strict = true, visual?: StepVisual) {
   const actions = actionsFor(beat, targets, visual);
+  const offered = exampleRules(beat, visual).offered;
   const ids = strict ? cueTargets(actions, targets) : [];
   if (strict) ids.push(...(targets.measured ?? []).map((t) => t.id));
   const pen = actions.includes('arrow');
@@ -368,7 +374,7 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
             : {},
         ]),
       ),
-      ...(!strict || exampleRules(beat, visual).offered ? { example: strict ? EXAMPLE_SCHEMA : {} } : {}),
+      ...(!strict || offered ? { example: strict ? exampleSchema(exampleKinds(visual)) : {} } : {}),
       say: {
         type: 'string',
         minLength: 20,
@@ -443,6 +449,10 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
         ? 'VISUAL FOR THIS STEP: none beyond the numerical worked example this step must show (example frames). Teach the rest on the page with highlights and marks.'
         : visualLine(visual),
     );
+    if (exampleRules(beat, visual).offered && visual.frames?.length)
+      lines.push(
+        `WORKED EXAMPLE FRAMES MAY USE ONLY: ${exampleKinds(visual).join(', ')}. Pick each frame's kind by what it shows; the tour counts them toward its limit of each kind, so do not use another.`,
+      );
   }
   const figure = doc.figures.find((f) => f.id === beat.target);
   const equation = doc.equations.find((e) => e.id === beat.target);
@@ -586,7 +596,7 @@ export function cleanDirection(
     .slice(0, MAX_CUES);
   const rules = exampleRules(beat, visual);
   const example: { example?: WorkedExample; problems: string[] } = rules.offered
-    ? checkExample(d.example, say, requireExample || rules.required || claimsNumericExample(say))
+    ? checkExample(d.example, say, requireExample || rules.required || claimsNumericExample(say), exampleKinds(visual))
     : { problems: [] };
   const results = reportsResults(beat, targets.table);
   const candidates = plannedKinds(visual)

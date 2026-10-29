@@ -1,5 +1,5 @@
 import { claimsNumericExample } from './example';
-import type { Doc, Step, Tour } from '../../../shared/paper';
+import { splitWords, type Doc, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
@@ -46,6 +46,7 @@ import { moveProblems } from './moves';
 import { imageParts, pool } from './calls';
 import { recordedCalls } from '../ai/recorded-calls';
 import { cardProblems, cardSchema, cleanCard, evidencePool, fallbackCard, repairTurn, type PaperCard } from './card';
+import type { BoardKind } from './board';
 import { boardStepsOf, degradeDirection, withoutBoards, type Degraded } from './degrade';
 import {
   beatBrief,
@@ -55,6 +56,7 @@ import {
   directionSchema,
   exampleRules,
   highlightedSentences,
+  lengthProblems,
   sayLimit,
   type BeatTargets,
   type Direction,
@@ -73,6 +75,7 @@ import {
   unitSteps,
   type Solution,
 } from './exercise';
+import { cleanUnitVisual, hasVisualHost, unitVisualSchema, unitVisualTask, type UnitVisual } from './exercise-visual';
 import { paperBlock } from './paper-block';
 import {
   RESTATEMENT_REPAIR,
@@ -87,6 +90,7 @@ import { HARNESS_VERSION, SHARED_RULES, cardTask, directTask } from './prompts';
 import { measuredFigureTargets } from './measured-visuals';
 import { pythonVerifier, type LineCheck, type MathVerifier } from './verify';
 import {
+  allocateFrames,
   cleanVisualPlan,
   plannableBeats,
   visualPlanBrief,
@@ -114,7 +118,7 @@ function beatImage(beat: Beat, doc: Doc, images: TourImage[]): TourImage | undef
  */
 type BeatResult =
   | { targets: BeatTargets; direction: Direction | null; degraded?: Degraded }
-  | { steps: Step[]; solved: boolean; checks: LineCheck[] };
+  | { steps: Step[]; solved: boolean; checks: LineCheck[]; visual?: BoardKind; degraded?: Degraded };
 
 const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused']);
 /** A beat survives the model's own faults and transient provider errors; credentials and rejected requests do not. */
@@ -375,23 +379,36 @@ export class HarnessTourGenerator implements TourGenerator {
     });
 
     // B2. Plan the side-board visuals of the whole tour with one call that sees every beat, so each step gets the picture
-    // that makes its point click and no two steps draw the same thing. Without a usable plan (or for an exercise sheet,
-    // whose parts are taught from their own solutions) every beat keeps the board its kind suggests.
+    // that makes its point click and no two steps draw the same thing. On an exercise sheet the call plans the method
+    // visual of each task (at most one, diversity first across the sheet) and the solution lines stay formula boards.
+    // Without a usable plan every beat keeps the board its kind suggests, and a sheet's tasks have no visual. Worked
+    // examples count: the plan allots the kinds of their frames, so that they stay within the tour's limits.
     let visuals: VisualPlan | null = null;
     let adjusted: PlanAdjustment[] = [];
-    const plannable = beats.some((beat) => beat.unit) ? [] : plannableBeats(beats);
+    const sheetTour = beats.some((beat) => beat.unit);
+    const plannable = plannableBeats(beats);
     if (plannable.length) {
+      const options = { sheet: sheetTour };
       const task: MuseMessage[] = [
         ...prefix,
         {
           role: 'user',
-          content: [{ type: 'text', text: `${visualPlanTask(language)}\n\n${visualPlanBrief(card!, plannable, doc)}` }],
+          content: [
+            { type: 'text', text: `${visualPlanTask(language, options)}\n\n${visualPlanBrief(card!, plannable, doc)}` },
+          ],
         },
       ];
       for (let attempt = 0; attempt < 2 && !visuals; attempt++) {
         try {
-          const completion = await call(task, 'visual_plan', visualPlanSchema(plannable), 8_000, 'medium', signal);
-          const checked = cleanVisualPlan(completion.value, plannable);
+          const completion = await call(
+            task,
+            'visual_plan',
+            visualPlanSchema(plannable, options),
+            8_000,
+            'medium',
+            signal,
+          );
+          const checked = cleanVisualPlan(completion.value, plannable, options);
           visuals = checked.plan;
           adjusted = checked.adjusted;
           if (!checked.plan) {
@@ -407,6 +424,12 @@ export class HarnessTourGenerator implements TourGenerator {
           if (!recoverable(error)) throw error;
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
         }
+      }
+      if (visuals) {
+        // A sheet's overview and takeaway have no visual of their own.
+        for (const beat of beats)
+          if (!visuals.has(beat.id)) visuals.set(beat.id, { visual: 'none', idea: '', data: '' });
+        visuals = allocateFrames(visuals, beats);
       }
       await input.onEvent?.('visual.plan', {
         source: visuals ? 'model' : 'fallback',
@@ -476,12 +499,70 @@ export class HarnessTourGenerator implements TourGenerator {
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
         }
       }
-      await progress('writing', ++directed, beats.length);
       if (!best) {
+        await progress('writing', ++directed, beats.length);
         await input.onEvent?.('beat.fallback', { beat: beat.id });
         return { steps: unitFallback(unit, doc), solved: false, checks: [] };
       }
-      return { steps: unitSteps(unit, best.solution, best.checks, language), solved: true, checks: best.checks };
+      // The method visual the plan gave this task, drawn once the part is solved so that it fits the solution; one
+      // repair, and a visual that still fails is dropped, flagged, with the solution lines as they were.
+      const planned = visuals?.get(beat.id);
+      const hosted = hasVisualHost(unit, best.solution);
+      let drawn: UnitVisual | null = null;
+      let lost = hosted ? [] : ['the part has no method step to show it'];
+      if (planned && planned.visual !== 'none' && hosted) {
+        const kind = planned.visual;
+        const ask: MuseMessage[] = [
+          ...prefix,
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: unitVisualTask(language, unitBrief(unit, doc), { ...planned, visual: kind }, best.solution),
+              },
+              ...imageParts(pages),
+            ],
+          },
+        ];
+        for (let attempt = 0; attempt < 2 && !drawn; attempt++) {
+          try {
+            const completion = await call(ask, 'exercise_visual', unitVisualSchema(kind), 8_000, 'medium', signal, {
+              id: beat.id,
+              label: beat.point,
+            });
+            const checked = cleanUnitVisual(completion.value, kind, unit, doc, best.solution, planned);
+            await input.onEvent?.('exercise.visual', {
+              beat: beat.id,
+              kind,
+              problems: checked.problems,
+              attempt: attempt + 1,
+            });
+            drawn = checked.visual;
+            lost = checked.problems;
+            if (!drawn) ask.push(...repairTurn(completion.value, checked.problems));
+          } catch (error) {
+            signal.throwIfAborted();
+            if (!recoverable(error)) throw error;
+            if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
+          }
+        }
+      }
+      await progress('writing', ++directed, beats.length);
+      return {
+        steps: unitSteps(unit, best.solution, best.checks, language, drawn),
+        solved: true,
+        checks: best.checks,
+        ...(drawn ? { visual: drawn.item.kind } : {}),
+        ...(planned && planned.visual !== 'none' && !drawn
+          ? {
+              degraded: {
+                dropped: ['board' as const],
+                problems: lost.length ? lost.slice(0, 8) : ['the model gave no usable board'],
+              },
+            }
+          : {}),
+      };
     };
     const results: BeatResult[] = new Array(beats.length);
     const direct = async (beat: Beat): Promise<BeatResult> => {
@@ -523,9 +604,11 @@ export class HarnessTourGenerator implements TourGenerator {
       let direction: Direction | null = null;
       const example = exampleRules(beat, visual);
       let requireExample = example.required;
-      // A step that mostly restates its highlighted sentences is sent back once; until then its direction is kept.
+      // A step that mostly restates its highlighted sentences, or runs past its cap, is sent back once; until then its
+      // direction is kept. A rewrite that was only to shorten it and is not shorter does not replace it.
       let rewrites = 0;
       let rewriting = false;
+      let shortenedFrom: number | null = null;
       // The model can correct its complete direction twice, with all validation faults in each reply. What still fails
       // afterwards is dropped and flagged (degradeDirection), never published and never a reason to fail the tour.
       for (
@@ -589,7 +672,7 @@ export class HarnessTourGenerator implements TourGenerator {
               ]),
             );
           if (next) {
-            direction = next;
+            if (shortenedFrom === null || splitWords(next.say).length < shortenedFrom) direction = next;
             rewriting = false;
           }
           // Report every fault together. Previously an example error skipped
@@ -623,20 +706,27 @@ export class HarnessTourGenerator implements TourGenerator {
                     `This step builds on slide ${beat.callbacks![0]}: name it once as "slide ${beat.callbacks![0]}" and say in one clause how it sets this step up.`,
                   ]
                 : [];
-            const repairs = [...(share >= RESTATEMENT_SHARE ? [RESTATEMENT_REPAIR] : []), ...moves, ...callback];
+            const long = lengthProblems(next.say, beat);
+            const repairs = [
+              ...(share >= RESTATEMENT_SHARE ? [RESTATEMENT_REPAIR] : []),
+              ...moves,
+              ...callback,
+              ...long,
+            ];
             if (repairs.length) {
               rewrites++;
               rewriting = true;
+              if (long.length === repairs.length) shortenedFrom = splitWords(next.say).length;
               if (share >= RESTATEMENT_SHARE)
                 await input.onEvent?.('beat.restates', {
                   beat: beat.id,
                   share: Number(share.toFixed(2)),
                   attempt: attempt + 1,
                 });
-              if (moves.length || callback.length)
+              if (moves.length || callback.length || long.length)
                 await input.onEvent?.('beat.guarded', {
                   beat: beat.id,
-                  problems: [...moves, ...callback],
+                  problems: [...moves, ...callback, ...long],
                   attempt: attempt + 1,
                 });
               task.push(...repairTurn(completion.value, repairs));
@@ -877,15 +967,19 @@ export class HarnessTourGenerator implements TourGenerator {
           ? { source: 'model', beats: visualPlanEvent(visuals, plannable), ...(adjusted.length ? { adjusted } : {}) }
           : { source: 'fallback' },
         boards: {
-          shown: directions.flatMap((direction, i) =>
-            late.some((drop) => drop.beat === beats[i].id)
+          shown: beats.flatMap((beat, i) => {
+            const result = results[i];
+            // A part's method visual shows on its method step.
+            if ('steps' in result) return result.visual ? [`${beat.id}:visual:${result.visual}`] : [];
+            const direction = result.direction;
+            return late.some((drop) => drop.beat === beat.id)
               ? []
               : direction?.example
-                ? direction.example.frames.map((frame, n) => `${beats[i].id}:frame-${n + 1}:${frame.item.kind}`)
-                : direction?.board && !repeats.dropped.some((drop) => drop.step === beats[i].id)
-                  ? [`${beats[i].id}:${direction.board.kind}`]
-                  : [],
-          ),
+                ? direction.example.frames.map((frame, n) => `${beat.id}:frame-${n + 1}:${frame.item.kind}`)
+                : direction?.board && !repeats.dropped.some((drop) => drop.step === beat.id)
+                  ? [`${beat.id}:${direction.board.kind}`]
+                  : [];
+          }),
           dropped: [
             ...directions.flatMap((direction, i) =>
               direction?.boardProblems?.length ? [{ beat: beats[i].id, problems: direction.boardProblems }] : [],
@@ -910,6 +1004,7 @@ export class HarnessTourGenerator implements TourGenerator {
                     ok: count('ok'),
                     failed: count('failed'),
                     unknown: count('unknown'),
+                    ...(result.visual ? { visual: result.visual } : {}),
                   },
                 ];
               }),

@@ -82,6 +82,10 @@ export interface EngineState {
   preview?: boolean;
   /** The step's narration is done and its checkpoint waits for the learner: paused until the answer is asked for. */
   awaiting?: boolean;
+  /** Everything written of a tour still being written has been played: it goes on when the next step arrives. */
+  waiting?: boolean;
+  /** Counts the times the tour grew, so what is derived from its steps (a clock, a list) is built again. */
+  revision?: number;
 }
 
 /** Progress over the current board's narrated interval, not a separate wall clock. */
@@ -113,6 +117,8 @@ export interface EngineOptions {
   timers?: Timers;
   /** Wait for the initial camera move; later word-synchronized moves do not delay speech. */
   beforeNarration?: (signal: AbortSignal) => Promise<void>;
+  /** The tour is still being written: at its last step it waits for more (see `extend`) instead of ending. */
+  open?: boolean;
 }
 
 const realTimers: Timers = {
@@ -189,8 +195,8 @@ export function flattenTour(tour: Tour): FlatStep[] {
 }
 
 export class TourEngine {
-  readonly tour: Tour;
-  readonly steps: FlatStep[];
+  private whole: Tour;
+  private flat: FlatStep[];
 
   private narrator: Narrator;
   private fallback?: Narrator;
@@ -220,10 +226,16 @@ export class TourEngine {
   private preview = false;
   /** Paused at a checkpoint after its step's narration. */
   private awaiting = false;
+  /** More steps are still being written; the last one waits for them instead of ending the tour. */
+  private open: boolean;
+  /** At the last step written, played to its end, until the next one arrives. */
+  private waiting = false;
+  private revision = 0;
 
   constructor(tour: Tour, opts: EngineOptions) {
-    this.tour = tour;
-    this.steps = flattenTour(tour);
+    this.whole = tour;
+    this.flat = flattenTour(tour);
+    this.open = !!opts.open;
     this.narrator = opts.narrator;
     this.fallback = opts.fallbackNarrator;
     this.rate = opts.rate ?? 1;
@@ -241,8 +253,54 @@ export class TourEngine {
 
   getState = (): EngineState => this.state;
 
+  /** The tour as far as it is written; a new object each time it grows. */
+  get tour(): Tour {
+    return this.whole;
+  }
+
+  get steps(): FlatStep[] {
+    return this.flat;
+  }
+
   get total(): number {
     return this.steps.length;
+  }
+
+  /**
+   * Go on with a longer version of the tour while it plays: the steps written so far keep playing, the new ones join
+   * after them, and a tour that had played everything written goes on with the next step. It does not interrupt, seek or
+   * redraw anything. `open` says whether more are still to come; a tour no longer open ends after its last step.
+   * A version that is not longer than the one held (the tour written again, still catching up) changes nothing but `open`.
+   * False, and nothing changed, when the steps it shares with the held ones are not the same (the same ids in the same
+   * chapters): the tour was written differently, and the caller starts the new one.
+   */
+  extend(tour: Tour, open: boolean): boolean {
+    const next = flattenTour(tour);
+    const held = this.flat;
+    for (let i = 0; i < Math.min(next.length, held.length); i++)
+      if (next[i].step.id !== held[i].step.id || next[i].chapterIndex !== held[i].chapterIndex) return false;
+    this.open = open;
+    this.revision++;
+    if (next.length >= held.length) {
+      // A step already shown stays as it was shown; the ones after it are the new tour's.
+      const shown = this.status === 'idle' ? 0 : this.index + 1;
+      this.flat = next.map((fs, i) => (i < shown ? held[i] : fs));
+      this.whole = tour;
+    }
+    const more = this.index + 1 < this.flat.length;
+    // A tour that had ended goes on from its old end when there is more: paused, as after any step.
+    if (this.status === 'ended' && (more || open)) {
+      this.status = 'paused';
+      this.preview = false;
+    }
+    if (this.waiting && this.status === 'playing' && (more || !open)) this.advance();
+    else this.emit();
+    return true;
+  }
+
+  /** No more steps are coming: the tour ends after the last one it has. */
+  close(): void {
+    this.extend(this.whole, false);
   }
 
   play(): void {
@@ -373,6 +431,8 @@ export class TourEngine {
       board: this.board,
       preview: this.preview,
       awaiting: this.awaiting,
+      waiting: this.waiting,
+      revision: this.revision,
     };
   }
 
@@ -384,6 +444,7 @@ export class TourEngine {
   private stopRun(): void {
     this.token++;
     this.awaiting = false;
+    this.waiting = false;
     this.preparation?.abort();
     this.preparation = null;
     const handle = this.handle;
@@ -627,9 +688,15 @@ export class TourEngine {
           this.emit();
         }, FADE_MS);
       }
+      this.waiting = false;
       this.runStep(this.index + 1);
+    } else if (this.open) {
+      // Everything written has been played. The step's marks and the board stay while the next one is written.
+      this.waiting = true;
+      this.emit();
     } else {
       this.token++;
+      this.waiting = false;
       this.status = 'ended';
       this.emit();
     }

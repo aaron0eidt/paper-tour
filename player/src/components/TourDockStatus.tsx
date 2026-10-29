@@ -10,6 +10,8 @@ interface Props {
   generation?: TourGenerationSummary | null;
   /** The tour has steps to play. */
   hasTour: boolean;
+  /** Steps of the tour that can be played already, and how many are planned, while it is still being written. */
+  steps?: { ready: number; planned: number } | null;
   onActivity?(): void;
 }
 
@@ -17,7 +19,7 @@ interface Props {
  * The tour's preparation status, in the dock while it is made or needs attention. Once a tour is
  * there the dock is only the ask bar: the control bar's timeline already says where the tour is.
  */
-export function TourDockStatus({ documentId, generation, hasTour, onActivity }: Props) {
+export function TourDockStatus({ documentId, generation, hasTour, steps, onActivity }: Props) {
   const [expanded, setExpanded] = useState(false);
   const checklistId = useId();
   const activity = useDockActivity(documentId, generation?.id, expanded);
@@ -32,6 +34,7 @@ export function TourDockStatus({ documentId, generation, hasTour, onActivity }: 
   let detail = 'Open activity to see how it was made';
   let fraction: number | undefined;
   let count = '';
+  let countLabel = 'sources reviewed';
   if (showingGeneration && generation) {
     title = tourGenerationCopy(generation).title;
     detail =
@@ -47,6 +50,13 @@ export function TourDockStatus({ documentId, generation, hasTour, onActivity }: 
       fraction = done / generation.imagesTotal;
       count = `${done} / ${generation.imagesTotal}`;
       detail = 'Sources reviewed';
+    } else if (generation.stage === 'writing' && generating && steps && steps.planned > 0) {
+      // The first steps can be played already: say how far the rest is.
+      const planned = Math.max(steps.ready, steps.planned);
+      fraction = Math.min(1, steps.ready / planned);
+      count = `${steps.ready} / ${planned}`;
+      countLabel = 'steps ready to play';
+      detail = 'You can play the steps that are ready';
     } else if (generation.stage === 'writing' && generating) detail = 'Building explanations and visual steps';
     else if (generation.stage === 'validating' && generating) detail = 'Checking the tour before it is ready';
   } else if (generation?.status === 'cancelled') {
@@ -80,7 +90,7 @@ export function TourDockStatus({ documentId, generation, hasTour, onActivity }: 
           {count && (
             <span
               className="ask-tour-count"
-              aria-label={showingGeneration ? `${count} sources reviewed` : `Step ${count}`}
+              aria-label={showingGeneration ? `${count} ${countLabel}` : `Step ${count}`}
             >
               {count}
             </span>

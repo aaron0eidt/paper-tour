@@ -16,32 +16,38 @@ interface Props {
   onSkip(direction: 1 | -1): void;
   /** One step back or on. */
   onStep(direction: 1 | -1): void;
+  /** What the timeline says while a tour still being written waits for its next step. */
+  writingLabel?: string;
 }
 
 /** Where the tour is on the timeline: before it starts, in the step being spoken, or at its end. */
 export function elapsedAt(clock: TourClock, state: EngineState, steps: readonly FlatStep[]): number {
   if (!steps.length || state.status === 'idle') return 0;
-  if (state.status === 'ended') return clock.total;
+  if (state.status === 'ended' || state.waiting) return clock.total;
   return timeAt(clock, state.index, state.word, steps[state.index]?.words.length ?? 0);
 }
 
 /**
  * The tour's timeline above the controls: its chapters as segments with a tick at each step, the
  * time elapsed, and a thumb that shows where it is. A click or drag goes there (the narration
- * resumes at the start of that sentence), and with the keyboard the arrows go by sentence.
+ * resumes at the start of that sentence), and with the keyboard the arrows go by sentence. A tour still being written ends
+ * in a dashed stretch for what is expected, where nothing can be played yet.
  */
-export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep }: Props) {
+export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep, writingLabel }: Props) {
   const track = useRef<HTMLDivElement>(null);
   // The time under the pointer, while it is over the timeline or drags along it.
   const [aim, setAim] = useState<number | null>(null);
   const dragging = useRef(false);
   const total = clock.total;
+  const span = Math.max(total, clock.span);
   const elapsed = elapsedAt(clock, state, steps);
-  const shown = aim ?? elapsed;
+  // Where the pointer is on the timeline, in time; past `total` it is over what is not written yet.
   const timeOf = (event: PointerEvent) => {
     const box = track.current!.getBoundingClientRect();
-    return total * Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(1, box.width)));
+    return span * Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(1, box.width)));
   };
+  const unwritten = aim !== null && aim > total;
+  const shown = aim === null ? elapsed : Math.min(aim, total);
   const seek = (time: number) => {
     const { index, word } = wordAt(clock, time, steps.map((fs) => fs.words.length));
     onSeek(index, word);
@@ -63,7 +69,7 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
   if (!steps.length || total <= 0) return null;
   return (
     <div
-      className={`timeline${aim !== null ? ' aiming' : ''}`}
+      className={`timeline${aim !== null ? ' aiming' : ''}${state.waiting ? ' waiting' : ''}`}
       ref={track}
       role="slider"
       tabIndex={0}
@@ -72,10 +78,12 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
       aria-valuemin={0}
       aria-valuemax={Math.round(total)}
       aria-valuenow={Math.round(elapsed)}
-      aria-valuetext={`Chapter ${chapter + 1} of ${chapters.length}, ${chapters[chapter] ?? ''}, ${formatTime(elapsed)} of ${formatTime(total)}`}
+      aria-valuetext={`Chapter ${chapter + 1} of ${chapters.length}, ${chapters[chapter] ?? ''}, ${formatTime(elapsed)} of ${formatTime(total)}${clock.pending > 0 ? ' so far' : ''}${state.waiting && writingLabel ? `, ${writingLabel.toLowerCase()}` : ''}`}
       onKeyDown={onKeyDown}
       onPointerDown={(event) => {
         if (event.pointerType === 'mouse' && event.button !== 0) return;
+        // Nothing to go to in the part that is not written yet.
+        if (timeOf(event) > total) return;
         dragging.current = true;
         event.currentTarget.setPointerCapture(event.pointerId);
         setAim(timeOf(event));
@@ -87,7 +95,7 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
       onPointerUp={(event) => {
         if (!dragging.current) return;
         dragging.current = false;
-        seek(timeOf(event));
+        seek(Math.min(timeOf(event), total));
         setAim(event.pointerType === 'mouse' ? timeOf(event) : null);
         // The keyboard goes back to the reader (Space plays, the arrows step); Tab brings it here again.
         event.currentTarget.blur();
@@ -106,7 +114,7 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
           <div
             key={c.index}
             className={`tl-chapter${shown >= c.start && shown < c.start + c.length ? ' current' : ''}`}
-            style={{ left: `${(c.start / total) * 100}%`, width: `${(c.length / total) * 100}%` }}
+            style={{ left: `${(c.start / span) * 100}%`, width: `${(c.length / span) * 100}%` }}
           >
             <div className="tl-rail">
               <span className="tl-fill" style={{ width: `${fill * 100}%` }} />
@@ -133,11 +141,21 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
           </div>
         );
       })}
-      <span className="tl-thumb" style={{ left: `${(shown / total) * 100}%` }} />
+      {/* What is expected of a tour still being written: nothing to play there yet. */}
+      {clock.pending > 0 && (
+        <div
+          className={`tl-chapter tl-pending${state.waiting ? ' waiting' : ''}`}
+          style={{ left: `${(total / span) * 100}%`, width: `${(clock.pending / span) * 100}%` }}
+          aria-hidden="true"
+        >
+          <div className="tl-rail" />
+        </div>
+      )}
+      <span className="tl-thumb" style={{ left: `${(shown / span) * 100}%` }} />
       {aim !== null && (
-        <span className="tl-tip" style={{ left: `clamp(90px, ${(shown / total) * 100}%, calc(100% - 90px))` }}>
-          <strong>{where}</strong>
-          <span>{formatTime(shown)}</span>
+        <span className="tl-tip" style={{ left: `clamp(90px, ${((unwritten ? aim : shown) / span) * 100}%, calc(100% - 90px))` }}>
+          <strong>{unwritten ? writingLabel ?? 'Not written yet' : where}</strong>
+          <span>{unwritten ? 'Not ready to play' : formatTime(shown)}</span>
         </span>
       )}
     </div>

@@ -1,12 +1,16 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { EngineState, FlatStep } from '../engine';
+import { stoppedCopy, writingLabel } from '../partialTour';
+import type { Growth } from '../partialTour';
 import type { Tour } from '../types';
 
 interface Props {
   tour: Tour | null;
   steps: FlatStep[];
   state: EngineState;
+  /** The tour is still being written (or stopped being written); null for a finished one. */
+  growth?: Growth | null;
   docTitle?: string;
   onJump(index: number): void;
   /** Rendered above the footer (the problems list). */
@@ -20,10 +24,12 @@ function stepLabel(say: string): string {
   return words.length > 9 ? `${words.slice(0, 9).join(' ')}…` : words.join(' ');
 }
 
-export function Sidebar({ tour, steps, state, docTitle, onJump, children, header, navigation }: Props) {
+export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children, header, navigation }: Props) {
   const started = state.status !== 'idle';
-  const done = state.status === 'ended' ? steps.length : started ? state.index : 0;
-  const progress = steps.length ? done / steps.length : 0;
+  const done = state.status === 'ended' || state.waiting ? steps.length : started ? state.index : 0;
+  // A tour still being written measures its progress against the steps planned.
+  const whole = growth?.phase === 'stopped' ? steps.length : Math.max(steps.length, growth?.planned ?? 0);
+  const progress = whole ? done / whole : 0;
   const navRef = useRef<HTMLElement>(null);
 
   // Keep the current step in view as the tour moves through the chapters.
@@ -45,12 +51,13 @@ export function Sidebar({ tour, steps, state, docTitle, onJump, children, header
         <div className="brand">Paper Tour</div>
         <h1 className="tour-title">{tour?.title ?? docTitle ?? 'Untitled paper'}</h1>
         {tour && (
-          <div className="progress" aria-label={`${done} of ${steps.length} steps done`}>
+          <div className="progress" aria-label={`${done} of ${whole} steps done`}>
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress * 100}%` }} />
             </div>
             <span>
-              {done} / {steps.length}
+              {done} / {whole}
+              {growth && growth.phase !== 'stopped' ? '+' : ''}
             </span>
           </div>
         )}
@@ -88,6 +95,22 @@ export function Sidebar({ tour, steps, state, docTitle, onJump, children, header
                 </ol>
               </section>
             ))}
+            {/* What the tour waits for, or why it will not go on, after the last step written. */}
+            {growth &&
+              (growth.phase === 'stopped' ? (
+                <p className="chapter-pending stopped" role="status">
+                  <strong>{stoppedCopy(growth).title}</strong>
+                  <span>{stoppedCopy(growth).detail}</span>
+                </p>
+              ) : (
+                <p className="chapter-pending">
+                  <i aria-hidden="true" />
+                  <span>
+                    {writingLabel(growth)}
+                    {growth.planned > steps.length ? <small>{growth.planned - steps.length} more planned</small> : null}
+                  </span>
+                </p>
+              ))}
           </nav>
         ) : (
           <div className="sidebar-empty">

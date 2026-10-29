@@ -5,7 +5,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@26';
+export const HARNESS_VERSION = 'paper-tour-harness@27';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -222,7 +222,7 @@ export const BOARD_EXAMPLES = {
 };
 const example = (value: unknown) => `EXAMPLE from another document: ${JSON.stringify(value)}`;
 
-const BOARD_TASK: Record<BoardKind, string> = {
+export const BOARD_TASK: Record<BoardKind, string> = {
   scene: `BOARD: a native scene combines positioned text, math, rectangles, circles, arrows, vectors, numeric matrices and safe function plots. Keep objects stable across example frames so positions and values transform instead of replacing the whole illustration. Use normalized boxes x,y,w,h inside0..1; arrow/vector w,h are signed endpoint deltas. Keep text readable, avoid overlapping foreground content, and explicitly mark unlabeled axes/containers background:true. No executable code or media.`,
   plot: `BOARD: an illustrative function plot, never claimed as measured data, for a shape that matters (saturation, decay, periodicity, a crossover); curves that are all straight lines are rejected. Fill plot with kind plot, x/y increasing finite ranges, 1-3 curves with expression and a short LaTeX label. Expressions use x, optional parameter a, pi/e, + - * / ^, parentheses, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max or softmax(x,0). No code, properties or unknown functions. Optional parameter {from,to} sweeps a; omit for fixed curves. Explain what changes and why, and use curve-1 etc for focus.`,
   formula: `BOARD SUGGESTION, NOT A REQUIREMENT: use a formula board for the meaning of the equation's terms. For how the output changes, prefer a function plot instead; a term list alone cannot explain response shape or sensitivity.

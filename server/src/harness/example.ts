@@ -28,29 +28,35 @@ function exampleBoardSchema(kind: BoardKind) {
   return { ...schema, properties, required: ['title', 'unit', 'bars'] };
 }
 
-/** Authoring only. Canonical tours use ordinary timed board actions, so existing players and saved tours work. */
-export const EXAMPLE_SCHEMA = object({
-  assumptions: text(220),
-  inputs: { type: 'array', minItems: 1, maxItems: 8, items: object({ label: text(40), value: { type: 'number' } }) },
-  calculations: {
-    type: 'array',
-    minItems: 1,
-    maxItems: 10,
-    items: object({ expression: text(200), result: { type: 'number' } }),
-  },
-  frames: {
-    type: 'array',
-    minItems: 2,
-    maxItems: 4,
-    items: object(
-      { anchor: text(80), ...Object.fromEntries(LEGACY_BOARD_KINDS.map((kind) => [kind, exampleBoardSchema(kind)])) },
-      ['anchor'],
-    ),
-  },
-});
+/**
+ * Authoring only. Canonical tours use ordinary timed board actions, so existing players and saved tours work. A step
+ * whose plan allots its frames some kinds (visual-plan.ts) offers those only.
+ */
+export function exampleSchema(kinds: readonly BoardKind[] = LEGACY_BOARD_KINDS) {
+  return object({
+    assumptions: text(220),
+    inputs: { type: 'array', minItems: 1, maxItems: 8, items: object({ label: text(40), value: { type: 'number' } }) },
+    calculations: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 10,
+      items: object({ expression: text(200), result: { type: 'number' } }),
+    },
+    frames: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 4,
+      items: object(
+        { anchor: text(80), ...Object.fromEntries(kinds.map((kind) => [kind, exampleBoardSchema(kind)])) },
+        ['anchor'],
+      ),
+    },
+  });
+}
+export const EXAMPLE_SCHEMA = exampleSchema();
 
 export const EXAMPLE_TASK = `WORKED EXAMPLES: If you introduce a numerical worked case, supply an "example" instead of repeating a symbolic board. Its assumptions state the illustrative special case and held-fixed quantities; say this naturally in the narration. inputs lists the named numerical starting values. calculations lists the actual arithmetic with numerical literals only and its results. Declare every nontrivial numeric operand as an input or an earlier calculation result (-1, 0 and 1 are implicit constants); + - * / ^ and sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max, softmax are supported, no variables or code. Prefer readable rounded illustrative results (usually 2–3 decimals, or scientific notation for tiny values), with ≈ for rounded equalities; code retains the exact computed value behind each rounded intermediate reference for later calculations. Never fill a formula or label with a floating-point tail or manually invent eight-digit precision. Keep the paper’s reported measurements exact. Non-integer results may be rounded to the precision shown; keep integer results exact. Superscript/layer indices are notation, not measured quantities: do not turn a symbolic indexed term into a fake scalar calculation.
-Use 2–4 frames, including at least one useful native flow, bars, plot or scene that visually demonstrates the mechanism (not only formula/text cards), each with anchor copied exactly from say and exactly ONE native item named formula, flow, bars, plot or scene (same fields as those boards). Prefer spatial and value transformations over a series of formula cards: changing same-label bars for competing contributions, a flowing input→operation→result path, or a plotted function/parameter sweep. For vector/matrix transformations or an illustration combining plots and moving quantities, choose a scene with stable objects and meaningful position/value changes. For a function example, make its behavior visible with a curve and data-bound sample points or a genuine component transformation. A one-cell matrix around a number followed by formula cards is not a meaningful animation. For quantitative vectors use a shared embedded plot with labeled axes and plotId-bound vectors, preserving the original vector alongside the transformed vector. Keep a stable origin, domain and object IDs across frames; do not replace one isolated arrow with another or silently rescale each state. Keep semantic labels consistent across states: preserve flow node IDs/order/edges for the same process and formula term labels for the same quantities when substituting values. Reusing those roles lets the live objects transform continuously. Use a formula card when the actual substitution itself is what teaches the mechanism. Show the concrete starting values, then a visibly changed calculation/output or a meaningful before/after comparison. The first frame explicitly shows the declared starting values, including their signs; preserve this input frame while repairing later states. The last shows a computed result explicitly in formula, flow, bars, or scene text/matrices. Bars support signed values around a zero baseline; preserve input and result signs. A plot may be an intermediate behavior frame, but axis limits alone do not display an example result. A title change or another highlight on the original symbolic equation is not a new state. Illustrative bars show inputs/intermediate values, not a quality ranking: omit higher_is_better, so no value is falsely labelled best. Keep the same ordered bar labels and the same unit when comparing successive states of the same quantity; different quantities need different units. Use illustrative titles, and never mix invented values with the paper's reported measurements. Formula terms and flow nodes can show concrete substitutions; bars may use the declared inputs and checked results. Each frame begins at its spoken anchor, in increasing order, with enough explanation to read it. Where the cue schema offers board_focus, its cues may name term-1, node-1, bar-1 or curve-1 etc of the frame active at their spoken anchor. Omit example when explaining a source diagram path without invented numerical values. FINAL CONSISTENCY CHECK before responding: read the narration against each frame in order. Every spoken input, sign, vector dimension, operation and result must match the actual displayed objects and checked calculations. When repairing frames, revise say and its anchors too; never preserve stale narration from an earlier example or describe a vector when the frame actually shows unrelated scalar cases. Prefer one coherent transformation with stable quantities over several disconnected demonstrations. Keep schema details out of say.`;
+Use 2–4 frames, including at least one useful native flow, bars, plot or scene that visually demonstrates the mechanism (not only formula/text cards). Each frame has an anchor copied exactly from say and exactly ONE native item named formula, flow, bars, plot or scene (same fields as those boards). Prefer spatial and value transformations over a series of formula cards, and choose each frame's kind by what it shows, never by habit: a plot for how a function responds, a scene for vectors or geometry, a flow for a process, a formula when the substitution itself is the lesson, and bars only for a few comparable quantities of one unit. The brief lists the kinds this step's frames may use; the tour counts frames toward its limit of each kind. For vector/matrix transformations or an illustration combining plots and moving quantities, choose a scene with stable objects and meaningful position/value changes. For a function example, make its behavior visible with a curve and data-bound sample points or a genuine component transformation. A one-cell matrix around a number followed by formula cards is not a meaningful animation. For quantitative vectors use a shared embedded plot with labeled axes and plotId-bound vectors, preserving the original vector alongside the transformed vector. Keep a stable origin, domain and object IDs across frames; do not replace one isolated arrow with another or silently rescale each state. Keep semantic labels consistent across states: preserve flow node IDs/order/edges for the same process and formula term labels for the same quantities when substituting values. Reusing those roles lets the live objects transform continuously. Use a formula card when the actual substitution itself is what teaches the mechanism. Show the concrete starting values, then a visibly changed calculation/output or a meaningful before/after comparison. The first frame explicitly shows the declared starting values, including their signs; preserve this input frame while repairing later states. The last shows a computed result explicitly in formula, flow, bars, or scene text/matrices. Bars support signed values around a zero baseline; preserve input and result signs. A plot may be an intermediate behavior frame, but axis limits alone do not display an example result. A title change or another highlight on the original symbolic equation is not a new state. Illustrative bars show inputs/intermediate values, not a quality ranking: omit higher_is_better, so no value is falsely labelled best. Keep the same ordered bar labels and the same unit when comparing successive states of the same quantity; different quantities need different units. Use illustrative titles, and never mix invented values with the paper's reported measurements. Formula terms and flow nodes can show concrete substitutions; bars may use the declared inputs and checked results. Each frame begins at its spoken anchor, in increasing order, with enough explanation to read it. Where the cue schema offers board_focus, its cues may name term-1, node-1, bar-1 or curve-1 etc of the frame active at their spoken anchor. Omit example when explaining a source diagram path without invented numerical values. FINAL CONSISTENCY CHECK before responding: read the narration against each frame in order. Every spoken input, sign, vector dimension, operation and result must match the actual displayed objects and checked calculations. When repairing frames, revise say and its anchors too; never preserve stale narration from an earlier example or describe a vector when the frame actually shows unrelated scalar cases. Prefer one coherent transformation with stable quantities over several disconnected demonstrations. Keep schema details out of say.`;
 
 const raw = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const rows = (v: unknown) => (Array.isArray(v) ? v.filter(raw) : []);
@@ -328,6 +334,7 @@ export function checkExample(
   value: unknown,
   say: string,
   required = false,
+  frameKinds: readonly BoardKind[] = LEGACY_BOARD_KINDS,
 ): { example?: WorkedExample; problems: string[] } {
   if (value !== undefined && !raw(value))
     return {
@@ -404,6 +411,10 @@ export function checkExample(
       continue;
     }
     const kind: BoardKind = kinds[0];
+    if (!frameKinds.includes(kind))
+      problems.push(
+        `Example frame ${i + 1} is a ${kind}, which this step's frames may not use; use ${frameKinds.join(', ')}.`,
+      );
     const itemRaw = frame[kind] as Record<string, unknown>;
     if (kind === 'bars' && itemRaw.higher_is_better !== undefined)
       problems.push(`Example frame ${i + 1}: illustrative values are not a quality ranking; omit higher_is_better.`);

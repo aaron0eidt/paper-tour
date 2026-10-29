@@ -27,18 +27,28 @@ export interface ClockChapter {
 export interface TourClock {
   steps: ClockStep[];
   chapters: ClockChapter[];
+  /** The length of the steps written so far. */
   total: number;
   /** Every step's length is known from its audio, not estimated from its words. */
   measured: boolean;
+  /** A tour still being written: the time its unwritten steps are expected to take, from the average of the written ones. */
+  pending: number;
+  /** The whole timeline, written and expected: what a position on the timeline is measured against. */
+  span: number;
 }
 
 export interface ClockOptions {
   /** Speed multiplier (the UI's speed times the URL's). */
   rate?: number;
   voices?: Tour['voices'];
+  /** Steps of the tour still to be written. */
+  pending?: number;
 }
 
-export function buildClock(steps: readonly FlatStep[], { rate = 1, voices }: ClockOptions = {}): TourClock {
+/** Without a written step to go by, an unwritten one is expected to take this long. */
+const EXPECTED_STEP_MS = 20_000;
+
+export function buildClock(steps: readonly FlatStep[], { rate = 1, voices, pending = 0 }: ClockOptions = {}): TourClock {
   let at = 0;
   let measured = steps.length > 0;
   const clock = steps.map((fs): ClockStep => {
@@ -56,7 +66,8 @@ export function buildClock(steps: readonly FlatStep[], { rate = 1, voices }: Clo
     if (last && last.index === fs.chapterIndex) last.length += clock[i].length;
     else chapters.push({ index: fs.chapterIndex, step: i, start: clock[i].start, length: clock[i].length });
   });
-  return { steps: clock, chapters, total: at, measured };
+  const expected = Math.max(0, Math.floor(pending)) * (steps.length ? at / steps.length : EXPECTED_STEP_MS);
+  return { steps: clock, chapters, total: at, measured, pending: expected, span: at + expected };
 }
 
 /** Time on the timeline when `word` of step `index` has been spoken (-1: before the first). */

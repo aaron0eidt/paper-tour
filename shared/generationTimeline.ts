@@ -27,6 +27,7 @@ export const modelActivityNames: Record<string, string> = {
   visual_plan: 'Design the side visuals',
   beat_direction: 'Write narration and visual cues',
   exercise_solution: 'Work through an exercise',
+  exercise_visual: 'Draw the method of an exercise',
 };
 /** Only public assistant text; structured JSON and private reasoning stay in the inspector. */
 export function readableAgentText(value: string): string {

@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { chapterTakeaways, docTypeLabel, stepsLabel } from '../tourSummary';
+import { stoppedCopy } from '../partialTour';
+import type { Growth } from '../partialTour';
 import type { Tour } from '../types';
 import { PlayIcon } from './icons';
 import './tourCards.css';
@@ -38,14 +40,17 @@ interface CoverProps {
   length: string;
   /** A saved place in the tour (a step number from 1) the learner can pick up from. */
   resumeAt?: number | null;
+  /** The tour is still being written: the cover counts the steps ready, not the whole. */
+  growth?: Growth | null;
   onStart(): void;
   onResume(): void;
   /** Read the document first: the card goes, the tour waits. */
   onBrowse(): void;
 }
 
-export function TourCover({ tour, steps, length, resumeAt, onStart, onResume, onBrowse }: CoverProps) {
+export function TourCover({ tour, steps, length, resumeAt, growth, onStart, onResume, onBrowse }: CoverProps) {
   const type = docTypeLabel(tour.doc_type);
+  const writing = !!growth && growth.phase !== 'stopped';
   const chapters = tour.chapters.map((chapter) => chapter.title);
   const resuming = !!resumeAt && resumeAt > 1;
   const [list, more] = useScrollCue<HTMLOListElement>(chapters.length);
@@ -55,10 +60,11 @@ export function TourCover({ tour, steps, length, resumeAt, onStart, onResume, on
         {type && <p className="tour-eyebrow">{type}</p>}
         <h2 className="tour-title-text">{tour.title}</h2>
         <p className="tour-meta">
-          <span>{stepsLabel(steps)}</span>
+          <span>{writing ? `${steps} of about ${Math.max(steps, growth.planned)} steps` : stepsLabel(steps)}</span>
           <span aria-hidden="true">·</span>
-          <span>{length}</span>
+          <span>{writing ? `${length} so far` : length}</span>
         </p>
+        {growth && <GrowthNote growth={growth} />}
         {chapters.length > 1 && (
           <ol className={`tour-chapters${more ? ' more-below' : ''}`} aria-label="Chapters" ref={list}>
             {chapters.slice(0, MAX_LISTED).map((title, i) => (
@@ -90,8 +96,27 @@ export function TourCover({ tour, steps, length, resumeAt, onStart, onResume, on
   );
 }
 
+/** What a tour still being written says about the rest: it is on its way, or it will not come. */
+function GrowthNote({ growth }: { growth: Growth }) {
+  const stopped = growth.phase === 'stopped';
+  return (
+    <p className={`tour-note${stopped ? ' stopped' : ''}`} role="status">
+      {!stopped && <i aria-hidden="true" />}
+      <span>
+        {stopped
+          ? stoppedCopy(growth).detail
+          : growth.phase === 'retrying'
+            ? 'The tour is being written again. These steps stay playable.'
+            : 'The rest is still being written and joins the tour as you watch.'}
+      </span>
+    </p>
+  );
+}
+
 interface EndProps {
   tour: Tour;
+  /** The tour stopped being written: this is not all of it. */
+  stopped?: Growth | null;
   /** Suggested questions the learner has not asked yet. */
   questions: string[];
   /** Play the tour again from a chapter's first step. */
@@ -102,7 +127,7 @@ interface EndProps {
   onClose(): void;
 }
 
-export function TourEnd({ tour, questions, onReplayChapter, onReplay, onAsk, onClose }: EndProps) {
+export function TourEnd({ tour, stopped, questions, onReplayChapter, onReplay, onAsk, onClose }: EndProps) {
   const takeaways = chapterTakeaways(tour);
   const [list, more] = useScrollCue<HTMLOListElement>(takeaways.length);
   // Escape closes the recap, unless a field or menu has just used it.
@@ -123,8 +148,8 @@ export function TourEnd({ tour, questions, onReplayChapter, onReplay, onAsk, onC
         </button>
         <header className="tour-end-head">
           <div>
-            <p className="tour-eyebrow">Tour complete</p>
-            <h2 className="tour-title-text">What you now know</h2>
+            <p className="tour-eyebrow">{stopped ? stoppedCopy(stopped).label : 'Tour complete'}</p>
+            <h2 className="tour-title-text">{stopped ? 'What you know so far' : 'What you now know'}</h2>
           </div>
           <button type="button" className="tour-btn small" onClick={onReplay}>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -133,6 +158,11 @@ export function TourEnd({ tour, questions, onReplayChapter, onReplay, onAsk, onC
             <span>Replay tour</span>
           </button>
         </header>
+        {stopped && (
+          <p className="tour-note stopped" role="status">
+            <span>{stoppedCopy(stopped).detail}</span>
+          </p>
+        )}
         <ol className={`tour-takeaways${more ? ' more-below' : ''}`} ref={list}>
           {takeaways.map((item) => (
             <li key={item.chapter}>

@@ -128,11 +128,55 @@
   background: var(--accent);
 }
 
+/* A tour still being written ends in a dashed stretch: what is expected, with nothing to play in it yet. A soft light
+   moves along it, faster while the tour waits there. */
+.tl-pending .tl-rail {
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.22) 0 5px, transparent 5px 9px);
+}
+
+.tl-pending .tl-rail::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(126, 166, 255, 0.55), transparent);
+  transform: translateX(-100%);
+  animation: tl-writing 3.2s ease-in-out infinite;
+}
+
+.tl-pending.waiting .tl-rail::after {
+  animation-duration: 1.8s;
+}
+
+@keyframes tl-writing {
+  to {
+    transform: translateX(270%);
+  }
+}
+
+/* The tour has played all that is written and waits for the next step: the thumb rests at the end of the written part and
+   breathes, and the light moves faster along what is to come. The caption says what it waits for. */
+.timeline.waiting .tl-thumb {
+  animation: tl-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes tl-breathe {
+  50% {
+    box-shadow: 0 0 0 7px rgba(126, 166, 255, 0.1), 0 1px 4px rgba(0, 0, 0, 0.5);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tl-rail,
   .tl-thumb,
   .tl-pause {
     transition: none;
+  }
+  .tl-pending .tl-rail::after,
+  .timeline.waiting .tl-thumb {
+    animation: none;
   }
 }
 

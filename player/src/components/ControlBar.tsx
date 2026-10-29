@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import type { EngineState, FlatStep } from '../engine';
 import { formatTime } from '../tourClock';
 import type { TourClock } from '../tourClock';
+import { writingLabel } from '../partialTour';
+import type { Growth } from '../partialTour';
 import { Timeline, elapsedAt } from './Timeline';
 import { DEFAULT_SPEAKER } from '../types';
 import type { Voice } from '../types';
@@ -16,6 +18,8 @@ interface Props {
   chapters: string[];
   clock: TourClock;
   state: EngineState;
+  /** The tour is still being written (or stopped being written); null for a finished one. */
+  growth?: Growth | null;
   speed: number;
   muted: boolean;
   onToggle(): void;
@@ -39,6 +43,7 @@ export function ControlBar({
   chapters,
   clock,
   state,
+  growth,
   speed,
   muted,
   onToggle,
@@ -108,12 +113,20 @@ export function ControlBar({
   useEffect(() => {
     const box = textRef.current;
     const word = box?.querySelector<HTMLElement>('.w.now');
-    if (!box || !word) return;
+    // A tour that waits for its next step shows that line last, under as much of what was said as fits.
+    const waiting = box?.querySelector<HTMLElement>('.writing-status');
+    if (!box || !(waiting ?? word)) return;
     const line = parseFloat(getComputedStyle(box).lineHeight) || 23;
-    const spoken = Math.round((word.offsetTop - box.offsetTop) / line);
     const first = Math.round(box.scrollTop / line);
+    if (waiting) {
+      const rows = Math.max(1, Math.floor(box.clientHeight / line + 0.1));
+      const at = Math.round((waiting.offsetTop - box.offsetTop) / line);
+      if (at !== first + rows - 1) box.scrollTo({ top: Math.max(0, at - rows + 1) * line, behavior: 'smooth' });
+      return;
+    }
+    const spoken = Math.round((word!.offsetTop - box.offsetTop) / line);
     if (spoken < first || spoken > first + 1) box.scrollTo({ top: Math.max(0, spoken - 1) * line, behavior: 'smooth' });
-  }, [state.word, state.index]);
+  }, [state.word, state.index, state.waiting]);
 
   useEffect(() => {
     textRef.current?.scrollTo({ top: 0 });
@@ -129,6 +142,7 @@ export function ControlBar({
         onSeek={onSeek}
         onSkip={onSkip}
         onStep={(direction) => (direction > 0 ? onNext() : onPrev())}
+        writingLabel={growth && growth.phase !== 'stopped' ? writingLabel(growth) : undefined}
       />
       <div className="transport">
         <button
@@ -156,8 +170,19 @@ export function ControlBar({
         >
           <NextIcon />
         </button>
-        <span className="step-count" title={clock.measured || muted ? undefined : 'Estimated from the narration; a voice may be quicker or slower'}>
-          {disabled ? 'No tour' : `${formatTime(elapsedAt(clock, state, steps))} / ${clock.measured || muted ? '' : '~'}${formatTime(clock.total)}`}
+        <span
+          className="step-count"
+          title={
+            clock.pending > 0
+              ? 'More of the tour is still being written'
+              : clock.measured || muted
+                ? undefined
+                : 'Estimated from the narration; a voice may be quicker or slower'
+          }
+        >
+          {disabled
+            ? 'No tour'
+            : `${formatTime(elapsedAt(clock, state, steps))} / ${clock.measured || muted ? '' : '~'}${formatTime(clock.total)}${clock.pending > 0 ? '+' : ''}`}
         </span>
       </div>
 
@@ -175,6 +200,13 @@ export function ControlBar({
                   {w}{' '}
                 </span>
               ))}
+              {/* Everything written has been played: say what the tour waits for, on the line after the last word. */}
+              {state.waiting && growth && growth.phase !== 'stopped' && (
+                <span className="writing-status" role="status">
+                  <i aria-hidden="true" />
+                  {writingLabel(growth)}…
+                </span>
+              )}
             </div>
           </>
         ) : (

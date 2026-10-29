@@ -13,7 +13,7 @@ import { createNarrator, SilentNarrator, useBrowserVoices } from './narration';
 import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
-import type { BBox, Doc } from './types';
+import type { BBox, Doc, Tour } from './types';
 import { markPlayback } from './marks';
 import { keyBelongsTo, keyCommand } from './keys';
 import type { KeyTarget } from './keys';
@@ -31,7 +31,11 @@ import { TourCover, TourEnd } from './components/TourCards';
 import { TourDockStatus } from './components/TourDockStatus';
 import { isTourGenerationActive } from './library/tourGeneration';
 import { apiRequest, ApiRequestError, getSupabase } from './library/client';
-import type { DocumentManifest, ReaderState, SearchHit } from '../../shared/contracts';
+import { usePartialTour } from './library/usePartialTour';
+import type { PartialSource } from './library/usePartialTour';
+import { currentStatus, growthOf, partialPath, playablePartial } from './partialTour';
+import { readGrowthPlan, simulatedSource } from './dev/growth';
+import type { DocumentManifest, ReaderState, SearchHit, TourPartialView } from '../../shared/contracts';
 import type { OverlayEntry } from './engine';
 import { positionFromView, viewFromPosition } from './readerState';
 import { AskPanel } from './ask/AskPanel';
@@ -42,6 +46,8 @@ import type { RegionSelection } from './ask/regionSelection';
 import { useRegionSnap } from './ask/useRegionSnap';
 import { SelectionPreview } from './ask/SelectionPreview';
 import './reader.css';
+
+type Prepared = ReturnType<typeof prepareTour>;
 
 interface Params {
   paper: string;
@@ -155,6 +161,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const restoredView = useRef(false);
   const savedPosition = useRef<ReaderState | null>(null);
   const loadedRef = useRef<Loaded | null>(null);
+  const loadedAnalysisRef = useRef<string | undefined>();
   const manifestRef = useRef<DocumentManifest | null>(null);
   const checkpointRef = useRef<ReaderState | null>(null);
   const accessTokenRef = useRef<string | null>(null);
@@ -168,13 +175,23 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     let lastPoll = 0;
     let needsRetry = false;
     let retryContent = false;
-    const accept = (value: Loaded, analysisId?: string) => {
+    const accept = (result: Loaded, analysisId?: string) => {
+      let value = result;
       if (!alive) {
         if (value.pdf !== loadedRef.current?.pdf) retirePdf(value.pdf);
         return;
       }
-      const previousPdf = loadedRef.current?.pdf;
+      const previous = loadedRef.current;
+      const previousPdf = previous?.pdf;
+      // The same analysis of the same PDF keeps its document and sizes, so that a tour arriving (the finished one, after
+      // its first steps played) neither rebuilds the page layout nor the target lookup under the learner.
+      if (
+        previous?.doc && value.doc && previous.pdf === value.pdf && analysisId === loadedAnalysisRef.current &&
+        previous.doc.source.sha256 === value.doc.source.sha256
+      )
+        value = { ...value, doc: previous.doc, sizes: previous.sizes };
       loadedRef.current = value;
+      loadedAnalysisRef.current = analysisId;
       setLoaded(value);
       setLoadedAnalysisId(analysisId);
       if (previousPdf !== value.pdf) retirePdf(previousPdf);
@@ -301,11 +318,50 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // a PDF borrowed by another refresh, and StrictMode's effect replay must keep it alive.
   usePdfDocument(loaded?.pdf);
 
+  // A tour still being written plays from its first steps. While its generation runs, the leading steps come from the
+  // partial endpoint (a demo simulates them, dev/growth.ts) and the reader follows them; the finished tour comes through
+  // the manifest and takes their place without a break.
+  const generation = manifest?.tourGeneration ?? null;
+  const simulation = useMemo(
+    () => (import.meta.env.DEV && !documentId ? readGrowthPlan(new URLSearchParams(location.search)) : null),
+    [documentId],
+  );
+  const [simulated, setSimulated] = useState(false);
+  // A saved tour on screen is never taken over by one being written: the learner opens that one when it is done.
+  const tourOnScreen = !!manifest?.selectedTour;
+  const hasDoc = !!loaded?.doc;
+  const demoTour = simulation ? (loaded?.tour ?? null) : null;
+  const generationId = generation?.id;
+  const following = !!documentId && !!generationId && !tourOnScreen && hasDoc && isTourGenerationActive(generation);
+  const source = useMemo<PartialSource | null>(() => {
+    if (import.meta.env.DEV && simulation) return demoTour ? simulatedSource(demoTour, simulation) : null;
+    if (!following || !documentId || !generationId) return null;
+    return {
+      key: generationId,
+      fetch: (held, signal) =>
+        apiRequest<TourPartialView>(partialPath(documentId, generationId, held), { signal }),
+    };
+  }, [simulation, !!demoTour, following, documentId, generationId]);
+  const follow = usePartialTour(source, `${generation?.status}:${generation?.stage}`, (status) => {
+    if (simulation) setSimulated(status === 'ready');
+    else setManifestRefresh((value) => value + 1);
+  });
+  const status = currentStatus(generation?.status, follow.status);
+  const finishedTour = simulation ? (simulated ? demoTour : null) : (loaded?.tour ?? null);
+  const partialTour = useMemo(
+    () => (tourOnScreen ? null : playablePartial(follow.held, loaded?.doc ?? null)),
+    [tourOnScreen, follow.held, loaded?.doc],
+  );
+  const tourSource: Tour | null = finishedTour ?? partialTour;
+  const fromPartial = !finishedTour && !!partialTour;
+  const growth = fromPartial ? growthOf(follow.held, status) : null;
+  const growing = !!growth && growth.phase !== 'stopped';
+
   // The tour says what the document is: a lecture plays as a deck, one slide at a time; anything else as a paper.
-  const deck = useMemo(() => readerMode(loaded?.tour, loaded?.sizes ?? []) === 'deck', [loaded]);
+  const deck = useMemo(() => readerMode(tourSource, loaded?.sizes ?? []) === 'deck', [tourSource?.doc_type, loaded?.sizes]);
   const layout = useMemo(
     () => (loaded?.pdf && loaded.sizes.length ? (deck ? layoutDeck(loaded.sizes) : layoutPages(loaded.sizes)) : null),
-    [loaded, deck],
+    [loaded?.pdf, loaded?.sizes, deck],
   );
   // A deck shows one slide: the page the camera last went to.
   const [slide, setSlide] = useState(1);
@@ -313,11 +369,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const slideNow = deck && layout ? clampSlide(slide, layout.pages.length) : undefined;
   // The chosen region snaps to the object inside it; a question about it carries the object's box once that is found.
   const regionSnap = useRegionSnap(askSource, regionSelection, (page) => layout?.pages[page - 1], loadedAnalysisId);
-  const resolver = useMemo(() => (loaded ? new Resolver(loaded.doc, loaded.sizes) : null), [loaded]);
-  const prepared = useMemo(
-    () => (loaded?.tour && resolver ? prepareTour(loaded.tour, resolver) : null),
-    [loaded, resolver],
-  );
+  const resolver = useMemo(() => (loaded ? new Resolver(loaded.doc, loaded.sizes) : null), [loaded?.doc, loaded?.sizes]);
+  const prepared = useMemo(() => (tourSource && resolver ? prepareTour(tourSource, resolver) : null), [tourSource, resolver]);
   const problems = useMemo(() => [...(loaded?.problems ?? []), ...(prepared?.problems ?? [])], [loaded, prepared]);
   const debugPages = useMemo(() => (loaded?.doc ? debugIndex(loaded.doc) : new Map<number, DebugPage>()), [loaded]);
 
@@ -393,29 +446,91 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     },
     [camera, layout, resolver],
   );
-  // Dispatch camera commands synchronously, before narration waits for the flight.
-  // A React effect would start the animation only after speech has already begun.
+  // The engine plays the tour. While the tour is written it grows in place (TourEngine.extend), so the learner's place,
+  // the camera and the board stay as they are. Only another tour (one written again with other steps, or one picked from
+  // the saved ones) gets an engine of its own; a learner who was in the old one's lineage stays on the step they were on.
+  const handle = useRef<{ engine: TourEngine; unsubscribe(): void; partial: boolean } | null>(null);
+  const carry = useRef<{ stepId: string; playing: boolean; after: boolean } | null>(null);
+  const [incoming, setIncoming] = useState<{ prepared: Prepared; growing: boolean; partial: boolean } | null>(null);
+  const adopt = useCallback(
+    (next: Prepared, open: boolean, partial: boolean) => {
+      const held = handle.current;
+      const e = new TourEngine(next.tour, {
+        narrator: new SilentNarrator(),
+        fallbackNarrator: new SilentNarrator(),
+        beforeNarration: (signal) => camera.whenSettled(signal),
+        open,
+      });
+      // Dispatch camera commands synchronously, before narration waits for the flight.
+      // A React effect would start the animation only after speech has already begun.
+      let lastCamera = 0;
+      const unsubscribe = e.subscribe(() => {
+        const command = e.getState().camera;
+        if (command.seq === lastCamera) return;
+        lastCamera = command.seq;
+        now.current.frame(command, false);
+      });
+      if (held) {
+        const was = held.engine.getState();
+        carry.current =
+          held.partial && was.status !== 'idle'
+            ? {
+                stepId: held.engine.steps[was.index]?.step.id ?? '',
+                playing: was.status === 'playing',
+                after: !!was.waiting || was.status === 'ended',
+              }
+            : null;
+        held.unsubscribe();
+        held.engine.destroy();
+      }
+      handle.current = { engine: e, unsubscribe, partial };
+      setEngine(e);
+    },
+    [camera],
+  );
   useEffect(() => {
-    if (!prepared) return;
-    const e = new TourEngine(prepared.tour, {
-      narrator: new SilentNarrator(),
-      fallbackNarrator: new SilentNarrator(),
-      beforeNarration: (signal) => camera.whenSettled(signal),
-    });
-    let lastCamera = 0;
-    const unsubscribe = e.subscribe(() => {
-      const command = e.getState().camera;
-      if (command.seq === lastCamera) return;
-      lastCamera = command.seq;
-      frame(command, false);
-    });
-    setEngine(e);
-    return () => {
-      unsubscribe();
-      e.destroy();
-      setEngine(null);
-    };
-  }, [prepared, camera, frame]);
+    const held = handle.current;
+    if (!prepared) {
+      setIncoming(null);
+      if (held) {
+        held.unsubscribe();
+        held.engine.destroy();
+        handle.current = null;
+        setEngine(null);
+      }
+      return;
+    }
+    if (held?.engine.extend(prepared.tour, growing)) {
+      held.partial = fromPartial;
+      setIncoming(null);
+      return;
+    }
+    // A tour written again with other steps than the ones that play: what plays goes on to its end, and then the new one
+    // takes over. Any other tour (one picked from the saved ones) replaces it at once.
+    const playing = held?.engine.getState();
+    if (held?.partial && playing?.status === 'playing' && !playing.waiting) {
+      held.engine.close();
+      setIncoming({ prepared, growing, partial: fromPartial });
+      return;
+    }
+    adopt(prepared, growing, fromPartial);
+    if (held?.partial) setToast((t) => ({ text: 'The tour was written again; this is the new version', n: (t?.n ?? 0) + 1 }));
+  }, [prepared, growing, fromPartial, adopt]);
+  useEffect(() => {
+    if (!incoming || (mainState.status === 'playing' && !mainState.waiting)) return;
+    setIncoming(null);
+    adopt(incoming.prepared, incoming.growing, incoming.partial);
+    setToast((t) => ({ text: 'The tour was written again; this is the new version', n: (t?.n ?? 0) + 1 }));
+  }, [incoming, mainState.status, mainState.waiting, adopt]);
+  useEffect(
+    () => () => {
+      const held = handle.current;
+      handle.current = null;
+      held?.unsubscribe();
+      held?.engine.destroy();
+    },
+    [],
+  );
   useEffect(() => engine?.setNarrator(narrator), [engine, narrator]);
   useEffect(() => engine?.setRate(speed * params.rate), [engine, speed, params.rate]);
   useEffect(() => answer?.setNarrator(narrator), [answer, narrator]);
@@ -430,11 +545,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     now.current.answer = null;
     setAnswer(null);
   }, []);
-  // A new tour (or none) ends any answer about the old one.
+  // A new tour (or none) ends any answer about the old one. A tour that only grows keeps it.
   useEffect(() => {
     dropAnswer();
     setAway(null);
-  }, [prepared, dropAnswer]);
+  }, [engine, dropAnswer]);
   useEffect(() => () => now.current.answer?.destroy(), []);
 
   /** Where the learner is: the tour step, and the figure, panel or equation the camera still shows. */
@@ -621,10 +736,23 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (!engine) return;
     setCoverGone(false);
     setEndGone(false);
+    // The tour was written again: the learner stays on the step they were on, or goes on after it.
+    const carried = carry.current;
+    carry.current = null;
+    const found = carried?.stepId ? engine.steps.findIndex((step) => step.step.id === carried.stepId) : -1;
+    if (carried && found >= 0) {
+      const index = carried.after && found + 1 < engine.steps.length ? found + 1 : found;
+      engine.goTo(index);
+      if (carried.playing) engine.play();
+      setCoverGone(true);
+      setRestored(null);
+      return;
+    }
     setAsked([]);
     let at: number | null = null;
     const saved = savedPosition.current;
-    if (saved?.stepId && manifest?.selectedTour?.id === saved.tourId) {
+    // A place saved in a tour still being written has no tour of its own yet.
+    if (saved?.stepId && (saved.tourId === null || saved.tourId === (manifestRef.current?.selectedTour?.id ?? null))) {
       const index = engine.steps.findIndex((step) => step.step.id === saved.stepId);
       if (index >= 0) {
         engine.goTo(index);
@@ -632,7 +760,14 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       }
     }
     setRestored(at);
-  }, [engine, manifest?.selectedTour?.id]);
+  }, [engine]);
+  // The first steps of a tour still being written open the tour's side of the reader, unless the learner is searching.
+  const openedGrowing = useRef(false);
+  useEffect(() => {
+    if (!engine || !fromPartial || openedGrowing.current) return;
+    openedGrowing.current = true;
+    if (!query.trim()) setTab('tour');
+  }, [engine, fromPartial, query]);
   useEffect(() => {
     if (mainState.status === 'playing') setCoverGone(true);
     if (mainState.status !== 'ended') setEndGone(false);
@@ -877,9 +1012,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   }, [toast]);
 
   useEffect(() => {
-    const title = loaded?.tour?.title ?? loaded?.doc?.source.title;
+    const title = tourSource?.title ?? loaded?.doc?.source.title;
     if (title) document.title = `${title} · Paper Tour`;
-  }, [loaded]);
+  }, [loaded, tourSource?.title]);
 
   // A chapter chip names the chapter the tour has just entered; it stays a moment, then goes.
   const [chip, setChip] = useState<{ number: number; title: string } | null>(null);
@@ -900,9 +1035,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     return () => clearTimeout(timer);
   }, [chip]);
 
+  // The time the steps still to be written are expected to take shows on the timeline as a stretch of its own.
+  const pending = growing && !answer ? Math.max(1, (growth?.planned ?? 0) - (engine?.steps.length ?? 0)) : 0;
   const clock = useMemo(
-    () => (active ? buildClock(active.steps, { rate: speed * params.rate, voices: active.tour.voices }) : null),
-    [active, speed, params.rate],
+    () => (active ? buildClock(active.steps, { rate: speed * params.rate, voices: active.tour.voices, pending }) : null),
+    [active, state.revision, speed, params.rate, pending],
   );
 
   const cardState = { hasTour: !!engine, status: mainState.status, index: mainState.index, preview: mainState.preview, restored, aside: !!answer || !!away };
@@ -921,7 +1058,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const errors = problems.filter((p) => p.level === 'error');
   const steps = engine?.steps ?? [];
   // A deck's slides, with the tour's steps on each (the filmstrip's dots), and the one step the tour is on.
-  const slidesOfSteps = useMemo(() => (deck && engine && resolver ? stepSlides(engine.steps, resolver) : []), [deck, engine, resolver]);
+  const slidesOfSteps = useMemo(
+    () => (deck && engine && resolver ? stepSlides(engine.steps, resolver) : []),
+    [deck, engine, resolver, mainState.revision],
+  );
   const stepsOn = useMemo(() => stepsBySlide(slidesOfSteps), [slidesOfSteps]);
   const tourStep = mainState.status === 'idle' ? null : mainState.index;
   // The slide the tour goes to next is drawn ahead, so the change to it finds it ready.
@@ -1081,9 +1221,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         )}
       </header>
       <Sidebar
-        tour={tab === 'tour' ? (prepared?.tour ?? null) : null}
+        tour={tab === 'tour' ? (engine?.tour ?? null) : null}
         steps={steps}
         state={mainState}
+        growth={growth}
         docTitle={manifest?.document.title ?? loaded?.doc?.source.title}
         onJump={(i) => {
           setNavigationOpen(false);
@@ -1297,6 +1438,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                   steps={engine.steps.length}
                   length={lengthLabel(clock.total)}
                   resumeAt={restored !== null ? restored + 1 : null}
+                  growth={growth}
                   onStart={() => {
                     setSelection([]);
                     if (restored !== null && restored > 0) engine.goTo(0);
@@ -1309,6 +1451,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               {endOpen && engine && (
                 <TourEnd
                   tour={engine.tour}
+                  stopped={growth?.phase === 'stopped' ? growth : null}
                   questions={loaded?.doc ? openQuestions(engine.tour.suggested_questions, asked) : []}
                   onReplayChapter={(step) => {
                     setSelection([]);
@@ -1335,6 +1478,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                         documentId={documentId}
                         generation={manifest?.tourGeneration}
                         hasTour={!!engine?.steps.length}
+                        steps={growth ? { ready: growth.steps, planned: growth.planned } : null}
                         onActivity={
                           manifest?.tourGeneration ? () => setActivityRequest((request) => request + 1) : undefined
                         }
@@ -1412,6 +1556,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             chapters={active.tour.chapters.map((chapter) => chapter.title)}
             clock={clock}
             state={state}
+            growth={answer ? null : growth}
             speed={speed}
             muted={muted || params.silent}
             onToggle={() => {

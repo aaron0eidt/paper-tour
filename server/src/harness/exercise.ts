@@ -14,6 +14,8 @@ import type { Beat, PlanChapter, Preset, TourPlan } from './beats';
 import type { PaperCard } from './card';
 import { TONE } from './doctype';
 import { taskName } from './paper-block';
+import type { UnitVisual } from './exercise-visual';
+import { unitTaskLines } from './unit-task';
 import type { LineCheck } from './verify';
 
 // The tutor for exercise sheets (notes/HARNESS.md, "Tutor"): each taught part gets one solve call that reads the task,
@@ -176,29 +178,12 @@ export function exercisePlan(card: PaperCard, doc: Doc, preset: Preset): TourPla
 
 /** The solve call's brief: the part's text with IDs, the maths only the page shows, and the parts before it. */
 export function unitBrief(unit: Unit, doc: Doc): string {
-  const blocks = new Map(doc.blocks.map((b) => [b.id, b]));
-  const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
-  const quote = (ids: string[]) =>
-    ids.flatMap((id) => blocks.get(id)?.sentences ?? []).map((id) => `[${id}] ${sentences.get(id)?.text ?? ''}`);
   const points = unit.part?.points ?? unit.task.points;
-  const lines = [`EXERCISE: ${unit.name}${points !== undefined ? `, ${points} points` : ''}`];
-  if (unit.statement.length) lines.push('TASK STATEMENT, shared by its parts:', ...quote(unit.statement));
-  lines.push(unit.part ? 'THIS PART:' : 'THE TASK:', ...quote(unit.blocks));
-  if (unit.maths.length)
-    lines.push(
-      'MATHS ON THE PAGE as extracted (often garbled; read it in the page image):',
-      ...unit.maths.map((id) => `[${id}] ${blocks.get(id)!.text.replace(/\s+/g, ' ').trim()}`),
-    );
-  const earlier = unit.part ? unit.task.parts.slice(0, unit.task.parts.indexOf(unit.part)) : [];
-  if (earlier.length)
-    lines.push(
-      'EARLIER PARTS OF THIS TASK:',
-      ...earlier.map((p) => `${p.label}) ${quote(p.blocks.slice(0, 1)).join(' ')}`),
-    );
-  lines.push(
+  return [
+    `EXERCISE: ${unit.name}${points !== undefined ? `, ${points} points` : ''}`,
+    ...unitTaskLines(unit, doc),
     `The page${unit.pages.length > 1 ? 's' : ''} with this exercise ${unit.pages.length > 1 ? 'are' : 'is'} attached.`,
-  );
-  return lines.join('\n');
+  ].join('\n');
 }
 
 const object = (properties: Record<string, object>) => ({
@@ -652,8 +637,19 @@ const UNCHECKED: Record<string, string> = {
 };
 const BOARD_HOLD_MS = 800;
 
-/** The steps that teach one part; `checks` are the verifier's verdicts on the solution lines, in order. */
-export function unitSteps(unit: Unit, s: Solution, checks: LineCheck[], language: string): Step[] {
+/**
+ * The steps that teach one part; `checks` are the verifier's verdicts on the solution lines, in order. A method visual
+ * (exercise-visual.ts) shows with the method, after the checkpoint: on the method step, or in the compact form on the
+ * first solution step, where the line's board follows it once the method has been said. It replaces the rule the method
+ * step would show; the solution lines stay formula boards.
+ */
+export function unitSteps(
+  unit: Unit,
+  s: Solution,
+  checks: LineCheck[],
+  language: string,
+  visual?: UnitVisual | null,
+): Step[] {
   const tag = UNCHECKED[language.slice(0, 2).toLowerCase()] ?? UNCHECKED.en;
   const camera: Action = { type: 'focus', target: unit.blocks[0] };
   const at = (say: string, phrase: string) => {
@@ -661,20 +657,29 @@ export function unitSteps(unit: Unit, s: Solution, checks: LineCheck[], language
     return word ? { at_word: word } : {};
   };
   /** The line's board item, titled "unchecked" when the code could not verify it, and a focus per named term. */
-  const board = (l: BoardLine | null, say: string, check?: LineCheck): Action[] => {
+  const board = (l: BoardLine | null, say: string, check?: LineCheck, from = 0): Action[] => {
     if (!l?.board) return [];
     const title = check && check.status !== 'ok' ? [l.title, tag].filter(Boolean).join(' · ') : l.title;
     const item: FormulaItem = { ...l.board, ...(title ? { title } : {}) };
-    const out: Action[] = [{ type: 'board', item }];
+    // From a word on (after a visual that the narration has been naming): the board and its terms come in there.
+    const out: Action[] = [{ type: 'board', item, ...(from ? { at_word: from } : {}) }];
     const used = new Set<number>();
     l.anchors.forEach((phrase, part) => {
       const word = phrase && part < item.terms.length ? findAnchor(say, phrase) : null;
-      if (word === null || used.has(word)) return;
+      if (word === null || word < from || used.has(word)) return;
       used.add(word);
       out.push({ type: 'board_focus', part, ...(word ? { at_word: word } : {}) });
     });
     return out;
   };
+  /** The method visual and the parts of it the narration names, each lit up where it does. */
+  const sketch = (v: UnitVisual, say: string): Action[] => [
+    { type: 'board', item: v.item },
+    ...v.focus.flatMap(({ part, anchor }): Action[] => {
+      const word = findAnchor(say, anchor);
+      return word === null ? [] : [{ type: 'board_focus', part, ...(word ? { at_word: word } : {}) }];
+    }),
+  ];
   /** A step that failed its check, or that its author doubts and the code could not confirm, asks for a check. */
   const doubt = (say: string, check: LineCheck | undefined, sure: boolean) =>
     check?.status === 'failed' || (!sure && check?.status !== 'ok') ? `${say} ${s.checkNote}`.trim() : say;
@@ -705,7 +710,7 @@ export function unitSteps(unit: Unit, s: Solution, checks: LineCheck[], language
       checkpoint: { prompt: coach.prompt, hints: coach.hints },
     });
   if (!unit.compact && s.method.say) {
-    const actions = [camera, ...board(s.method.line, s.method.say)];
+    const actions = [camera, ...(visual ? sketch(visual, s.method.say) : board(s.method.line, s.method.say))];
     steps.push({
       id: `${unit.id}-method`,
       say: s.method.say,
@@ -723,7 +728,12 @@ export function unitSteps(unit: Unit, s: Solution, checks: LineCheck[], language
         ? `${s.method.say} ${doubt(step.say, checks[i], step.sure)}`
         : doubt(step.say, checks[i], step.sure);
     const say = last ? `${lead} ${answerSay}` : lead;
-    const actions = [camera, ...board(step, say, checks[i])];
+    const shown = i === 0 && methodFirst && visual ? sketch(visual, s.method.say) : [];
+    const actions = [
+      camera,
+      ...shown,
+      ...board(step, say, checks[i], shown.length ? splitWords(s.method.say).length : 0),
+    ];
     if (last && read.asked.length) actions.push({ ...solved, at_word: splitWords(lead).length });
     steps.push({ id: `${unit.id}-step-${i + 1}`, say, actions, hold_ms: BOARD_HOLD_MS });
   });
