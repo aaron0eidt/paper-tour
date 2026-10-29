@@ -100,6 +100,112 @@ function chain(flow: FlowItem): boolean {
   return simple && flow.edges.length < flow.nodes.length;
 }
 
+/** Commands that set their content in words: a rule written out, not mathematics. */
+const TEXT_COMMAND = /\\(?:text|textrm|textit|textbf|textsf|texttt|textnormal|textup|textsc|mbox|hbox)\s*\{/;
+/** Commands that only space, size or wrap what follows; their content is read as any other. */
+const LAYOUT_COMMAND = new Set(
+  'left right big Big bigg Bigg bigl bigr Bigl Bigr quad qquad displaystyle textstyle scriptstyle scriptscriptstyle limits nolimits nonumber notag label tag hspace vspace phantom hphantom vphantom mathrm mathit mathbf mathsf mathtt mathcal mathbb mathfrak mathscr boldsymbol bm operatorname hat bar vec tilde dot ddot widehat widetilde overline underline overbrace underbrace'.split(
+    ' ',
+  ),
+);
+/** Operators and relations: they join things, and an equation of nothing else says nothing. */
+const OPERATOR_COMMAND = new Set(
+  'cdot times pm mp div leq geq le ge neq ne ll gg approx simeq sim cong propto equiv to rightarrow leftarrow leftrightarrow Rightarrow Leftarrow Leftrightarrow implies impliedby iff mapsto mid parallel in notin ni subset subseteq supset supseteq cup cap setminus land lor wedge vee neg ldots dots cdots vdots ddots colon lt gt ast star circ bullet oplus otimes odot'.split(
+    ' ',
+  ),
+);
+/** Names of functions, which are written out in letters in any formula. */
+const FUNCTION_NAME = new Set(
+  'sin cos tan cot sec csc sinh cosh tanh arcsin arccos arctan exp log ln lg max min sup inf lim det dim ker deg gcd lcm arg argmax argmin softmax sigmoid relu gelu norm diag tr trace rank sign sgn var cov corr erf mean std'.split(
+    ' ',
+  ),
+);
+
+/** The group after an opening brace at `open`, with its end. */
+function group(latex: string, open: number): { text: string; end: number } {
+  let depth = 0;
+  for (let i = open; i < latex.length; i++) {
+    if (latex[i] === '\\') i++;
+    else if (latex[i] === '{') depth++;
+    else if (latex[i] === '}' && --depth === 0) return { text: latex.slice(open + 1, i), end: i + 1 };
+  }
+  return { text: latex.slice(open + 1), end: latex.length };
+}
+
+/** Whether the position is in a subscript or a superscript: after `_` or `^`, or inside the braces that follow one. */
+function inScript(latex: string, at: number): boolean {
+  const open: boolean[] = [];
+  let script = false;
+  for (let i = 0; i < at; i++) {
+    const c = latex[i];
+    if (c === '\\') i++;
+    else if (c === '{') open.push(open.at(-1) === true || script);
+    else if (c === '}') open.pop();
+    if (c !== ' ') script = c === '_' || c === '^';
+  }
+  return open.at(-1) === true || script;
+}
+
+/**
+ * How much of a formula is mathematics: words set as operands (text in \text, or a plain run of letters that is no
+ * symbol and no function), against the symbols around them, and whether any of those is a variable, a number or a
+ * mathematical command rather than an operator. A name that takes arguments (`\text{Sublayer}(x)`) or labels a
+ * symbol (`F_{\text{thrust}}`) is a symbol, not a word.
+ */
+export function mathContent(latex: string): { words: number; symbols: number; mathematics: boolean } {
+  let words = 0,
+    symbols = 0,
+    mathematics = false;
+  let rest = latex.replace(/\\(?:begin|end)\s*\{[^{}]*\}/g, ' ');
+  for (let found = TEXT_COMMAND.exec(rest); found; found = TEXT_COMMAND.exec(rest)) {
+    const { text, end } = group(rest, found.index + found[0].length - 1);
+    if (inScript(rest, found.index) || /^\s*[([]/.test(rest.slice(end))) symbols++;
+    else words += text.split(/\s+/).filter((w) => /\p{L}/u.test(w)).length;
+    rest = `${rest.slice(0, found.index)} ${rest.slice(end)}`;
+  }
+  const token = /\\([a-zA-Z]+)|\\.|(\d+(?:[.,]\d+)*)|(\p{L}+)|([+\-−=<>*/±×÷≈≠≤≥∝→⇒⇔])/gu;
+  for (const m of rest.matchAll(token)) {
+    if (m[1]) {
+      if (LAYOUT_COMMAND.has(m[1])) continue;
+      symbols++;
+      if (!OPERATOR_COMMAND.has(m[1])) mathematics = true;
+    } else if (m[2]) {
+      symbols++;
+      mathematics = true;
+    } else if (m[3]) {
+      const run = m[3];
+      // A plain run of letters that no symbol or function explains is a word: "Rent", "YourOwnership".
+      const word =
+        run.length >= 4 &&
+        run !== run.toUpperCase() &&
+        !FUNCTION_NAME.has(run.toLowerCase()) &&
+        !inScript(rest, m.index) &&
+        !/^\s*[([]/.test(rest.slice(m.index + run.length));
+      if (word) words++;
+      else {
+        symbols++;
+        mathematics = true;
+      }
+    } else if (m[4]) symbols++;
+  }
+  return { words, symbols, mathematics };
+}
+
+/** Why a board's LaTeX is not mathematics: no symbol, number or command of maths in it, or mostly words. */
+export function formulaProblems(latex: string): string[] {
+  const { words, symbols, mathematics } = mathContent(latex);
+  const why = !mathematics
+    ? 'it has no variable, number or mathematical symbol, only words and operators'
+    : words > symbols
+      ? 'most of it is words in \\text'
+      : '';
+  return why
+    ? [
+        `this formula is not mathematics: ${why}. A formula board is for an equation in symbols and numbers; show a rule stated in words another way (a plot of how it behaves, a timeline, a flow with a branch) or leave the board out`,
+      ]
+    : [];
+}
+
 /** Why a checked board would show nothing real on this step; empty when it passes. */
 export function groundedProblems(item: BoardItem, { results }: { results: boolean }): string[] {
   const problems: string[] = [];
@@ -145,7 +251,8 @@ export function groundedProblems(item: BoardItem, { results }: { results: boolea
       problems.push(
         'every curve is a straight line in x, which a sentence says as well as a plot; plot a relationship whose shape matters (saturation, decay, periodicity, a crossover) or leave the board out',
       );
-  } else if (item.kind === 'flow' && chain(item))
+  } else if (item.kind === 'formula') problems.push(...formulaProblems(item.latex));
+  else if (item.kind === 'flow' && chain(item))
     problems.push(
       'this flow is a simple chain (no node has more than one arrow in or out), which a list says as well; a flow needs a branch, a merge or a loop, otherwise teach on the page with highlights or choose another visual',
     );

@@ -244,7 +244,9 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
   const have = [...new Set([...beat.evidence, ...(beat.boardEvidence ?? [])])];
   const more = dataSentences(doc, visual, have);
   const quoted = quote([...have, ...more]);
-  const table = resultTable(doc, beat.evidence, [...quoted, visual?.data ?? ''].join('\n'));
+  // The table the plan named (withTableBoard), else the one the evidence cites or repeats the most numbers of.
+  const named = visual?.table ? doc.figures.find((f) => f.id === visual.table) : undefined;
+  const table = named ?? resultTable(doc, beat.evidence, [...quoted, visual?.data ?? ''].join('\n'));
   const views = offeredViews(table, visual);
   return {
     ...targets,
@@ -624,6 +626,19 @@ export function cleanDirection(
     boardProblems,
     visualProblems,
   };
+}
+
+/**
+ * A step the plan put on a table's own numbers (withTableBoard) whose direction left the board out gets the best ready
+ * board of the table: it is built from cells of the table and passed the same checks as a model's board, so a results
+ * step never goes without its numbers. A board the model drew that failed its checks stays dropped and flagged, and a
+ * step with an example is left alone. Null when nothing is added.
+ */
+export function withReadyView(direction: Direction, targets: BeatTargets, visual?: StepVisual): Direction | null {
+  const view = targets.views?.[0];
+  if (!visual?.table || !view || view.kind !== visual.visual) return null;
+  if (direction.board || direction.example || direction.boardProblems?.length) return null;
+  return { ...direction, board: view.item };
 }
 
 /**

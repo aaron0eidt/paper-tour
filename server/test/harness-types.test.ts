@@ -750,8 +750,10 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
   assert.equal(requests.filter((r) => r.name === 'exercise_solution').length, 3);
   // The solve call offers only the part's own sentences and printed maths, and sees the page.
   const solve = requests.find((r) => r.name === 'exercise_solution' && r.brief.includes('EXERCISE: Aufgabe 2'))!;
-  assert.deepEqual(solve.schema.properties.read.properties.asked.items.enum, ['p1.s6', 'p1.s7']);
-  assert.deepEqual(solve.schema.properties.read.properties.marks.items.properties.target.enum, ['p1.b8']);
+  assert.equal(solve.schema.properties.read.properties.asked.items.$ref, '#/$defs/sentenceId');
+  assert.deepEqual(solve.schema.$defs.sentenceId.enum, ['p1.s6', 'p1.s7']);
+  assert.equal(solve.schema.properties.read.properties.marks.items.properties.target.$ref, '#/$defs/mathId');
+  assert.deepEqual(solve.schema.$defs.mathId.enum, ['p1.b8']);
   assert.match(solve.brief, /MATHS ON THE PAGE as extracted .*\n\[p1\.b8\] 1 2 3 −1/);
   assert.equal(solve.images, 1);
   assert.deepEqual(metadata.exercises, [
@@ -972,5 +974,15 @@ test('the verifier reads the helper’s answer, and runs the real helper when th
     assert.deepEqual(
       checks.map((c) => c.status),
       ['failed', 'ok'],
+    );
+  // Probabilities and expectations are names of values: the arithmetic behind them is checked, and a wrong chain fails.
+  const names = await pythonVerifier()([
+    'P(\\text{says blue}) = 0.99\\times 0.01 + 0.02\\times 0.99 = 0.0297',
+    'P(\\text{says blue}) = 0.99\\times 0.01 + 0.02\\times 0.99 = 0.0397',
+  ]);
+  if (names[0].status !== 'unknown' || names[1].status !== 'unknown')
+    assert.deepEqual(
+      names.map((c) => c.status),
+      ['ok', 'failed'],
     );
 });

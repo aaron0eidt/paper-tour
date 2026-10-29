@@ -3,7 +3,7 @@ import type { Beat } from './beats';
 import { BOARD_KINDS, LEGACY_BOARD_KINDS, type BoardKind } from './board';
 import type { PaperCard } from './card';
 import { unitTaskLines } from './unit-task';
-import { baseRowName, gridOf, resultTable, tableText } from './tables';
+import { baseRowName, gridOf, resultTable, tableText, tableViews, type TableView } from './tables';
 
 // The tour's visual plan (notes/VISUALS-V2.md): one call after the beats are planned and before they are directed.
 // It sees the whole document card and every beat, so it can give each step the visual that makes its point click, and
@@ -21,6 +21,8 @@ export interface StepVisual {
    * the kinds the plan leaves free, so that frames count toward the tour's kind limits. Unset: any frame kind.
    */
   frames?: BoardKind[];
+  /** The table whose own numbers the step draws (a results step that rests on one), when code chose it (withTableBoard). */
+  table?: string;
 }
 /** The plan by beat ID. Every planned beat has an entry; a beat without one (an exercise part) is not planned. */
 export type VisualPlan = Map<string, StepVisual>;
@@ -115,7 +117,7 @@ const KINDS_HELP: Record<BoardKind, string> = {
   timeline: 'the dates, notice periods, deadlines and terms a document states, or the ordered steps of a procedure.',
   distribution:
     'how uncertainty is spread and changes: a bell curve that narrows or shifts, a Poisson or binomial, the chance of a tail.',
-  formula: 'the parts of a key equation, each with its role.',
+  formula: 'the parts of a key equation in math symbols, each with its role; never a rule in words.',
   bars: 'one key comparison on a single metric.',
   flow: 'a real dependency structure with a branch, a merge or a loop that the page does not draw; a chain of steps is a list, not a flow.',
   scene: 'vectors or geometry (angles, projections, distances) when geometry is the point.',
@@ -226,7 +228,8 @@ ${kinds}
 3. For each visual, "idea" says in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks.
    "data" says exactly which numbers, symbols or labels it uses (at most ${DATA_WORDS} words): document values copied
    as printed, anything else marked illustrative. A step that reports results (a result or a table) uses only the
-   document's own numbers, which its evidence quotes; illustrative values only explain a mechanism. Labels are real
+   document's own numbers, which its evidence quotes; illustrative values only explain a mechanism. At least one
+   results step on a table with ready boards (listed under TABLES) draws one, naming its columns. Labels are real
    items (words of an example sentence, settings, methods), never "item 1".
 4. A step on a worked numerical case names the kind that shows its mechanism, and its example frames use that kind (bars
    only for a few comparable quantities of one unit). Frames count toward each kind's limit.
@@ -303,14 +306,23 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc): strin
     );
     for (const table of tables) {
       const base = baseRowName(table);
+      const ready = readyBoards(table);
       lines.push(
         tableText(table, { maxRows: 14, changes: false }),
         ...(base ? [`Base row "${base}": the change of every other row from it can be drawn as bars.`] : []),
+        ...(ready ? [`Ready boards of this table: ${ready}.`] : []),
         '',
       );
     }
   }
   return lines.join('\n').trimEnd();
+}
+
+/** What the code can draw from a table by itself, as one line for the brief: each kind with what it shows. */
+function readyBoards(table: DocFigure): string {
+  return tableViews(table)
+    .map((view) => `${view.kind}: ${view.what.replace(/^bars of /, '')}`)
+    .join('; ');
 }
 
 const words = (text: unknown, max: number) => {
@@ -404,6 +416,110 @@ export function cleanVisualPlan(
     }
   }
   return { plan, problems, adjusted };
+}
+
+/** A step that reports results from a table the code can draw from, and the boards it can make from it. */
+interface TableStep {
+  beat: Beat;
+  table: DocFigure;
+  views: TableView[];
+}
+
+/**
+ * The steps that report results from a table with ready boards (tables.ts): a step on a table, and a result that rests
+ * on one. Their numbers are the document's own, and a board of them is made by code.
+ */
+export function tableSteps(beats: Beat[], doc: Doc): TableStep[] {
+  const sentences = new Map(doc.sentences.map((s) => [s.id, s.text]));
+  const views = new Map<string, TableView[]>();
+  const steps: TableStep[] = [];
+  for (const beat of beats) {
+    if (beat.unit) continue;
+    const figure = beat.target ? doc.figures.find((f) => f.id === beat.target) : undefined;
+    const numbers = [...beat.evidence, ...(beat.boardEvidence ?? [])].map((id) => sentences.get(id) ?? '').join('\n');
+    const table = beat.target
+      ? figure?.kind === 'table'
+        ? figure
+        : undefined
+      : beat.kind === 'result'
+        ? resultTable(doc, beat.evidence, numbers)
+        : undefined;
+    if (!table) continue;
+    if (!views.has(table.id)) views.set(table.id, tableViews(table));
+    if (views.get(table.id)!.length) steps.push({ beat, table, views: views.get(table.id)! });
+  }
+  return steps;
+}
+
+/**
+ * The plan with a board of the document's own numbers on a results step, when the document has one that rests on a
+ * table with ready boards and the plan left them all out (models plan illustrative pictures for the mechanism and
+ * leave the results to the page). A step whose planned kind is one of its table's ready boards already counts, and
+ * only learns its table. Otherwise the first such step takes the kind of the first ready board that the variety rules
+ * leave room for: a free step before a step with another board, one not in detail before a detail; when every kind
+ * its table offers is used up, the last step elsewhere with such a board gives it up. The plan stays within the limits
+ * of each kind and the share of steps with a board, and every change is recorded.
+ */
+export function withTableBoard(
+  plan: VisualPlan,
+  beats: Beat[],
+  doc: Doc,
+): { plan: VisualPlan; adjusted: PlanAdjustment[] } {
+  const out: VisualPlan = new Map(plan);
+  const adjusted: PlanAdjustment[] = [];
+  const steps = tableSteps(beats, doc);
+  if (!steps.length) return { plan: out, adjusted };
+  const none: StepVisual = { visual: 'none', idea: '', data: '' };
+  const entry = (id: string) => out.get(id) ?? none;
+  const drawn = steps.find(({ beat, views }) => views.some((view) => view.kind === entry(beat.id).visual));
+  if (drawn) {
+    out.set(drawn.beat.id, { ...entry(drawn.beat.id), table: drawn.table.id });
+    return { plan: out, adjusted };
+  }
+  const results = new Set(steps.map(({ beat }) => beat.id));
+  const holders = (kind: BoardKind) => beats.filter((beat) => entry(beat.id).visual === kind).map((beat) => beat.id);
+  const boards = beats.filter((beat) => entry(beat.id).visual !== 'none').length;
+  const room = Math.max(1, Math.floor(beats.length * BOARD_SHARE));
+  const order = steps
+    .map((step, i) => ({ step, i, rank: (entry(step.beat.id).visual === 'none' ? 0 : 2) + (step.beat.detail ? 1 : 0) }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map(({ step }) => step);
+  for (const takeover of [false, true])
+    for (const { beat, table, views } of order)
+      for (const view of views) {
+        const free = entry(beat.id).visual === 'none';
+        const others = holders(view.kind).filter((id) => id !== beat.id);
+        const giving =
+          takeover && others.length >= kindLimit(view.kind)
+            ? others.filter((id) => !results.has(id)).at(-1)
+            : undefined;
+        const fits = giving !== undefined || others.length < kindLimit(view.kind);
+        if (!fits || boards + (free ? 1 : 0) - (giving === undefined ? 0 : 1) > room) continue;
+        if (giving !== undefined) {
+          out.set(giving, none);
+          adjusted.push({
+            beat: giving,
+            visual: view.kind,
+            reason: `its ${view.kind} goes to a results step that draws the numbers of table ${table.number}`,
+          });
+        }
+        out.set(beat.id, {
+          visual: view.kind,
+          idea: words(
+            `Learner sees ${view.what}, drawn from table ${table.number}'s own numbers, and clicks the pattern behind the result.`,
+            IDEA_WORDS,
+          ),
+          data: words(`columns ${view.columns.join(', ')} of the table, values as printed.`, DATA_WORDS),
+          table: table.id,
+        });
+        adjusted.push({
+          beat: beat.id,
+          visual: view.kind,
+          reason: `a results step on table ${table.number} draws its own numbers`,
+        });
+        return { plan: out, adjusted };
+      }
+  return { plan: out, adjusted };
 }
 
 /** The line a step's brief carries: its planned visual and data, or that it teaches on the page alone. */

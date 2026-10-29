@@ -650,7 +650,13 @@ const object = (properties: Record<string, object>) => ({
 function formulaSchema() {
   return object({
     title: field(BOARD_LIMITS.title, 'What the formula computes, at most 6 words.'),
-    latex: { ...field(400, 'The whole equation in LaTeX that KaTeX renders, without its number.'), minLength: 1 },
+    latex: {
+      ...field(
+        400,
+        'The whole equation in LaTeX that KaTeX renders, without its number. Mathematics only, never words.',
+      ),
+      minLength: 1,
+    },
     terms: {
       type: 'array',
       minItems: BOARD_LIMITS.terms[0],

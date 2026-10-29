@@ -10,7 +10,13 @@ import { checkBoard } from '../src/harness/board';
 import { boardStepsOf, degradeDirection, withoutBoards } from '../src/harness/degrade';
 import { beatTargets, cleanDirection, type Direction } from '../src/harness/direct';
 import { visualPlanTask, type StepVisual } from '../src/harness/visual-plan';
-import { groundedCheck, groundedProblems, reportsResults } from '../src/harness/visual-rules';
+import {
+  formulaProblems,
+  groundedCheck,
+  groundedProblems,
+  mathContent,
+  reportsResults,
+} from '../src/harness/visual-rules';
 
 // The rules a tour step's board must meet (visual-rules.ts) and the ladder that keeps one bad visual from failing a tour
 // (degrade.ts), with scripted models (no network).
@@ -260,6 +266,56 @@ test('a plot whose shape matters is accepted: saturation, decay, periodicity, a 
 });
 
 // ------------------------------------------------------------------------------------------------------------ flows
+
+test('a formula of words in \text is not mathematics: refused, with the ways to show the rule instead', () => {
+  const fake = '\\text{YourOwnership} + \\text{GrantedRights} = \\text{LimitedLicense}';
+  const problems = formulaProblems(fake);
+  has(problems, /this formula is not mathematics: it has no variable, number or mathematical symbol/);
+  has(
+    problems,
+    /show a rule stated in words another way \(a plot of how it behaves, a timeline, a flow with a branch\) or leave the board out/,
+  );
+  // The same rule as plain letters, as upright names, or as a sentence of conditions.
+  for (const latex of [
+    'YourOwnership + GrantedRights = LimitedLicense',
+    '\\mathrm{Revenue} - \\mathrm{Cost} = \\mathrm{Profit}',
+    '\\text{Total} = \\text{Rent} + \\text{Deposit}',
+    '\\text{Rent unpaid for fourteen days} \\Rightarrow \\text{landlord may enter}',
+  ])
+    assert.equal(formulaProblems(latex).length, 1, latex);
+  // It reaches the board of a tour step through the board check, and a formula with symbols does not.
+  const item = (latex: string) => ({
+    kind: 'formula' as const,
+    latex,
+    terms: [
+      { latex: latex.slice(0, 2), label: 'one' },
+      { latex: latex.slice(-2), label: 'two' },
+    ],
+  });
+  has(groundedProblems(item(fake), { results: false }), /not mathematics/);
+  assert.deepEqual(groundedProblems(item('E = m c^2'), { results: false }), []);
+});
+
+test('mostly words is not mathematics either, but a name that takes arguments or labels a symbol is a symbol', () => {
+  // Words are most of it.
+  assert.equal(mathContent('\\text{Rent due on the first} = \\text{Deposit}').mathematics, false);
+  has(formulaProblems('\\frac{\\text{Revenue}}{\\text{Cost}}'), /most of it is words in \\text/);
+  // Real mathematics, with a few words in it.
+  const accepted = [
+    'E_{\\text{kin}} = \\frac{1}{2} m v^2',
+    'F_{\\text{thrust}} \\propto v^2',
+    '\\text{Attention}(Q,K,V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V',
+    '\\text{LayerNorm}(x + \\text{Sublayer}(x))',
+    'Attention(Q,K,V) = softmax(QK^T / \\sqrt{d_k}) V',
+    '\\text{Fee} = 0.05 \\times \\text{Rent}',
+    '\\text{Profit} = R - C',
+    'P(\\text{rain}) = 0.3',
+    'ICC = \\frac{\\sigma^2_{shared}}{\\sigma^2_{shared} + \\sigma^2_{individual}} \\approx 0.21',
+    '28.4 - 26.36 \\approx 2.04',
+    'x',
+  ];
+  for (const latex of accepted) assert.deepEqual(formulaProblems(latex), [], latex);
+});
 
 test('a simple chain of boxes is refused as a list', () => {
   const problems = groundedProblems(
@@ -732,7 +788,7 @@ test('a step loses its board and board cues but keeps its narration and page cue
 // ------------------------------------------------------------------------------------------------------- the prompts
 
 test('the prompts and the visual plan state the rules briefly', () => {
-  assert.equal(HARNESS_VERSION, 'paper-tour-harness@28');
+  assert.equal(HARNESS_VERSION, 'paper-tour-harness@29');
   const prompt = (board?: Parameters<typeof directTask>[2]['board']) =>
     directTask('en', 'BRIEF', { actions: ['highlight', 'board_focus'], board, words: 120 });
   assert.match(prompt(), /A step that reports results \(a result or a table\) draws only the document’s own numbers/);
@@ -757,5 +813,6 @@ test('the prompts and the visual plan state the rules briefly', () => {
   assert.ok(prompt().length < 19_700, `${prompt().length} characters`);
   // The rule on worked-example frames (they count toward the kind limits) added one numbered point.
   // The timeline and distribution kinds added one line each to the catalog of kinds.
-  assert.ok(plan.length < 3_200, `${plan.length} characters`);
+  // The rule on a results step that stands on a table, and that a formula is mathematics, added a sentence each.
+  assert.ok(plan.length < 3_400, `${plan.length} characters`);
 });

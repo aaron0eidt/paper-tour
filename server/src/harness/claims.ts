@@ -6,6 +6,7 @@ import { evidencePool, type PaperCard } from './card';
 import type { BoardKind } from './board';
 import { MOVE_SPECS, type Move } from './moves';
 import { proseSentences } from './paper-block';
+import { equationIds, figureIds, idEnum } from './schema-budget';
 
 // A paper tour organised by claims (notes/ROADMAP.md, wave 2): the 2 to 4 statements the authors make in at least two of
 // the abstract, the introduction and the conclusion. Each claim is taught as what changed, why it works, the evidence
@@ -178,7 +179,7 @@ export const claimSentenceIds = (doc: Doc, context: ClaimContext) => [
 
 /** The claims call's response schema; `strict` adds the ID enums the model must choose from (cleanClaims re-checks them). */
 export function claimsSchema(doc: Doc, sentenceIds: string[], preset: Preset, strict = true) {
-  const elementIds = [...doc.figures.map((f) => f.id), ...doc.equations.map((e) => e.id)];
+  const elementIds = [...figureIds(doc), ...equationIds(doc)];
   const sentence = strict ? { $ref: SENTENCE } : { type: 'string' };
   const element = strict ? { $ref: ELEMENT } : { type: 'string' };
   const text = (most: number) => ({ type: 'string', minLength: 1, maxLength: most });
@@ -199,8 +200,8 @@ export function claimsSchema(doc: Doc, sentenceIds: string[], preset: Preset, st
     ...(strict
       ? {
           $defs: {
-            sentenceId: { type: 'string', enum: sentenceIds },
-            elementId: elementIds.length ? { type: 'string', enum: elementIds } : { type: 'string', maxLength: 0 },
+            sentenceId: idEnum(sentenceIds),
+            elementId: idEnum(elementIds),
           },
         }
       : {}),

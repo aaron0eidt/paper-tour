@@ -295,8 +295,9 @@ test('narration explains what the text leaves implicit instead of paraphrasing w
 });
 
 test('the direction prompt stays within its budget for every board', () => {
-  // The common prompt shrank when the rules were merged; this keeps it from growing back unnoticed.
+  // The common prompt shrank when the rules were merged; this keeps it from growing back unnoticed. The formula board's
+  // task grew by the line that a formula is mathematics, not a rule in words.
   for (const board of [undefined, 'formula', 'bars', 'flow', 'plot', 'scene', ...NEW_KINDS] as const)
-    assert.ok(prompt(board).length < 23_000, `${board ?? 'no board'}: ${prompt(board).length} characters`);
+    assert.ok(prompt(board).length < 23_200, `${board ?? 'no board'}: ${prompt(board).length} characters`);
   assert.ok(prompt().length < 20_000, `common prompt: ${prompt().length} characters`);
 });

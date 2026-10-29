@@ -5,7 +5,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@28';
+export const HARNESS_VERSION = 'paper-tour-harness@29';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -300,6 +300,7 @@ ${example(BOARD_EXAMPLES.plotMarks)}`,
 - When function behaviour explains the equation better, you may instead supply an optional "plot" object: kind "plot", x/y finite increasing ranges, curves [{expression,label}], optional x_label/y_label (LaTeX) and parameter {from,to} for a. Safe expressions: x, a, pi/e, + - * / ^, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max, softmax(x,0). Focus curve-1 etc. Say this is an illustrative function, not measured data. Explain how an input or parameter changes the output; do not merely read symbols.
 - "formula.latex" is the whole equation in clean LaTeX that KaTeX can render. The extracted text is often garbled:
   repair it from the page image and the text around it. Leave out the equation number and the final punctuation.
+  Mathematics only: a rule in words (\\text) is rejected; show it as a plot, a timeline, a flow with a branch, or no board.
 - "formula.terms" are the 2-4 parts a student must understand, in the order you explain them. Copy each term's latex
   character for character from formula.latex: one symbol or a complete group such as K^T or \\frac{a}{b}, never a
   piece of a command name or an exponent alone, and no two terms overlap. "label" says what the part means in at most

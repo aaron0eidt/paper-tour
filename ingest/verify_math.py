@@ -16,8 +16,15 @@ The checks are numeric, so they need no computer algebra system:
     and every other equation must hold for all of them (or, in a line joined by "or", one relation must); one
     that holds for some of them only is unknown, since the values may belong to different cases;
   - "A = \\begin{pmatrix}...\\end{pmatrix}" and "f(x) = ..." define a matrix and a function for later lines;
-    f'(x) and f''(x) are checked by finite differences.
-Anything else (sums, integrals, limits, words) is "unknown". Exit status 0 with JSON on stdout, also for bad input.
+    f'(x) and f''(x) are checked by finite differences;
+  - P(...), E[...], Var(...) and the like are names of values ("P(\\text{blue}) = 0.99 \\cdot 0.01 = 0.0099"): the
+    arithmetic of the chain is checked, and a name with just a value is a claim that nothing else in the solution
+    uses, which stays "unknown";
+  - "\\approx" accepts a value rounded to the places it prints ("\\sqrt{10} \\approx 3", "\\frac13 \\approx 33\\%");
+    a word set in \\text before a relation names a value ("\\text{Fläche} = 3 \\cdot 4 = 12"), and after a value it is
+    a note ("0.5 \\text{ probability}").
+Anything else (sums, integrals, limits, other words) is "unknown". Exit status 0 with JSON on stdout, also for bad
+input.
 """
 
 import cmath
@@ -166,7 +173,8 @@ FUNCTIONS = {"sin": cmath.sin, "cos": cmath.cos, "tan": cmath.tan, "arcsin": cma
              "arctan": cmath.atan, "sinh": cmath.sinh, "cosh": cmath.cosh, "tanh": cmath.tanh, "ln": cmath.log,
              "exp": cmath.exp, "lg": cmath.log10, "cot": lambda x: 1 / cmath.tan(x)}
 RELATIONS = {"=": "=", "<": "<", ">": ">", "\\le": "<=", "\\leq": "<=", "\\leqslant": "<=", "\\ge": ">=",
-             "\\geq": ">=", "\\geqslant": ">=", "\\neq": "!=", "\\ne": "!=", "\\approx": "~", "\\coloneqq": "=",
+             "\\geq": ">=", "\\geqslant": ">=", "\\neq": "!=", "\\ne": "!=", "\\approx": "~",
+             "\\simeq": "~", "\\doteq": "~", "\\thickapprox": "~", "\\coloneqq": "=",
              ":=": "=", "≤": "<=", "≥": ">=", "≠": "!=", "≈": "~"}
 AND_WORDS = {"and", "und", "also", "so", "thus", "hence", "then", "dann", "daher", "somit", "folglich", "i.e.",
              "d.h.", "bzw.", "sowie", "with", "mit", "where", "wobei", "da", "since", "because", "weil", "therefore"}
@@ -184,6 +192,58 @@ MATRIX_ENVS = {"pmatrix", "bmatrix", "Bmatrix", "vmatrix", "matrix", "smallmatri
 NOOP_ENVS = {"aligned", "align", "align*", "gathered", "gather", "gather*", "split", "equation", "equation*"}
 
 TOKEN = re.compile(r"\\[a-zA-Z]+|\\.|\d+(?:\.\d+)?|[a-zA-Z]|:=|[^\s]")
+
+# A value written like a function of an event or a variable: P(A), E[X \\mid Y = 1], \\operatorname{Var}(X). Read as
+# letters it would be a product of unknowns; it is a name, whose value the lines around it give or use.
+LABEL_HEAD = re.compile(
+    r"\\(?:mathbb|mathrm|mathbf)\s*\{\s*([PE])\s*\}|\\(Pr)(?![a-zA-Z])|"
+    r"\\(?:operatorname|mathrm|text|textrm)\s*\{\s*(Var|Cov|SD|Std|Pr|P|E)\s*\}|"
+    r"(?<![\\a-zA-Z])(Var|Cov|SD|Std|Pr)(?![a-zA-Z])|(?<![\\a-zA-Z])([PE])(?![a-zA-Z])"
+)
+# What makes P(...) or E(...) a name rather than a function of a number: a relation, a set operation, a condition or
+# words inside, or nothing but capital letters (events and random variables).
+LABEL_INNER = re.compile(r"[=<>|]|\\(?:mid|cap|cup|le|leq|ge|geq|in|setminus|text|textrm|mathrm|bar|overline|neg|ne"
+                         r"|neq)(?![a-zA-Z])|\^c|\\mathbb")
+EVENTS = re.compile(r"(?:\s|[A-Z](?:_\{?[A-Za-z0-9]+\}?)?|')+")
+
+
+def label_name(inner):
+    """The text inside a name's brackets without its spelling: \\text{..} opened, \\mid as |, no spaces or spacing."""
+    t = re.sub(r"\\(?:text|textrm|mathrm|mbox|textit)\s*\{([^{}]*)\}", r"\1", inner)
+    for command, plain in (("\\mid", "|"), ("\\cap", "∩"), ("\\cup", "∪"), ("\\leq", "<="), ("\\geq", ">="),
+                           ("\\le", "<="), ("\\ge", ">=")):
+        t = re.sub(re.escape(command) + r"(?![a-zA-Z])", plain, t)
+    t = re.sub(r"\\[,;:! ]|\\q?quad|~|\s+", "", t)
+    return re.sub(r"([_^])\{(\w)\}", r"\1\2", t)
+
+
+def label_at(src, i):
+    """(name, index after it) when a name written like a function starts at src[i], else None."""
+    m = LABEL_HEAD.match(src, i)
+    if m is None:
+        return None
+    head = next(g for g in m.groups() if g)
+    head = "P" if head == "Pr" else head
+    k = m.end()
+    while k < len(src) and src[k] == " ":
+        k += 1
+    if k >= len(src) or src[k] not in "([":
+        return None
+    depth, close = 0, None
+    for j in range(k, len(src)):
+        if src[j] in "([{" and src[j - 1] != "\\":
+            depth += 1
+        elif src[j] in ")]}" and src[j - 1] != "\\":
+            depth -= 1
+            if depth == 0:
+                close = j
+                break
+    if close is None:
+        return None
+    inner = src[k + 1:close]
+    if head in ("P", "E") and src[k] == "(" and not (LABEL_INNER.search(inner) or EVENTS.fullmatch(inner)):
+        return None
+    return f"{head}({label_name(inner)})", close + 1
 
 
 class Tok:
@@ -230,6 +290,11 @@ def tokenize(src):
     src = re.sub(r"(?<=\d),(?=\d)", ".", src)              # 1,5 is a German decimal
     out, i = [], 0
     while i < len(src):
+        label = label_at(src, i)
+        if label is not None:
+            out.append(Tok("label", label[0]))
+            i = label[1]
+            continue
         m = TOKEN.match(src, i)
         if m is None:
             i += 1
@@ -310,6 +375,31 @@ def tokenize(src):
     return [t for t in out if t is not None]
 
 
+def tidy_words(toks):
+    """Words set in \\text at the top level of a line. At the start of a statement and before a relation one names a
+    value ("\\text{Fläche} = 3 \\cdot 4"); after a value and before the end, a comma or a relation it is a note
+    ("0.5 \\text{ probability}") and goes. Any other word stays, and the relation it is in stays unknown."""
+    out, depth = [], 0
+    for k, t in enumerate(toks):
+        if t.kind == "begin" or (t.kind == "op" and t.text in ("(", "[", "{")):
+            depth += 1
+        elif t.kind == "end" or (t.kind == "op" and t.text in (")", "]", "}")):
+            depth -= 1
+        if t.kind == "word" and depth == 0:
+            before = out[-1] if out else None
+            after = toks[k + 1] if k + 1 < len(toks) else None
+            starts = before is None or before.kind in ("sep", "comma", "row")
+            if starts and after is not None and after.kind == "rel":
+                out.append(Tok("label", "“" + re.sub(r"\s+", " ", t.text).strip().lower() + "”"))
+                continue
+            value = before is not None and (before.kind in ("num", "letter", "label") or
+                                            (before.kind == "op" and before.text in (")", "]", "}", "%")))
+            if value and (after is None or after.kind in ("sep", "comma", "row", "rel")):
+                continue
+        out.append(t)
+    return out
+
+
 # ---------------------------------------------------------------------------- parser
 
 FUNC_LETTERS = set("fghFGH")
@@ -367,7 +457,7 @@ class Parser:
         t = self.peek()
         if t is None:
             return False
-        if t.kind in ("num", "letter", "begin"):
+        if t.kind in ("num", "letter", "begin", "label"):
             return True
         if t.kind == "op":
             return t.text in ("(", "[", "{")
@@ -520,6 +610,8 @@ class Parser:
             return [abs_value(v) for v in Parser(inner, self.env).whole()]
         if t.kind == "begin":
             return [self.matrix(t.text)]
+        if t.kind == "label":
+            return [self.variable(t.text)]
         if t.kind == "letter":
             name = self.subscript(t.text)
             primes = 0
@@ -805,7 +897,9 @@ def simple_name(side):
     t = p.take()
     if t is None:
         return None
-    if t.kind == "letter" and t.text != "e":
+    if t.kind == "label":
+        name = t.text
+    elif t.kind == "letter" and t.text != "e":
         name = p.subscript(t.text)
     elif t.kind == "cmd" and t.text[1:] in GREEK:
         name = p.subscript(t.text)
@@ -837,6 +931,27 @@ def numbers_of(side):
     toks = side[1:] if side and side[0].kind == "op" and side[0].text == "-" else side
     if len(toks) == 1 and toks[0].kind == "num" and "." in toks[0].text:
         return len(toks[0].text.split(".")[1])
+    return None
+
+
+def places_of(side):
+    """The decimals a side prints when it is one plain number or percentage (33 %, 2.50, -7), else None."""
+    toks = side[1:] if side and side[0].kind == "op" and side[0].text == "-" else side
+    percent = len(toks) == 2 and toks[1].kind == "op" and toks[1].text == "%"
+    toks = toks[:1] if percent else toks
+    if len(toks) == 1 and toks[0].kind == "num":
+        return (len(toks[0].text.split(".")[1]) if "." in toks[0].text else 0) + (2 if percent else 0)
+    return None
+
+
+def rounding(rel, left, right):
+    """The decimals the relation between two sides may differ by: a plain decimal rounds an equality, and for \\approx
+    any plain number (or percentage) is rounded to the places it prints. The right side counts first."""
+    pick = places_of if rel == "~" else numbers_of
+    for side in (right, left):
+        places = pick(side)
+        if places is not None:
+            return places
     return None
 
 
@@ -873,7 +988,10 @@ def holds(rel, a, b, decimals=None):
 
 def equal(x, y, rel, decimals):
     if rel == "~":
-        return close(x, y, rel=0.01, absolute=0.006)
+        # within a percent, or within the rounding of the places the printed side shows
+        return close(x, y, rel=0.01, absolute=0.006) or (
+            decimals is not None and not isinstance(x, Matrix) and not isinstance(y, Matrix)
+            and abs(x - y) <= 0.5 * 10 ** -decimals * (1 + 1e-9) + 1e-9)
     if decimals is not None and not isinstance(x, Matrix) and not isinstance(y, Matrix):
         return abs(x - y) <= 0.5 * 10 ** -decimals + 1e-9 or close(x, y)
     return close(x, y)
@@ -919,14 +1037,15 @@ def check_lines(lines):
     parsed = []
     for line in lines:
         try:
-            parts, joiner = split_line(tokenize(line))
+            parts, joiner = split_line(tidy_words(tokenize(line)))
             parsed.append(([chain(p) for p in parts], joiner, None))
         except Unsupported as e:
             parsed.append(([], "and", str(e)))
 
     # definitions (matrices, functions) and candidate values (assignments), in order
-    env, functions, alternatives = {"__functions__": {}}, {}, {}
+    env, functions, alternatives, derived = {"__functions__": {}}, {}, {}, {}
     env["__functions__"] = functions
+    env["__derived__"] = derived                 # values that a chain computed, by name
     for statements, joiner, _ in parsed:
         for sides, rels in statements:
             if len(sides) < 2 or rels[0] != "=":
@@ -938,23 +1057,38 @@ def check_lines(lines):
             name = simple_name(sides[0])
             if name is None:
                 continue
+            # names standing first in a chain share its value: "P(A) = P(B) = 0.5"
+            heads = [name]
+            while (len(heads) < len(sides) - 1 and rels[len(heads) - 1] == "="
+                   and simple_name(sides[len(heads)]) is not None):
+                heads.append(simple_name(sides[len(heads)]))
+            if rels[len(heads) - 1] != "=":
+                continue
             try:
                 try:
-                    values = evaluate(sides[1], env)
+                    values = evaluate(sides[len(heads)], env)
                 except FreeVariable:              # "A = 2w \cdot w = 50": the chain ends in A's value
                     values = evaluate(sides[-1], env)
             except (Unsupported, FreeVariable, ZeroDivisionError, ValueError, OverflowError):
                 continue
-            if any(isinstance(v, Matrix) for v in values):
-                if name not in env:
-                    env[name] = values[0]
-            else:
-                known = alternatives.setdefault(name, [])
-                known += [v for v in values if not any(close(v, k) for k in known)]
+            for name in heads:
+                if any(isinstance(v, Matrix) for v in values):
+                    if name not in env:
+                        env[name] = values[0]
+                else:
+                    known = alternatives.setdefault(name, [])
+                    known += [v for v in values if not any(close(v, k) for k in known)]
+                    if len(sides) - len(heads) >= 2 and computed(sides[len(heads):], rels[len(heads):], env):
+                        derived.setdefault(name, []).extend(values)
+    # a name that a chain computed has that value; a stray claim does not make it uncertain
+    for name in derived:
+        if "(" in name:
+            values = derived[name]
+            alternatives[name] = [v for i, v in enumerate(values) if not any(close(v, w) for w in values[:i])]
     # x_1 = 2, x_2 = 3 are values of x as well
     for name in list(alternatives):
         base = name.split("_", 1)[0]
-        if base != name and base not in alternatives:
+        if base != name and base not in alternatives and "(" not in name:
             alternatives.setdefault(base + "#", []).extend(alternatives[name])
     for name in [n for n in alternatives if n.endswith("#")]:
         values = alternatives.pop(name)
@@ -966,13 +1100,45 @@ def check_lines(lines):
         local.update(zip(names, combo))
         envs.append(local)
 
+    checked = [[check_statement(sides, rels, env, envs, functions) for sides, rels in statements]
+               if error is None else [] for statements, joiner, error in parsed]
+    checked = claims(parsed, checked, alternatives)
     out = []
-    for statements, joiner, error in parsed:
+    for (statements, joiner, error), results in zip(parsed, checked):
         if error is not None or not statements:
             out.append({"status": "unknown"} if error is None else {"status": "unknown", "problem": error})
             continue
-        results = [check_statement(sides, rels, env, envs, functions) for sides, rels in statements]
         out.append(line_status(results) if joiner == "and" else either(statements, results, envs))
+    return out
+
+
+def labels_in(sides):
+    return {t.text for side in sides for t in side if t.kind == "label"}
+
+
+def computed(sides, rels, env):
+    """Whether a chain of plain numbers computes one value: every side is a number and each equals the next."""
+    try:
+        values = [evaluate(side, env) for side in sides]
+        return all(holds(r, values[k], values[k + 1], rounding(r, sides[k], sides[k + 1])) for k, r in enumerate(rels))
+    except (Unsupported, FreeVariable, ZeroDivisionError, ValueError, OverflowError):
+        return False
+
+
+def claims(parsed, checked, alternatives):
+    """A name given a value is only a claim, and a line of claims stays unknown, unless a statement that checks out
+    computes or uses the name: "P(A) = 0.3" is what the later "P(A \\cap B) = P(A) \\cdot 0.5 = 0.15" is computed from,
+    and nothing else checks it. A name with two different values in the solution is a claim as well."""
+    verified = set()
+    for (statements, _, _), results in zip(parsed, checked):
+        for (sides, _), (kind, _) in zip(statements, results):
+            if kind == "ok":
+                verified |= labels_in(sides)
+    out = []
+    for (statements, _, _), results in zip(parsed, checked):
+        out.append([("claim", None) if kind == "assign" and labels_in(sides) and (
+            not labels_in(sides) & verified or any(len(alternatives.get(n, ())) > 1 for n in labels_in(sides)))
+                    else (kind, problem) for (sides, _), (kind, problem) in zip(statements, results)])
     return out
 
 
@@ -1014,29 +1180,37 @@ def check_statement(sides, rels, env, envs, functions):
         names = []
         for s in sides:
             names += [n for n in free_variables(s, env) if n not in names]
-        decimals = [numbers_of(s) for s in sides]
         if not names:
             values = [evaluate(s, env) for s in sides]
             for k, r in enumerate(rels):
-                d = decimals[k + 1] if decimals[k + 1] is not None else decimals[k]
-                if not holds(r, values[k], values[k + 1], d):
+                if not holds(r, values[k], values[k + 1], rounding(r, sides[k], sides[k + 1])):
                     return ("failed", f"{text} is false: {text_of(sides[k])} is {show_all(values[k])}, "
                                       f"{text_of(sides[k + 1])} is {show_all(values[k + 1])}")
             return ("ok", None)
         if identity(sides, rels, env, names):
             return ("ok", None)
-        if simple_name(sides[0]) is not None and len(sides) == 2 and rels[0] == "=":
+        lone = [simple_name(s) for s in sides]
+        value_sides = [s for s, name in zip(sides, lone) if name is None]
+        if labels_in(sides) and set(rels) == {"="} and len(value_sides) <= 1 and not labels_in(value_sides):
+            # names given one value; see claims(). Not the value a chain computed for the name elsewhere: that fails.
+            value = evaluate(value_sides[0], env) if value_sides else []
+            for name in (n for n in lone if n and n in env["__derived__"]):
+                if value and not any(close(v, d) for v in value for d in env["__derived__"][name]):
+                    return ("failed", f"{text} is false: {name} is {show_all(value)} here, but "
+                                      f"{show_all(env['__derived__'][name])} where it is computed")
+            return ("assign", None)
+        if simple_name(sides[0]) is not None and len(sides) == 2 and rels[0] == "=" and not labels_in(sides[1:]):
             return ("assign", None)
         if claims_function(sides[0], functions):
             return ("failed", f"{text} does not hold for every {names[0]}")
         covering = [e for e in envs if all(n in e for n in names)]
         if not covering:
-            return ("unknown", None)
+            return partial(sides, rels, env, text) or ("unknown", None)
         verdicts = []
         for e in covering:
             values = [evaluate(s, e) for s in sides]
-            ok = all(holds(r, values[k], values[k + 1], decimals[k + 1] if decimals[k + 1] is not None else
-                           decimals[k]) for k, r in enumerate(rels))
+            ok = all(holds(r, values[k], values[k + 1], rounding(r, sides[k], sides[k + 1]))
+                     for k, r in enumerate(rels))
             verdicts.append((ok, e))
         if all(ok for ok, _ in verdicts):
             return ("ok", None)
@@ -1045,9 +1219,31 @@ def check_statement(sides, rels, env, envs, functions):
             return ("failed", f"{text} does not hold for {where}")
         return ("mixed", None)
     except (Unsupported, FreeVariable) as e:
-        return ("unknown", str(e))
+        return partial(sides, rels, env, text) or ("unknown", str(e))
     except (ZeroDivisionError, ValueError, OverflowError):
         return ("unknown", "a value is undefined")
+
+
+def partial(sides, rels, env, text):
+    """A chain that cannot be evaluated as a whole can still be wrong where two plain numbers stand side by side
+    ("P(A) = \\frac{|A|}{|\\Omega|} = \\frac{3}{6} = \\frac{1}{3}"): that relation must hold. ("failed", why) or None.
+    """
+    values = []
+    for side in sides:
+        try:
+            values.append(evaluate(side, env))
+        except (Unsupported, FreeVariable, ZeroDivisionError, ValueError, OverflowError):
+            values.append(None)
+    for k, r in enumerate(rels):
+        if values[k] is None or values[k + 1] is None:
+            continue
+        try:
+            if not holds(r, values[k], values[k + 1], rounding(r, sides[k], sides[k + 1])):
+                return ("failed", f"{text} is false: {text_of(sides[k])} is {show_all(values[k])}, "
+                                  f"{text_of(sides[k + 1])} is {show_all(values[k + 1])}")
+        except Unsupported:
+            continue
+    return None
 
 
 def show_all(values):
@@ -1060,7 +1256,8 @@ def line_status(results):
     failed = [p for k, p in results if k == "failed"]
     if failed:
         return {"status": "failed", "problem": failed[0]}
-    if all(k in ("ok", "assign") for k in kinds):
+    # a claim that nothing checks does not spoil a line in which something else was checked
+    if all(k in ("ok", "assign", "claim") for k in kinds) and ("claim" not in kinds or "ok" in kinds):
         return {"status": "ok"}
     problem = next((p for k, p in results if k == "unknown" and p), None)
     return {"status": "unknown", **({"problem": problem} if problem else {})}

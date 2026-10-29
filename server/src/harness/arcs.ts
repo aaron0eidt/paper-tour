@@ -5,6 +5,7 @@ import { MAX_STEPS, type Beat, type BeatKind, type PlanChapter, type Preset, typ
 import type { CardItem, PaperCard } from './card';
 import { DOC_TYPE_HELP, type DocType } from './doctype';
 import { proseSentences } from './paper-block';
+import { equationIds, figureIds, idEnum } from './schema-budget';
 
 // Tours of documents that are neither papers nor exercise sheets (notes/HARNESS.md, stage B with the model): one call
 // picks the points each chapter of the type's arc makes, with evidence; code turns them into beats.
@@ -135,11 +136,13 @@ export interface ArcPlan {
 export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset: Preset, strict = true) {
   const specs = ARC_SPECS[type];
   const short = { type: 'string', minLength: 1, maxLength: 80 };
+  // Every list shares the one definition of the sentence IDs: written into each field they would be counted once for
+  // each, and a long document's sentences would exceed the provider's enum budget (schema-budget.ts).
   const evidence = {
     type: 'array',
     minItems: 1,
     maxItems: 3,
-    items: strict ? { type: 'string', enum: sentenceIds } : { type: 'string' },
+    items: strict ? { $ref: '#/$defs/sentenceId' } : { type: 'string' },
   };
   const object = (properties: Record<string, object>) => ({
     type: 'object',
@@ -148,7 +151,7 @@ export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset
     properties,
   });
   const text = { type: 'string', minLength: 1, maxLength: 300 };
-  const visuals = ['', ...doc.figures.map((f) => f.id), ...doc.equations.map((e) => e.id)];
+  const visuals = ['', ...figureIds(doc), ...equationIds(doc)];
   const topic = object({
     title: short,
     text,
@@ -157,22 +160,25 @@ export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset
     visual: strict ? { type: 'string', enum: visuals } : { type: 'string' },
   });
   const titled = specs.filter((s) => !(type === 'lecture' && s.id === 'topics'));
-  return object({
-    plan: { type: 'string', maxLength: 1500 },
-    chapter_titles: object(Object.fromEntries(titled.map((s) => [s.id, short]))),
-    ...Object.fromEntries(
-      specs.map((s) => [
-        s.id,
-        {
-          type: 'array',
-          minItems: s.min,
-          maxItems: s.max[preset],
-          items: type === 'lecture' && s.id === 'topics' ? topic : object({ text, evidence }),
-        },
-      ]),
-    ),
-    ...(type === 'contract' ? { disclaimer: { type: 'string', minLength: 1, maxLength: 200 } } : {}),
-  });
+  return {
+    ...(strict ? { $defs: { sentenceId: idEnum(sentenceIds) } } : {}),
+    ...object({
+      plan: { type: 'string', maxLength: 1500 },
+      chapter_titles: object(Object.fromEntries(titled.map((s) => [s.id, short]))),
+      ...Object.fromEntries(
+        specs.map((s) => [
+          s.id,
+          {
+            type: 'array',
+            minItems: s.min,
+            maxItems: s.max[preset],
+            items: type === 'lecture' && s.id === 'topics' ? topic : object({ text, evidence }),
+          },
+        ]),
+      ),
+      ...(type === 'contract' ? { disclaimer: { type: 'string', minLength: 1, maxLength: 200 } } : {}),
+    }),
+  };
 }
 
 export function arcTask(type: ArcType, language: string, preset: Preset) {

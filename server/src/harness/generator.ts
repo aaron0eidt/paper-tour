@@ -58,6 +58,7 @@ import {
   highlightedSentences,
   lengthProblems,
   sayLimit,
+  withReadyView,
   type BeatTargets,
   type Direction,
 } from './direct';
@@ -97,6 +98,7 @@ import {
   visualPlanEvent,
   visualPlanSchema,
   visualPlanTask,
+  withTableBoard,
   type PlanAdjustment,
   type VisualPlan,
 } from './visual-plan';
@@ -426,6 +428,10 @@ export class HarnessTourGenerator implements TourGenerator {
         }
       }
       if (visuals) {
+        // A results step on a table with ready boards draws the table's own numbers when the plan left them out.
+        const withData = withTableBoard(visuals, plannable, doc);
+        visuals = withData.plan;
+        adjusted = [...adjusted, ...withData.adjusted];
         // A sheet's overview and takeaway have no visual of their own.
         for (const beat of beats)
           if (!visuals.has(beat.id)) visuals.set(beat.id, { visual: 'none', idea: '', data: '' });
@@ -752,7 +758,13 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       // A board, example or pen mark that still fails is dropped; the narration and the page cues stay.
       const settled = degradeDirection(direction);
-      return { targets, direction: settled.direction, ...(settled.degraded ? { degraded: settled.degraded } : {}) };
+      const filled = withReadyView(settled.direction, targets, visual);
+      if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: visual!.visual });
+      return {
+        targets,
+        direction: filled ?? settled.direction,
+        ...(settled.degraded ? { degraded: settled.degraded } : {}),
+      };
     };
     // The tour as one step list per beat: a beat's own steps, or none for an omitted detail or a step that only read the
     // source aloud. Built once per beat, since a finished beat never changes.

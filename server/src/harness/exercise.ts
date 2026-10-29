@@ -14,6 +14,7 @@ import type { Beat, PlanChapter, Preset, TourPlan } from './beats';
 import type { PaperCard } from './card';
 import { TONE } from './doctype';
 import { taskName } from './paper-block';
+import { idEnum, pick } from './schema-budget';
 import type { UnitVisual } from './exercise-visual';
 import { unitTaskLines } from './unit-task';
 import type { LineCheck } from './verify';
@@ -53,6 +54,8 @@ const STEP_CAP: Record<Preset, number> = { quick: 2, standard: 3, deep: 4 };
 /** The checkpoint's limits, as the tour schema states them. */
 const COACH_PROMPT_MAX = 300;
 const COACH_HINT_MAX = 200;
+/** Most sentences (or formulas) of a task a solve call may cite from. */
+const UNIT_IDS = 400;
 const COACH_HINTS = 3;
 /**
  * Steps of a part besides its solution steps: the task, the checkpoint, the method and the answer; in compact form the
@@ -247,57 +250,66 @@ export function solveSchema(unit: Unit, strict = true): object {
       properties: { ...loose.properties, try: {} },
     };
   }
-  const ids = (list: string[]) => (list.length ? { type: 'string', enum: list } : { type: 'string', maxLength: 0 });
+  // The task's sentences are listed once for the fields that cite them; a task of many pages offers its first
+  // sentences and the rest is checked in code (schema-budget.ts).
+  const sentence = { $ref: '#/$defs/sentenceId' };
   const { title, latex, terms } = line(1, 3).properties;
-  return object({
-    plan: { type: 'string', maxLength: 6000, description: 'Solve the exercise here first and check the result.' },
-    read: object({
-      say: words(55, 'What is given and what is asked, in 20-50 spoken words.'),
-      given: { type: 'array', maxItems: 3, items: ids(unit.sentences) },
-      given_anchor: anchor,
-      asked: { type: 'array', minItems: 1, maxItems: 2, items: ids(unit.sentences) },
-      asked_anchor: anchor,
-      marks: { type: 'array', maxItems: unit.maths.length ? 1 : 0, items: object({ target: ids(unit.maths), anchor }) },
-    }),
-    method: object({
-      say: words(45, 'The idea or method and why it fits, in 15-45 spoken words.'),
-      formula: line(0, 4, 0),
-    }),
-    steps: {
-      type: 'array',
-      minItems: 1,
-      maxItems: Math.max(1, unit.steps),
-      items: object({
-        title,
-        latex,
-        terms,
-        say: words(45, 'What this step does and why it works, in 10-45 spoken words.'),
-        sure: { type: 'boolean', description: 'false when you are not certain this step is right' },
+  return {
+    $defs: { sentenceId: idEnum(pick(unit.sentences, UNIT_IDS)), mathId: idEnum(pick(unit.maths, UNIT_IDS)) },
+    ...object({
+      plan: { type: 'string', maxLength: 6000, description: 'Solve the exercise here first and check the result.' },
+      read: object({
+        say: words(55, 'What is given and what is asked, in 20-50 spoken words.'),
+        given: { type: 'array', maxItems: 3, items: sentence },
+        given_anchor: anchor,
+        asked: { type: 'array', minItems: 1, maxItems: 2, items: sentence },
+        asked_anchor: anchor,
+        marks: {
+          type: 'array',
+          maxItems: unit.maths.length ? 1 : 0,
+          items: object({ target: { $ref: '#/$defs/mathId' }, anchor }),
+        },
       }),
-    },
-    answer: object({ ...line(1, 2).properties, say: words(45, 'The result in words and a one-line summary.') }),
-    try: object({
-      prompt: {
-        type: 'string',
-        minLength: 1,
-        maxLength: COACH_PROMPT_MAX,
-        description:
-          'What the learner should try before seeing the solution, in 1-2 spoken sentences; never the result.',
-      },
-      hints: {
+      method: object({
+        say: words(45, 'The idea or method and why it fits, in 15-45 spoken words.'),
+        formula: line(0, 4, 0),
+      }),
+      steps: {
         type: 'array',
-        maxItems: COACH_HINTS,
-        items: { type: 'string', minLength: 1, maxLength: COACH_HINT_MAX },
-        description: 'Up to 3 hints from a nudge to almost the answer; none contains the final result.',
+        minItems: 1,
+        maxItems: Math.max(1, unit.steps),
+        items: object({
+          title,
+          latex,
+          terms,
+          say: words(45, 'What this step does and why it works, in 10-45 spoken words.'),
+          sure: { type: 'boolean', description: 'false when you are not certain this step is right' },
+        }),
       },
+      answer: object({ ...line(1, 2).properties, say: words(45, 'The result in words and a one-line summary.') }),
+      try: object({
+        prompt: {
+          type: 'string',
+          minLength: 1,
+          maxLength: COACH_PROMPT_MAX,
+          description:
+            'What the learner should try before seeing the solution, in 1-2 spoken sentences; never the result.',
+        },
+        hints: {
+          type: 'array',
+          maxItems: COACH_HINTS,
+          items: { type: 'string', minLength: 1, maxLength: COACH_HINT_MAX },
+          description: 'Up to 3 hints from a nudge to almost the answer; none contains the final result.',
+        },
+      }),
+      check_note: {
+        type: 'string',
+        maxLength: 140,
+        description: 'One short sentence asking the learner to check a step.',
+      },
+      questions: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', minLength: 1, maxLength: 120 } },
     }),
-    check_note: {
-      type: 'string',
-      maxLength: 140,
-      description: 'One short sentence asking the learner to check a step.',
-    },
-    questions: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', minLength: 1, maxLength: 120 } },
-  });
+  };
 }
 
 /**

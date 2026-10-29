@@ -9,7 +9,11 @@ import { ANSWERABLE, type AskRequest } from './ask-types';
 import type { Passage, Retrieval } from './ask-retrieval';
 import { BOARD_EXAMPLES } from './prompts';
 import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
+import { pick } from './schema-budget';
 import { BOUNDS_SCHEMA, figureFrameText, measuredFrameText } from './visual-grounding';
+
+/** Most sentences and visuals an answer may point at (schema-budget.ts). */
+const ASK_IDS = 600;
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
@@ -168,7 +172,8 @@ export function answerProviderSchema<T>(schema: T): T {
  * IDs. Regions other than "whole" are offered only when the model can see the figure.
  */
 export function answerSchema(retrieval: Retrieval, regions: readonly string[] = ['whole']) {
-  const ids = [...retrieval.sentences, ...retrieval.visuals];
+  // What a question retrieves is small, but a selection can cover a page: the focus comes first and the rest is cut.
+  const ids = pick([...retrieval.sentences, ...retrieval.visuals], ASK_IDS);
   const text = (maxLength: number, description?: string) => ({
     type: 'string',
     maxLength,
