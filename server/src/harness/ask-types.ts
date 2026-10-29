@@ -26,3 +26,14 @@ export interface AskAnswer {
   steps: Step[];
   followups: string[];
 }
+
+/**
+ * What a streamed answer sends, one JSON object per line (ask-stream.ts): each step that is finished and checked while
+ * the rest is still being written, then the whole answer, whose first steps are those already sent.
+ */
+export type AnswerEvent =
+  | { type: 'step'; answerable: Answerable; step: Step; language?: string }
+  | { type: 'answer'; answer: AskAnswer }
+  | { type: 'error'; error: { code: string; message: string; status: number } };
+/** Where a finished step goes while the answer is written, with the answer language when the learner chose one. */
+export type StepSink = (answerable: Answerable, step: Step, language?: string) => void;

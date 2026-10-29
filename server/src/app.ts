@@ -12,7 +12,7 @@ import type { Library } from './service';
 import type { ReaderState } from '../../shared/contracts';
 import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
-import { DEMO_PAPER, type AskAnswer, type AskRequest } from './harness/ask';
+import { DEMO_PAPER, answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
 import { snapService, type SnapRequest, type SnapResult, type SnapService } from './snap';
 
 const uuid = { type: 'string', format: 'uuid' };
@@ -545,10 +545,12 @@ export async function createApp(options: Options) {
       api.post<{ Params: { id: string }; Body: AskRequest }>(
         '/documents/:id/ask',
         { schema: { params: documentParams, body: askBody } },
-        async (req, reply): Promise<AskAnswer> => {
+        async (req, reply): Promise<AskAnswer | FastifyReply> => {
           const ask = service.ask?.bind(service);
           if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
-          return whileConnected(reply, (signal) => ask(owner(req), req.params.id, req.body, signal));
+          return whileConnected(reply, (signal) =>
+            answerResponse(reply, req.headers.accept, () => ask(owner(req), req.params.id, req.body, signal)),
+          );
         },
       );
       // A loose box dragged over a figure, answered with the outline of the object inside it (snap.ts).
@@ -603,10 +605,12 @@ export async function createApp(options: Options) {
               body: askBody,
             },
           },
-          async (req, reply): Promise<AskAnswer> => {
+          async (req, reply): Promise<AskAnswer | FastifyReply> => {
             const ask = options.service.demoAsk?.bind(options.service);
             if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
-            return whileConnected(reply, (signal) => ask(req.params.paper, req.body, signal));
+            return whileConnected(reply, (signal) =>
+              answerResponse(reply, req.headers.accept, () => ask(req.params.paper, req.body, signal)),
+            );
           },
         );
         demo.post<{ Params: { paper: string }; Body: SnapRequest }>(

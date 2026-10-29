@@ -280,6 +280,37 @@ await test('a demo paper is asked about in the background only where a local API
   eq(prefetchPossible({ paper: 'demo' }, { DEV: false, VITE_API_URL: '' }), false);
 });
 
+await test('a question the learner asks reports its progress; a kept or background answer comes whole', async () => {
+  const progress: string[] = [];
+  const seen: (((answer: AskAnswer) => void) | undefined)[] = [];
+  const calls: Call[] = [];
+  const transport = (_s: AskSource, req: AskRequest, signal: AbortSignal, onProgress?: (answer: AskAnswer) => void) =>
+    new Promise<AskAnswer>((resolve, reject) => {
+      seen.push(onProgress);
+      calls.push({ question: req.question, signal, resolve, reject });
+    });
+  const keeper = new AnswerKeeper(transport);
+  keeper.prefetch(source, [request('background')]);
+  eq(seen, [undefined], 'the background asks without progress');
+  // The learner asks the same question: it waits for the background request, which reports nothing.
+  const joined = keeper.answer(source, request('background'), new AbortController().signal, () => progress.push('joined'));
+  calls[0].resolve(answerTo('A'));
+  eq((await joined).steps[0].say, 'A');
+  eq(progress, [], 'a joined request comes whole');
+  eq(
+    await keeper.answer(source, request('background'), new AbortController().signal, () => progress.push('kept')),
+    answerTo('A'),
+  );
+  eq(progress, [], 'a kept answer comes whole');
+  // A question of its own reports each step as it is written.
+  const own = keeper.answer(source, request('own'), new AbortController().signal, (a) => progress.push(a.steps[0].say));
+  eq(seen.length, 2);
+  seen[1]?.(answerTo('first step'));
+  calls[1].resolve(answerTo('whole'));
+  eq((await own).steps[0].say, 'whole');
+  eq(progress, ['first step']);
+});
+
 console.log(results.join('\n'));
 if (failures) throw new Error(`${failures} test(s) failed`);
 console.log(`\nall ${results.length} prefetch tests passed`);

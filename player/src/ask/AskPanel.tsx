@@ -48,6 +48,11 @@ export interface AskPanelProps {
   onAsk?(question: string): void;
   /** Play the answer; the panel never drives an engine itself. */
   onAnswer(answer: AskAnswer, question: string): void;
+  /**
+   * Play the answer while it is still written: called with the answer so far each time another step is whole (the first
+   * call starts it), and last with `open` false and the whole answer. Without it an answer plays when it is complete.
+   */
+  onAnswerPart?(answer: AskAnswer, question: string, open: boolean): void;
   /** The learner stopped a question before its answer came. */
   onCancel?(): void;
   onResume?(): void;
@@ -97,6 +102,8 @@ export function AskPanel(props: AskPanelProps) {
   const [focused, setFocused] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const request = useRef<AbortController | null>(null);
+  // An answer is playing while the rest of it is still written.
+  const writing = useRef(false);
   // The reader's callbacks as of now, for an answer that arrives after it re-rendered.
   const latest = useRef(props);
   latest.current = props;
@@ -134,9 +141,16 @@ export function AskPanel(props: AskPanelProps) {
     if (props.selection && !props.selecting) input.current?.focus();
   }, [props.selection, props.selecting]);
 
-  // The reader went back to the tour on its own (a step picked in the sidebar, another tour): the answer is gone.
+  // The reader went back to the tour on its own (a step picked in the sidebar, another tour): the answer is gone, and an
+  // answer still being written has nowhere to play.
   useEffect(() => {
-    if (!away) setPhase((current) => (current.kind === 'answered' ? { kind: 'idle' } : current));
+    if (away) return;
+    setPhase((current) => (current.kind === 'answered' ? { kind: 'idle' } : current));
+    if (writing.current) {
+      writing.current = false;
+      request.current?.abort();
+      request.current = null;
+    }
   }, [away]);
 
   // While waiting, the status says what is happening, so a long wait does not look stuck.
@@ -189,11 +203,20 @@ export function AskPanel(props: AskPanelProps) {
     latest.current.onAnswer(answer, question);
   }, []);
 
+  // The answer that began playing while it was written is complete (or ends where it stopped): remember it and close it.
+  const finish = useCallback((question: string, answer: AskAnswer) => {
+    writing.current = false;
+    setHistory((turns) => [...turns, { question, answer: answerText(answer) }].slice(-MAX_HISTORY));
+    setPhase({ kind: 'answered', question, answer });
+    latest.current.onAnswerPart?.(answer, question, false);
+  }, []);
+
   const ask = useCallback(
     async (text: string) => {
       const question = text.replace(/\s+/g, ' ').trim();
       if (!question || busy || voiceBusy || latest.current.selecting) return;
       request.current?.abort();
+      writing.current = false;
       const controller = new AbortController();
       request.current = controller;
       setDraft(question);
@@ -209,12 +232,32 @@ export function AskPanel(props: AskPanelProps) {
       }
       setPhase({ kind: 'thinking', question, since: Date.now() });
       latest.current.onAsk?.(question);
+      // The answer as far as it is written, once its first step is here: it plays from then on, and the field is free.
+      let begun: AskAnswer | null = null;
+      const progress = (part: AskAnswer) => {
+        if (request.current !== controller) return;
+        if (!begun) {
+          writing.current = true;
+          setDraft('');
+          input.current?.blur();
+          setPhase({ kind: 'answered', question, answer: part });
+        }
+        begun = part;
+        latest.current.onAnswerPart?.(part, question, true);
+      };
       let answer: AskAnswer;
       try {
-        answer = await keeper.answer(source, sent, controller.signal);
+        answer = await keeper.answer(
+          source,
+          sent,
+          controller.signal,
+          latest.current.onAnswerPart ? progress : undefined,
+        );
       } catch (error) {
         if (request.current !== controller) return;
         request.current = null;
+        // Steps were already playing: the answer ends with them, rather than failing after the learner heard it begin.
+        if (begun) return finish(question, begun);
         // Stopped by the learner: back to the question, ready to edit or send again.
         if (isCancelled(error)) {
           setPhase({ kind: 'stopped', question });
@@ -224,9 +267,10 @@ export function AskPanel(props: AskPanelProps) {
       }
       if (request.current !== controller) return;
       request.current = null;
-      deliver(question, answer);
+      if (begun) finish(question, answer);
+      else deliver(question, answer);
     },
-    [busy, voiceBusy, source, keeper, requestFor, deliver],
+    [busy, voiceBusy, source, keeper, requestFor, deliver, finish],
   );
 
   // The tour's last step asks for the answers to its suggested questions, one at a time, with the request a click on

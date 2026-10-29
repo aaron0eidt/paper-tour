@@ -3,6 +3,7 @@ import { selectedSourceIds } from '../../../shared/selection';
 import type { AskRequest } from './ask-types';
 import { tableLines } from '../../../shared/tableTargets';
 import { proseSentences } from './paper-block';
+import { gridOf, tableText, tableViews, viewsFor, type TableView } from './tables';
 import { figureTextTargets, type MeasuredTarget } from './visual-grounding';
 
 export interface Passage {
@@ -21,8 +22,11 @@ export interface Retrieval {
   sentences: string[];
   /** Figures, tables, their panels and equations. */
   visuals: string[];
-  /** The extracted cells of the tables in focus, so an answer can quote and chart their numbers. */
-  tables: { id: string; lines: string[] }[];
+  /**
+   * The extracted cells of the tables in focus, so an answer can quote and chart their numbers. A table the ingest read
+   * into a typed grid also has it as text (with the changes from its base row), and the boards the code builds from it.
+   */
+  tables: { id: string; lines: string[]; text?: string; views?: TableView[] }[];
   /** Where the camera goes when a step points at nothing. */
   home?: string;
   measured?: MeasuredTarget[];
@@ -280,11 +284,19 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
   );
   const namedVisual = named.find((id) => byId.get(id)?.kind !== 'section');
   const tables = focus
-    .flatMap((id) => {
+    .flatMap((id): Retrieval['tables'] => {
       const table = figures.get(id);
-      return table?.kind === 'table' ? [{ id, lines: tableLines(doc, table).slice(0, TABLE_LINES) }] : [];
+      if (table?.kind !== 'table') return [];
+      const lines = tableLines(doc, table).slice(0, TABLE_LINES);
+      if (!gridOf(table)) return [{ id, lines }];
+      // The best board of each kind the code can build from the grid: its numbers are cells of the table.
+      const views = tableViews(table);
+      const ready = (['scatter', 'heatmap', 'bars'] as const).flatMap((kind) =>
+        viewsFor(views, kind, request.question).slice(0, 1),
+      );
+      return [{ id, lines, text: tableText(table), views: ready }];
     })
-    .filter((t) => t.lines.length)
+    .filter((t) => t.lines.length || t.text)
     .slice(0, 2);
   return {
     focus: focus.map((id) => byId.get(id)!),
@@ -302,6 +314,21 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
       named[0] ??
       ranked[0]?.id,
   };
+}
+
+/**
+ * What the model was shown that can print a number, which a board's document values must be printed in: the document
+ * block it reads on every call (prose, captions, equations) and the cells of the tables in focus. A number the model read
+ * anywhere in the document may be charted; one that is printed nowhere in it is invented.
+ */
+export function evidenceText(doc: Doc, retrieval: Retrieval): string {
+  return [
+    ...proseSentences(doc).map((s) => s.text),
+    ...doc.figures.map((f) => f.caption),
+    ...doc.equations.map((e) => e.text),
+    ...[...retrieval.focus, ...retrieval.ranked].map((p) => p.text),
+    ...retrieval.tables.flatMap((t) => (t.text ? [...t.lines, t.text] : t.lines)),
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------- the call

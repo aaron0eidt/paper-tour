@@ -546,9 +546,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const now = useRef({ engine, answer, away, prepared, resolver, frame, narrator, rate: speed * params.rate });
   now.current = { engine, answer, away, prepared, resolver, frame, narrator, rate: speed * params.rate };
 
+  // The answer that is still being written, so that its next steps join the engine that plays it.
+  const writing = useRef<{ question: string; engine: TourEngine } | null>(null);
   const dropAnswer = useCallback(() => {
     now.current.answer?.destroy();
     now.current.answer = null;
+    writing.current = null;
     setAnswer(null);
   }, []);
   // A new tour (or none) ends any answer about the old one. A tour that only grows keeps it.
@@ -601,12 +604,19 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     main?.pause();
   }, [camera]);
 
-  const onAnswer = useCallback(
-    (reply: AskAnswer, question: string) => {
+  const playAnswer = useCallback(
+    (reply: AskAnswer, question: string, open: boolean) => {
       const { engine: main, prepared: tour, resolver: ids, narrator: voice, rate } = now.current;
       if (!ids) return;
       const speaker = main?.steps[main.getState().index]?.step.speaker;
       const script = prepareTour(answerTour(reply, question, tour?.tour ?? null, speaker), ids).tour;
+      const held = writing.current;
+      if (held && now.current.answer === held.engine && held.question === question) {
+        // The next steps of the answer being played: it goes on with them, and ends after the last one once it is whole.
+        held.engine.extend(script, open);
+        if (!open) writing.current = null;
+        return;
+      }
       dropAnswer();
       // Also when a new tour arrived meanwhile or the learner pressed play: an answer always has a way back.
       setAside();
@@ -615,7 +625,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         fallbackNarrator: new SilentNarrator(),
         rate,
         beforeNarration: (signal) => camera.whenSettled(signal),
-        });
+        open,
+      });
       // An answer step without a camera move keeps the view; it never jumps back to the first page.
       let lastCamera = 0;
       e.subscribe(() => {
@@ -625,12 +636,14 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         if (command.action) now.current.frame(command, false);
       });
       now.current.answer = e;
+      writing.current = open ? { question, engine: e } : null;
       setAnswer(e);
       setSelection([]);
       e.play();
     },
     [camera, dropAnswer, setAside],
   );
+  const onAnswer = useCallback((reply: AskAnswer, question: string) => playAnswer(reply, question, false), [playAnswer]);
 
   // Back to the tour: the answer goes, and the tour returns as it was: its marks and board (it only paused), the
   // camera on what it showed, and playing again if it was.
@@ -1596,6 +1609,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     onCancelSelection={cancelRegionSelection}
                     onAsk={onAsked}
                     onAnswer={onAnswer}
+                    onAnswerPart={playAnswer}
                     onResume={backToTour}
                   />
                 </div>

@@ -9,7 +9,13 @@ import { responseLanguage } from '../../../shared/languages';
 import type { Status } from '../engine';
 import type { AskAnswer, AskRequest, AskSource } from './api';
 
-export type Transport = (source: AskSource, request: AskRequest, signal: AbortSignal) => Promise<AskAnswer>;
+/** Asks a question; `onProgress` gets the answer as far as it is written, when the transport can read it so. */
+export type Transport = (
+  source: AskSource,
+  request: AskRequest,
+  signal: AbortSignal,
+  onProgress?: (answer: AskAnswer) => void,
+) => Promise<AskAnswer>;
 
 const sourceKey = (source: AskSource) =>
   'documentId' in source ? `document:${source.documentId}` : `demo:${source.paper}`;
@@ -135,9 +141,15 @@ export class AnswerKeeper {
 
   /**
    * Answer a question the learner asked: at once from a kept answer, by waiting for the background request that is
-   * already answering it, or with a request of its own, which stops the background work first.
+   * already answering it, or with a request of its own, which stops the background work first. Only a request of its own
+   * reports `onProgress`; a kept or background answer comes whole.
    */
-  async answer(source: AskSource, request: AskRequest, signal: AbortSignal): Promise<AskAnswer> {
+  async answer(
+    source: AskSource,
+    request: AskRequest,
+    signal: AbortSignal,
+    onProgress?: (answer: AskAnswer) => void,
+  ): Promise<AskAnswer> {
     const key = requestKey(source, request);
     const kept = this.take(source, request);
     if (kept) return kept;
@@ -148,7 +160,7 @@ export class AnswerKeeper {
       if (answer) return answer;
     }
     this.cancel();
-    return this.transport(source, request, signal);
+    return this.transport(source, request, signal, onProgress);
   }
 
   /** Start no more background requests; the one that runs finishes, since a learner may be waiting for it. */

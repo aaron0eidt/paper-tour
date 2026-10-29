@@ -506,3 +506,41 @@ test('the ask route serves the repeat from the store with the same body', async 
     await app.close();
   }
 });
+
+test('a streamed question sends its steps as they are written, and the repeat is served whole from the store', async (t) => {
+  quiet(t);
+  const { service, state } = library(() => modelAnswer());
+  const app = await createApp({ service, authenticate: async (token) => (token === 'owner' ? token : null) });
+  const post = (question: string, accept: string) =>
+    app.inject({
+      method: 'POST',
+      url: `/api/documents/${DOCUMENT}/ask`,
+      headers: { authorization: 'Bearer owner', accept },
+      payload: { question },
+    });
+  try {
+    const first = await post('Why scale the dot products?', 'application/x-ndjson');
+    assert.equal(first.statusCode, 200);
+    assert.match(String(first.headers['content-type']), /^application\/x-ndjson/);
+    const lines = first.body
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      lines.map((line) => line.type),
+      ['step', 'answer'],
+    );
+    assert.equal(lines[0].step.say, lines[1].answer.steps[0].say);
+    assert.equal(lines[0].step.id, lines[1].answer.steps[0].id, 'the answer is the steps already sent');
+    assert.equal(state.calls, 1);
+    // The same question again needs no model call and no stream: the stored answer comes back whole, as JSON.
+    const again = await post('why  SCALE the dot products?', 'application/x-ndjson');
+    assert.match(String(again.headers['content-type']), /^application\/json/);
+    assert.deepEqual(again.json(), lines[1].answer);
+    assert.equal(state.calls, 1);
+    // A client that does not read streams gets the same answer as JSON from the store too.
+    assert.deepEqual((await post('Why scale the dot products?', 'application/json')).json(), lines[1].answer);
+  } finally {
+    await app.close();
+  }
+});
