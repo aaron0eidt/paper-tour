@@ -1,3 +1,4 @@
+import { SOURCE_VISUAL_POLICY } from './visual-policy';
 import type { Action, Doc, Region } from '../../../shared/paper';
 import { TourValidationError, type TourDraft } from './schema';
 
@@ -12,6 +13,7 @@ export interface VisualObservation {
 }
 
 export const VISUAL_DIRECTION_GUIDANCE = `VISUAL DETAIL AND SPEECH TIMING
+${SOURCE_VISUAL_POLICY}
 Treat a meaningful figure as a guided explanation, not one caption and one outline. First orient the reader, then explain its important components, connections, computations and takeaway in separate small steps. Multi-part diagrams normally need 2–4 or more steps. Explain what each part does and why its relationship matters. Equations deserve a similar term-by-term explanation in natural speech.
 Inspect at the level of INDIVIDUAL OPERATIONS. Two large rectangles for the left and right halves of a complex architecture are only an overview, never a complete decomposition. Record and explain its readable named blocks, internal arrows, branching/merging points, repeated computation and output transform. Complex diagrams commonly need 6–12 component regions and 4–8 teaching steps, with 2–4 successive annotations per step. Simple three-box diagrams need only their actual parts. For plots, separate axes, curves, distinctive trends and comparisons; for tables, meaningful column/row groups and the entries supporting the finding. Do not invent subdivisions in a single-part image. Spend the step budget on mechanisms instead of many generic prose paraphrases.
 When inspecting a figure/table, record its meaningful components as labels and normalized regions. Use components: [] only for an image with no useful internal subdivisions. Coordinates [x0,y0,x1,y1] are relative to the CURRENT TARGET's bounding box, with origin top left and values 0–1. A page image and a cropped figure have different coordinate frames. view_visuals supplies the exact frame and existing panel IDs. Prefer a real panel ID when it fits; otherwise use the recorded component region on the figure ID. Never guess regions from a caption alone.

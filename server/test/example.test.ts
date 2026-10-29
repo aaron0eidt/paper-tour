@@ -49,7 +49,7 @@ test('worked example compiles input and result states at narrated times, with fo
     targets,
   )!;
   assert.deepEqual(direction.exampleProblems, []);
-  const step = beatStep(beat, targets, direction, doc, new Set());
+  const step = beatStep(beat, targets, direction, doc);
   const boards = step.actions.filter((a) => a.type === 'board');
   assert.equal(boards.length, 2);
   assert.equal(boards[0].item.kind, 'flow');
@@ -98,7 +98,7 @@ test('formula detail cannot replace its worked sequence with the original symbol
     targets,
   )!;
   assert.match(direction.exampleProblems!.join(' '), /needs example frames/);
-  assert.throws(() => beatStep(beat, targets, direction, doc, new Set()), /needs example frames/);
+  assert.throws(() => beatStep(beat, targets, direction, doc), /needs example frames/);
   const formula = {
     latex: 'x=2',
     terms: [

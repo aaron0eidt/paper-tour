@@ -53,6 +53,7 @@ export function recordedCalls(client: MuseClient, input: TourGenerationInput, mo
         input.onEvent ? async (delta) => input.onEvent!('model.delta', { callId, delta }) : undefined,
         input.onEvent ? async (usage) => input.onEvent!('model.usage', { callId, usage }) : undefined,
         effort,
+        input.onEvent ? async (text) => input.onEvent!('model.narration', { callId, text }) : undefined,
       );
       completions.push(completion);
       await input.onEvent?.('model.completed', {

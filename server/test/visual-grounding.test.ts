@@ -97,20 +97,20 @@ test('the image frame exposes panel coordinates and only detected text inside th
 test('tour authoring preserves precise bounds and old regions, while unseen fine marks require correction', () => {
   const targets = seenTargets();
   const direction = cleanDirection(raw([cue]), beat, targets)!;
-  const step = beatStep(beat, targets, direction, doc, new Set());
+  const step = beatStep(beat, targets, direction, doc);
   assert.deepEqual(
     step.actions.find((a) => a.type === 'arrow'),
     { type: 'arrow', target: 'fig1', region: bounds, color: 'blue', at_word: 1 },
   );
   const old = cleanDirection(raw([{ ...cue, bounds: undefined, region: 'top-left' }]), beat, targets)!;
   assert.deepEqual(
-    beatStep(beat, targets, old, doc, new Set()).actions.find((a) => a.type === 'arrow'),
+    beatStep(beat, targets, old, doc).actions.find((a) => a.type === 'arrow'),
     { type: 'arrow', target: 'fig1', region: [0, 0, 0.4, 0.4], color: 'blue', at_word: 1 },
   );
   for (const testTargets of [beatTargets(beat, doc), { ...targets, imaged: 'another-figure' }]) {
     const unseen = cleanDirection(raw([cue]), beat, testTargets)!;
     assert.ok(unseen.visualProblems?.length);
-    assert.throws(() => beatStep(beat, testTargets, unseen, doc, new Set()), /attached figure/);
+    assert.throws(() => beatStep(beat, testTargets, unseen, doc), /attached figure/);
   }
   assert.deepEqual(groundedVisualMark(doc, 'fig1.a', 'circle', undefined, 'Look here', 'fig1'), {
     action: 'circle',
@@ -125,9 +125,9 @@ test('tour authoring preserves precise bounds and old regions, while unseen fine
 test('invalid bounds and missing spoken anchors cannot create guessed figure arrows', () => {
   const targets = seenTargets();
   const bad = cleanDirection(raw([{ ...cue, bounds: [0.8, 0.1, 0.2, 0.4], region: 'top-left' }]), beat, targets)!;
-  assert.throws(() => beatStep(beat, targets, bad, doc, new Set()), /bounds must/);
+  assert.throws(() => beatStep(beat, targets, bad, doc), /bounds must/);
   const absent = cleanDirection(raw([{ ...cue, anchor: 'words never spoken' }]), beat, targets)!;
-  assert.ok(beatStep(beat, targets, absent, doc, new Set()).actions.every((a) => a.type !== 'arrow'));
+  assert.ok(beatStep(beat, targets, absent, doc).actions.every((a) => a.type !== 'arrow'));
 });
 
 test('Q&A offers and maps the same detected targets and exact crop coordinates', () => {
@@ -189,7 +189,7 @@ test('measured groups publish separate exact boxes, including the fourth mark, w
   };
   const direction = cleanDirection(raw([group]), beat, targets)!;
   assert.deepEqual(direction.visualProblems, []);
-  const boxes = beatStep(beat, targets, direction, doc, new Set()).actions.filter((a) => a.type === 'box');
+  const boxes = beatStep(beat, targets, direction, doc).actions.filter((a) => a.type === 'box');
   assert.equal(boxes.length, 4);
   assert.deepEqual(
     boxes.map((b) => b.region),

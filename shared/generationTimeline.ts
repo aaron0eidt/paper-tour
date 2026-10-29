@@ -50,6 +50,7 @@ function assistantText(output: unknown): string {
 }
 export function generationTimeline(events: GenerationEvent[]): ActivityEntry[] {
   const entries = new Map<string, ActivityEntry>();
+  const narrating = new Set<string>();
   for (const event of uniqueGenerationEvents(events)) {
     const key = String(event.data.callId ?? event.id);
     if (event.type === 'context.reset' || event.type === 'context.fallback') {
@@ -91,7 +92,13 @@ export function generationTimeline(events: GenerationEvent[]): ActivityEntry[] {
     if (event.type === 'model.tool.started') {
       entry.detail = `Preparing: ${names[String(event.data.name)] ?? 'document action'}`;
     }
-    if (event.type === 'model.delta' && typeof event.data.delta === 'string') entry.text += event.data.delta;
+    if (event.type === 'model.delta' && !narrating.has(key) && typeof event.data.delta === 'string')
+      entry.text += event.data.delta;
+    if (event.type === 'model.narration' && typeof event.data.text === 'string') {
+      narrating.add(key);
+      entry.text = readableAgentText(event.data.text);
+      entry.detail = 'Drafting narration · validation follows';
+    }
     if (['model.completed', 'tool.completed', 'model.failed'].includes(event.type)) {
       const output = object(event.data.output);
       entry.state = event.type === 'model.failed' || output.error ? 'failed' : 'done';

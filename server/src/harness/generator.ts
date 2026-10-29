@@ -463,16 +463,12 @@ export class HarnessTourGenerator implements TourGenerator {
 
     // F. Assemble and validate in code. A contract's first and last steps say that the tour is no legal advice.
     await progress('validating', beats.length, beats.length);
-    const used = new Set<string>();
     const steps = beats.map((beat, i) => {
       const result = results[i];
       if ('steps' in result) return result.steps;
       if (beat.detail && !result.direction) return [];
-      const previous = new Set(used);
-      const step = beatStep(beat, result.targets, result.direction, doc, used);
+      const step = beatStep(beat, result.targets, result.direction, doc);
       if (!readsSource(step.say, doc)) return [step];
-      used.clear();
-      for (const id of previous) used.add(id);
       return [];
     });
     if (!steps.some((part) => part.length))

@@ -1,12 +1,10 @@
+import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
 import { EXAMPLE_TASK } from './example';
 import type { BoardKind } from './board';
 import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@21';
-
-/** The same visual-selection rule governs generated tours and follow-up questions. */
-export const SOURCE_VISUAL_POLICY = `VISUAL VALUE TEST: For each explanation, first choose the actual PDF sentence, equation term, table cells or figure components that the listener should look at. Annotate these at the spoken anchors, moving emphasis to the element currently discussed. A separate panel is justified only if it reveals a relationship or transformation that these source annotations cannot show. A vertical chain of named stages is not an explanation: do not open a sideboard merely to list an architecture, processing order, glossary, or recap. Trace such stages directly on the PDF instead. Keep a flow only when its concrete dependencies, branching, feedback or changing values explain an otherwise hidden mechanism. For functional behavior, plot the actual relevant function with explained axes and a meaningful parameter/input change; do not force an arbitrary function plot onto a passage that has no functional question. For vector/matrix transformations show the actual components changing. Keep the PDF wide when no separate visual adds insight. In plan, identify the specific extra insight a proposed sideboard reveals; if it only repeats the narration or printed labels, omit it and choose source cues.`;
+export const HARNESS_VERSION = 'paper-tour-harness@22';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -66,6 +64,21 @@ const REGION_HELP = `When the image is attached, use exact "bounds": [left,top,r
 
 /** One short example per board for a different document (weak models copy the format and depth of examples). */
 export const BOARD_EXAMPLES = {
+  plot: {
+    plan: 'Show how changing a scale changes the response shape; source highlighting cannot show that change.',
+    plot: {
+      kind: 'plot',
+      title: 'Illustrative response sensitivity',
+      x: [-4, 4],
+      y: [0, 1],
+      x_label: 'input',
+      y_label: 'response',
+      curves: [{ expression: 'sigmoid(x/a)', label: '\\sigma(x/a)' }],
+      parameter: { from: 0.5, to: 2 },
+    },
+    say: 'This illustrative response turns an input into a value between zero and one. The horizontal axis is the input and the vertical axis is the response. As the scale increases, the transition becomes gentler: the same change in input has a smaller effect near the middle. This is a function illustration, not a measured result.',
+    cues: [{ action: 'board_focus', target: 'curve-1', label: '', anchor: 'the transition becomes gentler' }],
+  },
   formula: {
     plan: 'The weighted sum, the bias, then the squashing.',
     formula: {
@@ -229,7 +242,9 @@ export function directTask(language: string, brief: string, { actions, board, wo
   if (pen) rules.push(REGION_HELP);
   if (page.length) {
     const fewer = pen ? ' Prefer one or two pen marks that name the important parts.' : '';
-    rules.push(`Use few cues and only where they help the listener look at the right place.${fewer}`);
+    rules.push(
+      `Cue every distinct source claim you explain at its spoken anchor. Revisit a source when explaining it again; do not leave a whole explanation with only its opening sentence marked.${fewer}`,
+    );
   }
   return [
     `TASK: write ONE step of a guided tour in ${JSON.stringify(language)} and say what to point at.`,
@@ -238,6 +253,7 @@ export function directTask(language: string, brief: string, { actions, board, wo
     EXAMPLE_TASK,
     'FIGURE CHECK: before finalizing, verify every left/right/up/down statement against the actual axis labels, axis direction and the compared points. A desirable corner is not necessarily the trajectory of a parameter sweep. Separate direction of movement from whether each metric improves. Preserve multi-objective trade-offs instead of replacing a two-axis source plot with a one-metric chart that hides the cost. Describe dominance only for the configurations and matched conditions the paper supports. If the needed positions are not clear, state the grounded metric relationship without inventing a spatial direction.',
     SOURCE_VISUAL_POLICY,
+    `${example(BOARD_EXAMPLES.plot)} Use this as a tool-format example only: choose the function, domain and parameter from the concept actually being taught, never copy this illustration into an unrelated explanation.`,
     'CHOOSE REPRESENTATIONS: use bars for an important measured comparison on a shared metric; use a function plot for response shape or sensitivity; use vectors/matrices when the components themselves matter; use connected diagram nodes only to explain actual causal structure. A few floating text labels connected by tiny arrows are not a quantitative visual. If the PDF already contains the useful plot or table, teach its axes, baseline and important cases on the source first. A sideboard must reveal something beyond the printed labels. Favor a small number of well-explained changes over many repetitive boards.',
     'SCENE PREFLIGHT: all unbound coordinates and endpoints must fit 0..1 (never use pixel values). Allocate readable bounds for text, put a node label in that node text field rather than overlapping another text object, and terminate arrows on the outside edge of nodes. Use background:true only for real unlabeled containers/coordinate planes, not to bypass readable-foreground validation. Keep legends, sample labels and source values separate and legible.',
     'SCENE COORDINATES: a plot-bound circle uses the lower-left corner x,y and width/height in plot data units, not a center point. To surround the sample (u,v), use x=u-w/2 and y=v-h/2; check that the circle center is exactly the intended sample. Arrow/vector x,y are their starting point and w,h are endpoint deltas. Keep descriptive axis labels as clear words, with mathematical notation only for actual variables/expressions.',

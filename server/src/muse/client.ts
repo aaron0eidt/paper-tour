@@ -46,6 +46,7 @@ export class MuseClient {
     onDelta?: (text: string) => Promise<void>,
     onUsage?: (usage: ModelUsage) => Promise<void>,
     effort: 'low' | 'medium' | 'high' = 'medium',
+    onNarration?: (text: string) => Promise<void>,
   ): Promise<Completion> {
     if (!this.config.apiKey.trim())
       throw new ProcessingError('muse_not_configured', 'Connect Meta in Profile & Settings.');
@@ -73,26 +74,49 @@ export class MuseClient {
       telemetry: await modelTelemetry(name),
     };
     try {
-      const result = onDelta ? streamText({ ...options, onError: () => {} }) : await generateText(options);
+      const result =
+        onDelta || onNarration ? streamText({ ...options, onError: () => {} }) : await generateText(options);
       if ('stream' in result) {
-        let pending = '',
-          length = 0,
-          lastFlush = Date.now();
-        for await (const part of result.stream) {
-          if (part.type === 'text-delta') {
-            length += part.text.length;
-            if (length > 2_000_000)
-              throw new ProcessingError('muse_invalid_response', 'The model response is too large.');
-            pending += part.text;
-            if (pending.length >= 4096 || Date.now() - lastFlush >= 500) {
-              await onDelta?.(pending);
-              pending = '';
-              lastFlush = Date.now();
+        // SDK parses incomplete structured output. Only the public `say` field
+        // becomes a narration snapshot; raw JSON remains in technical activity.
+        const narration = async () => {
+          if (!onNarration) return;
+          let sent = '',
+            latest = '',
+            last = 0;
+          for await (const partial of result.partialOutputStream) {
+            const value = partial as { say?: unknown } | undefined;
+            if (typeof value?.say !== 'string' || value.say === sent) continue;
+            latest = value.say;
+            if (Date.now() - last >= 250) {
+              await onNarration(latest);
+              sent = latest;
+              last = Date.now();
             }
           }
-          if (part.type === 'error') throw part.error;
-        }
-        if (pending) await onDelta?.(pending);
+          if (latest !== sent) await onNarration(latest);
+        };
+        const diagnostics = async () => {
+          let pending = '',
+            length = 0,
+            lastFlush = Date.now();
+          for await (const part of result.stream) {
+            if (part.type === 'text-delta') {
+              length += part.text.length;
+              if (length > 2_000_000)
+                throw new ProcessingError('muse_invalid_response', 'The model response is too large.');
+              pending += part.text;
+              if (pending.length >= 4096 || Date.now() - lastFlush >= 500) {
+                await onDelta?.(pending);
+                pending = '';
+                lastFlush = Date.now();
+              }
+            }
+            if (part.type === 'error') throw part.error;
+          }
+          if (pending) await onDelta?.(pending);
+        };
+        await Promise.all([diagnostics(), narration()]);
       }
       if ((await result.text).length > 2_000_000)
         throw new ProcessingError('muse_invalid_response', 'The model response is too large.');

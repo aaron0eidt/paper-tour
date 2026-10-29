@@ -90,13 +90,7 @@ function elementName(beat: Beat, doc: Doc): string {
 }
 
 /** One tour step from a beat and its direction; without a direction, the card's own words with a single pointer. */
-export function beatStep(
-  beat: Beat,
-  targets: BeatTargets,
-  direction: Direction | null,
-  doc: Doc,
-  used: Set<string>,
-): Step {
+export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction | null, doc: Doc): Step {
   if (direction?.exampleProblems?.length) throw new Error(direction.exampleProblems.join(' '));
   if (direction?.visualProblems?.length) throw new Error(direction.visualProblems.join(' '));
   const name = elementName(beat, doc);
@@ -117,14 +111,16 @@ export function beatStep(
     lastPart = -1;
   let lastBoard: BoardItem | undefined;
   const focusWords = new Set<number>();
+  const highlightedHere = new Set<string>();
   for (const cue of direction?.cues ?? []) {
     const found = findAnchor(say, cue.anchor);
     const at = Math.min(found ?? 0, words - 1);
     const timing = at > 0 ? { at_word: at } : {};
     if (cue.action === 'highlight') {
-      if (highlights >= 2 || used.has(cue.target)) continue;
+      // Past steps must not suppress a cue explicitly tied to this explanation.
+      if (found === null || highlightedHere.has(cue.target)) continue;
       highlights++;
-      used.add(cue.target);
+      highlightedHere.add(cue.target);
       actions.push({ type: 'highlight', targets: [cue.target], color: beat.tint ?? COLORS[beat.kind], ...timing });
     } else if (cue.action === 'board_focus') {
       // A part lights up when the narration names it: never without its board or anchor, nor twice in a row or at once.
@@ -172,9 +168,8 @@ export function beatStep(
   }
   // Pointing is the point: a text step always marks its main sentence, a figure step outlines its figure.
   if (!beat.target && !highlights) {
-    const first = beat.evidence.find((id) => !used.has(id) && targets.sentences.includes(id));
+    const first = beat.evidence.find((id) => targets.sentences.includes(id));
     if (first) {
-      used.add(first);
       actions.push({ type: 'highlight', targets: [first], color: beat.tint ?? COLORS[beat.kind] });
     }
   }

@@ -50,11 +50,11 @@ test('table direction uses complete grounded text blocks and rejects invented su
   };
   const direction = cleanDirection(raw, beat, targets)!;
   assert.deepEqual(direction.visualProblems, []);
-  const step = beatStep(beat, targets, direction, doc, new Set());
+  const step = beatStep(beat, targets, direction, doc);
   assert.ok(step.actions.some((a) => a.type === 'box' && a.target === 'p1.b1' && !a.region));
   const invented = cleanDirection({ ...raw, cues: [{ ...raw.cues[0], region: 'bottom-half' }] }, beat, targets)!;
   assert.ok(invented.visualProblems?.length);
-  assert.throws(() => beatStep(beat, targets, invented, doc, new Set()), /fine geometry requires/);
+  assert.throws(() => beatStep(beat, targets, invented, doc), /fine geometry requires/);
 });
 test('table source marks stay boxes while the separate board can focus its parts', () => {
   const targets = beatTargets(beat, doc);
@@ -72,7 +72,7 @@ test('table source marks stay boxes while the separate board can focus its parts
       targets,
     )!;
     assert.ok(direction.visualProblems?.some((p) => p.includes('fine geometry requires')));
-    assert.throws(() => beatStep(beat, targets, direction, doc, new Set()), /fine geometry requires/);
+    assert.throws(() => beatStep(beat, targets, direction, doc), /fine geometry requires/);
   }
 });
 test('legacy table arrows and circles become unlabelled outlines, even for merged rows or nested figures', () => {
