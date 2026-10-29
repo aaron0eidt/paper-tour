@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "esbuild test/camera.test.ts test/pdfLifetime.test.ts test/engine.test.ts test/readerState.test.ts test/board.test.ts test/pen.test.ts test/labelLayout.test.ts test/ask.test.ts src/narration/voices.test.ts src/library/modelChoices.test.ts --bundle --platform=node --format=esm --log-level=warning --outdir=node_modules/.cache/paper-tour && node node_modules/.cache/paper-tour/test/engine.test.js && node node_modules/.cache/paper-tour/test/readerState.test.js && node node_modules/.cache/paper-tour/test/board.test.js && node node_modules/.cache/paper-tour/test/pen.test.js && node node_modules/.cache/paper-tour/test/labelLayout.test.js && node node_modules/.cache/paper-tour/src/narration/voices.test.js && node node_modules/.cache/paper-tour/src/library/modelChoices.test.js && node node_modules/.cache/paper-tour/test/pdfLifetime.test.js && node node_modules/.cache/paper-tour/test/camera.test.js && node node_modules/.cache/paper-tour/test/ask.test.js"
+    "test": "esbuild test/camera.test.ts test/pdfLifetime.test.ts test/engine.test.ts test/readerState.test.ts test/board.test.ts test/pen.test.ts test/labelLayout.test.ts test/ask.test.ts src/narration/voices.test.ts src/library/modelChoices.test.ts --bundle --platform=node --format=esm --log-level=warning --outdir=node_modules/.cache/paper-tour && node node_modules/.cache/paper-tour/test/engine.test.js && node node_modules/.cache/paper-tour/test/readerState.test.js && node node_modules/.cache/paper-tour/test/board.test.js && node node_modules/.cache/paper-tour/test/pen.test.js && node node_modules/.cache/paper-tour/test/labelLayout.test.js && node node_modules/.cache/paper-tour/src/narration/voices.test.js && node node_modules/.cache/paper-tour/src/library/modelChoices.test.js && node node_modules/.cache/paper-tour/test/pdfLifetime.test.js && node node_modules/.cache/paper-tour/test/camera.test.js && node node_modules/.cache/paper-tour/test/ask.test.js",
+    "dev:math-lab": "vite --port 5175",
+    "build:math-lab": "tsc --noEmit && vite build --config vite.math-lab.config.ts",
+    "test:math-lab": "esbuild test/mathLab.test.ts --bundle --platform=node --format=esm --log-level=warning --outfile=node_modules/.cache/paper-tour/math-lab.test.mjs && node node_modules/.cache/paper-tour/math-lab.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
@@ -22,8 +25,16 @@
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "4.7.0",
+    "elkjs": "0.12.1",
     "esbuild": "0.25.12",
+    "mafs": "0.21.0",
+    "motion": "14.7.1",
     "typescript": "5.6.3",
     "vite": "6.4.5"
+  },
+  "overrides": {
+    "mafs": {
+      "katex": "0.19.0"
+    }
   }
 }
