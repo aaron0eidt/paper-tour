@@ -21,8 +21,9 @@
      sentence as two boxes. The insight guards work within a step, not across steps.
   3. A misleading badge: in the first run, the parsing bars marked the Transformer (91.3 F1) "Best", but Table 4 lists
      Dyer et al. at 91.7 in the same WSJ-only setting, and the narration said the Transformer stays below it. The bars
-     renderer (`player/src/components/Board.tsx`, from 10-27) badges the highest bar shown, so a model-chosen subset
-     can mislead.
+     renderer (`player/src/components/Board.tsx`, from 10-27) badged the highest bar shown, so a model-chosen subset
+     could mislead. Fixed on 10-29: no bar is badged or coloured for its size; the bar the narration is on stands out,
+     and the unit chip says which way is better (`F1 ↑`).
   4. Plots: the second run uses one, but positional encoding still gets no board, and neither run explains the sine
      and cosine functions.
   5. The floating ask tray covered page text at the bottom of the reader in the first run; the reader layout has not

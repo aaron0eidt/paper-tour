@@ -556,25 +556,6 @@ code.formula-symbol {
   font-weight: 600;
 }
 
-.bar-badge {
-  opacity: 0;
-  transition: opacity 420ms ease;
-}
-
-.bar-badge[data-in] {
-  opacity: 1;
-}
-
-.bar-badge rect {
-  fill: color-mix(in srgb, var(--c) 16%, transparent);
-}
-
-.bar-badge text {
-  fill: var(--c);
-  font-size: 10.5px;
-  font-weight: 600;
-}
-
 /* ------------------------------------------------------ under the stage */
 
 /* The board under the stage is short: tighter margins and a smaller formula. */

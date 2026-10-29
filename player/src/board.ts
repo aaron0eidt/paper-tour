@@ -526,14 +526,25 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
 
 // --------------------------------------------------------------------- bars
 
-/** The best bar when the tour says which way is better (the first one on a tie), else null. */
-export function bestBar(item: BarsItem): number | null {
-  if (item.higher_is_better === undefined) return null;
-  let best = 0;
-  item.bars.forEach((b, i) => {
-    if (item.higher_is_better ? b.value > item.bars[best].value : b.value < item.bars[best].value) best = i;
-  });
-  return best;
+/** Whether a bar stands out: the one the narration is on, or all of them while it is on none. Size never singles a
+ * bar out: a tour shows a few chosen rows, and the largest of them need not be the best in the document. */
+export function barStandsOut(focused: number | null, index: number): boolean {
+  return focused === null || index === focused;
+}
+
+/** "higher is better" or "lower is better" when the tour says which way is better, else null. */
+export function betterWay(item: BarsItem): string | null {
+  return item.higher_is_better === undefined ? null : `${item.higher_is_better ? 'higher' : 'lower'} is better`;
+}
+
+/** The unit chip of a bars board, with the way that is better in the notation papers use ("BLEU ↑", "PPL ↓").
+ * Percent is printed on every value, so it shows only beside an arrow; without a unit the direction is spelled out. */
+export function barsUnit(item: BarsItem): { text: string; label: string } | null {
+  const better = betterWay(item);
+  const unit = item.unit && (item.unit !== '%' || better) ? item.unit : null;
+  if (!unit) return better ? { text: better, label: better } : null;
+  const arrow = item.higher_is_better === undefined ? '' : item.higher_is_better ? ' ↑' : ' ↓';
+  return { text: `${unit}${arrow}`, label: better ? `${unit}, ${better}` : unit };
 }
 
 /** Only forward frames of one spoken step share a numeric transition. Matching

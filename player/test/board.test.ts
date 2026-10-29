@@ -13,7 +13,8 @@ import {
   plotCursor,
   barPath,
   barsLayout,
-  bestBar,
+  barStandsOut,
+  barsUnit,
   checkBoardItem,
   cubicBezier,
   decimalsOf,
@@ -316,11 +317,20 @@ test('a wrap that crosses a term or breaks the formula is left out', () => {
 
 // --------------------------------------------------------------------- bars
 
-test('the best bar follows the direction, and there is none without one', () => {
-  eq(bestBar(bleu), 0, 'highest');
-  eq(bestBar({ ...bleu, higher_is_better: false }), 2, 'lowest');
-  eq(bestBar({ ...bleu, higher_is_better: undefined }), null, 'none');
-  eq(bestBar({ kind: 'bars', higher_is_better: true, bars: [{ label: 'a', value: 1 }, { label: 'b', value: 1 }] }), 0, 'tie');
+// A tour shows a few chosen rows: marking the largest as the best can contradict the document (a stronger row left out).
+test('size never singles a bar out; the bar the narration is on does', () => {
+  eq(bleu.bars.map((_, i) => barStandsOut(null, i)), [true, true, true], 'alike before any focus, largest included');
+  eq(bleu.bars.map((_, i) => barStandsOut(2, i)), [false, false, true], 'the focused bar, though the smallest');
+});
+
+test('the unit chip says which way is better, in the notation papers use', () => {
+  eq(barsUnit(bleu), { text: 'BLEU ↑', label: 'BLEU, higher is better' });
+  eq(barsUnit({ ...bleu, unit: 'PPL', higher_is_better: false }), { text: 'PPL ↓', label: 'PPL, lower is better' });
+  eq(barsUnit({ ...bleu, higher_is_better: undefined }), { text: 'BLEU', label: 'BLEU' }, 'no direction, no arrow');
+  eq(barsUnit({ ...bleu, unit: '%' }), { text: '% ↑', label: '%, higher is better' }, 'percent beside its arrow');
+  eq(barsUnit({ ...bleu, unit: '%', higher_is_better: undefined }), null, 'percent alone is on every value already');
+  eq(barsUnit({ ...bleu, unit: undefined }), { text: 'higher is better', label: 'higher is better' }, 'no unit');
+  eq(barsUnit({ ...bleu, unit: undefined, higher_is_better: undefined }), null, 'nothing to say');
 });
 
 test('values print with the places they were reported with', () => {

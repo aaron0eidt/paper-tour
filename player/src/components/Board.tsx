@@ -21,7 +21,9 @@ import {
   interpolateBars,
   barPath,
   barsLayout,
-  bestBar,
+  barStandsOut,
+  barsUnit,
+  betterWay,
   cubicBezier,
   decimalsOf,
   fitText,
@@ -151,7 +153,7 @@ const BoardView = memo(function BoardView({
   range?: number[];
   continuous?: boolean;
 }) {
-  const unit = item.kind === 'bars' && item.unit && item.unit !== '%' ? item.unit : null;
+  const unit = item.kind === 'bars' ? barsUnit(item) : null;
   const bodyRef = useRef<HTMLDivElement>(null);
   useFocusInView(bodyRef, focus);
   return (
@@ -159,7 +161,11 @@ const BoardView = memo(function BoardView({
       {(item.title || unit) && (
         <header className="board-head">
           {item.title && <h2 className="board-title">{item.title}</h2>}
-          {unit && <span className="board-unit">{unit}</span>}
+          {unit && (
+            <span className="board-unit" title={unit.label}>
+              {unit.text}
+            </span>
+          )}
         </header>
       )}
       <div className="board-body" ref={bodyRef}>
@@ -455,7 +461,6 @@ const nodeLabel = (item: FlowItem, id: string) => item.nodes.find((n) => n.id ==
 const BAR_FIRST_MS = 320;
 const BAR_EVERY_MS = 110;
 const BAR_GROW_MS = 1100;
-const BADGE = { text: 'Best', gap: 8, padX: 7 };
 const easeOut = cubicBezier(...EASE_OUT);
 
 /** Milliseconds since the bars started growing, ticking until they are done; the end at once under reduced motion. */
@@ -489,30 +494,29 @@ function BarsBoard({ item, focus, playback, from, range }: { item: BarsItem; foc
   const elapsed = useBarClock(item.bars.length, playback, !!from);
   const transition = from ? easeOut(Math.min(1, elapsed / 650)) : 1;
   const displayed = useMemo(() => from ? interpolateBars(from, item, transition) : item, [from, item, transition]);
-  const best = bestBar(item);
   const focused = focus !== null && focus < item.bars.length ? focus : null;
   const places = useMemo(() => item.bars.map((b) => decimalsOf(b.value)), [item]);
   const values = useMemo(() => item.bars.map((b, i) => formatValue(b.value, places[i], item.unit)), [item, places]);
   const measured = useMemo(() => {
     const label = textMeasure(450, 12.5);
     const value = textMeasure(600, 13);
-    const badge = textMeasure(600, 10.5)(BADGE.text) + 2 * BADGE.padX;
-    return { label, value, badge, widths: values.map((v, i) => Math.max(value(v), from ? value(formatValue(from.bars[i].value, decimalsOf(from.bars[i].value), item.unit)) : 0)) };
+    return { label, value, widths: values.map((v, i) => Math.max(value(v), from ? value(formatValue(from.bars[i].value, decimalsOf(from.bars[i].value), item.unit)) : 0)) };
   }, [values, from, item.unit]);
   const layout = useMemo(() => {
     if (!box) return null;
-    const valueWidths = measured.widths.map((w, i) => w + (i === best ? BADGE.gap + measured.badge : 0));
     const labelWidths = item.bars.map((b) => measured.label(b.label));
-    return barsLayout(displayed, box.width, labelWidths, valueWidths, box.height, range);
-  }, [item, displayed, range, box, best, measured]);
-  // One colour for the series; the best bar and the bar in focus stand out in the accent.
+    return barsLayout(displayed, box.width, labelWidths, measured.widths, box.height, range);
+  }, [item, displayed, range, box, measured]);
+  // One colour for the series; the bar the narration is on stands out in the accent.
   const fill = (i: number) => {
     const own = item.bars[i].color;
     if (own) return BOARD_INK[own];
-    return best === null || i === best || i === focused ? ACCENT : 'var(--board-bar)';
+    return barStandsOut(focused, i) ? ACCENT : 'var(--board-bar)';
   };
+  const direction = betterWay(item);
   const label = item.bars
     .map((b, i) => `${b.label}: ${values[i]}${item.unit && item.unit !== '%' ? ` ${item.unit}` : ''}`)
+    .concat(direction ? [direction] : [])
     .join(', ');
 
   return (
@@ -535,7 +539,6 @@ function BarsBoard({ item, focus, playback, from, range }: { item: BarsItem; foc
             const ride = (positive ? -1 : 1) * length * (1 - progress);
             const digits = from && transition < 1 ? Math.max(places[i], decimalsOf(from.bars[i].value)) : places[i];
             const text = formatValue(displayed.bars[i].value * progress, digits, item.unit);
-            const done = progress >= 1 && transition >= 1;
             return (
               <g key={i} className={`bar${i === focused ? ' is-focus' : ''}`} style={ink(fill(i))}>
                 <g className="bar-state">
@@ -560,18 +563,6 @@ function BarsBoard({ item, focus, playback, from, range }: { item: BarsItem; foc
                     >
                       {text}
                     </text>
-                    {i === best && (
-                      <g
-                        className="bar-badge"
-                        data-in={done ? '' : undefined}
-                        transform={`translate(${positive ? row.valueX + measured.widths[i] + BADGE.gap : row.valueX - measured.widths[i] - BADGE.gap - measured.badge} ${row.y + BAR_THICKNESS / 2 - 9})`}
-                      >
-                        <rect width={measured.badge} height={18} rx={9} />
-                        <text x={measured.badge / 2} y={9} textAnchor="middle" dominantBaseline="central">
-                          {BADGE.text}
-                        </text>
-                      </g>
-                    )}
                   </g>
                 </g>
               </g>
