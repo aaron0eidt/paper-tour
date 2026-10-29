@@ -194,6 +194,96 @@ function boardSettler() {
   };
 }
 
+const round = (n: number) => String(Number(n.toPrecision(6)));
+const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+
+/**
+ * What a board shows, as text: its kind and the values, latex, expressions, points or labels that make it that board.
+ * Two boards with the same signature are the same picture; bars compare their values in any order. Null when a board
+ * has nothing to compare (a scene of plain shapes).
+ */
+export function boardSignature(item: BoardItem): string | null {
+  switch (item.kind) {
+    case 'formula':
+      return `formula|${squash(item.latex)}`;
+    case 'bars':
+      return `bars|${item.bars
+        .map((b) => b.value)
+        .sort((a, b) => a - b)
+        .map(round)
+        .join(',')}`;
+    case 'flow':
+      return `flow|${item.nodes
+        .map((n) => squash(n.label))
+        .sort()
+        .join(',')}`;
+    case 'plot':
+      return `plot|${item.curves
+        .map((c) => squash(c.expression))
+        .sort()
+        .join(',')}`;
+    case 'heatmap':
+      return `heatmap|${item.rows.join(',')}|${item.cols.join(',')}|${item.values.map((row) => row.map(round).join(',')).join(';')}`;
+    case 'scatter':
+      return `scatter|${item.points
+        .map((p) => `${squash(p.label)}:${round(p.x)}:${round(p.y)}`)
+        .sort()
+        .join(',')}`;
+    case 'shapes':
+      return `shapes|${JSON.stringify(item.terms)}`;
+    case 'scene': {
+      const content = item.objects.flatMap((o) => [
+        ...(o.text ? [`${o.type}:${squash(o.text)}`] : []),
+        ...(o.values ? [`${o.type}:${o.values.map((row) => row.map(round).join(',')).join(';')}`] : []),
+        ...(o.plot ? o.plot.curves.map((c) => `plot:${squash(c.expression)}`) : []),
+      ]);
+      return content.length ? `scene|${content.sort().join('|')}` : null;
+    }
+  }
+}
+
+/**
+ * A board that repeats an earlier step's board (the same kind and data) is dropped together with the board_focus cues
+ * that light up its parts; the narration stays and the board hygiene then clears or keeps the screen as for any step
+ * without a board. The steps of one beat may repeat each other, so only earlier beats count; the beats at the `exempt`
+ * indices (an exercise part's solution lines) are neither compared nor remembered.
+ */
+export function dropRepeatedBoards(
+  steps: Step[][],
+  exempt: ReadonlySet<number> = new Set(),
+): {
+  steps: Step[][];
+  dropped: { step: string; kind: BoardItem['kind']; repeats: string }[];
+} {
+  const seen = new Map<string, string>();
+  const dropped: { step: string; kind: BoardItem['kind']; repeats: string }[] = [];
+  const kept = steps.map((list, beat) => {
+    if (exempt.has(beat)) return list;
+    const before = new Map(seen);
+    const out = list.map((step) => {
+      const ordered = step.actions.map((action, index) => ({ action, index }));
+      ordered.sort((a, b) => (a.action.at_word ?? 0) - (b.action.at_word ?? 0) || a.index - b.index);
+      const remove = new Set<number>();
+      let repeating = false;
+      for (const { action, index } of ordered) {
+        if (action.type === 'board') {
+          const signature = boardSignature(action.item);
+          const earlier = signature ? before.get(signature) : undefined;
+          repeating = earlier !== undefined;
+          if (earlier !== undefined) {
+            remove.add(index);
+            dropped.push({ step: step.id, kind: action.item.kind, repeats: earlier });
+          } else if (signature && !seen.has(signature)) seen.set(signature, step.id);
+        } else if (action.type === 'board_clear') repeating = false;
+        else if (action.type === 'board_focus' && repeating) remove.add(index);
+      }
+      return remove.size ? { ...step, actions: step.actions.filter((_, index) => !remove.has(index)) } : step;
+    });
+    return out;
+  });
+  return { steps: kept, dropped };
+}
+
 /**
  * A sentence the tour opens and closes with, such as a contract's "this is not legal advice": it leads the first step,
  * whose cues move on by its words, and ends the last.

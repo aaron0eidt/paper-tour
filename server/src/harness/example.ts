@@ -1,6 +1,6 @@
 import { splitWords, type Action, type BoardItem } from '../../../shared/paper';
 import { evaluateExpression, parseExpression } from '../../../shared/plot';
-import { BOARD_KINDS, boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
+import { LEGACY_BOARD_KINDS, boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
 
 export interface ExampleFrame {
   anchor: string;
@@ -43,7 +43,7 @@ export const EXAMPLE_SCHEMA = object({
     minItems: 2,
     maxItems: 4,
     items: object(
-      { anchor: text(80), ...Object.fromEntries(BOARD_KINDS.map((kind) => [kind, exampleBoardSchema(kind)])) },
+      { anchor: text(80), ...Object.fromEntries(LEGACY_BOARD_KINDS.map((kind) => [kind, exampleBoardSchema(kind)])) },
       ['anchor'],
     ),
   },
@@ -103,7 +103,8 @@ function visibleText(item: BoardItem): string[] {
   if (item.kind === 'formula') return [item.latex.replace(/_(?:\{[^}]*\}|[\p{L}\p{N}])/gu, '')];
   if (item.kind === 'flow') return item.nodes.map((n) => n.label);
   if (item.kind === 'bars') return item.bars.map((b) => b.label);
-  return item.curves.map((c) => c.label);
+  if (item.kind === 'plot') return item.curves.map((c) => c.label);
+  return []; // Frames only use the kinds in LEGACY_BOARD_KINDS.
 }
 function visibleNumbers(item: BoardItem): number[] {
   const labels = visibleText(item)
@@ -397,7 +398,7 @@ export function checkExample(
   const previews: (BoardItem | undefined)[] = [];
   let previousAnchor: number | null = null;
   for (const [i, frame] of frames.entries()) {
-    const kinds = BOARD_KINDS.filter((kind) => raw(frame[kind]));
+    const kinds = LEGACY_BOARD_KINDS.filter((kind) => raw(frame[kind]));
     if (kinds.length !== 1) {
       problems.push(`Example frame ${i + 1} must contain exactly one formula, flow, bars, plot or scene item.`);
       continue;

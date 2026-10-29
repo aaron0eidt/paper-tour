@@ -1,0 +1,215 @@
+/* The shapes board: blocks sized by their dimensions, with dimension lines on the top and left edges. Parts arrive from
+   script (ShapesBoard.tsx follows the narration); only the focus and the colour of a contracted dimension are CSS. */
+
+/* The drawing is as wide as its widest row, and centred; the body's spacers keep it a little above the middle. */
+.board-view[data-kind='shapes'] .board-body {
+  scrollbar-gutter: stable;
+}
+
+.shapes {
+  width: 100%;
+  min-width: 0;
+}
+
+.shapes-stage {
+  position: relative;
+  margin: 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.shapes .katex {
+  font-size: 1em;
+}
+
+/* ------------------------------------------------------------------ blocks */
+
+.shapes-matrix {
+  position: absolute;
+}
+
+/* The block, its name and its dimension lines dim together while another matrix is in focus. */
+.shapes-body {
+  position: absolute;
+  inset: 0;
+  transition: opacity 360ms ease;
+}
+
+.shapes.has-focus .shapes-matrix:not(.is-focus) .shapes-body {
+  opacity: 0.62;
+}
+
+.shapes-block {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border: 1.25px solid color-mix(in srgb, var(--c) 64%, var(--board-bg));
+  border-radius: 8px;
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--c) 28%, var(--board-bg)),
+    color-mix(in srgb, var(--c) 11%, var(--board-bg))
+  );
+  transition:
+    border-color 360ms ease,
+    box-shadow 360ms ease;
+}
+
+/* The focused block lifts: a brighter edge, a glow, and its fill filled in. */
+.shapes-block::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--c) 18%, transparent);
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.shapes-matrix.is-focus .shapes-block {
+  border-color: var(--c);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--c) 20%, transparent),
+    0 0 24px color-mix(in srgb, var(--c) 26%, transparent);
+}
+
+.shapes-matrix.is-focus .shapes-block::after {
+  opacity: 1;
+}
+
+.shapes-name {
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+/* A block too narrow for its name (a vector) carries it underneath. */
+.shapes-name.is-below {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ---------------------------------------------------------- dimension lines */
+
+/* A bracket along the edge with its label beyond it. A contracted dimension takes its colour as --hot comes up. */
+.shapes-dim {
+  --ink: color-mix(in srgb, var(--dim, var(--muted)) calc(var(--hot, 0) * 100%), var(--muted));
+  position: absolute;
+  border: 1.5px solid var(--ink);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.shapes-dim.is-cols {
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  height: 5px;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+}
+
+.shapes-dim.is-rows {
+  top: 0;
+  bottom: 0;
+  right: calc(100% + 6px);
+  width: 5px;
+  border-right: 0;
+  border-radius: 2px 0 0 2px;
+}
+
+.shapes-dim-text {
+  position: absolute;
+}
+
+.is-cols .shapes-dim-text {
+  left: 50%;
+  bottom: calc(100% + 3px);
+  transform: translateX(-50%);
+}
+
+.is-rows .shapes-dim-text {
+  top: 50%;
+  right: calc(100% + 3px);
+  transform: translateY(-50%);
+}
+
+/* --------------------------------------------------------------- operators */
+
+.shapes-op {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  height: 28px;
+  color: var(--board-edge);
+}
+
+.shapes-op svg {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.shapes-op .shapes-dot {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* The function an arrow applies, over the arrow. */
+.shapes-op-label {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------------- ghosts */
+
+/* Under a result: the dimension a product summed over, struck out, since the result no longer has it. */
+.shapes-ghosts {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.shapes-ghost {
+  position: relative;
+  padding: 4px 11px;
+  border: 1px dashed color-mix(in srgb, var(--c) 60%, transparent);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--c);
+}
+
+.shapes-ghost::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  right: 6px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: scaleX(var(--strike, 0));
+  transform-origin: left;
+}

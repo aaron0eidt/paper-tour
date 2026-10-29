@@ -24,6 +24,7 @@ const names: Record<string, string> = {
 export const modelActivityNames: Record<string, string> = {
   paper_card: 'Understand the document',
   tour_plan: 'Plan the tour',
+  visual_plan: 'Design the side visuals',
   beat_direction: 'Write narration and visual cues',
   exercise_solution: 'Work through an exercise',
 };

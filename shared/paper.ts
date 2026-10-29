@@ -2,6 +2,12 @@ import type { PlotItem } from './plot';
 export type { PlotItem } from './plot';
 import type { SceneItem } from './scene';
 export type { SceneItem, SceneObject } from './scene';
+import type { HeatmapItem } from './heatmap';
+export type { HeatmapItem } from './heatmap';
+import type { ScatterItem } from './scatter';
+export type { ScatterItem } from './scatter';
+import type { ShapesItem } from './shapes';
+export type { ShapesItem, ShapesTerm } from './shapes';
 // TypeScript mirror of schema/doc.schema.json and schema/tour.schema.json (version 0.1).
 // The schemas are the source of truth; keep these in sync with them.
 
@@ -244,6 +250,9 @@ export interface FormulaTerm {
 export type BoardItem =
   | PlotItem
   | SceneItem
+  | HeatmapItem
+  | ScatterItem
+  | ShapesItem
   | { kind: 'formula'; title?: string; latex: string; terms: FormulaTerm[] }
   | { kind: 'flow'; title?: string; nodes: { id: string; label: string; color?: Color }[]; edges: [string, string][] }
   | {
@@ -261,7 +270,10 @@ export interface BoardAction {
   at_word?: number;
 }
 
-/** Light up one part of the board item: a formula term, flow node, bar, curve or scene object, by index. */
+/**
+ * Light up one part of the board item, by index: a formula term, flow node, bar, curve, scene object, heatmap row,
+ * scatter point or shapes matrix.
+ */
 export interface BoardFocusAction {
   type: 'board_focus';
   part: number;

@@ -132,7 +132,15 @@ function provider(model: Model, requests: Request[]): typeof fetch {
     void last;
     return new Response(
       JSON.stringify({
-        choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(model(request)) } }],
+        // No visual plan: every beat keeps the board its kind suggests, which these suites check.
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify(request.name === 'visual_plan' ? { plan: 'none', beats: [] } : model(request)),
+            },
+          },
+        ],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       }),
     );

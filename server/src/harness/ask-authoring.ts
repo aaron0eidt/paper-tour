@@ -3,7 +3,7 @@ import { PLOT_SCHEMA } from '../../../shared/plot';
 import type { Doc, Step } from '../../../shared/paper';
 import { selectedSourceIds } from '../../../shared/selection';
 import type { TourImage } from '../tour-generator';
-import { BOARD_KINDS, BOARD_LIMITS } from './board';
+import { BOARD_LIMITS, LEGACY_BOARD_KINDS } from './board';
 import { EXAMPLE_SCHEMA, EXAMPLE_TASK } from './example';
 import { ANSWERABLE, type AskRequest } from './ask-types';
 import type { Passage, Retrieval } from './ask-retrieval';
@@ -207,7 +207,7 @@ export function answerSchema(retrieval: Retrieval, regions: readonly string[] = 
   const limits = BOARD_LIMITS;
   const parts = (max: number, item: object) => ({ type: 'array', maxItems: max, items: item });
   const board = object({
-    kind: { type: 'string', enum: ['none', ...BOARD_KINDS] },
+    kind: { type: 'string', enum: ['none', ...LEGACY_BOARD_KINDS] },
     title: text(limits.title),
     latex: text(400, 'formula only: the LaTeX of the whole formula.'),
     terms: parts(

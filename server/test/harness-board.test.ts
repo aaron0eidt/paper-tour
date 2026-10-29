@@ -13,13 +13,26 @@ import { BOARD_EXAMPLES } from '../src/harness/prompts';
 import type { MeasuredTarget } from '../src/harness/visual-grounding';
 
 test('plots and successive source cues survive assembly, including in later steps using the same passages', () => {
-  const beat = { id: 'method-plot', kind: 'method' as const, arc: 'method', point: 'Response sensitivity', evidence: ['p1.s1', 'p1.s2', 'p1.s3', 'p1.s4'] };
+  const beat = {
+    id: 'method-plot',
+    kind: 'method' as const,
+    arc: 'method',
+    point: 'Response sensitivity',
+    evidence: ['p1.s1', 'p1.s2', 'p1.s3', 'p1.s4'],
+  };
   const targets = beatTargets(beat, doc);
-  const say = 'First the motivation explains the question. Next the proposal describes the approach. Then the planner orders the work. Finally the figure shows the connections, and the transition becomes gentler in this illustrative response.';
+  const say =
+    'First the motivation explains the question. Next the proposal describes the approach. Then the planner orders the work. Finally the figure shows the connections, and the transition becomes gentler in this illustrative response.';
   const raw = {
-    ...BOARD_EXAMPLES.plot, say,
+    ...BOARD_EXAMPLES.plot,
+    say,
     cues: [
-      ...['First the motivation', 'Next the proposal', 'Then the planner', 'Finally the figure'].map((anchor, i) => ({ action: 'highlight', target: `p1.s${i + 1}`, label: '', anchor })),
+      ...['First the motivation', 'Next the proposal', 'Then the planner', 'Finally the figure'].map((anchor, i) => ({
+        action: 'highlight',
+        target: `p1.s${i + 1}`,
+        label: '',
+        anchor,
+      })),
       ...BOARD_EXAMPLES.plot.cues,
     ],
   };
@@ -317,14 +330,17 @@ function provider(script: Script, requests: Request[]): typeof fetch {
     };
     requests.push(request);
     const kind = kindOf(request.brief);
+    // No visual plan: every beat keeps the board its kind suggests, which these tests check.
     const value =
       request.name === 'paper_card'
         ? card
-        : ((kind &&
-            script[kind]?.(
-              request.task.includes('board cannot be shown') || request.task.includes('complete corrected answer'),
-            )) ??
-          plain(request));
+        : request.name === 'visual_plan'
+          ? { plan: 'none', beats: [] }
+          : ((kind &&
+              script[kind]?.(
+                request.task.includes('board cannot be shown') || request.task.includes('complete corrected answer'),
+              )) ??
+            plain(request));
     return new Response(
       JSON.stringify({
         choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }],
@@ -778,6 +794,9 @@ test('every direction can choose a useful native board without changing its sour
       'bars',
       'plot',
       'scene',
+      'heatmap',
+      'scatter',
+      'shapes',
       'example',
       'say',
       'cues',

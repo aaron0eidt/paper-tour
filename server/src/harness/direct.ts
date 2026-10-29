@@ -3,8 +3,9 @@ import { tableTextBlocks, tableLines } from '../../../shared/tableTargets';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
 import type { Beat } from './beats';
-import { BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
+import { BOARD_KINDS, LEGACY_BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
 import type { DocType } from './doctype';
+import { proseSentences } from './paper-block';
 import type { DirectOptions } from './prompts';
 import {
   BOUNDS_SCHEMA,
@@ -16,6 +17,7 @@ import {
   visualCueProblems,
   type MeasuredTarget,
 } from './visual-grounding';
+import { visualLine, type StepVisual } from './visual-plan';
 
 export const CUE_ACTIONS = ['highlight', 'box', 'spotlight', 'note', 'arrow', 'circle', 'board_focus'] as const;
 /** Room for source cues and board emphasis in the same explanation. */
@@ -55,6 +57,8 @@ export interface BeatTargets {
   /** A table whose cells a text beat quotes as the source of its numbers. */
   table?: string;
   tableCells?: string[];
+  /** Sentences that print the numbers a planned visual names, so its board may copy them (they are part of `evidence`). */
+  visualEvidence?: string[];
   /** The actual figure crop supplied to this direction call. Absent means no fine visual targeting. */
   imaged?: string;
   measured?: MeasuredTarget[];
@@ -111,26 +115,84 @@ export { boardPartIds, boardPart } from './board';
 
 export { tableLines } from '../../../shared/tableTargets';
 
+/** Decimals and larger numbers, but not years: "28.4 BLEU" is a distinctive number, "Table 2" or "2017" is not. */
+const distinctive = (numbers: number[]) =>
+  numbers.filter((n) => !Number.isInteger(n) || (n >= 100 && !(n >= 1900 && n <= 2100)));
+
 /** The table a result rests on: one its evidence cites, else the one that repeats most of its distinctive numbers. */
 function resultTable(doc: Doc, evidence: string[], text: string): DocFigure | undefined {
   const tables = doc.figures.filter((f) => f.kind === 'table');
   const cited = tables.find((t) => t.referenced_by.some((id) => evidence.includes(id)));
   if (cited) return cited;
-  // Decimals and larger numbers, but not years: "28.4 BLEU" finds its table, "Table 2" or "2017" does not.
-  const distinctive = numbersIn(text).filter((n) => !Number.isInteger(n) || (n >= 100 && !(n >= 1900 && n <= 2100)));
+  const named = distinctive(numbersIn(text));
   let best: DocFigure | undefined,
     bestScore = 0;
   for (const table of tables) {
     const printed = numbersIn(tableLines(doc, table).join('\n'));
-    const score = new Set(distinctive.filter((n) => printed.includes(n))).size;
+    const score = new Set(named.filter((n) => printed.includes(n))).size;
     if (score > bestScore) [best, bestScore] = [table, score];
   }
   return best;
 }
 
-/** Targets on the page the camera shows: a text beat's paragraphs, or a figure with its panels, or an equation. */
-export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
-  const parts = { parts: BOARD_KINDS.flatMap(boardPartIds) };
+/** Planned kinds whose numbers come from the document, so their board may only copy what the evidence prints. */
+const NUMERIC_KINDS: readonly string[] = ['bars', 'heatmap', 'scatter'];
+
+/** Planned kinds that show a relationship themselves: a worked-example sequence is never forced on their steps. */
+const RELATIONAL_KINDS: readonly string[] = ['heatmap', 'scatter', 'shapes', 'plot'];
+
+/**
+ * Whether a step may carry a worked example (example frames) and whether it must. Without a plan a step may always,
+ * and a formula detail must. A planned relationship (heatmap, scatter, shapes, plot) is the visual itself, with no
+ * example. A step planned without a board has example frames only when it must have a worked example.
+ */
+export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolean; required: boolean } {
+  const detail = beat.kind === 'formula' && !!beat.detail;
+  if (!visual) return { offered: true, required: detail };
+  if (RELATIONAL_KINDS.includes(visual.visual)) return { offered: false, required: false };
+  return { offered: visual.visual !== 'none' || detail, required: detail };
+}
+
+/** The board kinds a step's direction offers: its planned kind alone, none when it is planned without a board. */
+const plannedKinds = (visual?: StepVisual) =>
+  visual ? (visual.visual === 'none' ? [] : [visual.visual]) : [...BOARD_KINDS];
+
+/** Board parts a board_focus cue may light up: those of the planned board, and of an example's frames when offered. */
+function focusParts(beat: Beat, visual?: StepVisual): string[] {
+  if (!visual) return BOARD_KINDS.flatMap(boardPartIds);
+  const kinds = [...plannedKinds(visual), ...(exampleRules(beat, visual).offered ? LEGACY_BOARD_KINDS : [])];
+  return [...new Set(kinds.flatMap(boardPartIds))];
+}
+
+/**
+ * Sentences that print the numbers a planned visual names in its data, the best matches first: one that has a
+ * distinctive number (a decimal, or 100 and more) or at least two of them.
+ */
+function dataSentences(doc: Doc, visual: StepVisual | undefined, have: string[]): string[] {
+  if (!visual || !NUMERIC_KINDS.includes(visual.visual)) return [];
+  const named = new Set(numbersIn(visual.data));
+  const rare = new Set(distinctive([...named]));
+  if (!named.size) return [];
+  return proseSentences(doc)
+    .filter((s) => !have.includes(s.id))
+    .map((s) => {
+      const hits = new Set(numbersIn(s.text).filter((n) => named.has(n)));
+      return { id: s.id, hits: hits.size, rare: [...hits].some((n) => rare.has(n)) };
+    })
+    .filter((s) => s.rare || s.hits >= 2)
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 4)
+    .map((s) => s.id);
+}
+
+/**
+ * Targets on the page the camera shows: a text beat's paragraphs, or a figure with its panels, or an equation. A
+ * numeric board (bars, or a planned heatmap or scatter) may copy numbers from the cited table and from the sentences
+ * that print the numbers its plan names.
+ */
+export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTargets {
+  const parts = { parts: focusParts(beat, visual) };
+  const numeric = visual ? NUMERIC_KINDS.includes(visual.visual) : beat.board === 'bars';
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const quote = (ids: string[]) => ids.map((id) => sentences.get(id)?.text ?? '').filter(Boolean);
   if (beat.target) {
@@ -152,7 +214,7 @@ export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
         ]
       : [beat.target];
     const table = figure?.kind === 'table' ? { table: figure.id } : {};
-    if (beat.board !== 'bars' || !figure)
+    if (!numeric || !figure)
       return {
         page,
         sentences: [],
@@ -163,8 +225,19 @@ export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
         evidence: figure ? [figure.caption, ...quote(figure.referenced_by)].join('\n') : (equation?.text ?? ''),
       };
     // A table's numbers come from what its brief quotes: the caption, the citing sentences and the cells.
-    const evidence = [figure.caption, ...quote(figure.referenced_by.slice(0, 4)), ...tableLines(doc, figure)];
-    return { page, sentences: [], visuals, tableCells, ...table, ...parts, evidence: evidence.join('\n') };
+    const cited = figure.referenced_by.slice(0, 4);
+    const more = dataSentences(doc, visual, cited);
+    const evidence = [figure.caption, ...quote([...cited, ...more]), ...tableLines(doc, figure)];
+    return {
+      page,
+      sentences: [],
+      visuals,
+      tableCells,
+      ...table,
+      ...parts,
+      ...(more.length ? { visualEvidence: more } : {}),
+      evidence: evidence.join('\n'),
+    };
   }
   const first = sentences.get(beat.evidence[0]);
   const page = first?.page ?? 1;
@@ -176,19 +249,26 @@ export function beatTargets(beat: Beat, doc: Doc): BeatTargets {
   );
   const ids = doc.blocks.filter((b) => blocks.has(b.id)).flatMap((b) => b.sentences);
   const targets = { page, sentences: ids.slice(0, 60), visuals: [], ...parts };
-  if (beat.board !== 'bars') return { ...targets, evidence: quote(beat.evidence).join('\n') };
-  const quoted = quote([...new Set([...beat.evidence, ...(beat.boardEvidence ?? [])])]);
-  const table = resultTable(doc, beat.evidence, quoted.join('\n'));
+  if (!numeric) return { ...targets, evidence: quote(beat.evidence).join('\n') };
+  const have = [...new Set([...beat.evidence, ...(beat.boardEvidence ?? [])])];
+  const more = dataSentences(doc, visual, have);
+  const quoted = quote([...have, ...more]);
+  const table = resultTable(doc, beat.evidence, [...quoted, visual?.data ?? ''].join('\n'));
   return {
     ...targets,
     evidence: [...quoted, ...(table ? tableLines(doc, table) : [])].join('\n'),
+    ...(more.length ? { visualEvidence: more } : {}),
     ...(table ? { table: table.id } : {}),
   };
 }
 
-/** Cue actions a beat may use: text beats highlight, figures get the pen, and a formula walks its board's terms. */
-function actionsFor(beat: Beat, targets?: BeatTargets): CueAction[] {
-  const board: CueAction[] = ['board_focus'];
+/**
+ * Cue actions a beat may use: text beats highlight, figures get the pen, and a formula walks its board's terms. A step
+ * planned without a board (or example) has nothing on the board to light up.
+ */
+function actionsFor(beat: Beat, targets?: BeatTargets, visual?: StepVisual): CueAction[] {
+  const board: CueAction[] =
+    !visual || visual.visual !== 'none' || exampleRules(beat, visual).offered ? ['board_focus'] : [];
   if (beat.kind === 'formula') return board;
   return [
     ...(beat.target
@@ -210,15 +290,21 @@ function cueTargets(actions: CueAction[], targets: BeatTargets): string[] {
   ];
 }
 
-/** Leave room for causal explanation; detail steps teach a worked example, not a terse caption. */
-const sayWords = (beat: Beat) =>
-  beat.detail ? 150 : beat.kind === 'takeaway' ? 90 : ['formula', 'method', 'figure'].includes(beat.kind) ? 110 : 80;
+/**
+ * The spoken length a step aims for: an overview step makes its point in about 50 to 90 words, a detail step adds one
+ * worked case in about 90 to 140. The learner reads the page; the voice only says what the page does not.
+ */
+const sayWords = (beat: Beat) => (beat.detail ? 140 : 90);
+const sayShortest = (beat: Beat) => (beat.detail ? 90 : 50);
+/** The most words a step may have before it is sent back for a rewrite: a margin over what it aims for. */
+export const sayLimit = (beat: Beat) => (beat.detail ? 175 : 115);
 
 /** What the beat's task offers the model: its cue actions, its board, the spoken length it aims for and its tone. */
-export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets): DirectOptions {
+export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets, visual?: StepVisual): DirectOptions {
+  const board = visual ? plannedKinds(visual)[0] : beat.board;
   return {
-    actions: actionsFor(beat, targets),
-    ...(beat.board ? { board: beat.board } : {}),
+    actions: actionsFor(beat, targets, visual),
+    ...(board ? { board } : {}),
     words: sayWords(beat),
     detail: beat.detail,
     ...(type ? { type } : {}),
@@ -229,13 +315,14 @@ export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets)
  * The beat's response schema; `strict` adds the enums the model must choose from (the code re-checks them anyway).
  * A board comes before "say", so the narration walks through the terms, stages or numbers the board already holds.
  */
-export function directionSchema(beat: Beat, targets: BeatTargets, strict = true) {
-  const actions = actionsFor(beat, targets);
+export function directionSchema(beat: Beat, targets: BeatTargets, strict = true, visual?: StepVisual) {
+  const actions = actionsFor(beat, targets, visual);
   const ids = strict ? cueTargets(actions, targets) : [];
   if (strict) ids.push(...(targets.measured ?? []).map((t) => t.id));
   const pen = actions.includes('arrow');
   const measured = targets.measured ?? [];
-  const words = beat.detail ? 175 : 135;
+  // A planned step offers its own board kind only (the loose schema, which cleans the answer, still names every kind).
+  const kinds = strict ? plannedKinds(visual) : BOARD_KINDS;
   const region = strict
     ? {
         type: 'string',
@@ -252,12 +339,13 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
         ? {
             type: 'string',
             maxLength: 600,
-            description:
-              'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.',
+            description: visual
+              ? 'Name the one point this step makes, then how the planned visual or the page marks make it click. Do not restate the highlighted sentences.'
+              : 'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.',
           }
         : { type: 'string' },
       ...Object.fromEntries(
-        BOARD_KINDS.map((kind) => [
+        kinds.map((kind) => [
           kind,
           strict
             ? {
@@ -270,12 +358,12 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
             : {},
         ]),
       ),
-      example: strict ? EXAMPLE_SCHEMA : {},
+      ...(!strict || exampleRules(beat, visual).offered ? { example: strict ? EXAMPLE_SCHEMA : {} } : {}),
       say: {
         type: 'string',
         minLength: 20,
-        maxLength: words * 9,
-        description: `About 25-${sayWords(beat)} spoken words.`,
+        maxLength: sayLimit(beat) * 9,
+        description: `About ${sayShortest(beat)}-${sayWords(beat)} spoken words.`,
       },
       cues: {
         type: 'array',
@@ -315,8 +403,8 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
   };
 }
 
-/** The beat's task text: the point to make and the local evidence, quoted from the document. */
-export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
+/** The beat's task text: the point to make, its planned visual and the local evidence, quoted from the document. */
+export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: StepVisual): string {
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const quote = (ids: string[]) =>
     ids
@@ -333,6 +421,14 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
   }
   if (beat.role) lines.push(`THIS STEP OF THE TOUR: ${beat.role}`);
   lines.push(`POINT TO MAKE: ${beat.point}`);
+  if (visual) {
+    const demanded = visual.visual === 'none' && exampleRules(beat, visual).required;
+    lines.push(
+      demanded
+        ? 'VISUAL FOR THIS STEP: none beyond the numerical worked example this step must show (example frames). Teach the rest on the page with highlights and marks.'
+        : visualLine(visual),
+    );
+  }
   const figure = doc.figures.find((f) => f.id === beat.target);
   const equation = doc.equations.find((e) => e.id === beat.target);
   const cells = (table: DocFigure) => [
@@ -371,6 +467,9 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets): string {
     lines.push('EVIDENCE:', ...quote(beat.evidence));
     const more = (beat.boardEvidence ?? []).filter((id) => !beat.evidence.includes(id));
     if (more.length) lines.push('MORE NUMBERS FOR THE BARS ONLY (other steps speak about them):', ...quote(more));
+    const data = (targets.visualEvidence ?? []).filter((id) => !more.includes(id));
+    if (data.length)
+      lines.push('SENTENCES WITH THE NUMBERS OF THE PLANNED VISUAL (for its board only):', ...quote(data));
     const table = doc.figures.find((f) => f.id === targets.table);
     if (table) lines.push(...cells(table));
     lines.push(
@@ -391,20 +490,22 @@ const ajv = new Ajv2020({ strict: false, allErrors: true });
 
 /**
  * Keep a direction whose shape and narration are usable; drop just the cues with an action or target this beat may not
- * use. The board is checked here too: one that fails comes back as `boardProblems`, without the board.
+ * use. The board is checked here too: one that fails comes back as `boardProblems`, without the board. A planned step
+ * keeps only its planned board, and an example only when its plan allows one.
  */
 export function cleanDirection(
   value: unknown,
   beat: Beat,
   targets: BeatTargets,
   requireExample = false,
+  visual?: StepVisual,
 ): Direction | null {
-  if (!ajv.compile(directionSchema(beat, targets, false))(value)) return null;
+  if (!ajv.compile(directionSchema(beat, targets, false, visual))(value)) return null;
   const d = value as Direction & Record<string, unknown>;
   const say = d.say.replace(/\s+/g, ' ').trim();
   const words = say.split(' ').length;
-  if (words < 8 || words > (beat.detail ? 175 : 135)) return null;
-  const actions = new Set<string>(actionsFor(beat, targets)),
+  if (words < 8 || words > sayLimit(beat)) return null;
+  const actions = new Set<string>(actionsFor(beat, targets, visual)),
     sentences = new Set(targets.sentences),
     visuals = new Set(targets.visuals),
     parts = new Set(targets.parts);
@@ -446,15 +547,13 @@ export function cleanDirection(
     }))
     .filter((c) => actions.has(c.action) && allowed(c))
     .slice(0, MAX_CUES);
-  const example = checkExample(
-    d.example,
-    say,
-    requireExample || (beat.kind === 'formula' && !!beat.detail) || claimsNumericExample(say),
-  );
-  const candidates = BOARD_KINDS.filter((kind) => d[kind] !== undefined && d[kind] !== null).map((kind) => ({
-    kind,
-    check: checkBoard(kind, d[kind], targets.evidence),
-  }));
+  const rules = exampleRules(beat, visual);
+  const example: { example?: WorkedExample; problems: string[] } = rules.offered
+    ? checkExample(d.example, say, requireExample || rules.required || claimsNumericExample(say))
+    : { problems: [] };
+  const candidates = plannedKinds(visual)
+    .filter((kind) => d[kind] !== undefined && d[kind] !== null)
+    .map((kind) => ({ kind, check: checkBoard(kind, d[kind], targets.evidence) }));
   const boards = candidates.filter((c) => c.check.item);
   const boardProblems = candidates.flatMap((c) => c.check.problems.map((p) => `${c.kind}: ${p}`));
   if (boards.length > 1)
@@ -477,4 +576,15 @@ export function cleanDirection(
     boardProblems,
     visualProblems,
   };
+}
+
+/**
+ * The sentences a text step highlights: its highlight cues, or when it has none the first sentence of its evidence,
+ * which the assembled step marks instead (see beatStep). A step on a figure or equation highlights no sentences.
+ */
+export function highlightedSentences(direction: Direction, beat: Beat, targets: BeatTargets): string[] {
+  if (beat.target) return [];
+  const cued = direction.cues.filter((cue) => cue.action === 'highlight').map((cue) => cue.target);
+  const first = beat.evidence.find((id) => targets.sentences.includes(id));
+  return [...new Set(cued.length ? cued : first ? [first] : [])];
 }

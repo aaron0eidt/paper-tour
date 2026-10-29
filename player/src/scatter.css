@@ -1,0 +1,219 @@
+/* The scatter board: a crisp plot at the size of the board, calm until a point is in focus. Parts arrive from script
+   (ScatterBoard.tsx follows the narration); only the focus changes here are CSS transitions. */
+
+/* The plot fills the body and keeps its own room, so the body's spacers step aside. */
+.board-view[data-kind='scatter'] .board-body {
+  scrollbar-gutter: stable;
+}
+
+.board-view[data-kind='scatter'] .board-body::before,
+.board-view[data-kind='scatter'] .board-body::after {
+  display: none;
+}
+
+.scatter {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The legend and the plot sit a little above the middle with room to spare, and scroll from the top without. */
+.scatter::before,
+.scatter::after {
+  content: '';
+  flex: 1 1 0;
+}
+
+.scatter::after {
+  flex-grow: 1.4;
+}
+
+.sc-svg {
+  display: block;
+  flex: none;
+  margin: 0 auto;
+  overflow: visible;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ legend */
+
+.sc-legend {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  animation: board-rise 480ms var(--board-ease-out) 260ms backwards;
+}
+
+.sc-series {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+.sc-series i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+}
+
+/* Invented values say so, as the plot of a function does. */
+.sc-tag {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--board-rule);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+/* -------------------------------------------------------------------- axes */
+
+.sc-grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.sc-axis,
+.sc-marks {
+  fill: none;
+  stroke: var(--board-bar);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.sc-tick {
+  fill: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: opacity 240ms ease;
+}
+
+/* A tick label under the focused point's badge gives way to it. */
+.sc-tick.is-hidden {
+  opacity: 0;
+}
+
+.sc-title {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ points */
+
+.sc-line {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-opacity: 0.55;
+}
+
+/* The dot grows from its own centre when it is the one in focus; a halo comes up behind it. */
+.sc-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform 360ms var(--board-ease-out),
+    opacity 360ms ease;
+}
+
+.sc-core {
+  fill: var(--c);
+  stroke: var(--board-bg);
+  stroke-width: 1.5;
+}
+
+.sc-halo {
+  fill: var(--c);
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.sc-point.is-focus .sc-dot {
+  transform: scale(1.6);
+}
+
+.sc-point.is-focus .sc-halo {
+  opacity: 0.2;
+}
+
+/* Labels carry a halo of the board's colour, so they read over grid lines and series lines. */
+.sc-label {
+  fill: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: var(--board-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  transition: fill 360ms ease;
+}
+
+.sc-point.is-focus .sc-label {
+  font-weight: 650;
+}
+
+.scatter.has-focus .sc-point:not(.is-focus) .sc-dot {
+  opacity: 0.45;
+}
+
+.scatter.has-focus .sc-point:not(.is-focus) .sc-label {
+  fill: var(--muted);
+}
+
+/* ------------------------------------------------------------------- focus */
+
+.sc-probe {
+  animation: board-in 240ms ease backwards;
+}
+
+.sc-guide {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  stroke-opacity: 0.6;
+}
+
+.sc-badge rect {
+  fill: var(--board-bg);
+  stroke: var(--c);
+  stroke-width: 1;
+}
+
+.sc-badge text {
+  fill: var(--c);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ better */
+
+.sc-better path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sc-better text {
+  fill: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}

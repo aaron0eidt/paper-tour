@@ -173,9 +173,26 @@ function provider(fn: (request: Request) => Response | unknown): typeof fetch {
     return result instanceof Response ? result : reply(result);
   }) as typeof fetch;
 }
-/** A well-behaved model: the card above, and per beat a direction using its first allowed action and target. */
+/** A visual plan that gives each listed step the visual `pick` returns, or none. */
+function planFor(request: Request, pick: (beat: string) => string = () => 'none') {
+  const beats: string[] = request.schema.properties.beats.items.properties.beat.enum;
+  return {
+    plan: 'p',
+    beats: beats.map((beat) => {
+      const visual = pick(beat);
+      return {
+        beat,
+        visual,
+        idea: visual === 'none' ? '' : 'Show how the parts relate.',
+        data: visual === 'none' ? '' : 'Illustrative values.',
+      };
+    }),
+  };
+}
+/** A well-behaved model: the card above, no side boards, and per beat a direction using its first allowed action and target. */
 function goodModel(request: Request) {
   if (request.name === 'paper_card') return card;
+  if (request.name === 'visual_plan') return planFor(request);
   if (request.task.includes('STEP KIND: formula (a closer look'))
     return { plan: 'Compute the worked case.', say: exampleSay, example: numericalExample(), cues: [] };
   const cue = request.schema.properties.cues.items.properties;
@@ -206,6 +223,7 @@ test('a standard tour follows the argument in a handful of steps and ends with q
     ['problem', 'idea', 'method', 'evidence', 'limits', 'takeaway'],
   );
   assert.equal(names.filter((n) => n === 'paper_card').length, 1);
+  assert.equal(names.filter((n) => n === 'visual_plan').length, 1);
   assert.equal(names.filter((n) => n === 'beat_direction').length, all.length);
   assert.deepEqual(tour.suggested_questions, card.suggested_questions);
   assert.equal(tour.preset, 'standard');
@@ -391,7 +409,9 @@ test('a fatal beat request records the failed planned item before rejecting the 
   const generator = new HarnessTourGenerator(
     settings,
     'quick',
-    provider((request) => (request.name === 'paper_card' ? card : reply({}, 401))),
+    provider((request) =>
+      request.name === 'paper_card' ? card : request.name === 'visual_plan' ? planFor(request) : reply({}, 401),
+    ),
   );
   await assert.rejects(
     generator.generate({
@@ -428,6 +448,8 @@ test('fatal direction failure aborts siblings and drains their events before gen
   const transport: typeof fetch = async (_url, init) => {
     const request = JSON.parse(String(init?.body));
     if (request.response_format.json_schema.name === 'paper_card') return reply(card);
+    if (request.response_format.json_schema.name === 'visual_plan')
+      return reply(planFor({ schema: request.response_format.json_schema.schema } as Request));
     requests++;
     if (requests === 1) return reply({}, 401);
     const signal = init!.signal!;
@@ -522,6 +544,9 @@ test('a non-formula beat cannot silently remove its numerical example during rep
     settings,
     'quick',
     provider((request) => {
+      // The method step is planned with a flow, a kind whose steps may carry a worked example.
+      if (request.name === 'visual_plan')
+        return planFor(request, (beat) => (beat.startsWith('method') ? 'flow' : 'none'));
       if (request.name === 'beat_direction' && request.task.includes('STEP KIND: method')) {
         attempts++;
         return { plan: 'p', say: attempts === 1 ? exampleSay : SAY, cues: [] };

@@ -498,7 +498,7 @@
           "additionalProperties": false
         },
         {
-          "description": "Light up a formula term, flow node, bar, curve or scene object by index.",
+          "description": "Light up a formula term, flow node, bar, curve, scene object, heatmap row, scatter point or shapes matrix by index.",
           "properties": {
             "type": {
               "const": "board_focus"
@@ -1028,6 +1028,272 @@
                     "description": "Bind arrow/vector/circle to this plot object using data coordinates. Arrow/vector x,y start and w,h are signed endpoint deltas. Circle x,y is its LOWER-LEFT bounding corner; w,h are positive diameters, so center (u,v) needs x=u-w/2,y=v-h/2."
                   }
                 }
+              }
+            }
+          }
+        },
+        {
+          "description": "A grid of values with labelled rows and columns. The values are always present; an expression, when given, is how they were computed (x is the column number, a the row number, both from 1).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "rows",
+            "cols",
+            "values",
+            "source"
+          ],
+          "properties": {
+            "kind": {
+              "const": "heatmap"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "rows": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 10,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              "description": "Row labels, distinct."
+            },
+            "cols": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 10,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              "description": "Column labels, distinct."
+            },
+            "values": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 10,
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 10,
+                "items": {
+                  "type": "number",
+                  "minimum": -1000000,
+                  "maximum": 1000000
+                }
+              }
+            },
+            "expression": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "source": {
+              "enum": [
+                "document",
+                "illustrative",
+                "formula"
+              ]
+            },
+            "scale": {
+              "enum": [
+                "sequential",
+                "diverging"
+              ]
+            },
+            "normalize": {
+              "const": "rows",
+              "description": "The values are raw scores; the board shows a row-wise softmax turning each row into weights that sum to one."
+            },
+            "mask": {
+              "const": "upper",
+              "description": "Square grids only: cells above the diagonal are masked."
+            },
+            "view": {
+              "enum": [
+                "grid",
+                "links"
+              ],
+              "description": "Links needs at most 8 columns."
+            },
+            "unit": {
+              "type": "string",
+              "maxLength": 12
+            }
+          }
+        },
+        {
+          "description": "Points on two measured axes, such as quality against cost.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "x_label",
+            "y_label",
+            "points",
+            "source"
+          ],
+          "properties": {
+            "kind": {
+              "const": "scatter"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "x_label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "y_label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "x_log": {
+              "type": "boolean"
+            },
+            "y_log": {
+              "type": "boolean"
+            },
+            "better": {
+              "enum": [
+                "up-left",
+                "up-right",
+                "down-left",
+                "down-right"
+              ],
+              "description": "The corner where results are better."
+            },
+            "points": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "label",
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 24
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "series": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 24,
+                    "description": "Points of one series are joined in order; at most 3 series."
+                  }
+                }
+              }
+            },
+            "source": {
+              "enum": [
+                "document",
+                "illustrative"
+              ]
+            }
+          }
+        },
+        {
+          "description": "How the dimensions of matrices combine through an operation: matrix, operator, matrix, ..., ending with a matrix.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "terms"
+          ],
+          "properties": {
+            "kind": {
+              "const": "shapes"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "terms": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 9,
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "name",
+                      "rows",
+                      "cols"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "matrix"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40,
+                        "description": "LaTeX."
+                      },
+                      "rows": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8
+                      },
+                      "cols": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "op"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "op"
+                      },
+                      "op": {
+                        "enum": [
+                          "times",
+                          "plus",
+                          "hadamard",
+                          "equals",
+                          "apply"
+                        ]
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16,
+                        "description": "The function applied by apply, such as softmax."
+                      }
+                    }
+                  }
+                ]
               }
             }
           }

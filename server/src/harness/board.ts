@@ -1,5 +1,14 @@
 import { SCENE_SCHEMA, SCENE_MAX_OBJECTS, sceneProblems, type SceneItem } from '../../../shared/scene';
 import { PLOT_SCHEMA, plotProblems } from '../../../shared/plot';
+import {
+  HEATMAP_LIMITS,
+  HEATMAP_SCHEMA,
+  canonicalHeatmap,
+  heatmapMasked,
+  heatmapProblems,
+} from '../../../shared/heatmap';
+import { SCATTER_LIMITS, SCATTER_SCHEMA, canonicalScatter, scatterProblems } from '../../../shared/scatter';
+import { SHAPES_LIMITS, SHAPES_SCHEMA, canonicalShapes, shapesProblems } from '../../../shared/shapes';
 import katex, { type KatexOptions } from 'katex';
 import type { BoardItem } from '../../../shared/paper';
 
@@ -402,6 +411,85 @@ function checkPlot(raw: unknown): BoardCheck {
   return { item: problems.length ? null : (item as BoardItem), problems };
 }
 
+/** Empty lists are how a model says "no board": a missing value, or an array with nothing in it. */
+const blank = (v: unknown) => v === undefined || (Array.isArray(v) && !v.length);
+
+/**
+ * What a board that claims the document's own numbers is told when some are not printed in `evidence`: the first few by
+ * position, then how to fix it. Empty when every value is printed.
+ */
+function unprinted(values: { where: string; value: number }[], evidence: string, field: string): string[] {
+  const printed = numbersIn(evidence);
+  const missing = values.filter(({ value }) => !printed.some((n) => sameNumber(n, value)));
+  if (!missing.length) return [];
+  const shown = missing.slice(0, 3).map(({ where, value }) => `${where} = ${value}`);
+  const more = missing.length > shown.length ? ` (and ${missing.length - shown.length} more)` : '';
+  return [
+    `${field}: not printed in the evidence: ${shown.join('; ')}${more}. Copy numbers exactly as printed, or set source to illustrative and say so in the title`,
+  ];
+}
+
+/**
+ * A heatmap: shape, labels and values from the shared check (it also rejects a grid whose visible cells are all equal); a
+ * grid of the document's own values must be printed in the evidence, a formula's values are computed here.
+ */
+function checkHeatmap(raw: unknown, evidence: string): BoardCheck {
+  if (isObj(raw) && blank(raw.rows) && blank(raw.cols) && blank(raw.values)) return none();
+  const item = isObj(raw) ? { ...raw, kind: 'heatmap' as const } : raw;
+  const problems = heatmapProblems(item);
+  if (problems.length) return { item: null, problems };
+  const checked = canonicalHeatmap(item);
+  if (checked.source === 'document')
+    problems.push(
+      ...unprinted(
+        checked.values.flatMap((row, r) =>
+          row.flatMap((value, c) =>
+            heatmapMasked(checked.mask, r, c)
+              ? []
+              : [{ where: `row "${checked.rows[r]}", column "${checked.cols[c]}"`, value }],
+          ),
+        ),
+        evidence,
+        'values',
+      ),
+    );
+  return { item: problems.length ? null : checked, problems };
+}
+
+/** A scatter plot: labels, finite coordinates, log axes and series from the shared check; document coordinates must be printed. */
+function checkScatter(raw: unknown, evidence: string): BoardCheck {
+  if (isObj(raw) && blank(raw.points)) return none();
+  const item = isObj(raw) ? { ...raw, kind: 'scatter' as const } : raw;
+  const problems = scatterProblems(item);
+  if (problems.length) return { item: null, problems };
+  const checked = canonicalScatter(item);
+  if (checked.source === 'document')
+    problems.push(
+      ...unprinted(
+        checked.points.flatMap((point) => [
+          { where: `"${point.label}" x`, value: point.x },
+          { where: `"${point.label}" y`, value: point.y },
+        ]),
+        evidence,
+        'points',
+      ),
+    );
+  return { item: problems.length ? null : checked, problems };
+}
+
+/** Matrix shapes through an operation: the dimension algebra comes from the shared check, and every name must render. */
+function checkShapes(raw: unknown): BoardCheck {
+  if (isObj(raw) && blank(raw.terms)) return none();
+  const item = isObj(raw) ? { ...raw, kind: 'shapes' as const } : raw;
+  const problems = shapesProblems(item);
+  (isObj(raw) && Array.isArray(raw.terms) ? raw.terms : []).forEach((term, i) => {
+    const name = isObj(term) && term.kind === 'matrix' ? text(term.name) : '';
+    const error = name && latexError(name);
+    if (error) problems.push(`term ${i + 1}: the name "${name}" cannot be rendered as LaTeX: ${error}`);
+  });
+  return { item: problems.length ? null : canonicalShapes(item), problems };
+}
+
 /** Dispatch schema-validated tool data through the same checks in tours, examples and Q&A. */
 export function checkBoard(kind: BoardKind, raw: unknown, evidence = ''): BoardCheck {
   return BOARD_TOOLS[kind].check(raw, evidence);
@@ -527,9 +615,30 @@ const BOARD_TOOLS = {
     focusIds: partIds('object', SCENE_MAX_OBJECTS),
     parts: (item) => (item.kind === 'scene' ? partIds('object', item.objects.length) : []),
   },
+  heatmap: {
+    schema: () => HEATMAP_SCHEMA,
+    check: checkHeatmap,
+    focusIds: partIds('row', HEATMAP_LIMITS.labels[1]),
+    parts: (item) => (item.kind === 'heatmap' ? partIds('row', item.rows.length) : []),
+  },
+  scatter: {
+    schema: () => SCATTER_SCHEMA,
+    check: checkScatter,
+    focusIds: partIds('point', SCATTER_LIMITS.points[1]),
+    parts: (item) => (item.kind === 'scatter' ? partIds('point', item.points.length) : []),
+  },
+  shapes: {
+    schema: () => SHAPES_SCHEMA,
+    check: checkShapes,
+    focusIds: partIds('matrix', SHAPES_LIMITS.matrices),
+    parts: (item) =>
+      item.kind === 'shapes' ? partIds('matrix', item.terms.filter((term) => term.kind === 'matrix').length) : [],
+  },
 } satisfies Record<BoardKind, BoardTool>;
 
 export const BOARD_KINDS = Object.freeze(Object.keys(BOARD_TOOLS) as BoardKind[]);
+/** The kinds questions and worked-example frames offer; the newer kinds are for tour steps only (for now). */
+export const LEGACY_BOARD_KINDS: readonly BoardKind[] = Object.freeze(['formula', 'flow', 'bars', 'plot', 'scene']);
 
 /** Provider schemas stay separate from canonical player validation. */
 export function boardSchema(kind: BoardKind) {

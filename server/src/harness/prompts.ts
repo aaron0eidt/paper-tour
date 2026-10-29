@@ -4,12 +4,14 @@ import type { BoardKind } from './board';
 import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@22';
+export const HARNESS_VERSION = 'paper-tour-harness@23';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
-1. Use a neutral, factual tone and short, clear sentences for listening: no markdown, lists or URLs in narration.
-   Mathematical notation belongs in visual math fields (formula latex, scene math text and plot math labels), never in say.
+1. Narration is for listening: short, clear sentences in a neutral, factual tone, with no markdown, lists, URLs, hype or
+   suspense. The highlight already shows where a point is written, so never read it out or paraphrase it: lead with the
+   point in one plain sentence, then say what the text leaves implicit. Mathematical notation belongs in visual math
+   fields (formula latex, scene math text and plot math labels), never in say.
 2. Every claim must be supported by the document. Add general knowledge only when it helps, in one short clause.
    Never speak as the document's author: name its authors, sender or parties in the third person ("the authors",
    "the landlord").
@@ -52,6 +54,11 @@ const FOCUS_HELP: Record<BoardKind, string> = {
   formula: 'board_focus lights up one term of your formula while you name it: target term-1 is the first term.',
   flow: 'board_focus lights up one stage of your flow while you speak about it: its target is that node id.',
   bars: 'board_focus lights up one bar while you mention it: target bar-1 is the first bar.',
+  heatmap:
+    'board_focus lights up one row of the grid while you explain it: target row-1 is the first row (with a links view, its curves draw in).',
+  scatter: 'board_focus lights up one point while you mention it: target point-1 is the first point.',
+  shapes:
+    'board_focus lights up one matrix while you name it: target matrix-1 is the first matrix, matrix-2 the second; operators are not targets.',
 };
 const REGION_HELP = `When the image is attached, use exact "bounds": [left,top,right,bottom] between 0 and 1, relative
    to the chosen TARGET. Use its supplied image-frame locations. Prefer a detected text ID or panel for the exact
@@ -130,6 +137,65 @@ export const BOARD_EXAMPLES = {
       ],
     },
   },
+  heatmap: {
+    plan: 'Show which classes get mistaken for which: a grid shows it at a glance, prose cannot.',
+    heatmap: {
+      kind: 'heatmap',
+      title: 'Illustrative confusion matrix',
+      rows: ['true blight', 'true rust', 'true healthy'],
+      cols: ['pred blight', 'pred rust', 'pred healthy'],
+      values: [
+        [46, 3, 1],
+        [9, 38, 3],
+        [0, 2, 48],
+      ],
+      source: 'illustrative',
+      unit: 'leaves',
+    },
+    say: 'The classifier gets most leaves right, and its mistakes cluster in one place: rust is mistaken for blight. Along the rust row, nine of fifty leaves land in the blight column, while healthy leaves are almost never confused with either disease. The diagonal counts the correct calls, so the cells off it are where to look. These counts are illustrative.',
+    cues: [{ action: 'board_focus', target: 'row-2', label: '', anchor: 'Along the rust row' }],
+  },
+  scatter: {
+    plan: 'The trade-off is the point: both axes at once, with size on a log axis.',
+    scatter: {
+      kind: 'scatter',
+      title: 'Illustrative size against error',
+      x_label: 'parameters (millions)',
+      y_label: 'top-1 error (%)',
+      x_log: true,
+      better: 'down-left',
+      points: [
+        { label: 'tiny', x: 5, y: 28 },
+        { label: 'small', x: 22, y: 21 },
+        { label: 'medium', x: 60, y: 17 },
+        { label: 'large', x: 300, y: 15 },
+      ],
+      source: 'illustrative',
+    },
+    say: 'Bigger models make fewer mistakes, but the gains shrink as the cost grows. From tiny to small, the error drops seven points. From medium to large, the size grows fivefold for just two points. The size axis is logarithmic, so a flattening curve means diminishing returns. These values are illustrative.',
+    cues: [{ action: 'board_focus', target: 'point-4', label: '', anchor: 'medium to large' }],
+  },
+  shapes: {
+    plan: 'The point is which dimension the weights consume and which one survives.',
+    shapes: {
+      kind: 'shapes',
+      title: 'A linear layer with ReLU',
+      terms: [
+        { kind: 'matrix', name: 'X', rows: 'n', cols: 'd' },
+        { kind: 'op', op: 'times' },
+        { kind: 'matrix', name: 'W', rows: 'd', cols: 'h' },
+        { kind: 'op', op: 'equals' },
+        { kind: 'matrix', name: 'H', rows: 'n', cols: 'h' },
+        { kind: 'op', op: 'apply', label: 'ReLU' },
+        { kind: 'matrix', name: 'A', rows: 'n', cols: 'h' },
+      ],
+    },
+    say: 'A layer turns every input row into a new row of a different width. The weights W take the shared dimension d in and give h out, so n inputs of width d become n outputs of width h. The number of examples n never changes. ReLU then acts on each entry separately, so the shape stays the same. This layer is illustrative.',
+    cues: [
+      { action: 'board_focus', target: 'matrix-2', label: '', anchor: 'The weights W take' },
+      { action: 'board_focus', target: 'matrix-3', label: '', anchor: 'outputs of width h' },
+    ],
+  },
   pen: [
     {
       action: 'arrow',
@@ -166,7 +232,7 @@ const BOARD_TASK: Record<BoardKind, string> = {
   teacher would ("Q times K transposed", "the square root of d k"), never as LaTeX.
 - Add one board_focus cue per term, anchored where you name that term.
 ${example(BOARD_EXAMPLES.formula)}`,
-  bars: `BOARD (optional): show the main numbers as bars on the side board.
+  bars: `BOARD (optional): show one key comparison on a single metric as bars; use bars for nothing else.
 - Fill "bars.bars" with 2-6 values of ONE metric or unit, each copied exactly as printed in the evidence or table
   above. A number that is not printed there requires correction; use illustrative example inputs/calculations for invented worked values.
 - "label" names the method, setting or item in at most 4 words, "unit" names the metric (BLEU, %, F1, EUR), and
@@ -180,6 +246,21 @@ ${example(BOARD_EXAMPLES.bars)}`,
   earlier node to a later one, and every node has at least one arrow.
 - To light up a stage while you speak about it, add a board_focus cue whose target is that node's id.
 `,
+  heatmap: `BOARD (optional): a heatmap shows a grid of values with labelled rows and columns: which items relate to or weigh on which, a mask, similarity or correlation, a confusion matrix, a grid of results, or a formula over two indices.
+- Fill "heatmap" with kind heatmap, source, rows and cols (2-10 distinct labels each, at most 16 characters) and values (one row of numbers per row label).
+- source document: values copied exactly as printed in the evidence above, never rounded or invented. source illustrative: made-up values that differ from each other, labelled illustrative in the title and in "say". source formula: leave values out and give "expression" in x (the column number) and a (the row number), both from 1, using + - * / ^, parentheses, pi, e, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max; the code computes every cell.
+- Options: scale diverging for signed values; normalize rows when the values are raw scores and the point is how a softmax turns each row into weights that sum to one; mask upper on a square grid where each row sees only the columns up to its own number; view links to draw curves from the focused row to every column (at most 8 columns); unit.
+${example(BOARD_EXAMPLES.heatmap)}`,
+  scatter: `BOARD (optional): a scatter plot shows a trade-off or relationship between two measured quantities: quality against cost or size, accuracy against speed, precision against recall, a parameter sweep, or any two columns of a results table.
+- Fill "scatter" with kind scatter, source, x_label and y_label (plain words with the unit) and 2-10 points, each with a distinct short label, x and y.
+- source document: coordinates copied exactly as printed in the evidence above. source illustrative: invented coordinates, labelled illustrative in the title and in "say", with at least two different values on each axis.
+- Options: x_log or y_log when values span orders of magnitude (all above zero); better says which corner is better (up-left, up-right, down-left or down-right); series names a group, at most 3, and the points of a series are joined in order, as in a sweep of one parameter.
+${example(BOARD_EXAMPLES.scatter)}`,
+  shapes: `BOARD (optional): shapes shows how the dimensions of matrices and vectors combine through an operation: what it keeps, where a dimension disappears, the shape of the result.
+- Fill "shapes" with kind shapes and 3-9 terms that alternate matrix, op, matrix and end with a matrix (at most 5 matrices).
+- A matrix has a LaTeX name and rows and cols, each a symbol such as n or d_k or a number; a vector has cols 1. Use the document's own names and dimensions.
+- An op is times (the columns on its left must equal the rows on its right), plus or hadamard (equal shapes), equals (the next matrix is the computed result, so it must have the computed shape) or apply (a function such as softmax, named in label, that keeps the shape).
+${example(BOARD_EXAMPLES.shapes)}`,
 };
 
 const FORMULA_DETAIL_TASK = `BOARD: the learner already saw the symbolic equation. This detail MUST author a numerical example sequence (the example field) showing actual inputs, a calculation/transformation and its output. Do not supply another copy of the parent formula with different term highlights. Choose a small case that reveals this particular operation's effect and its simplifying assumptions. Show the values changing at the relevant spoken anchors; a concrete substituted formula, connected flow, changing bars or a function plot may each be appropriate. Spend the explanation on why the intermediate changes lead to the result, and what the example does and does not establish.`;
@@ -200,18 +281,10 @@ export function directTask(language: string, brief: string, { actions, board, wo
   const help = page.map((a) => CUE_HELP[a]);
   if (board && actions.includes('board_focus')) help.push(FOCUS_HELP[board]);
   const rules = [
-    `"say" is ${detail ? 90 : 45}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step". Explain why or how, in your own words; never read the source aloud.`,
+    `"say" is ${detail ? 90 : 50}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
+    'The highlight shows where the point is written, so never read it out or paraphrase it, and skip what a reader gets from it at a glance. State the point in one plain sentence, then explain what the text leaves implicit: why it holds, how it works, what it changes, what would happen without it. Add one concrete example or analogy only when it makes the idea click, labelled illustrative.',
+    'No rhetorical questions, invented stories, hooks or suspense. Preserve the document’s qualifications and keep its statements apart from labelled illustrative explanations. Use the source outline for continuity without inventing a narrative arc.',
   ];
-  rules.push(
-    'Actively choose a visual teaching method for every step. When it adds understanding, use it: function behavior or parameter sensitivity becomes a live plot; comparable quantities become bars; a calculation or transformation becomes timed example frames. A useful native animation should accompany that explanation, not be reserved for rare optional extras. For a simple source-diagram path, measured component cues already provide the right live visual. Do not add decorative motion or redundant boards.',
-  );
-  rules.push(
-    'Explain the reasoning between the facts: what changes, why the operation has that effect, and what the result means. Spend words on the mechanism and its limits, not introductions, repeated definitions or a dry list of claims.',
-  );
-  rules.push(
-    'Follow the paper’s actual section and page order. Explain the content in a neutral, precise style close to the authors’ terminology and claims, with concise paraphrases rather than dramatic storytelling. Do not add rhetorical questions, imagined scenarios, motivational hooks or suspense. Preserve the paper’s qualifications and distinguish its statements from clearly labelled illustrative explanations. Use the supplied source outline for continuity without inventing a narrative arc.',
-    'When evidence compares numerical values, prefer a clear visual comparison alongside speech. Identify the metric, scope and baseline, guide the eye through the relevant values, then explain the meaningful difference. Use a grounded bars board if offered. Do not redraw a plot that already communicates the comparison clearly.',
-  );
   rules.push(
     'Trace operation order only from visible arrows or the mathematical expression and supporting text. Spatial position alone is not execution order. If the order is uncertain, describe the relationship without inventing first/then steps.',
   );
@@ -249,23 +322,21 @@ export function directTask(language: string, brief: string, { actions, board, wo
   return [
     `TASK: write ONE step of a guided tour in ${JSON.stringify(language)} and say what to point at.`,
     brief,
-    'NATIVE BOARD CHOICE: all steps may choose one useful top-level formula, flow, bars, plot or scene, regardless of the suggested board below. Function behavior→plot; comparable measured numbers→bars; mechanism stages already in the PDF→source annotations; hidden dependencies or changing values→flow only if informative; symbolic relationships→formula; vector/matrix transformations or combined visual explanations→scene. A scene contains objects with stable id,type,x,y,w,h, optional color/text/values/plot/background. Types text/math/rect/circle/arrow/vector/matrix/plot are native, positions normalized0..1; vectors/arrows use signed endpoint deltas. Use stable IDs and meaningful motion across example frames. To place a vector, arrow or circle on a plot, set plotId to that plot object ID and give x,y and endpoint deltas in its DATA domain; never guess normalized canvas alignment with axes. Unbound shapes use normalized canvas units. Scene matrix values need source evidence or checked example provenance. Keep labels compact and put a shape label in that shape’s own text field instead of overlapping separate foreground objects. A vector/matrix teaching example should transform its actual coordinates or values, not just move a title. Coordinates are layout, never substitute for declaring a numeric value in text or a matrix. Omit an unhelpful board. Use example.frames for a numerical worked transformation; never also supply a top-level board. Paper-result bars must use exact values in the quoted evidence. Plot expressions use the safe functions listed in the example contract, variable x and optional parameter a.',
+    'NATIVE BOARD CHOICE: when the brief has a VISUAL FOR THIS STEP line, draw exactly that visual (or no board when it says none); otherwise a step may draw one top-level board, whatever the suggested board below. Choose the kind that shows what the document is trying to show at this step. Relations, weights, masks, a grid of results or a formula over two indices→heatmap. A trade-off or relationship between two measured quantities→scatter. How matrix dimensions combine through an operation→shapes. How an output responds to an input or parameter→plot. The parts of an equation→formula. One key comparison on a single metric→bars. A real dependency structure the page does not draw→flow. Vector/matrix transformations with actual values or combined visual explanations→scene. A scene contains objects with stable id,type,x,y,w,h, optional color/text/values/plot/background. Types text/math/rect/circle/arrow/vector/matrix/plot are native, positions normalized0..1; vectors/arrows use signed endpoint deltas. Use stable IDs and meaningful motion across example frames. To place a vector, arrow or circle on a plot, set plotId to that plot object ID and give x,y and endpoint deltas in its DATA domain; never guess normalized canvas alignment with axes. Unbound shapes use normalized canvas units. Scene matrix values need source evidence or checked example provenance. A vector/matrix teaching example should transform its actual coordinates or values, not just move a title. Coordinates are layout, never substitute for declaring a numeric value in text or a matrix. Use example.frames for a numerical worked transformation; never also supply a top-level board. Values of a bars, heatmap or scatter board labelled as the document’s must be copied exactly from the quoted evidence. Plot expressions use the safe functions listed in the example contract, variable x and optional parameter a.',
     EXAMPLE_TASK,
-    'FIGURE CHECK: before finalizing, verify every left/right/up/down statement against the actual axis labels, axis direction and the compared points. A desirable corner is not necessarily the trajectory of a parameter sweep. Separate direction of movement from whether each metric improves. Preserve multi-objective trade-offs instead of replacing a two-axis source plot with a one-metric chart that hides the cost. Describe dominance only for the configurations and matched conditions the paper supports. If the needed positions are not clear, state the grounded metric relationship without inventing a spatial direction.',
+    'FIGURE CHECK: before finalizing, verify every left/right/up/down statement against the actual axis labels, axis direction and the compared points. A desirable corner is not necessarily the trajectory of a parameter sweep. Separate direction of movement from whether each metric improves. Preserve multi-objective trade-offs instead of replacing a two-axis source plot with a one-metric chart that hides the cost; a scatter keeps both axes. Describe dominance only for the configurations and matched conditions the paper supports. If the needed positions are not clear, state the grounded metric relationship without inventing a spatial direction.',
     SOURCE_VISUAL_POLICY,
-    ...(!detail
+    ...(!detail && (!board || ['plot', 'formula', 'scene'].includes(board))
       ? [
           `${example(BOARD_EXAMPLES.plot)} Use this as a tool-format example only: choose the function, domain and parameter from the concept actually being taught, never copy this illustration into an unrelated explanation.`,
         ]
       : []),
-    'CHOOSE REPRESENTATIONS: use bars for an important measured comparison on a shared metric; use a function plot for response shape or sensitivity; use vectors/matrices when the components themselves matter; use connected diagram nodes only to explain actual causal structure. A few floating text labels connected by tiny arrows are not a quantitative visual. If the PDF already contains the useful plot or table, teach its axes, baseline and important cases on the source first. A sideboard must reveal something beyond the printed labels. Favor a small number of well-explained changes over many repetitive boards.',
     'SCENE PREFLIGHT: all unbound coordinates and endpoints must fit 0..1 (never use pixel values). Allocate readable bounds for text, put a node label in that node text field rather than overlapping another text object, and terminate arrows on the outside edge of nodes. Use background:true only for real unlabeled containers/coordinate planes, not to bypass readable-foreground validation. Keep legends, sample labels and source values separate and legible.',
     'SCENE COORDINATES: a plot-bound circle uses the lower-left corner x,y and width/height in plot data units, not a center point. To surround the sample (u,v), use x=u-w/2 and y=v-h/2; check that the circle center is exactly the intended sample. Arrow/vector x,y are their starting point and w,h are endpoint deltas. Keep descriptive axis labels as clear words, with mathematical notation only for actual variables/expressions.',
     'LIVE PDF TUTORING: cue each important explanation at the exact spoken phrase that names its source element. Walk through the actual figure components, equation or table rows in narration order, using source highlights, measured outlines and concise explanatory labels. Use arrows only when their exact target is available and the renderer can keep their labels/strokes clear of printed content; never draw across table values. Do not point generically at an entire page while discussing a specific part. When source geometry cannot isolate an equation term reliably, copy that actual equation into a formula board and work through its terms rather than inventing coordinates. Use emphasis selectively so the current explanation remains obvious and readable.',
-    'SOURCE ANCHORS: connect explanations to the actual equation, figure, table and sentences in the PDF. Combine precise source highlights/boxes with a live plot or transformation when the explanation concerns behavior the static source cannot show; do not require exhausting source annotations before choosing a useful side visual. If copying a formula alongside the paper, preserve the source equation and work with its actual terms: build/highlight the relevant subexpression, substitute values, or connect it to an informative plot/transformation. Do not replace source content with an unrelated generic diagram or copy the equation merely to repeat it. The PDF remains the reference; a side visual must add an insight that its source annotations alone cannot show.',
-    'VISUAL PLAN FIRST: use plan to identify the difficult concept, compare the available visual tools, and choose the one that makes the missing intuition visible. Flow is for causal order/connectivity, not a substitute for plotting a function or showing actual vector components. Do not compress several numerical values into labels such as "Inputs -1.5 2" and "Outputs 0.1 3.1": show separate quantities, their units/roles and how the operation changes them. For nonlinear behavior show the function with moving samples or a parameter sweep; for vector/matrix operations show components and their transformation; for measured differences use a meaningful comparison. Coordinate visual changes with the corresponding explanation. More complex is useful only when it explains more; avoid both decorative complexity and an empty three-box summary.',
-    'VISUAL VALUE: never use a scene as a colored text slide, a list of table row/column descriptions, or prose inside decorative shapes. A separate board must make a quantitative change, relationship or mechanism visible through plotted curves, matrices/vectors or connected moving objects. Table orientation belongs on the PDF with grounded cues; choose a separate chart only for a comparison or consequence that is actually explained. Prefer omitting an unnecessary board to duplicating the narration. This is not permission to omit a required worked example: render its actual quantities and transformation.',
-    'BE SELECTIVE: spend sideboard space only on important concepts whose explanation benefits from seeing a mechanism, transformation, parameter effect, or meaningful measured comparison. No visual quota. A trivial unit conversion, restated conclusion, list of labels, or decorative layout is not a teaching contribution. A recap normally summarizes the paper without inventing a numerical case just to open a board. Keep the PDF spacious when source cues suffice. For an important mathematical worked example, still show the actual quantities changing rather than only speaking the example.',
+    'SOURCE ANCHORS: connect explanations to the actual equation, figure, table and sentences in the PDF. Combine precise source highlights/boxes with a live plot or transformation when the explanation concerns behavior the static source cannot show; do not require exhausting source annotations before choosing a useful side visual. If copying a formula alongside the paper, preserve the source equation and work with its actual terms: build/highlight the relevant subexpression, substitute values, or connect it to an informative plot/transformation. Do not replace source content with an unrelated generic diagram or copy the equation merely to repeat it.',
+    'VISUAL PLAN FIRST: use plan to name the point of this step and what the page alone does not show, then the board kind that makes it visible, or none. Show separate quantities with their units and roles, never numbers squeezed into labels such as "Inputs -1.5 2". For nonlinear behavior show the function with moving samples or a parameter sweep; for relations or weights a grid; for a trade-off the points on both axes; for matrix operations their shapes or components; for one key comparison a bar chart. Coordinate each visual change with the explanation. Complexity helps only when it explains more: avoid a decorative picture and an empty three-box summary.',
+    'BE SELECTIVE: spend side-board space only on a point whose explanation gains from seeing a mechanism, relationship, trade-off, transformation or parameter effect. There is no visual quota, and no board is better than a weak one. Never repeat the same data twice, redraw what is on screen, or use a scene as a coloured text slide, a list of table rows or prose inside shapes. If the PDF already has the useful plot or table, teach its axes, baseline and important cases there with grounded cues. A glossary, trivial unit conversion, restated conclusion or recap is not a teaching contribution, and a recap needs no invented numerical case. Keep the PDF spacious when source cues suffice. This is not permission to omit a required worked example: render its actual quantities and transformation.',
     'SELF-CORRECTION: a validation reply lists every detected field/problem in your last direction. Return the complete corrected direction, preserving valid narration, assumptions, inputs and frames. Fix all listed problems together. Unused top-level boards must be omitted, including when example.frames supplies the visuals; never add dummy objects to satisfy a schema. A scene text/math object needs its actual nonempty text, and a matrix needs its actual values. If a chosen representation cannot express signed values, use a scene matrix or function plot instead. Do not remove a required example or replace it with prose to evade validation.',
     ...rules.map((rule, i) => `${i + 1}. ${rule}`),
     ...(pen ? [`${example(BOARD_EXAMPLES.pen)} (cues only)`] : []),

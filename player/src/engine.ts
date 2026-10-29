@@ -116,7 +116,7 @@ export function isBoard(a: Action): a is BoardControl {
 export function boardAfter(board: BoardState, a: BoardControl, key: string, current: boolean): BoardState {
   // Older saved tours may contain removed video boards. Skip them without opening an empty panel or stalling playback.
   if (a.type === 'board')
-    return ['formula', 'flow', 'bars', 'plot', 'scene'].includes(a.item.kind)
+    return ['formula', 'flow', 'bars', 'plot', 'scene', 'heatmap', 'scatter', 'shapes'].includes(a.item.kind)
       ? { key, item: a.item, focus: null }
       : EMPTY_BOARD;
   if (a.type === 'board_clear') return EMPTY_BOARD;

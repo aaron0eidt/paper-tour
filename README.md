@@ -144,9 +144,10 @@ npm run test:integration
 Integration tests require the local Supabase stack. `Dockerfile` and `compose.yaml` provide an
 optional deployment setup; environment variables are listed in `.env.example`.
 
-New tours use the guided harness (`TOUR_PRESET=deep`). It plans
-explanations, directs independent steps concurrently, then gives each detail step its preceding overview
-to build on. `quick` and `standard` remain available. Activity shows readable narration, concurrent
+New tours use the guided harness (`TOUR_PRESET=standard`, 10-12 steps). It plans the main explanations,
+designs the side visuals for the whole tour in one call (diversity first, see notes/VISUALS-V2.md), directs
+independent steps concurrently, then gives each detail step its preceding overview to build on. `quick` and `deep`
+remain available. Activity shows readable narration, concurrent
 work and timing diagnostics; the floating question bubble also shows progress.
 
 Set `PAPER_AGENT_ENABLED=true` for new tours to use the persistent paper agent. Existing jobs keep

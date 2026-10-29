@@ -47,7 +47,7 @@ steps. Its weak points are listed in [STATUS.md](STATUS.md) and are the first it
   `mkdir -p .data/tmp && TMPDIR=$PWD/.data/tmp npm run supabase:start`. Then `npm run dev` runs the web app (5174), the
   API (3001) and the worker. The worker does not reload on changes: restart `npm run dev` after server changes.
 - **Settings in the root `.env`** (see `.env.example`): `MODEL_API_KEY` for a shared Meta key (or add your own in
-  Profile & Settings), `TOUR_PRESET` (`quick`, `standard` or `deep`; the default is `deep`) and
+  Profile & Settings), `TOUR_PRESET` (`quick`, `standard` or `deep`; the default is `standard`) and
   `PAPER_AGENT_ENABLED=false` (Nikolas's agent, which walks every page). The earlier page-by-page writer and its
   `TOUR_WRITER` setting are retired.
 - **A tour without the app:** ingest a PDF, then write the tour with the same generator the worker uses (real API

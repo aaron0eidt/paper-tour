@@ -19,7 +19,7 @@ export const DOC_TYPE_HELP: Record<DocType, string> = {
 /** How every step of a tour of this type speaks. */
 export const TONE: Record<DocType, string> = {
   research_paper:
-    'Explain this point neutrally and precisely, staying close to the paper’s terminology, claims and section structure. Clarify important concepts without adding rhetorical questions or an invented story.',
+    'Explain the point directly and precisely, using the paper’s own terms for its concepts. Make the idea intuitive without rhetorical questions or invented drama.',
   exercise_sheet: 'Speak as a patient tutor who works through the exercises with the student.',
   lecture:
     'Teach this part of the lecture to a student as a friendly tutor would: build on what came before without ' +

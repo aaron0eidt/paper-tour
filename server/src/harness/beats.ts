@@ -110,12 +110,12 @@ const RESULT_RE = /\b(result|accura|perform|compar|score|bleu|error|outperform|b
 
 const TEACHING_ROLES: Partial<Record<BeatKind, string>> = {
   problem:
-    'State the problem and motivation as the paper presents them, with its scope and terminology. Keep a neutral tone without adding a hook or rhetorical question.',
-  idea: 'Describe the central contribution and its relation to the stated problem, preserving the authors’ claims and qualifications.',
+    'State the problem in one plain sentence, then say what makes it hard or what goes wrong today. The learner can read the highlighted sentences, so add the cause or the stakes instead of rewording them. Keep a neutral tone without a hook or rhetorical question.',
+  idea: 'Say the central contribution in one sentence, then why it answers the stated problem: what it changes and what that buys. Preserve the authors’ claims and qualifications and add the intuition, not a rewording of the highlighted sentences.',
   method:
-    'Actively choose the visual that clarifies this mechanism: a process flow, an input/output plot, a numerical comparison or a worked transformation. Explain the method in the order presented: inputs, operations and outputs. Explain reasons supported by the text; do not invent failure cases or unsupported causal claims.',
+    'Explain how the mechanism works in the order presented: inputs, operations and outputs, and why each part is needed. Do not reword the highlighted sentences. Give reasons supported by the text; do not invent failure cases or unsupported causal claims.',
   result:
-    'Present the experiment, metric and comparable baseline, then the relevant values and their difference. State only the supported implication and its scope.',
+    'Lead with the result: the experiment, metric and comparable baseline, then the values and their difference. Then say what the gap supports and what it does not establish; state only the supported implication and its scope.',
   limitation:
     'Show where the preceding explanation stops working or remains uncertain, and why that boundary matters for applying the method.',
   takeaway:
