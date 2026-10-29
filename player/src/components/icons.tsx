@@ -45,3 +45,10 @@ export const VolumeIcon = ({ muted }: { muted: boolean }) => (
     )}
   </Svg>
 );
+
+export const KeyboardIcon = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="6" width="18" height="12" rx="2.5" />
+    <path d="M7 10h.01M10.5 10h.01M14 10h.01M17.5 10h.01M8 14h8" />
+  </svg>
+);

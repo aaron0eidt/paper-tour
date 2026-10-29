@@ -1,19 +1,30 @@
 import { useEffect, useRef } from 'react';
 import type { EngineState, FlatStep } from '../engine';
+import { formatTime } from '../tourClock';
+import type { TourClock } from '../tourClock';
+import { Timeline, elapsedAt } from './Timeline';
 import { DEFAULT_SPEAKER } from '../types';
 import type { Voice } from '../types';
 import { isGoogleVoice, pickVoice, voiceId } from '../narration/voices';
-import { NextIcon, PauseIcon, PlayIcon, PrevIcon, VolumeIcon } from './icons';
+import { KEY_HELP } from '../keys';
+import { KeyboardIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon, VolumeIcon } from './icons';
 import '../voiceSettings.css';
 
 interface Props {
   steps: FlatStep[];
+  /** Chapter titles, by chapter index. */
+  chapters: string[];
+  clock: TourClock;
   state: EngineState;
   speed: number;
   muted: boolean;
   onToggle(): void;
   onPrev(): void;
   onNext(): void;
+  onSeek(index: number, word: number): void;
+  onSkip(direction: 1 | -1): void;
+  helpOpen: boolean;
+  onHelp(open: boolean): void;
   onSpeed(speed: number): void;
   onMute(muted: boolean): void;
   voices?: SpeechSynthesisVoice[];
@@ -25,12 +36,18 @@ interface Props {
 
 export function ControlBar({
   steps,
+  chapters,
+  clock,
   state,
   speed,
   muted,
   onToggle,
   onPrev,
   onNext,
+  onSeek,
+  onSkip,
+  helpOpen,
+  onHelp,
   onSpeed,
   onMute,
   voices = [],
@@ -44,10 +61,12 @@ export function ControlBar({
   const playing = state.status === 'playing';
   const textRef = useRef<HTMLDivElement>(null);
   const audioPanel = useRef<HTMLDetailsElement>(null);
+  const helpPanel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       if (audioPanel.current?.open && !audioPanel.current.contains(event.target as Node))
         audioPanel.current.open = false;
+      if (helpOpen && !helpPanel.current?.contains(event.target as Node)) onHelp(false);
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && audioPanel.current?.open) {
@@ -61,7 +80,7 @@ export function ControlBar({
       document.removeEventListener('pointerdown', closeOutside);
       document.removeEventListener('keydown', escape);
     };
-  }, []);
+  }, [helpOpen, onHelp]);
   // A speed picked with the mouse or a finger hands focus back, so Space and the arrows control
   // the tour again; with the keyboard, focus stays for further arrow presses.
   const pickedByPointer = useRef(false);
@@ -84,15 +103,16 @@ export function ControlBar({
             ? 'Using your selected voice.'
             : 'Google voice preferred automatically.';
 
-  // Keep the word being spoken in view when the narration is longer than the box.
+  // Keep the word being spoken in view when the narration is longer than the box. The caption moves by whole lines, so
+  // no half line shows at its edges: the line being spoken sits second, with the next one already in view below it.
   useEffect(() => {
     const box = textRef.current;
     const word = box?.querySelector<HTMLElement>('.w.now');
     if (!box || !word) return;
-    const top = word.offsetTop - box.offsetTop;
-    if (top < box.scrollTop || top + word.offsetHeight > box.scrollTop + box.clientHeight) {
-      box.scrollTo({ top: top - box.clientHeight / 3, behavior: 'smooth' });
-    }
+    const line = parseFloat(getComputedStyle(box).lineHeight) || 23;
+    const spoken = Math.round((word.offsetTop - box.offsetTop) / line);
+    const first = Math.round(box.scrollTop / line);
+    if (spoken < first || spoken > first + 1) box.scrollTo({ top: Math.max(0, spoken - 1) * line, behavior: 'smooth' });
   }, [state.word, state.index]);
 
   useEffect(() => {
@@ -101,6 +121,15 @@ export function ControlBar({
 
   return (
     <footer className="controls">
+      <Timeline
+        steps={steps}
+        chapters={chapters}
+        clock={clock}
+        state={state}
+        onSeek={onSeek}
+        onSkip={onSkip}
+        onStep={(direction) => (direction > 0 ? onNext() : onPrev())}
+      />
       <div className="transport">
         <button
           className="icon-btn"
@@ -121,7 +150,9 @@ export function ControlBar({
         >
           <NextIcon />
         </button>
-        <span className="step-count">{disabled ? 'No tour' : `step ${state.index + 1} / ${steps.length}`}</span>
+        <span className="step-count" title={clock.measured || muted ? undefined : 'Estimated from the narration; a voice may be quicker or slower'}>
+          {disabled ? 'No tour' : `${formatTime(elapsedAt(clock, state, steps))} / ${clock.measured || muted ? '' : '~'}${formatTime(clock.total)}`}
+        </span>
       </div>
 
       <div className="narration">
@@ -220,6 +251,34 @@ export function ControlBar({
             </label>
           </div>
         </details>
+        <div className="key-help-wrap" ref={helpPanel}>
+          <button
+            className={`icon-btn key-help-button${helpOpen ? ' open' : ''}`}
+            onClick={() => onHelp(!helpOpen)}
+            aria-expanded={helpOpen}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <KeyboardIcon />
+          </button>
+          {helpOpen && (
+            <div className="key-help" role="dialog" aria-label="Keyboard shortcuts">
+              <h3>Keyboard</h3>
+              <dl>
+                {KEY_HELP.map((row) => (
+                  <div key={row.does}>
+                    <dt>
+                      {row.keys.map((key) => (
+                        <kbd key={key}>{key}</kbd>
+                      ))}
+                    </dt>
+                    <dd>{row.does}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </div>
         <button
           className={`icon-btn${muted ? ' active' : ''}`}
           onClick={() => onMute(!muted)}

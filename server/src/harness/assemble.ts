@@ -18,6 +18,7 @@ import { ROOT } from '../config';
 import { indexElements } from '../elements';
 import type { Beat, BeatKind, Preset, TourPlan } from './beats';
 import { boardParts } from './board';
+import { equationName } from './equations';
 import { exampleActions } from './example';
 import { insightStep } from './insight';
 import type { PaperCard } from './card';
@@ -86,7 +87,7 @@ function elementName(beat: Beat, doc: Doc): string {
   const figure = doc.figures.find((f) => f.id === beat.target);
   if (figure) return `${figure.kind === 'table' ? 'Table' : 'Figure'} ${figure.number}`;
   const equation = doc.equations.find((e) => e.id === beat.target);
-  return equation ? `Equation ${equation.number}` : '';
+  return equation ? equationName(equation) : '';
 }
 
 /** One tour step from a beat and its direction; without a direction, the card's own words with a single pointer. */

@@ -650,6 +650,9 @@ kbd {
 /* ------------------------------------------------------------- control bar */
 
 .controls {
+  position: relative;
+  /* Above the ask dock (18), below the phone's navigation drawer (20): the timeline's tip may reach over the stage. */
+  z-index: 19;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -740,7 +743,8 @@ button:disabled {
 }
 
 .narration-text {
-  max-height: 4.6em;
+  /* Three whole lines; the caption scrolls by lines (ControlBar). */
+  max-height: calc(1.55em * 3);
   overflow-y: auto;
   font-size: 15px;
   line-height: 1.55;

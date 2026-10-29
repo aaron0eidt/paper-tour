@@ -1,7 +1,7 @@
 // Engine tests with a fake narrator and fake timers. Run with `npm test` (esbuild bundles this
 // file for Node, no test framework needed).
 
-import { TourEngine, boardPlayback, flattenTour } from '../src/engine';
+import { FADE_MS, TourEngine, boardPlayback, flattenTour } from '../src/engine';
 import type { EngineState, Timers } from '../src/engine';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from '../src/narration/narrator';
 import { SilentNarrator } from '../src/narration/silent';
@@ -371,7 +371,10 @@ await test('at_word past the narration fires at the end; advance after hold_ms',
   timers.tick(1);
   const s = engine.getState();
   eq(s.index, 1, 'advanced');
-  eq(keys(s), ['0:2'], 'non-persistent overlays dropped, persistent kept');
+  eq(s.overlays.filter((o) => !o.leaving).map((o) => o.key), ['0:2'], 'only persistent overlays stay');
+  eq(s.overlays.filter((o) => o.leaving).map((o) => o.key), ['0:0', '0:3'], 'the step\'s marks fade out');
+  timers.tick(FADE_MS);
+  eq(keys(engine.getState()), ['0:2'], 'non-persistent overlays dropped once faded, persistent kept');
   eq(narrator.calls.length, 2, 'second step spoken');
   eq(narrator.last.req.speaker, 'guest', 'speaker');
   eq(narrator.last.req.voice, { lang: 'en-GB', rate: 1.2 }, 'voice for speaker');
@@ -663,6 +666,197 @@ await test('removed video boards in saved tours neither open a panel nor block o
   engine.goTo(0);
   eq(engine.getState().board, { key: null, item: null, focus: null }, 'seeking also skips obsolete video items');
   engine.destroy();
+});
+
+// ------------------------------------------------------- seeking, resuming and the timeline
+
+/** Two chapters; the first step has three sentences, so a pause or a seek can land inside it. */
+const spoken: Tour = {
+  schema: 'paper-tour/tour@0.1',
+  title: 'Seeking',
+  paper: 'test',
+  chapters: [
+    {
+      id: 'c1',
+      title: 'One',
+      steps: [
+        {
+          id: 'a',
+          say: 'First point. Second point is longer than that. Third and last.',
+          hold_ms: 100,
+          actions: [
+            { type: 'focus', target: 'p1.b1' },
+            { type: 'highlight', targets: ['p1.s1'], at_word: 0 },
+            { type: 'highlight', targets: ['p1.s2'], at_word: 2 },
+            { type: 'box', target: 'fig1', at_word: 8 },
+            { type: 'zoom', target: 'fig1', at_word: 8 },
+          ],
+        },
+        { id: 'b', say: 'Next step comes right here.', hold_ms: 100, actions: [{ type: 'focus', target: 'p2.b1' }] },
+      ],
+    },
+    {
+      id: 'c2',
+      title: 'Two',
+      steps: [
+        { id: 'c', say: 'Chapter two starts. It goes on.', hold_ms: 100, actions: [] },
+        { id: 'd', say: 'Last one.', hold_ms: 100, actions: [] },
+      ],
+    },
+  ],
+};
+
+function spokenSetup() {
+  const narrator = new FakeNarrator(), timers = new FakeTimers();
+  return { engine: new TourEngine(spoken, { narrator, timers }), narrator, timers };
+}
+
+await test('a camera move carries the marks that appear while it holds', () => {
+  const steps = flattenTour(spoken);
+  const [first, second] = steps[0].schedule.filter((item) => item.action.type === 'focus' || item.action.type === 'zoom');
+  eq(first.also?.map((m) => m.target), ['p1.s1', 'p1.s2'], 'marks until the next camera move');
+  eq(second.also?.map((m) => m.target), ['fig1'], 'marks of the later move');
+  const { engine, narrator } = spokenSetup();
+  engine.play();
+  eq(engine.getState().camera.also?.map((m) => m.target), ['p1.s1', 'p1.s2'], 'the command the reader frames');
+  narrator.last.cb.onWord(8);
+  eq(engine.getState().camera.also?.map((m) => m.target), ['fig1'], 'and at the later move');
+});
+
+await test('pause then play goes on from the start of the sentence that was being spoken', () => {
+  const { engine, narrator } = spokenSetup();
+  engine.play();
+  eq(narrator.last.req.startWord, 0, 'a step starts at its first word');
+  narrator.last.cb.onWord(4);
+  engine.pause();
+  engine.play();
+  eq(narrator.calls.length, 2, 'spoken again');
+  eq(narrator.last.req.startWord, 2, 'from the second sentence');
+  const s = engine.getState();
+  eq([s.status, s.word], ['playing', 1], 'the first sentence stays spoken');
+  eq(keys(s), ['0:1', '0:2'].filter((k) => k !== '0:2'), 'marks of later sentences wait for their words');
+  narrator.last.cb.onWord(2);
+  eq(keys(engine.getState()), ['0:1', '0:2'], 'and replay as the sentence is spoken again');
+});
+
+await test('pausing at the end of a sentence resumes with the next one, nothing repeated', () => {
+  const { engine, narrator } = spokenSetup();
+  engine.play();
+  narrator.last.cb.onWord(1);
+  engine.pause();
+  engine.play();
+  eq(narrator.last.req.startWord, 2, 'the sentence after the one that finished');
+});
+
+await test('pausing during the hold and playing again only waits out the hold', () => {
+  const { engine, narrator, timers } = spokenSetup();
+  engine.play();
+  narrator.last.cb.onEnd();
+  engine.pause();
+  engine.play();
+  eq(narrator.calls.length, 1, 'the step is not spoken again');
+  timers.tick(100);
+  eq([engine.getState().index, engine.getState().status], [1, 'playing']);
+});
+
+await test('seeking while playing speaks from the sentence the word is in, on the state a natural run reaches', () => {
+  const natural = spokenSetup();
+  natural.engine.play();
+  natural.narrator.last.cb.onWord(8);
+  const naturalState = natural.engine.getState();
+
+  const { engine, narrator } = spokenSetup();
+  engine.play();
+  const first = narrator.last;
+  engine.seekTo(0, 5);
+  eq(first.cancelled, true, 'the old narration stops');
+  eq(narrator.last.req.startWord, 2, 'snapped back to the start of the second sentence');
+  let s = engine.getState();
+  eq([s.status, s.index, s.word], ['playing', 0, 1]);
+  eq(keys(s), ['0:1'], 'only what was marked before that sentence');
+  narrator.last.cb.onWord(8);
+  s = engine.getState();
+  eq(keys(s), keys(naturalState), 'the rest arrives as in a natural run');
+  eq(s.camera.key, naturalState.camera.key, 'camera');
+  engine.seekTo(2, 0);
+  eq([engine.getState().index, narrator.last.req.text], [2, 'Chapter two starts. It goes on.'], 'into another step');
+});
+
+await test('seeking while paused shows the step before that sentence and play speaks from it', () => {
+  const { engine, narrator } = spokenSetup();
+  engine.seekTo(0, 9);
+  let s = engine.getState();
+  eq([s.status, s.index, s.word, s.preview], ['paused', 0, 7, false]);
+  eq(keys(s), ['0:1', '0:2'], 'marks up to the word before the sentence');
+  eq(narrator.calls.length, 0, 'nothing spoken');
+  engine.play();
+  eq(narrator.last.req.startWord, 8, 'from the third sentence');
+  engine.pause();
+  engine.seekTo(1, 0);
+  s = engine.getState();
+  eq([s.index, s.word], [1, -1]);
+  engine.play();
+  eq(narrator.last.req.startWord, 0, 'a seek to a step start plays the whole step');
+});
+
+await test('skip moves by sentence, restarting the current one first, then across steps', () => {
+  const { engine, narrator } = spokenSetup();
+  engine.play();
+  narrator.last.cb.onWord(4);
+  engine.skip(1);
+  eq([engine.getState().index, narrator.last.req.startWord], [0, 8], 'next sentence');
+  engine.skip(1);
+  eq([engine.getState().index, narrator.last.req.startWord], [1, 0], 'next step after the last sentence');
+  narrator.last.cb.onWord(3);
+  engine.skip(-1);
+  eq([engine.getState().index, narrator.last.req.startWord], [1, 0], 'a sentence well under way restarts');
+  engine.skip(-1);
+  eq([engine.getState().index, narrator.last.req.startWord], [0, 8], 'then the last sentence of the step before');
+  narrator.last.cb.onWord(10);
+  engine.skip(-1);
+  eq(narrator.last.req.startWord, 2, 'and back through the sentences');
+});
+
+await test('chapter jumps: the next chapter, or this one is restarted before going back', () => {
+  const { engine } = spokenSetup();
+  eq(engine.chapterStart(1), 2, 'the first step of chapter two');
+  engine.goTo(1);
+  eq(engine.chapterStart(-1), 0, 'the start of this chapter');
+  engine.goTo(2);
+  eq(engine.chapterStart(-1), 0, 'at a chapter start, the one before');
+  engine.goTo(3);
+  eq(engine.chapterStart(-1), 2, 'later in a chapter, its own start');
+  eq(engine.chapterStart(1), 3, 'the last chapter has none after it');
+});
+
+await test('the marks of a step fade out as the next one starts, and the camera keeps its mark list', () => {
+  const { engine, narrator, timers } = spokenSetup();
+  engine.play();
+  narrator.last.cb.onWord(9);
+  narrator.last.cb.onEnd();
+  timers.tick(100);
+  let s = engine.getState();
+  eq(s.index, 1);
+  eq(s.overlays.map((o) => [o.key, !!o.leaving]), [['0:1', true], ['0:2', true], ['0:3', true]], 'leaving, not gone');
+  engine.pause();
+  engine.seekTo(1, 0);
+  eq(engine.getState().overlays.length, 0, 'a seek drops them at once');
+  engine.play();
+  narrator.last.cb.onEnd();
+  timers.tick(100 + FADE_MS);
+  s = engine.getState();
+  eq([s.index, s.overlays.length], [2, 0]);
+});
+
+await test('silent narrator starts at the given word', async () => {
+  const seen: number[] = [];
+  await new Promise<void>((resolve) => {
+    new SilentNarrator().speak({ text: 'a b c d', words: ['a', 'b', 'c', 'd'], speaker: 'host', rate: 8, startWord: 2 }, {
+      onWord: (i) => seen.push(i),
+      onEnd: resolve,
+    });
+  });
+  eq(seen, [2, 3], 'only the words from there');
 });
 
 console.log(results.join('\n'));

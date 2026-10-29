@@ -1,5 +1,6 @@
 import type { Doc, DocExercise, DocExercisePart, DocSentence } from '../../../shared/paper';
 import { paperLike } from './doctype';
+import { equationTag } from './equations';
 
 /** Block types whose sentences a tour may speak about and highlight (headings appear as section lines). */
 const PROSE = new Set(['paragraph', 'footnote']);
@@ -85,14 +86,18 @@ export function paperBlock(doc: Doc): string {
   if (doc.figures.length) lines.push('', 'FIGURES AND TABLES:');
   for (const f of doc.figures) {
     const panels = f.panels.map((p) => `${p.id}${p.label ? ` (${p.label})` : ''}`).join(', ');
+    const columns = f.grid ? f.grid.columns.map((c) => c.name) : [];
     lines.push(
       `[${f.id}] ${f.kind} ${f.number}, page ${f.page}: ${f.caption}` +
         (f.referenced_by.length ? ` | cited by ${f.referenced_by.slice(0, 8).join(', ')}` : '') +
-        (panels ? ` | panels ${panels}` : ''),
+        (panels ? ` | panels ${panels}` : '') +
+        (f.grid
+          ? ` | ${f.grid.rows.length} rows, columns ${columns.slice(0, 8).join(', ')}${columns.length > 8 ? ', ...' : ''}`
+          : ''),
     );
   }
   if (doc.equations.length) lines.push('', 'EQUATIONS (extracted text, may be garbled):');
-  for (const e of doc.equations) lines.push(`[${e.id}] (${e.number}), page ${e.page}: ${e.text}`);
+  for (const e of doc.equations) lines.push(`[${e.id}] ${equationTag(e)}, page ${e.page}: ${e.text}`);
   if (doc.exercises?.length) lines.push('', 'EXERCISES (tasks and their parts):', ...exerciseLines(doc));
   return lines.join('\n');
 }

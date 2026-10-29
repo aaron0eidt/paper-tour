@@ -46,6 +46,8 @@ export interface AskPanelProps {
   onPauseAnswer?(): void;
   onContinueAnswer?(): void;
   selection?: RegionSelection | null;
+  /** The region was snapped to the object inside it. */
+  selectionSnapped?: boolean;
   selecting?: boolean;
   selectionPreview?: ReactNode;
   onSelectRegion?(): void;
@@ -230,7 +232,8 @@ export function AskPanel(props: AskPanelProps) {
         ? answering
           ? []
           : openQuestions(phase.answer.followups, asked, 2)
-        : invite || (focused && !history.length)
+        : // Questions about the whole document make no sense beside a chosen region: its chip is the context.
+          invite || (focused && !history.length && !props.selection)
           ? offered
           : [];
   const back = away && !busy && !voiceBusy && !props.selecting;
@@ -366,7 +369,7 @@ export function AskPanel(props: AskPanelProps) {
         {props.selection && !props.selecting && (
           <div className="ask-selection-chip">
             {props.selectionPreview}
-            <span><strong>Selected region</strong><small>Page {props.selection.page} · included with your question</small></span>
+            <span><strong>Selected region</strong><small>Page {props.selection.page} · {props.selectionSnapped ? 'snapped to the object · ' : ''}included with your question</small></span>
             <button type="button" onClick={props.onSelectRegion} disabled={busy || voiceBusy} aria-label="Change selected region">Change</button>
             <button type="button" onClick={props.onClearRegion} disabled={busy || voiceBusy} aria-label="Remove selected region" title="Remove selected region">×</button>
           </div>
@@ -435,15 +438,18 @@ export function AskPanel(props: AskPanelProps) {
               {voice.phase === 'transcribing' ? '…' : <MicrophoneIcon />}
             </button>
           )}
-          <button
-            type="submit"
-            className={`ask-send${busy ? ' stop' : empty ? '' : ' ready'}`}
-            disabled={voiceBusy || props.selecting || (!busy && empty)}
-            aria-label={busy ? 'Stop generating answer' : 'Ask'}
-            title={busy ? 'Stop generating answer (Esc)' : 'Ask (Enter)'}
-          >
-            {busy ? <StopIcon /> : <SendIcon />}
-          </button>
+          {/* Nothing to send yet: the bar stays quiet, and the controls before it do not move when it appears. */}
+          {(busy || !empty) && (
+            <button
+              type="submit"
+              className={`ask-send${busy ? ' stop' : ' ready'}`}
+              disabled={voiceBusy || props.selecting}
+              aria-label={busy ? 'Stop generating answer' : 'Ask'}
+              title={busy ? 'Stop generating answer (Esc)' : 'Ask (Enter)'}
+            >
+              {busy ? <StopIcon /> : <SendIcon />}
+            </button>
+          )}
         </form>
       </div>
     </section>

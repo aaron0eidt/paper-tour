@@ -101,7 +101,7 @@ function corpus(doc: Doc): { passage: Passage; search: string }[] {
     const before = at > 0 ? blocks[at - 1].sentences.at(-1) : undefined;
     const after = at >= 0 && at + 1 < blocks.length ? blocks[at + 1].sentences[0] : undefined;
     const around = [before, after].map((id) => (id ? (sentences.get(id)?.text ?? '') : '')).join(' ');
-    const text = `Equation (${e.number}): ${e.text}`;
+    const text = `${e.number ? `Equation (${e.number})` : 'Equation'}: ${e.text}`;
     out.push({ passage: { id: e.id, kind: 'equation', page: e.page, text }, search: `${text} ${around}` });
   }
   for (const s of doc.sections) {
@@ -122,7 +122,7 @@ export function namedElements(doc: Doc, question: string): string[] {
     if (f) ids.push(f.id);
   }
   for (const m of question.matchAll(/\b(?:eq(?:uation)?s?)\.?\s*\(?([0-9]+[a-z]?)\)?/gi)) {
-    const e = doc.equations.find((e) => e.number.toLowerCase() === m[1].toLowerCase());
+    const e = doc.equations.find((e) => e.number?.toLowerCase() === m[1].toLowerCase());
     if (e) ids.push(e.id);
   }
   for (const m of question.matchAll(/(?:\bsec(?:tion)?s?\.?|§)\s*([0-9]+(?:\.[0-9]+)*)/gi)) {

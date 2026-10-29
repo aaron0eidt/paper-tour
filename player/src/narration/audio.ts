@@ -17,8 +17,9 @@ export class AudioNarrator implements Narrator {
     const el = new Audio(new URL(req.audio!.src, new URL(this.baseUrl, location.href)).href);
     el.playbackRate = rate;
 
+    const from = Math.max(0, Math.min(req.startWord ?? 0, n - 1));
     let done = false;
-    let last = -1;
+    let last = from - 1;
     let poll: ReturnType<typeof setInterval> | undefined;
     let watchdog: ReturnType<typeof setTimeout> | undefined;
     let stopFallback: (() => void) | undefined;
@@ -59,6 +60,14 @@ export class AudioNarrator implements Narrator {
       return req.words.map((_, i) => (i * total) / n);
     };
 
+    // Resuming or seeking: the browser seeks as soon as the audio can.
+    if (from > 0) {
+      try {
+        el.currentTime = wordTimes()[from] / 1000;
+      } catch {
+        // Stays at the start; the words then catch up as they are heard.
+      }
+    }
     el.onended = finish;
     el.onerror = () => fallback(el.error?.message || 'audio error');
     el.play().then(

@@ -46,6 +46,7 @@ export interface PenArrowShape {
    */
   head: { fit: number; max: number };
   bounds: BBox;
+  leaving?: boolean;
 }
 
 /** A hand-drawn loop around the target: once around and a little past its start. */
@@ -58,14 +59,15 @@ export interface PenCircleShape {
   /** The loop's upper-right point, where its label goes. */
   labelAt: Point;
   bounds: BBox;
+  leaving?: boolean;
 }
 
 export type PenShape = PenArrowShape | PenCircleShape;
 
 export interface PageShapes {
-  markers: { key: string; rects: BBox[]; color: Color }[];
-  underlines: { key: string; rects: BBox[]; color: Color }[];
-  boxes: { key: string; rect: BBox; color: Color }[];
+  markers: { key: string; rects: BBox[]; color: Color; leaving?: boolean }[];
+  underlines: { key: string; rects: BBox[]; color: Color; leaving?: boolean }[];
+  boxes: { key: string; rect: BBox; color: Color; leaving?: boolean }[];
   /** Spotlight holes on this page. */
   holes: BBox[];
   /** A gentle reading veil inferred from the active narration focus. */
@@ -80,6 +82,7 @@ export interface SceneNote {
   side: NonNullable<NoteAction['side']>;
   /** Anchor in stage coordinates. */
   rect: BBox;
+  leaving?: boolean;
 }
 
 export interface SceneLabel {
@@ -95,12 +98,15 @@ export interface SceneLabel {
   pin?: { x: number; y: number; side: PenLabelSide; alt?: PenSide };
   /** Parent visual in stage coordinates: optional labels must stay outside it. */
   area?: BBox;
+  leaving?: boolean;
 }
 
 export interface Scene {
   pages: Map<number, PageShapes>;
   /** Any spotlight active: every page dims except the holes. */
   spotlight: boolean;
+  /** Every spotlight shown is leaving. */
+  spotlightLeaving?: boolean;
   notes: SceneNote[];
   labels: SceneLabel[];
   /** PDF content in stage coordinates, kept clear by measured screen labels. */
@@ -640,14 +646,18 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
       boxNeighbors.push({ page: group.page, rect: unionRect(group.rects) });
   }
 
-  for (const { key, action: a } of overlays) {
+  // A mark of a step that has ended is leaving: it fades out while the camera moves on.
+  let spotlights = 0;
+  let leavingSpotlights = 0;
+  for (const { key, action: a, leaving } of overlays) {
+    const fade = leaving ? { leaving: true } : {};
     switch (a.type) {
       case 'highlight': {
         const color = a.color ?? DEFAULT_COLOR;
         const list = a.style === 'underline' ? 'underlines' : 'markers';
         a.targets.forEach((t, i) => {
           for (const g of resolver.resolve(t, { lines: true }) ?? []) {
-            page(g.page)[list].push({ key: `${key}.${i}.${g.page}`, rects: g.rects, color });
+            page(g.page)[list].push({ key: `${key}.${i}.${g.page}`, rects: g.rects, color, ...fade });
           }
         });
         break;
@@ -660,8 +670,8 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
         const area = visualArea(resolver, a.target);
         const local = paddedBox(unionRect(g.rects), boxNeighbors.filter(item => item.page === g.page).map(item => item.rect));
         const rect = toStage(layout, g.page, local);
-        page(g.page).boxes.push({ key, rect: local, color });
-        if (a.label) scene.labels.push({ key, text: a.label, color, rect, ...(area ? { area: toStage(layout, g.page, area) } : {}) });
+        page(g.page).boxes.push({ key, rect: local, color, ...fade });
+        if (a.label) scene.labels.push({ key, text: a.label, color, rect, ...fade, ...(area ? { area: toStage(layout, g.page, area) } : {}) });
         break;
       }
       case 'spotlight': {
@@ -670,11 +680,13 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
         // slice through letters. Deliberate visual spotlights remain unchanged.
         if (isTextTarget(a.target)) {
           for (const g of resolver.resolve(a.target, { lines: true }) ?? [])
-            page(g.page).markers.push({ key: `${key}.${g.page}`, rects: g.rects, color: DEFAULT_COLOR });
+            page(g.page).markers.push({ key: `${key}.${g.page}`, rects: g.rects, color: DEFAULT_COLOR, ...fade });
           break;
         }
         for (const g of resolver.resolveTarget(a.target, a.region) ?? []) {
           scene.spotlight = true;
+          spotlights++;
+          if (leaving) leavingSpotlights++;
           page(g.page).holes.push(pad(unionRect(g.rects), SPOT_PAD));
         }
         break;
@@ -682,7 +694,7 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
       case 'note': {
         const groups = resolver.resolveTarget(a.anchor, a.region);
         const target = groups && stageRect(layout, groups);
-        if (target) scene.notes.push({ key, text: a.text, side: a.side ?? 'auto', rect: target.rect });
+        if (target) scene.notes.push({ key, text: a.text, side: a.side ?? 'auto', rect: target.rect, ...fade });
         break;
       }
       case 'arrow':
@@ -704,19 +716,20 @@ export function buildScene(overlays: OverlayEntry[], resolver: Resolver, layout:
         const pen = a.type === 'arrow'
           ? arrow ?? penArrow(key, color, region, sheet, area ?? areaOf(resolver, a.target, box.height), a.from, drawn)
           : penCircle(key, color, region);
-        shapes.pens.push(pen);
+        shapes.pens.push(leaving ? { ...pen, leaving: true } : pen);
         if (a.label) {
           const [x, y] = pen.kind === 'arrow' ? pen.tail : pen.labelAt;
           const [sx, sy] = toStage(layout, g.page, [x, y, x, y]);
           const pin =
             pen.kind === 'arrow' ? { side: pen.labelSide, alt: pen.labelAlt } : { side: 'upper-right' as const };
           const rect = toStage(layout, g.page, pen.bounds);
-          scene.labels.push({ key, text: a.label, color, rect, pin: { x: sx, y: sy, ...pin }, ...(area ? { area: toStage(layout, g.page, area) } : {}) });
+          scene.labels.push({ key, text: a.label, color, rect, pin: { x: sx, y: sy, ...pin }, ...fade, ...(area ? { area: toStage(layout, g.page, area) } : {}) });
         }
         break;
       }
     }
   }
+  if (spotlights && spotlights === leavingSpotlights) scene.spotlightLeaving = true;
   // Visual orientation may use a gentle veil before a spoken mark appears.
   // Text reading uses its authored line highlights without automatically dimming.
   const readingKind = readingFocus && resolver.kind(readingFocus.target);

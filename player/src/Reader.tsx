@@ -1,6 +1,6 @@
 import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Camera, cameraView, fitWidthView, initialView, readingScale } from './camera';
+import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView } from './camera';
 import type { View } from './camera';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
@@ -11,7 +11,11 @@ import { createNarrator, SilentNarrator, useBrowserVoices } from './narration';
 import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
-import type { Doc } from './types';
+import type { BBox, Doc } from './types';
+import { markPlayback } from './marks';
+import { keyBelongsTo, keyCommand } from './keys';
+import type { KeyTarget } from './keys';
+import { buildClock } from './tourClock';
 import { BoardSplit } from './components/Board';
 import { ControlBar } from './components/ControlBar';
 import type { DebugPage } from './components/PageView';
@@ -30,6 +34,7 @@ import type { AskContext } from './ask/AskPanel';
 import { answerTour, visualShown } from './ask/answer';
 import type { AskAnswer, AskSource } from './ask/api';
 import type { RegionSelection } from './ask/regionSelection';
+import { useRegionSnap } from './ask/useRegionSnap';
 import { SelectionPreview } from './ask/SelectionPreview';
 import './reader.css';
 
@@ -88,11 +93,6 @@ function debugIndex(doc: Doc): Map<number, DebugPage> {
   return pages;
 }
 
-function isInteractive(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return !!el && (el.isContentEditable || !!el.closest('input, textarea, select, button, a, summary, dialog'));
-}
-
 async function copyText(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
@@ -130,6 +130,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [selection, setSelection] = useState<OverlayEntry[]>([]);
   const [regionSelection, setRegionSelection] = useState<RegionSelection | null>(null);
   const [selectingRegion, setSelectingRegion] = useState(false);
+  // Asking is open wherever there is a document to ask about: a library document by its ID, a demo by its folder.
+  const askSource = useMemo<AskSource>(
+    () => (documentId ? { documentId } : { paper: params.paper }),
+    [documentId, params.paper],
+  );
   const selectionCheckpoint = useRef<{ engine: TourEngine | null; playing: boolean } | null>(null);
   useEffect(() => {
     setRegionSelection(null);
@@ -290,6 +295,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   usePdfDocument(loaded?.pdf);
 
   const layout = useMemo(() => (loaded?.pdf && loaded.sizes.length ? layoutPages(loaded.sizes) : null), [loaded]);
+  // The chosen region snaps to the object inside it; a question about it carries the object's box once that is found.
+  const regionSnap = useRegionSnap(askSource, regionSelection, (page) => layout?.pages[page - 1], loadedAnalysisId);
   const resolver = useMemo(() => (loaded ? new Resolver(loaded.doc, loaded.sizes) : null), [loaded]);
   const prepared = useMemo(
     () => (loaded?.tour && resolver ? prepareTour(loaded.tour, resolver) : null),
@@ -327,9 +334,16 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     [state.overlays, state.camera, state.status, selection, resolver, layout],
   );
 
+  // Which mark the voice is on. The list of keys is kept as long as it holds the same keys, so a word that does
+  // not change it re-renders no page.
+  const playback = markPlayback(state, active?.steps ?? []);
+  const currentKey = playback.current?.join('|') ?? null;
+  const currentMarks = useMemo(() => (currentKey === null ? null : currentKey.split('|')), [currentKey]);
+  const marks = useMemo(() => ({ current: currentMarks, sweep: playback.sweep }), [currentMarks, playback.sweep]);
+
   // Camera: frame the engine's current camera command; re-frame instantly on resize.
   // `framed` is the last command and the view chosen for it, so a resize can frame it again.
-  const framed = useRef<{ cmd: CameraCommand; view: View; fitWidth?: boolean } | null>(null);
+  const framed = useRef<{ cmd: CameraCommand; view: View; fitWidth?: boolean; rect?: BBox } | null>(null);
   const fitSourceWidth = useRef(false);
   fitSourceWidth.current = !!state.board.item;
   const frame = useCallback(
@@ -339,12 +353,14 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       try {
         const vp = camera.viewport;
         const fitWidth = retarget ? fitSourceWidth.current || !!framed.current?.fitWidth : fitSourceWidth.current;
-        const view = cmd.action ? cameraView(cmd.action, resolver, layout, vp, { fitWidth }) : initialView(layout, vp);
+        // Targets are framed above the ask dock, together with the other marks the step shows meanwhile.
+        const target = cmd.action ? frameFor(cmd.action, resolver, layout, vp, { fitWidth, insets: camera.insets, also: cmd.also }) : null;
+        const view = cmd.action ? target?.view : initialView(layout, vp, camera.insets);
         if (!view) return;
         if (instant) camera.jumpTo(view);
         else if (retarget) camera.retargetTo(view);
         else camera.animateTo(view);
-        framed.current = { cmd, view: camera.targetView, fitWidth };
+        framed.current = { cmd, view: camera.targetView, fitWidth, rect: target?.rect };
       } catch (err) {
         console.warn('[camera] could not frame', cmd.action, err);
       }
@@ -404,10 +420,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     return {
       stepId: tour && tour.status !== 'idle' ? main?.steps[tour.index]?.step.id : undefined,
       figureId: !regionSelection && ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
-      selection: regionSelection ?? undefined,
+      selection: regionSnap.region ?? undefined,
       analysisId: loadedAnalysisId,
     };
-  }, [camera, regionSelection, loadedAnalysisId]);
+  }, [camera, regionSelection, regionSnap.region, loadedAnalysisId]);
 
   // A question pauses whatever plays; the first one of a conversation remembers where the tour was.
   const setAside = useCallback(() => {
@@ -523,22 +539,46 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (!layout) return;
     if (!restoredView.current) {
       restoredView.current = true;
-      camera.jumpTo(viewFromPosition(layout, camera.viewport, savedPosition.current));
+      camera.jumpTo(viewFromPosition(layout, camera.viewport, savedPosition.current, camera.insets));
       return;
     }
     // While the camera still shows the target it last framed, the new size (the board opening or
     // closing, a window resize) frames that target again, so it stays whole and in view. Otherwise
     // reflow preserves the page-relative reading position, including restored/manual navigation.
     const last = framed.current;
-    if (fitSourceWidth.current || last?.fitWidth) {
-      const wasFramed = last && camera.targetView === last.view;
-      const view = fitWidthView(camera.targetView, layout, camera.viewport);
+    if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating, true);
+    else if (fitSourceWidth.current || last?.fitWidth) {
+      const view = fitWidthView(camera.targetView, layout, camera.viewport, camera.insets);
       if (camera.animating) camera.retargetTo(view);
       else camera.jumpTo(view);
-      if (wasFramed) framed.current = { ...last, view: camera.targetView, fitWidth: true };
-    } else if (last && camera.targetView === last.view) frame(last.cmd, !camera.animating, true);
-    else camera.jumpTo(camera.getView());
+    } else camera.jumpTo(camera.getView());
   }, [camera, layout, frame]);
+
+  // A chosen region stays in view above the ask dock, which opens over the bottom of the stage as it is chosen.
+  const revealRegion = useCallback(() => {
+    const page = layout && regionSelection && layout.pages[regionSelection.page - 1];
+    if (!layout || !regionSelection || !page) return false;
+    const [x0, y0, x1, y1] = regionSelection.rect;
+    const rect: BBox = [page.x + x0 * page.width, page.y + y0 * page.height, page.x + x1 * page.width, page.y + y1 * page.height];
+    const view = revealView(rect, camera.targetView, layout, camera.viewport, camera.insets);
+    if (view) camera.animateTo(view);
+    return true;
+  }, [camera, layout, regionSelection]);
+  useEffect(() => {
+    revealRegion();
+  }, [revealRegion]);
+
+  // The ask dock grew over the stage (the learner opened it, an answer began): when it now covers part of
+  // what the camera shows, frame that again above it. A dock that shrinks again leaves the view alone.
+  const onInsetsChange = useCallback(() => {
+    if (revealRegion()) return;
+    const last = framed.current;
+    if (!layout || !restoredView.current || !last?.rect || camera.targetView !== last.view) return;
+    const { bottom } = camera.insets;
+    const shown = project(last.rect, last.view, camera.viewport);
+    if (shown.bottom <= camera.viewport.height - bottom + 1) return;
+    frame(last.cmd, false, camera.animating);
+  }, [camera, layout, frame, revealRegion]);
 
   useEffect(() => {
     if (!engine) return;
@@ -711,31 +751,46 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   useEffect(() => () => camera.destroy(), [camera]);
 
-  // Keyboard: Space play/pause, arrows step (through an answer while one plays), D toggles the ID overlay. Nothing
-  // fires while the learner types, in the ask bar or any other field.
+  // Keyboard (keys.ts): Space plays and pauses, the arrows step (Shift: by sentence), [ and ] jump chapters, R replays the
+  // sentence. They steer an answer while one plays. Nothing fires while the learner types, and a focused button keeps only
+  // Space and Enter, so the arrows work after a click on Play.
+  const [helpOpen, setHelpOpen] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && navigationOpen) {
+      if (e.key === 'Escape' && (navigationOpen || helpOpen)) {
         setNavigationOpen(false);
+        setHelpOpen(false);
         return;
       }
-      if (selectingRegion || isInteractive(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
-      if (e.key === ' ') {
-        e.preventDefault();
-        active?.toggle();
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        active?.next();
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        active?.prev();
-      } else if (e.key === 'd' || e.key === 'D') {
-        setDebug((d) => !d);
+      if (e.defaultPrevented || selectingRegion || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (keyBelongsTo(e.target as KeyTarget | null, e.key)) return;
+      const command = keyCommand(e.key, e.shiftKey);
+      if (!command) return;
+      e.preventDefault();
+      const tour = active;
+      if (command === 'ids') setDebug((d) => !d);
+      else if (command === 'mute') setMuted((m) => !m);
+      else if (command === 'help') setHelpOpen((open) => !open);
+      else if (tour) {
+        const here = tour.getState();
+        if (command === 'toggle') tour.toggle();
+        else if (command === 'next') tour.next();
+        else if (command === 'prev') tour.prev();
+        else if (command === 'nextSentence') tour.skip(1);
+        else if (command === 'prevSentence') tour.skip(-1);
+        else if (command === 'nextChapter') tour.goTo(tour.chapterStart(1));
+        else if (command === 'prevChapter') tour.goTo(tour.chapterStart(-1));
+        else if (command === 'first') tour.goTo(0);
+        else if (command === 'last') tour.goTo(tour.total - 1);
+        else if (command === 'replay') {
+          tour.seekTo(here.index, Math.max(0, here.word));
+          tour.play();
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, navigationOpen, selectingRegion]);
+  }, [active, navigationOpen, helpOpen, selectingRegion]);
 
   const onCopyId = useCallback((id: string) => {
     void copyText(id);
@@ -751,6 +806,30 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     const title = loaded?.tour?.title ?? loaded?.doc?.source.title;
     if (title) document.title = `${title} · Paper Tour`;
   }, [loaded]);
+
+  // A chapter chip names the chapter the tour has just entered; it stays a moment, then goes.
+  const [chip, setChip] = useState<{ number: number; title: string } | null>(null);
+  const lastChapter = useRef<number | null>(null);
+  useEffect(() => {
+    lastChapter.current = null;
+    setChip(null);
+  }, [engine]);
+  useEffect(() => {
+    const entered = engine?.steps[mainState.index];
+    if (!engine || answer || !entered || mainState.status !== 'playing' || lastChapter.current === entered.chapterIndex) return;
+    lastChapter.current = entered.chapterIndex;
+    setChip({ number: entered.chapterIndex + 1, title: engine.tour.chapters[entered.chapterIndex]?.title ?? '' });
+  }, [engine, answer, mainState.index, mainState.status]);
+  useEffect(() => {
+    if (!chip) return;
+    const timer = setTimeout(() => setChip(null), 2800);
+    return () => clearTimeout(timer);
+  }, [chip]);
+
+  const clock = useMemo(
+    () => (active ? buildClock(active.steps, { rate: speed * params.rate, voices: active.tour.voices }) : null),
+    [active, speed, params.rate],
+  );
 
   const errors = problems.filter((p) => p.level === 'error');
   const steps = engine?.steps ?? [];
@@ -770,11 +849,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (checkpointRef.current) void save(checkpointRef.current).finally(onBack);
     else onBack();
   };
-  // Asking is open wherever there is a document to ask about: a library document by its ID, a demo by its folder.
-  const askSource = useMemo<AskSource>(
-    () => (documentId ? { documentId } : { paper: params.paper }),
-    [documentId, params.paper],
-  );
   const documentNavigation = (
     <div className="document-navigation">
       <label className="reader-search">
@@ -1078,6 +1152,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           >
             IDs
           </button>
+          {chip && (
+            <div className="chapter-chip" key={`${chip.number}:${chip.title}`} role="status">
+              <b>{chip.number}</b>
+              <span>{chip.title}</span>
+            </div>
+          )}
         </div>
         {layout ? (
           <BoardSplit board={state.board} playback={boardPlayback(state, active?.steps ?? [])}>
@@ -1088,10 +1168,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 camera={camera}
                 scene={scene}
                 debugPages={debug ? debugPages : null}
+                marks={marks}
                 onViewportChange={onViewportChange}
+                onInsetsChange={onInsetsChange}
                 onCopyId={onCopyId}
                 selecting={selectingRegion}
                 regionSelection={regionSelection}
+                regionSnap={regionSnap}
                 onSelectRegion={acceptRegionSelection}
                 onCancelSelection={cancelRegionSelection}
               />
@@ -1103,10 +1186,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                       <TourDockStatus
                         documentId={documentId}
                         generation={manifest?.tourGeneration}
-                        state={state}
-                        steps={active?.steps ?? []}
-                        chapter={active?.tour.chapters[active.steps[state.index]?.chapterIndex ?? 0]?.title}
-                        answering={!!answer}
+                        hasTour={!!engine?.steps.length}
                         onActivity={
                           manifest?.tourGeneration ? () => setActivityRequest((request) => request + 1) : undefined
                         }
@@ -1123,10 +1203,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     onPauseAnswer={() => now.current.answer?.pause()}
                     onContinueAnswer={() => now.current.answer?.play()}
                     resumeLabel={engine ? (answer ? 'Back to the tour' : 'Continue tour') : 'Back to the document'}
-                    selection={regionSelection}
+                    selection={regionSnap.region}
+                    selectionSnapped={regionSnap.phase === 'snapped'}
                     selecting={selectingRegion}
                     selectionPreview={
-                      regionSelection && <SelectionPreview pdf={loaded.pdf} selection={regionSelection} />
+                      regionSnap.region && <SelectionPreview pdf={loaded.pdf} selection={regionSnap.region} />
                     }
                     onSelectRegion={beginRegionSelection}
                     onClearRegion={clearRegionSelection}
@@ -1165,9 +1246,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           </div>
         )}
 
-        {active && (
+        {active && clock && (
           <ControlBar
             steps={active.steps}
+            chapters={active.tour.chapters.map((chapter) => chapter.title)}
+            clock={clock}
             state={state}
             speed={speed}
             muted={muted || params.silent}
@@ -1177,6 +1260,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             }}
             onPrev={() => active.prev()}
             onNext={() => active.next()}
+            onSeek={(index, word) => {
+              setSelection([]);
+              active.seekTo(index, word);
+            }}
+            onSkip={(direction) => active.skip(direction)}
+            helpOpen={helpOpen}
+            onHelp={setHelpOpen}
             onSpeed={setSpeed}
             onMute={setMuted}
             voices={browserVoices.voices}

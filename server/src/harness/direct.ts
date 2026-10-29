@@ -18,6 +18,7 @@ import {
   visualCueProblems,
   type MeasuredTarget,
 } from './visual-grounding';
+import { distinctive, gridOf, resultTable, tableText, tableViews, viewsFor, viewText, type TableView } from './tables';
 import { visualLine, type StepVisual } from './visual-plan';
 import { groundedCheck, reportsResults } from './visual-rules';
 
@@ -61,6 +62,8 @@ export interface BeatTargets {
   tableCells?: string[];
   /** Sentences that print the numbers a planned visual names, so its board may copy them (they are part of `evidence`). */
   visualEvidence?: string[];
+  /** Boards the table fills by itself for the planned kind, best first (tables.ts); their numbers are in `evidence`. */
+  views?: TableView[];
   /** The actual figure crop supplied to this direction call. Absent means no fine visual targeting. */
   imaged?: string;
   measured?: MeasuredTarget[];
@@ -117,26 +120,6 @@ export { boardPartIds, boardPart } from './board';
 
 export { tableLines } from '../../../shared/tableTargets';
 
-/** Decimals and larger numbers, but not years: "28.4 BLEU" is a distinctive number, "Table 2" or "2017" is not. */
-const distinctive = (numbers: number[]) =>
-  numbers.filter((n) => !Number.isInteger(n) || (n >= 100 && !(n >= 1900 && n <= 2100)));
-
-/** The table a result rests on: one its evidence cites, else the one that repeats most of its distinctive numbers. */
-function resultTable(doc: Doc, evidence: string[], text: string): DocFigure | undefined {
-  const tables = doc.figures.filter((f) => f.kind === 'table');
-  const cited = tables.find((t) => t.referenced_by.some((id) => evidence.includes(id)));
-  if (cited) return cited;
-  const named = distinctive(numbersIn(text));
-  let best: DocFigure | undefined,
-    bestScore = 0;
-  for (const table of tables) {
-    const printed = numbersIn(tableLines(doc, table).join('\n'));
-    const score = new Set(named.filter((n) => printed.includes(n))).size;
-    if (score > bestScore) [best, bestScore] = [table, score];
-  }
-  return best;
-}
-
 /** Planned kinds whose numbers come from the document, so their board may only copy what the evidence prints. */
 const NUMERIC_KINDS: readonly string[] = ['bars', 'heatmap', 'scatter'];
 
@@ -187,6 +170,21 @@ function dataSentences(doc: Doc, visual: StepVisual | undefined, have: string[])
     .map((s) => s.id);
 }
 
+/** A table's numbers for a board's evidence and for the brief: its grid as compact text, else its extracted cell lines. */
+const tableEvidence = (doc: Doc, table: DocFigure) =>
+  gridOf(table) ? tableText(table) : tableLines(doc, table).join('\n');
+
+/**
+ * The boards a table fills by itself for the board kind of a step (bars when there is no plan), the ones that match
+ * the plan's description of its data best first. Their numbers are cells of the table or computed from them, and all
+ * of them are in the table's text, so a board copied from one passes the grounding check.
+ */
+function offeredViews(table: DocFigure | undefined, visual?: StepVisual): TableView[] {
+  const kind = visual ? visual.visual : 'bars';
+  if (!table || !gridOf(table) || (kind !== 'bars' && kind !== 'scatter' && kind !== 'heatmap')) return [];
+  return viewsFor(tableViews(table), kind, `${visual?.idea ?? ''} ${visual?.data ?? ''}`).slice(0, 2);
+}
+
 /**
  * Targets on the page the camera shows: a text beat's paragraphs, or a figure with its panels, or an equation. A
  * numeric board (bars, or a planned heatmap or scatter) may copy numbers from the cited table and from the sentences
@@ -229,7 +227,8 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
     // A table's numbers come from what its brief quotes: the caption, the citing sentences and the cells.
     const cited = figure.referenced_by.slice(0, 4);
     const more = dataSentences(doc, visual, cited);
-    const evidence = [figure.caption, ...quote([...cited, ...more]), ...tableLines(doc, figure)];
+    const evidence = [figure.caption, ...quote([...cited, ...more]), tableEvidence(doc, figure)];
+    const views = offeredViews(figure, visual);
     return {
       page,
       sentences: [],
@@ -238,6 +237,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
       ...table,
       ...parts,
       ...(more.length ? { visualEvidence: more } : {}),
+      ...(views.length ? { views } : {}),
       evidence: evidence.join('\n'),
     };
   }
@@ -256,11 +256,13 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
   const more = dataSentences(doc, visual, have);
   const quoted = quote([...have, ...more]);
   const table = resultTable(doc, beat.evidence, [...quoted, visual?.data ?? ''].join('\n'));
+  const views = offeredViews(table, visual);
   return {
     ...targets,
-    evidence: [...quoted, ...(table ? tableLines(doc, table) : [])].join('\n'),
+    evidence: [...quoted, ...(table ? [tableEvidence(doc, table)] : [])].join('\n'),
     ...(more.length ? { visualEvidence: more } : {}),
     ...(table ? { table: table.id } : {}),
+    ...(views.length ? { views } : {}),
   };
 }
 
@@ -433,10 +435,19 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
   }
   const figure = doc.figures.find((f) => f.id === beat.target);
   const equation = doc.equations.find((e) => e.id === beat.target);
-  const cells = (table: DocFigure) => [
-    `TABLE ${table.number} [${table.id}] CELLS (extracted, one line per block):`,
-    ...tableLines(doc, table),
-  ];
+  const cells = (table: DocFigure) =>
+    gridOf(table)
+      ? [
+          'TABLE AS READ (typed rows and columns; numbers exactly as printed; "-" is a blank cell):',
+          tableText(table),
+          ...(targets.views?.length
+            ? [
+                `READY ${targets.views[0].kind.toUpperCase()} BOARDS BUILT FROM THE TABLE BY CODE (every number is a cell of the table or computed from cells): use one as it is, shorten its title or drop rows, or build your own from the table by copying numbers exactly as printed.`,
+                ...targets.views.map(viewText),
+              ]
+            : []),
+        ]
+      : [`TABLE ${table.number} [${table.id}] CELLS (extracted, one line per block):`, ...tableLines(doc, table)];
   if (figure) {
     lines.push(`${figure.kind.toUpperCase()} ${figure.number} [${figure.id}], page ${figure.page}: ${figure.caption}`);
     if (figure.panels.length)
@@ -462,9 +473,12 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
     const block = doc.blocks.findIndex((b) => b.id === equation.block);
     const around = doc.blocks.slice(Math.max(0, block - 1), block + 2).flatMap((b) => b.sentences);
     const extracted = `extracted text (often garbled): ${equation.text}`;
-    lines.push(`EQUATION (${equation.number}) [${equation.id}], page ${equation.page}, ${extracted}`);
+    const tag = equation.number ? ` (${equation.number})` : ' (it has no printed number)';
+    lines.push(`EQUATION${tag} [${equation.id}], page ${equation.page}, ${extracted}`);
     lines.push('TEXT AROUND IT:', ...quote(around.slice(0, 6)));
-    lines.push(`Page ${equation.page} is attached: read the typeset equation (${equation.number}) there.`);
+    lines.push(
+      `Page ${equation.page} is attached: read the typeset equation${equation.number ? ` (${equation.number})` : ''} there.`,
+    );
   } else {
     lines.push('EVIDENCE:', ...quote(beat.evidence));
     const more = (beat.boardEvidence ?? []).filter((id) => !beat.evidence.includes(id));

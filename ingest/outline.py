@@ -94,6 +94,13 @@ def main(argv=None):
         if f["panels"]:
             panels = ", ".join(p["id"] + (f" {p['label']}" if p.get("label") else "") for p in f["panels"])
             out.append(f"       panels: {panels}")
+        grid = f.get("grid")
+        if grid:
+            out.append(f"       grid: {len(grid['rows'])} rows x {len(grid['columns'])} columns "
+                       f"({grid['confidence']}, {grid['method']}): "
+                       + ", ".join(c["name"] for c in grid["columns"][:6]) + (" ..." if len(grid["columns"]) > 6 else ""))
+        elif f["kind"] == "table":
+            out.append("       grid: none (not readable without guessing)")
         refs = " ".join(f["referenced_by"]) or "-"
         out.append(f"       referenced_by: {refs}")
 

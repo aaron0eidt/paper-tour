@@ -45,8 +45,8 @@ const SPOKEN_COMMANDS: Record<string, string> = {
   right: '',
 };
 
-/** Element IDs a model sometimes cites in its narration: "[p3.s12]", "(fig2.a)", "eq1". */
-const SPOKEN_ID = /\s*[[(]?\b(?:p\d+\.[sb]\d+|(?:fig|tab)\d+(?:\.[a-z])?|eq\d+|sec-\d+(?:\.\d+)*|page\d+)\b[\])]?/g;
+/** Element IDs a model sometimes cites in its narration: "[p3.s12]", "(fig2.a)", "eq1", "equ2". */
+const SPOKEN_ID = /\s*[[(]?\b(?:p\d+\.[sb]\d+|(?:fig|tab)\d+(?:\.[a-z])?|equ?\d+|sec-\d+(?:\.\d+)*|page\d+)\b[\])]?/g;
 
 /**
  * Text as the voice should read it: no element IDs, markdown or LaTeX remnants ("$\sqrt{d_k}$" becomes "square root of

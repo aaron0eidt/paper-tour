@@ -77,6 +77,49 @@ export interface DocPanel {
   label?: string;
 }
 
+/** A column of a table grid, after its row labels. */
+export interface DocTableColumn {
+  /** The header text, spanning headers first ("BLEU EN-DE"), without direction marks; equal names get a number. */
+  name: string;
+  /** number: most of the filled cells are numbers. */
+  kind: 'number' | 'text';
+  /** A unit or scale found in the header or the cells: ms, %, ×10^6. */
+  unit?: string;
+  /** Which way is better, only when the header says so (an arrow, "higher is better"). */
+  better?: 'up' | 'down';
+}
+
+export interface DocTableCell {
+  /** As printed; empty for a blank cell. Scripts are written d_model and 10^19. */
+  text: string;
+  /** The number the cell holds, only when the whole cell is one number (0.16 ± 0.11 is 0.16, 2.3 × 10^19 is 2.3e19). */
+  value?: number;
+}
+
+export interface DocTableRow {
+  /** The row label; empty when the row is named by its group or by its cells. */
+  label: string;
+  /** What several rows share: a label centred beside them, or a title line above them. */
+  group?: string;
+  /** Text printed across the row's columns. */
+  note?: string;
+  /** One cell per column. */
+  cells: DocTableCell[];
+}
+
+/** What a table prints, typed. Only present when the table could be read without guessing. */
+export interface DocTableGrid {
+  /** medium: part of it was inferred (no rule under the header, a number printed across several columns). */
+  confidence: 'high' | 'medium';
+  method: 'spans' | 'finder';
+  /** Header of the row-label column, when the table has one. */
+  label_header?: string;
+  columns: DocTableColumn[];
+  rows: DocTableRow[];
+  /** Lines of text under the last row, inside the table box. */
+  notes?: string[];
+}
+
 export interface DocFigure {
   id: string;
   kind: 'figure' | 'table';
@@ -88,11 +131,15 @@ export interface DocFigure {
   image: string;
   panels: DocPanel[];
   referenced_by: string[];
+  /** Tables only, and only when readable: the typed rows and columns. */
+  grid?: DocTableGrid;
 }
 
 export interface DocEquation {
+  /** eq and the printed number (eq1, eq5a), or equ1, equ2, ... in reading order for a display without one. */
   id: string;
-  number: string;
+  /** The printed number; null for a display without one. */
+  number: string | null;
   page: number;
   bbox: BBox;
   block?: string;

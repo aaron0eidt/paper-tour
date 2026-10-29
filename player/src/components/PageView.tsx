@@ -26,7 +26,10 @@ interface Props {
   scale: number;
   detail: Detail | null;
   shapes?: PageShapes;
+  /** Overlay keys of the mark the voice is on; null shows every mark alike. */
+  current?: readonly string[] | null;
   spotlight: boolean;
+  spotlightLeaving?: boolean;
   debug: DebugPage | null;
 }
 
@@ -46,8 +49,26 @@ const BOX_RADIUS = 5;
 // spotlit target is never clipped at its corners.
 const HOLE_RADIUS = BOX_RADIUS + SPOT_PAD - BOX_PAD;
 
+/** The class of a mark: the one being read is `current`, earlier ones `past`, and one whose step ended `leaving`. */
+function tone(key: string, current: readonly string[] | null, leaving?: boolean): string {
+  if (leaving) return ' leaving';
+  if (!current) return '';
+  return current.some((k) => key === k || key.startsWith(`${k}.`)) ? ' current' : ' past';
+}
+
+/** Where along a passage each line starts and ends, 0 to 1, weighted by the line's width. */
+function sweepSpans(rects: BBox[]): [number, number][] {
+  const total = rects.reduce((sum, r) => sum + (r[2] - r[0]), 0) || 1;
+  let done = 0;
+  return rects.map((r) => {
+    const from = done / total;
+    done += r[2] - r[0];
+    return [from, done / total];
+  });
+}
+
 /** One page: a pdf.js canvas with SVG layers on top that use page points directly via viewBox. */
-export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes, spotlight, debug }: Props) {
+export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes, current = null, spotlight, spotlightLeaving, debug }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const { width: w, height: h } = box;
@@ -129,24 +150,38 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
       <div className="page-detail" ref={detailRef} />
 
       <svg className="layer layer-marker" viewBox={viewBox} preserveAspectRatio="none">
-        {shapes?.markers.map((m) => (
-          <g key={m.key} fill={MARKER[m.color]}>
-            {m.rects.map((r, i) => (
-              <rect
-                key={i}
-                className="hl-rect"
-                {...rectProps([r[0] - 1.5, r[1] - 0.5, r[2] + 1.5, r[3] + 0.5])}
-                rx={2}
-                style={{ animationDelay: `${i * 110}ms` }}
-              />
-            ))}
-          </g>
-        ))}
+        {shapes?.markers.map((m) => {
+          const spans = sweepSpans(m.rects);
+          return (
+            <g key={m.key} fill={MARKER[m.color]} className={`mark${tone(m.key, current, m.leaving)}`}>
+              {m.rects.map((r, i) => (
+                <rect
+                  key={i}
+                  className="hl-rect"
+                  {...rectProps([r[0] - 1.5, r[1] - 0.5, r[2] + 1.5, r[3] + 0.5])}
+                  rx={2}
+                  style={{ animationDelay: `${i * 110}ms` }}
+                />
+              ))}
+              {/* The narration's progress along the passage; only the current mark shows it. */}
+              <g className="hl-sweep" fill={STROKE[m.color]}>
+                {m.rects.map((r, i) => (
+                  <rect
+                    key={i}
+                    {...rectProps([r[0] - 1.5, r[1] - 0.5, r[2] + 1.5, r[3] + 0.5])}
+                    rx={2}
+                    style={{ '--from': spans[i][0], '--to': spans[i][1] } as CSSProperties}
+                  />
+                ))}
+              </g>
+            </g>
+          );
+        })}
       </svg>
 
       <svg className="layer layer-fx" viewBox={viewBox} preserveAspectRatio="none">
         {shapes?.underlines.map((m) => (
-          <g key={m.key} fill={STROKE[m.color]}>
+          <g key={m.key} fill={STROKE[m.color]} className={`mark${tone(m.key, current, m.leaving)}`}>
             {m.rects.map((r, i) => (
               <rect
                 key={i}
@@ -159,7 +194,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
           </g>
         ))}
         {shapes?.boxes.map((b) => (
-          <g key={b.key} className="box">
+          <g key={b.key} className={`box${tone(b.key, current, b.leaving)}`}>
             <path className="box-fill" d={roundedRect(b.rect, BOX_RADIUS)} fill={STROKE[b.color]} />
             <path className="box-stroke" d={roundedRect(b.rect, BOX_RADIUS)} stroke={STROKE[b.color]} pathLength={1} />
           </g>
@@ -167,7 +202,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
         {/* Drawn last so boxes outside the hole dim like everything else. */}
         {spotlight && (
           <path
-            className={shapes?.readingSpotlight ? 'spotlight spotlight-reading' : 'spotlight'}
+            className={`${shapes?.readingSpotlight ? 'spotlight spotlight-reading' : 'spotlight'}${spotlightLeaving ? ' leaving' : ''}`}
             fillRule="evenodd"
             d={`M0,0H${w}V${h}H0Z ${(shapes?.holes ?? []).map((r) => roundedRect(r, HOLE_RADIUS)).join(' ')}`}
           />
@@ -178,7 +213,9 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
       {!!shapes?.pens.length && (
         <svg className="layer layer-pen" viewBox={viewBox} preserveAspectRatio="none">
           {shapes.pens.map((p) => (
-            <PenMark key={p.key} pen={p} />
+            <g key={p.key} className={`pen${tone(p.key, current, p.leaving)}`}>
+              <PenMark pen={p} />
+            </g>
           ))}
         </svg>
       )}

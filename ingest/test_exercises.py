@@ -414,7 +414,9 @@ class ExerciseTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             outline.main([self.folder])
         text = out.getvalue()
-        self.assertIn(", 0 equations, 1 exercises;", text)
+        # the sheet's system of equations is a display without a number: it is the equation equ1
+        self.assertIn(", 1 equations, 1 exercises;", text)
+        self.assertRegex(text, r"(?m)^equ1 +p1 +p1\.b\d+ +x1 \+ 2 x2 = 5, 3 x1 \+ 4 x2 = 6$")
         self.assertRegex(text, r"(?m)^## Exercises\nex1 +p1 +4 points, p1\.b\d+ … p1\.b\d+ \(\d+ blocks\)$")
         self.assertRegex(text, r"(?m)^ +heading p1\.b\d+: Aufgabe 1 \(4 Punkte\)$")
         self.assertRegex(text, r"(?m)^  ex1\.a +p1 +p1\.b\d+: a\) Berechnen Sie")

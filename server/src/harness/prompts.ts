@@ -4,7 +4,7 @@ import type { BoardKind } from './board';
 import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@24';
+export const HARNESS_VERSION = 'paper-tour-harness@25';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -32,6 +32,7 @@ ${types}
 3. For every item give 1-3 evidence sentence IDs from the list in the schema: the sentences that state it best. Prefer method, result and conclusion evidence in their actual body sections over repeated abstract claims, so the tour can follow the PDF forward.
 4. Write each "text" as one plain sentence of at most 30 words, in your own words.
 5. Pick key figures and formulas only if they are central to understanding; "why" says what the reader learns there.
+   A formula listed as (no number) is a display equation without a printed number: choose it like any other.
 6. Write three questions a curious reader would ask after the tour, each at most 15 words; for an exercise sheet,
    questions about the methods, such as why a step works.
 7. Write a tour title of at most 8 words and the six chapter titles in ${JSON.stringify(language)}, worded to fit
@@ -240,6 +241,8 @@ ${example(BOARD_EXAMPLES.formula)}`,
   above. A number that is not printed there requires correction; use illustrative example inputs/calculations for invented worked values.
 - "label" names the real method, setting or item in at most 4 words (never "item 1"), "unit" names the metric (BLEU, %, F1, EUR), and
   "higher_is_better" says whether a larger value is better.
+- When the brief lists READY BARS BOARDS built from a table, start from one: its numbers are already checked. A bar can
+  be a change from a base row; a negative value is a drop.
 - Leave "bars.bars" empty when the evidence has fewer than two comparable numbers.
 - To light up a bar while you mention it, add a board_focus cue: target bar-1 for the first bar, and so on.
 ${example(BOARD_EXAMPLES.bars)}`,
@@ -252,11 +255,12 @@ ${example(BOARD_EXAMPLES.bars)}`,
   heatmap: `BOARD (optional): a heatmap shows a grid of values with labelled rows and columns: which items relate to or weigh on which, a mask, similarity or correlation, a confusion matrix, a grid of results, or a formula over two indices.
 - Fill "heatmap" with kind heatmap, source, rows and cols (2-10 distinct labels each, at most 16 characters, named after real items such as the words of a short example sentence, settings or methods, never "pos 1") and values (one row of numbers per row label).
 - source document: values copied exactly as printed in the evidence above, never rounded or invented; a step that reports results (a result or a table) needs it. source illustrative: made-up values that differ from each other, labelled illustrative in the title and in "say". source formula: leave values out and give "expression" in x (the column number) and a (the row number), both from 1, using + - * / ^, parentheses, pi, e, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max; the code computes every cell.
+- When the brief lists READY HEATMAP BOARDS built from a table, start from one: its grid is already checked.
 - Options: scale diverging for signed values; normalize rows when the values are raw scores and the point is how a softmax turns each row into weights that sum to one; mask upper on a square grid where each row sees only the columns up to its own number; view links to draw curves from the focused row to every column (at most 8 columns); unit.
 ${example(BOARD_EXAMPLES.heatmap)}`,
   scatter: `BOARD (optional): a scatter plot shows a trade-off or relationship between two measured quantities: quality against cost or size, accuracy against speed, precision against recall, a parameter sweep, or any two columns of a results table.
 - Fill "scatter" with kind scatter, source, x_label and y_label (plain words with the unit) and 2-10 points, each with a distinct short label naming a real method, setting or system (never "point 1"), x and y.
-- source document: coordinates copied exactly as printed in the evidence above, with at least two different values on each axis. A scatter shows measured quantities only, so source illustrative is rejected.
+- source document: coordinates copied exactly as printed in the evidence above, with at least two different values on each axis. A scatter shows measured quantities only, so source illustrative is rejected. When the brief lists READY SCATTER BOARDS built from a table, start from one: its points are already checked.
 - Options: x_log or y_log when values span orders of magnitude (all above zero); better says which corner is better (up-left, up-right, down-left or down-right); series names a group, at most 3, and the points of a series are joined in order, as in a sweep of one parameter.
 ${example(BOARD_EXAMPLES.scatter)}`,
   shapes: `BOARD (optional): shapes shows how the dimensions of matrices and vectors combine through an operation: what it keeps, where a dimension disappears, the shape of the result.

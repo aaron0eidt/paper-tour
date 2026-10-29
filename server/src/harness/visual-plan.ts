@@ -1,7 +1,8 @@
-import type { Doc } from '../../../shared/paper';
+import type { Doc, DocFigure } from '../../../shared/paper';
 import type { Beat } from './beats';
 import { BOARD_KINDS, type BoardKind } from './board';
 import type { PaperCard } from './card';
+import { baseRowName, gridOf, resultTable, tableText } from './tables';
 
 // The tour's visual plan (notes/VISUALS-V2.md): one call after the beats are planned and before they are directed.
 // It sees the whole document card and every beat, so it can give each step the visual that makes its point click, and
@@ -32,7 +33,7 @@ const KINDS_HELP: Record<BoardKind, string> = {
   heatmap:
     'how every item relates to every other (weights, attention, alignment, similarity, correlation, confusion), a mask, a grid of results over two settings, or a formula’s value over two indices.',
   scatter:
-    'a trade-off or relationship between two quantities measured in the document (quality against cost, accuracy against size, speed against error), never made-up points, with the better corner marked.',
+    'a trade-off or relationship between two quantities measured in the document (quality against cost, accuracy against size, speed against error; two columns of a results table), never made-up points, with the better corner marked.',
   shapes: 'how matrix or vector dimensions combine in an operation, and which dimension disappears or appears.',
   plot: 'how a formula responds to its input or a parameter when the shape matters (saturation, decay, periodicity, a crossover), never a straight line.',
   formula: 'the parts of a key equation, each with its role.',
@@ -106,7 +107,10 @@ const trimmed = (text: string, max = 280) => {
   return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
 };
 
-/** The document card and every step with its point, its evidence sentences and its figure or equation. */
+/**
+ * The document card and every step with its point, its evidence sentences and its figure or equation, then the tables
+ * the steps stand on, as read from the page.
+ */
 export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc): string {
   const sentences = new Map(doc.sentences.map((s) => [s.id, s.text]));
   const quote = (ids: string[], max: number) =>
@@ -123,14 +127,23 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc): strin
     '',
     'STEPS OF THE TOUR, in order:',
   ];
+  const tables: DocFigure[] = [];
+  const listed = (table: DocFigure | undefined) => {
+    if (!table || !gridOf(table)) return undefined;
+    if (!tables.includes(table)) tables.push(table);
+    return table;
+  };
   for (const beat of beats) {
     const figure = doc.figures.find((f) => f.id === beat.target);
     const equation = doc.equations.find((e) => e.id === beat.target);
     lines.push(`[${beat.id}] ${beat.kind} step${beat.detail ? ' (a closer look at one detail)' : ''}`);
     lines.push(`  the point: ${beat.point}`);
     if (figure) lines.push(`  on ${figure.kind} ${figure.number}, page ${figure.page}: ${trimmed(figure.caption)}`);
+    if (listed(figure)) lines.push('  its rows and columns are listed under TABLES below');
     if (equation)
-      lines.push(`  on equation (${equation.number}), page ${equation.page}: ${trimmed(equation.text, 160)}`);
+      lines.push(
+        `  on ${equation.number ? `equation (${equation.number})` : 'an equation without a printed number'}, page ${equation.page}: ${trimmed(equation.text, 160)}`,
+      );
     const evidence = quote(beat.evidence, 4);
     if (evidence.length) lines.push('  evidence sentences:', ...evidence);
     const more = quote(
@@ -138,8 +151,29 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc): strin
       3,
     );
     if (more.length) lines.push('  other numbers of the chapter:', ...more);
+    // A step that reports results rests on a table: the one its evidence cites, or that repeats the most of its numbers.
+    const numbers = [...beat.evidence, ...(beat.boardEvidence ?? [])].map((id) => sentences.get(id) ?? '').join('\n');
+    const table =
+      !figure && !equation && (beat.kind === 'result' || beat.board === 'bars')
+        ? listed(resultTable(doc, beat.evidence, numbers))
+        : undefined;
+    if (table) lines.push(`  its numbers come from table ${table.number}, listed under TABLES below`);
   }
-  return lines.join('\n');
+  if (tables.length) {
+    lines.push(
+      '',
+      'TABLES THE STEPS STAND ON (rows and columns as read from the page, numbers as printed). A step on a table, or a result that rests on one, can draw the table’s own columns: a scatter of two of them for a trade-off, bars of one column or of the change from a base row (an ablation), a heatmap of a grid of comparable results. Then "data" names the columns and rows.',
+    );
+    for (const table of tables) {
+      const base = baseRowName(table);
+      lines.push(
+        tableText(table, { maxRows: 14, changes: false }),
+        ...(base ? [`Base row "${base}": the change of every other row from it can be drawn as bars.`] : []),
+        '',
+      );
+    }
+  }
+  return lines.join('\n').trimEnd();
 }
 
 const words = (text: unknown, max: number) => {

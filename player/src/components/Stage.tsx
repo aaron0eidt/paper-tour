@@ -7,6 +7,9 @@ import type { Plan } from '../canvasPlan';
 import type { Layout } from '../layout';
 import type { PDFDocumentProxy } from '../pdf';
 import type { Scene } from '../scene';
+import type { MarkPlayback } from '../marks';
+import type { RegionSnap } from '../ask/useRegionSnap';
+import { RegionMark } from './RegionMark';
 import { PageView } from './PageView';
 import type { DebugPage } from './PageView';
 import { ScreenLayer } from './ScreenLayer';
@@ -20,15 +23,24 @@ interface Props {
   camera: Camera;
   scene: Scene;
   debugPages: Map<number, DebugPage> | null;
+  /** Which mark the voice is on, and how far along its passage the narration is. */
+  marks?: MarkPlayback;
   onViewportChange(): void;
+  /** What floats over the stage (the ask dock) changed in size, after it settled. */
+  onInsetsChange?(): void;
   onCopyId(id: string): void;
   selecting?: boolean;
   regionSelection?: RegionSelection | null;
+  /** How the chosen region is being snapped to the object inside it. */
+  regionSnap?: RegionSnap;
   onSelectRegion?(region: RegionSelection): void;
   onCancelSelection?(): void;
 }
 
 const PLAN_THROTTLE_MS = 150;
+// Between the ask dock and what the camera frames, and how long the dock must hold still before a frame follows it.
+const DOCK_GAP = 10;
+const DOCK_SETTLE_MS = 160;
 // A pointer that moves less than this (px) is a click, not a drag.
 const DRAG_SLOP = 4;
 
@@ -40,7 +52,9 @@ interface Point {
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
-export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange, onCopyId, selecting = false, regionSelection, onSelectRegion, onCancelSelection }: Props) {
+const STILL: MarkPlayback = { current: null, sweep: 1 };
+
+export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, onViewportChange, onInsetsChange, onCopyId, selecting = false, regionSelection, regionSnap, onSelectRegion, onCancelSelection }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -58,19 +72,30 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
   const [occlusions, setOcclusions] = useState<ScreenRect[]>([]);
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
+  const onInsetsChangeRef = useRef(onInsetsChange);
+  onInsetsChangeRef.current = onInsetsChange;
 
   useLayoutEffect(() => camera.setLayout(layout), [camera, layout]);
 
   // Only the floating card occupies the PDF, not the full-width transparent ask lane.
-  // Its live bounds include an expanded progress tray and adapt to a side-board resize.
+  // Its live bounds include an expanded progress tray and adapt to a side-board resize. The camera
+  // frames targets above the card; labels also keep clear of the language menu that opens from it.
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const host = viewport?.closest('.ask-stage');
     if (!viewport || !host) return;
     const observed = new Set<Element>();
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const measure = () => {
       const bounds = viewport.getBoundingClientRect();
       const cards = [...host.querySelectorAll('.ask-card, .ask-language-menu')];
+      const dock = host.querySelector('.ask-card')?.getBoundingClientRect();
+      // A card in the lower half of the stage is the dock; the camera keeps targets above it.
+      const bottom = dock && dock.height && dock.top - bounds.top > bounds.height / 2 ? Math.ceil(bounds.bottom - dock.top + DOCK_GAP) : 0;
+      if (camera.setInsets({ top: 0, right: 0, bottom, left: 0 })) {
+        clearTimeout(settle);
+        settle = setTimeout(() => onInsetsChangeRef.current?.(), DOCK_SETTLE_MS);
+      }
       for (const card of cards) {
         if (!observed.has(card)) { observed.add(card); resize.observe(card); }
       }
@@ -87,8 +112,8 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
     const changes = new MutationObserver(measure);
     changes.observe(host, { childList: true, subtree: true });
     measure();
-    return () => { resize.disconnect(); changes.disconnect(); };
-  }, []);
+    return () => { clearTimeout(settle); resize.disconnect(); changes.disconnect(); };
+  }, [camera]);
 
   // ID overlay: one delegated handler for hover tooltips and click-to-copy.
   const setHovered = useCallback((target: Element | null, x = 0, y = 0) => {
@@ -107,6 +132,11 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
     tip.style.display = 'block';
     tip.style.transform = `translate(${x + 14}px, ${y + 16}px)`;
   }, []);
+
+  // How far the narration is through the passage being read: a CSS variable the sweep follows, not a re-render of every page.
+  useLayoutEffect(() => {
+    stageRef.current?.style.setProperty('--sweep', String(marks.sweep));
+  }, [marks.sweep]);
 
   // Apply camera moves straight to the DOM (no React render per frame) and plan canvas scales.
   useLayoutEffect(() => {
@@ -304,17 +334,19 @@ export function Stage({ pdf, layout, camera, scene, debugPages, onViewportChange
             scale={plan.scales[box.n - 1] ?? 0}
             detail={plan.details[box.n - 1] ?? null}
             shapes={scene.pages.get(box.n)}
+            current={marks.current}
             spotlight={scene.spotlight}
+            spotlightLeaving={scene.spotlightLeaving}
             debug={debugPages?.get(box.n) ?? null}
           />
         ))}
         {shownRegion && regionPage && (
-          <div className="pdf-region-selection" style={{
-            left: regionPage.x + shownRegion.rect[0] * regionPage.width,
-            top: regionPage.y + shownRegion.rect[1] * regionPage.height,
-            width: (shownRegion.rect[2] - shownRegion.rect[0]) * regionPage.width,
-            height: (shownRegion.rect[3] - shownRegion.rect[1]) * regionPage.height,
-          }} />
+          <RegionMark
+            page={regionPage}
+            rect={shownRegion.rect}
+            phase={draftRegion ? 'draft' : (regionSnap?.phase ?? 'kept')}
+            snapped={draftRegion ? null : regionSnap?.snapped}
+          />
         )}
       </div>
       <ScreenLayer camera={camera} notes={scene.notes} labels={scene.labels} obstacles={scene.obstacles} occlusions={occlusions} />

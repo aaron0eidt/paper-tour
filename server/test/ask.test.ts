@@ -615,6 +615,7 @@ test('the narration never reads element IDs aloud', () => {
     spoken('The scale keeps the softmax soft [p2.s4], as Equation one shows (eq1).'),
     'The scale keeps the softmax soft, as Equation one shows.',
   );
+  assert.equal(spoken('A display without a number (equ2) sets the dose.'), 'A display without a number sets the dose.');
 });
 
 test('a follow-up searches with the exchange it builds on', () => {
