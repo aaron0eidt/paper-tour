@@ -164,6 +164,15 @@ Meta's count/retrieve endpoints remain explicit provider capabilities, and its n
 endpoint implements the SDK transcription contract. The reader and its existing activity protocol
 remain compatible. See [the migration plan](notes/VERCEL-MIGRATION.md) for decisions and verification.
 
+Generation queue handling is centralized in `server/src/generation/runtime.ts`; writer
+selection lives in `generation/writers.ts`. Paper tools are grouped under `agent/tools/`
+by source reads, visual inspection and tour editing. Registering a tool supplies its schema,
+execution, progress stage and concurrency classification together. Both writers share SDK call
+recording and the provider schema adapter; the durable journal retains canonical validation.
+The existing Activity design now consumes AI SDK UI message streams, with raw diagnostics
+still available in Technical details. See [the architecture audit](notes/GENERATION-ARCHITECTURE.md)
+for real-provider results and the assessment of retiring the older writer.
+
 For local SDK timing and token diagnostics, set `AI_SDK_DEVTOOLS=true` and run
 `npm --prefix server exec -- devtools`. Development dependencies are required. Traces contain only
 metadata: prompts, tool arguments, generated text, raw requests/replies and image bytes are omitted.
