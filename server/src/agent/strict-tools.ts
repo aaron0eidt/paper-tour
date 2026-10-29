@@ -1,3 +1,4 @@
+import { museAuthoringSchema } from '../muse/authoring-schema';
 /**
  * Muse strict function calls require every object property, including nested ones.
  * This tool has no unions or optional semantic payloads: empty components / an empty
@@ -26,4 +27,19 @@ export function strictVisualObservationTool<T extends { name: string; parameters
   };
   visit(parameters);
   return { ...tool, strict: true, parameters };
+}
+
+/** Keep the chapter envelope structured while polymorphic actions are validated
+ * against the full canonical schema at execution. Muse limits function schema depth.
+ */
+export function shallowChapterTool<
+  T extends { name: string; description: string; parameters: object; strict: boolean },
+>(tool: T): T {
+  if (tool.name !== 'upsert_tour_chapter') return tool;
+  return {
+    ...tool,
+    strict: false,
+    description: `${tool.description} Supply chapter as an object with id, title and steps, not as an encoded string or an extra chapter wrapper. Polymorphic actions must satisfy the complete authoring contract documented here; the server validates every action, source and timing: ${JSON.stringify(tool.parameters)}`,
+    parameters: museAuthoringSchema(tool.parameters, false),
+  };
 }

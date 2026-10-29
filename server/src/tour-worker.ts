@@ -351,7 +351,7 @@ export class TourWorker {
           [generationId, generator.model],
         );
         signal.throwIfAborted();
-        folder = await mkdtemp(resolve(tmpdir(), 'paper-tour-muse-'));
+        folder = await mkdtemp(resolve(tmpdir(), 'paper-tour-generation-'));
         const input = { documentId, analysisId, uploadPath: row.upload_path as string, doc: row.doc as Doc, folder };
         const images = await (this.prepareImages?.(input, signal) ?? this.loadImages(input, signal));
         await record('sources.prepared', {
@@ -369,39 +369,12 @@ export class TourWorker {
             [generationId, progress.stage, progress.imagesDone, progress.imagesTotal],
           );
         };
-        const {
-          rows: [previous],
-        } = await this.db.query(
-          `select id,metadata from tour_generations where document_id=$1 and analysis_id=$2 and id<>$3
-           and status='ready' and model=$4 and metadata->>'model'=$4 and metadata->>'sourceSha256'=$5
-           and metadata->>'analysisId'=$2::text order by created_at desc,id desc limit 1`,
-          [documentId, analysisId, generationId, generator.model, input.doc.source.sha256],
-        );
-        const candidate = previous?.metadata;
-        const previousVisualInspection =
-          candidate && typeof candidate === 'object' && !Array.isArray(candidate)
-            ? { ...(candidate as Record<string, unknown>), generationId: previous.id }
-            : undefined;
-        const { rows: checkpoints } = await this.db.query(
-          `select e.data,g.id as generation_id from generation_events e join tour_generations g on g.id=e.generation_id
-           where g.document_id=$1 and g.analysis_id=$2 and g.model=$3 and e.type='inspection.batch.completed' order by e.id desc limit 200`,
-          [documentId, analysisId, generator.model],
-        );
-        const previousVisualBatches = checkpoints
-          .filter((entry) => typeof entry.data?.cacheKey === 'string')
-          .map((entry) => ({
-            cacheKey: entry.data.cacheKey,
-            observations: entry.data.observations,
-            generationId: entry.generation_id,
-          }));
         const generated = await generator.generate(
           {
             documentId,
             analysisId,
             doc: input.doc,
             images,
-            previousVisualInspection,
-            previousVisualBatches,
             onEvent: record,
           },
           onProgress,

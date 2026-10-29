@@ -1,14 +1,10 @@
-import { PaperAgent } from './agent/runner';
-import { config, type MuseConfig } from './config';
-import { HarnessTourGenerator } from './harness/generator';
+import { config } from './config';
 import { Database } from './db';
 import { storageClient } from './storage';
 import { createQueue, ANALYZE, DELETE, CLEANUP, GENERATE_TOUR, AGENT_TURN } from './queue';
 import { AnalysisWorker } from './worker';
-import { TourWorker } from './tour-worker';
-import { MuseTourGenerator } from './muse/generator';
 import { SettingsService } from './settings';
-import { recoverInterruptedTours } from './tour-recovery';
+import { createGenerationRuntime } from './generation/runtime';
 const workerStartedAt = new Date();
 const c = config();
 const db = new Database(c.databaseUrl);
@@ -16,31 +12,15 @@ const { storage } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const worker = new AnalysisWorker(db, storage, c, enqueue);
 const settings = new SettingsService(db, c.muse);
-// Guided concepts and focused details; TOUR_WRITER=muse selects the one-shot writer.
-const writer = (muse: MuseConfig) =>
-  c.tours.writer === 'harness' ? new HarnessTourGenerator(muse, c.tours.preset) : new MuseTourGenerator(muse);
-const tourWorker = new TourWorker(db, storage, c, writer(c.muse), undefined, async (owner, model) => {
-  const resolved = await settings.resolveMuse(owner, model);
-  return {
-    generator: writer(resolved.config).withModel!(model),
-    secret: resolved.config.apiKey,
-    source: resolved.source,
-    version: resolved.version,
-  };
-});
-const agent = new PaperAgent(db, storage, c, enqueue, settings, (input, signal) =>
-  tourWorker.loadImages(input, signal),
-);
-const interruptedTours = await recoverInterruptedTours(db, boss, workerStartedAt);
+const generation = createGenerationRuntime(db, storage, c, enqueue, settings);
+const interruptedTours = await generation.reconcile(boss, workerStartedAt);
 if (interruptedTours.length)
   console.log(JSON.stringify({ event: 'interrupted_tours_recovered', generationIds: interruptedTours }));
-await tourWorker.reconcile(enqueue);
-await agent.reconcile();
 await boss.work<{ documentId: string; agentRunId: string; wakeIndex: number }>(
   AGENT_TURN,
   { batchSize: 1, includeMetadata: true },
   async (jobs) => {
-    for (const job of jobs) await agent.turn(job.data.agentRunId, job.data.wakeIndex, job.signal);
+    for (const job of jobs) await generation.turn(job.data.agentRunId, job.data.wakeIndex, job.signal);
   },
 );
 await boss.work<{ documentId: string; analysisId: string; generationId: string }>(
@@ -48,20 +28,7 @@ await boss.work<{ documentId: string; analysisId: string; generationId: string }
   { batchSize: 1, includeMetadata: true },
   async (jobs) => {
     for (const job of jobs) {
-      const {
-        rows: [generation],
-      } = await db.query('select engine from tour_generations where id=$1', [job.data.generationId]);
-      if (generation?.engine === 'agent') {
-        await agent.start(job.data.generationId);
-        continue;
-      }
-      await tourWorker.generate(
-        job.data.documentId,
-        job.data.analysisId,
-        job.data.generationId,
-        job.retryCount >= 2,
-        job.signal,
-      );
+      await generation.start(job.data, job.retryCount >= 2, job.signal);
     }
   },
 );

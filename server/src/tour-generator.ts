@@ -14,10 +14,7 @@ export interface TourGenerationInput {
   analysisId: string;
   doc: Doc;
   images: TourImage[];
-  /** Candidate only: generator must validate image hashes, observations and inspection version. */
-  previousVisualInspection?: Record<string, unknown>;
   onEvent?: ActivitySink;
-  previousVisualBatches?: { cacheKey: string; observations: unknown; generationId: string }[];
 }
 export interface TourProgress {
   stage: TourGenerationStage;

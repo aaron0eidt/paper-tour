@@ -1,5 +1,5 @@
 import { reportedUsage } from '../../shared/activity';
-import { createMuseTourGenerator } from '../src/muse/generator';
+import { createTourGenerator } from '../src/generation/generator';
 import { createApp } from '../src/app';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,6 +74,8 @@ const png =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j0ZkAAAAASUVORK5CYII=';
 const call = (name: string, args: unknown, id = name) => ({
   type: 'function_call',
+  id: `fc_${id}`,
+  status: 'completed',
   name,
   arguments: JSON.stringify(args),
   call_id: id,
@@ -81,6 +83,8 @@ const call = (name: string, args: unknown, id = name) => ({
 const result = (id: string, output: unknown[]) => ({
   id,
   status: 'completed',
+  created_at: 1,
+  model: 'muse-spark-1.3',
   output,
   usage: { input_tokens: 3000, output_tokens: 100, total_tokens: 3100, input_tokens_details: { cached_tokens: 2048 } },
 });
@@ -89,10 +93,17 @@ const json = (value: unknown) =>
 
 test('Responses streams text, tool arguments and stored response IDs with real usage', async () => {
   const events = [
-    { type: 'response.created', response: { id: 'r1' } },
-    { type: 'response.function_call_arguments.delta', delta: '{"ids":' },
-    { type: 'response.output_item.added', item: { type: 'function_call', call_id: 'tool1', name: 'view_visuals' } },
-    { type: 'response.output_text.delta', delta: 'Inspecting the figure.' },
+    { type: 'response.created', response: { id: 'r1', created_at: 1, model: 'muse-spark-1.3' } },
+
+    {
+      type: 'response.output_item.added',
+      output_index: 0,
+      item: { id: 'fc_tool1', type: 'function_call', call_id: 'tool1', name: 'view_visuals', arguments: '' },
+    },
+    { type: 'response.function_call_arguments.delta', item_id: 'fc_tool1', output_index: 0, delta: '{"ids":["fig1"]}' },
+    { type: 'response.output_item.done', output_index: 0, item: call('view_visuals', { ids: ['fig1'] }, 'tool1') },
+    { type: 'response.output_item.added', output_index: 1, item: { type: 'message', id: 'msg1' } },
+    { type: 'response.output_text.delta', item_id: 'msg1', output_index: 1, delta: 'Inspecting the figure.' },
     { type: 'response.completed', response: result('r1', [call('view_visuals', { ids: ['fig1'] })]) },
   ];
   const requests: any[] = [];
@@ -276,7 +287,7 @@ test(
         );
       let output: unknown[];
       if (!b.previous_response_id) output = [];
-      else if (b.input[0].type === 'message')
+      else if (!b.input.some((item: any) => item.type === 'function_call_output'))
         output = [
           call('view_visuals', { ids: ['page1', 'fig1'] }, 'view-' + counter),
           call(
@@ -613,7 +624,7 @@ test(
         await db.query("update agent_runs set status='paused' where id=$1", [f.run]);
         await db.query("update tour_generations set status='needs_configuration' where id=$1", [f.g.id]);
         const before = jobs.length;
-        await new TourWorker(db, storage, c, createMuseTourGenerator(muse), images).reconcile(enqueue, f.id);
+        await new TourWorker(db, storage, c, createTourGenerator(muse, 'deep'), images).reconcile(enqueue, f.id);
         assert.equal(jobs.length, before);
         assert.equal((await service.generateTour(owner, f.id)).generation.agentRunId, f.run);
         assert.equal(

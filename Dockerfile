@@ -28,7 +28,7 @@ COPY supabase/migrations ./supabase/migrations
 COPY shared ./shared
 COPY --from=build /app/server ./server
 COPY --from=build /app/player/dist ./player/dist
-ENV HOST=0.0.0.0 PORT=3001 PYTHON_BIN=/usr/local/bin/python3
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001 PYTHON_BIN=/usr/local/bin/python3
 RUN useradd --create-home --uid 10001 paper
 USER paper
 EXPOSE 3001

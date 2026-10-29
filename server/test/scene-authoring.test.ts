@@ -122,7 +122,7 @@ test('scene example authoring preserves stable objects, checked values, motion a
     targets,
   )!;
   assert.deepEqual(direction.exampleProblems, []);
-  const step = beatStep(beat, targets, direction, doc, new Set());
+  const step = beatStep(beat, targets, direction, doc);
   const frames = step.actions.flatMap((a) => (a.type === 'board' && a.item.kind === 'scene' ? [a.item] : []));
   assert.deepEqual(
     frames.map((f) => [f.objects[0].id, f.objects[0].x, f.objects[0].values]),

@@ -98,3 +98,32 @@ test('a new run on the same generation clears old plan, publication and tracked 
   assert.equal(generationChecklist(events, 'ready').items[0].state, 'unknown');
   assert.ok(checklistEvent(e('8', 'run.started')));
 });
+
+test('durable tools expose a real chapter plan and saved progress without retaining raw tool payloads', () => {
+  const events = [
+    e('1', 'tool.completed', {
+      name: 'set_tour_plan',
+      output: {
+        plan: [
+          { id: 'method', title: 'The method' },
+          { id: 'results', title: 'Results' },
+        ],
+        private: 'discard',
+      },
+    }),
+    e('2', 'tool.started', {
+      name: 'upsert_tour_chapter',
+      arguments: { chapter: { id: 'method', title: 'The method', steps: [{ say: 'private narration' }] } },
+    }),
+    e('3', 'tool.completed', { name: 'upsert_tour_chapter', output: { chapterId: 'method', savedSteps: 3 } }),
+  ];
+  const compact = events.flatMap((event) => checklistEvent(event) ?? []);
+  assert.doesNotMatch(JSON.stringify(compact), /private|narration/);
+  const actual = generationChecklist(compact, 'generating');
+  assert.equal(actual.planned, 2);
+  assert.equal(actual.finished, 1);
+  assert.equal(actual.items[0].label, 'The method');
+  assert.equal(actual.items[0].state, 'done');
+  assert.equal(actual.items[1].state, 'pending');
+  assert.deepEqual(checklistEvent(compact[0]), compact[0], 'Compact data must survive the dock filtering it again');
+});

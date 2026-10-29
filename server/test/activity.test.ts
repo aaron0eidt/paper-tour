@@ -7,6 +7,7 @@ import { DocumentService } from '../src/service';
 import { createApp } from '../src/app';
 import { generationRecorder } from '../src/activity';
 import type { FileStorage } from '../src/storage';
+import { readActivityStream } from '../../player/src/library/activity';
 
 test(
   'private generation events replay in order and stay isolated by document owner',
@@ -59,6 +60,21 @@ test(
       assert(!read.body.includes('private-test-key'));
       assert(read.body.includes('[REDACTED]'));
       assert(read.body.includes('actual output β'));
+      const ui = await app.inject({ method: 'GET', url: path + '?format=ui', headers });
+      assert.equal(ui.statusCode, 200);
+      assert.equal(ui.headers['x-vercel-ai-ui-message-stream'], 'v1');
+      const sdkEvents = [];
+      for await (const frame of readActivityStream(new Response(ui.body))) if (frame.event) sdkEvents.push(frame.event);
+      assert.deepEqual(
+        sdkEvents.map((event) => event.type),
+        ['model.started', 'model.delta', 'run.failed'],
+      );
+      assert(!JSON.stringify(sdkEvents).includes('private-test-key'));
+      assert.equal(
+        (await app.inject({ method: 'GET', url: path + '?format=ui', headers: { authorization: 'Bearer other' } }))
+          .statusCode,
+        404,
+      );
       const frames = read.body
         .split('\n\n')
         .filter(Boolean)
@@ -95,8 +111,14 @@ test(
       });
       await record('model.usage', { callId: 'b', usage: { promptTokens: 6, completionTokens: 3, totalTokens: 9 } });
       const usages = [...reportedUsage((await service.activity(user, doc, generation, '0')).events).values()];
-      assert.equal(usages.reduce((sum, value) => sum + value.promptTokens, 0), 106);
-      assert.equal(usages.reduce((sum, value) => sum + value.completionTokens, 0), 8);
+      assert.equal(
+        usages.reduce((sum, value) => sum + value.promptTokens, 0),
+        106,
+      );
+      assert.equal(
+        usages.reduce((sum, value) => sum + value.completionTokens, 0),
+        8,
+      );
       await db.query('delete from documents where id=$1', [doc]);
       assert.equal(
         (await db.query('select 1 from generation_events where generation_id=$1', [generation])).rowCount,

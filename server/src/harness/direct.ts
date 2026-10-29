@@ -18,6 +18,8 @@ import {
 } from './visual-grounding';
 
 export const CUE_ACTIONS = ['highlight', 'box', 'spotlight', 'note', 'arrow', 'circle', 'board_focus'] as const;
+/** Room for source cues and board emphasis in the same explanation. */
+export const MAX_CUES = 8;
 export type CueAction = (typeof CUE_ACTIONS)[number];
 export interface Cue {
   action: CueAction;
@@ -277,7 +279,7 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true)
       },
       cues: {
         type: 'array',
-        ...(strict ? { maxItems: ids.length ? 4 : 0 } : {}),
+        ...(strict ? { maxItems: ids.length ? MAX_CUES : 0 } : {}),
         items: {
           type: 'object',
           additionalProperties: false,
@@ -443,7 +445,7 @@ export function cleanDirection(
       anchor: c.anchor,
     }))
     .filter((c) => actions.has(c.action) && allowed(c))
-    .slice(0, 4);
+    .slice(0, MAX_CUES);
   const example = checkExample(
     d.example,
     say,

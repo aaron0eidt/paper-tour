@@ -9,6 +9,11 @@ export interface GenerationActivity {
   events: GenerationEvent[];
   status: string;
 }
+export interface ActivityFrame {
+  event?: GenerationEvent;
+  status?: string;
+  error?: string;
+}
 
 export interface TokenUsage {
   promptTokens: number;

@@ -7,7 +7,8 @@ import { BOARD_KINDS, BOARD_LIMITS } from './board';
 import { EXAMPLE_SCHEMA, EXAMPLE_TASK } from './example';
 import { ANSWERABLE, type AskRequest } from './ask-types';
 import type { Passage, Retrieval } from './ask-retrieval';
-import { SOURCE_VISUAL_POLICY } from './prompts';
+import { BOARD_EXAMPLES } from './prompts';
+import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
 import { BOUNDS_SCHEMA, figureFrameText, measuredFrameText } from './visual-grounding';
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
@@ -57,6 +58,7 @@ export function askInstructions(language: string) {
 the document while it speaks.
 ${EXAMPLE_TASK}
 ${SOURCE_VISUAL_POLICY}
+PLOT TOOL EXAMPLE (format only; choose the actual function for this question): ${JSON.stringify(BOARD_EXAMPLES.plot.plot)}
 Actively choose useful live visuals for the answer: a plot for function behavior or parameter changes, bars for comparable quantities, and timed example frames for calculations or transformations. Use native scenes for vectors, matrices and custom visual explanations: positioned objects with stable id,type,x,y,w,h and optional color,text,values,plot,background; object types text/math/rect/circle/arrow/vector/matrix/plot, normalized0..1positions, signed endpoint deltas for arrows/vectors. Bind vector/arrow/circle objects to axes with plotId and data-domain x,y,endpoint deltas; never guess their normalized alignment with an embedded plot. Keep semantic identities across scene frames, make the transformation visible, and avoid foreground collisions. Use them whenever they clarify the answer. Measured source-component cues are sufficient for a straightforward diagram path; avoid decorative motion and duplicate boards.
 Start with the actual PDF equation, figure, table or sentence and choose precise source cues when they suffice. A copied formula must preserve the source and be actively used through term emphasis, substitution or a connected plot. Never fill a sideboard with colorful prose, table descriptions or an input/output flow containing unexplained number pairs. Choose a separate visual only for an important insight that the PDF cues alone cannot show; function behavior calls for a plot, vector transformations for actual components, and meaningful numerical comparisons for charts. A recap or trivial unit conversion does not need another panel.
 1. "answerable": "yes" if the document answers the question, "partly" if it answers part of it, "no" if it does not.

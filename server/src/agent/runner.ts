@@ -12,7 +12,7 @@ import { generationRecorder } from '../activity';
 import { ProcessingError } from '../errors';
 import { isContributorModel } from '../muse/models';
 import { paperContext } from '../muse/context';
-import { writingInstructions, PROMPT_VERSION } from '../muse/prompts';
+import { writingInstructions, PROMPT_VERSION } from './writing';
 import { MAX_CONTENT_PAGES, walkthroughGoals } from '../muse/planning';
 import { TourValidationError } from '../muse/schema';
 import { ResponsesClient, responseUsage, type AgentResponse, type ResponseItem } from './responses';
@@ -20,6 +20,7 @@ import {
   AGENT_VERSION,
   AGENT_INSTRUCTIONS,
   AGENT_TOOLS,
+  paperTools,
   executeTool,
   paperManifest,
   requiredVisuals,
@@ -32,8 +33,8 @@ import { scheduleAgent } from './store';
 import { replayHistory, historyCoversCheckpoint } from './history';
 import { checkProgress } from './progress';
 import { workflowDirective } from './workflow';
-import { strictVisualObservationTool } from './strict-tools';
-const WIRE_TOOLS = AGENT_TOOLS.map(strictVisualObservationTool);
+import { strictVisualObservationTool, shallowChapterTool } from './strict-tools';
+const WIRE_TOOLS = AGENT_TOOLS.map(strictVisualObservationTool).map(shallowChapterTool);
 
 export class PaperAgent {
   constructor(
@@ -455,6 +456,7 @@ export class PaperAgent {
             const request: Record<string, unknown> = {
               instructions: AGENT_INSTRUCTIONS,
               tools: WIRE_TOOLS,
+              ...(step.phase === 'root' ? { tool_choice: 'none' } : {}),
               reasoning: { effort: 'medium' },
               input: await hydrateImages(step.input, this.storage, visuals),
               ...(previous && !localHistory ? { previous_response_id: previous } : {}),
@@ -613,11 +615,10 @@ export class PaperAgent {
           };
           const calls = response.output.filter((item) => item.type === 'function_call');
           // Reads may run concurrently; writes below are always serialized and committed with their results.
-          const readNames = new Set(['search_paper', 'read_elements']);
-          const reads = calls.filter((call) => readNames.has(String(call.name)));
+          const reads = calls.filter((call) => paperTools.effect(String(call.name)) === 'read');
           for (let offset = 0; offset < reads.length; offset += 4)
             await Promise.all(reads.slice(offset, offset + 4).map((call) => this.tool(run, scope, call, record)));
-          for (const call of calls.filter((call) => !readNames.has(String(call.name)))) {
+          for (const call of calls.filter((call) => paperTools.effect(String(call.name)) !== 'read')) {
             if (await this.tool(run, scope, call, record)) return;
           }
         }
@@ -789,7 +790,7 @@ export class PaperAgent {
     const toolStarted = Date.now();
     await record('tool.started', { callId, name, arguments: args });
     let readResult: Awaited<ReturnType<typeof executeTool>> | undefined;
-    if (['search_paper', 'read_elements'].includes(name)) {
+    if (paperTools.effect(name) === 'read') {
       try {
         readResult = await executeTool(scope, run.state, name, args);
       } catch (error) {
@@ -847,12 +848,7 @@ export class PaperAgent {
           );
         }
       }
-      const stage =
-        name === 'view_visuals' || name === 'record_visual_observations'
-          ? 'images'
-          : name === 'finish_tour'
-            ? 'validating'
-            : 'writing';
+      const stage = paperTools.stage(name);
       await tx.query('update tour_generations set stage=$2,images_done=$3,updated_at=now() where id=$1', [
         run.generation_id,
         stage,

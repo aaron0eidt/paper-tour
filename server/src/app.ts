@@ -1,5 +1,6 @@
+import { pipeUIMessageStreamToResponse } from 'ai';
+import { activityFrames, activityUIStream } from './ai/activity-stream';
 import { RESPONSE_LANGUAGES } from '../../shared/languages';
-import { setTimeout as delay } from 'node:timers/promises';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type { Readable } from 'node:stream';
 import cors from '@fastify/cors';
@@ -193,7 +194,7 @@ export async function createApp(options: Options) {
         api.post('/settings/test', async (req) => settings.test(owner(req)));
       }
       for (const runRoute of [false, true])
-        api.get<{ Params: { id: string; generationId: string }; Querystring: { after?: string } }>(
+        api.get<{ Params: { id: string; generationId: string }; Querystring: { after?: string; format?: 'ui' } }>(
           runRoute
             ? '/documents/:id/agent-runs/:generationId/events'
             : '/documents/:id/generations/:generationId/events',
@@ -207,7 +208,10 @@ export async function createApp(options: Options) {
               querystring: {
                 type: 'object',
                 additionalProperties: false,
-                properties: { after: { type: 'string', pattern: '^[0-9]{1,18}$' } },
+                properties: {
+                  after: { type: 'string', pattern: '^[0-9]{1,18}$' },
+                  format: { type: 'string', enum: ['ui'] },
+                },
               },
             },
           },
@@ -218,14 +222,38 @@ export async function createApp(options: Options) {
               if (!service.agentRun) throw new HttpError(503, 'agent_unavailable', 'Agent runs are unavailable.');
               generationId = (await service.agentRun(owner(req), req.params.id, req.params.generationId)).generationId;
             }
-            let cursor = req.query.after ?? '0';
-            let batch = await service.activity(owner(req), req.params.id, generationId, cursor);
+            const cursor = req.query.after ?? '0';
+            const batch = await service.activity(owner(req), req.params.id, generationId, cursor);
             reply
               .header('Content-Type', 'text/event-stream')
               .header('Cache-Control', 'no-store')
               .header('X-Accel-Buffering', 'no');
             // Fastify applies CORS headers before we take ownership of the stream.
             reply.hijack();
+            const controller = new AbortController();
+            const close = () => controller.abort();
+            reply.raw.on('close', close);
+            const frames = activityFrames(
+              batch,
+              (after) => service.activity!(owner(req), req.params.id, generationId, after),
+              cursor,
+              controller.signal,
+            );
+            if (req.query.format === 'ui') {
+              try {
+                await pipeUIMessageStreamToResponse({
+                  response: reply.raw,
+                  headers: Object.fromEntries(
+                    Object.entries(reply.getHeaders()).map(([key, value]) => [key, String(value)]),
+                  ),
+                  stream: activityUIStream(frames, generationId),
+                });
+              } finally {
+                reply.raw.off('close', close);
+                controller.abort();
+              }
+              return;
+            }
             reply.raw.writeHead(
               200,
               Object.fromEntries(
@@ -234,9 +262,7 @@ export async function createApp(options: Options) {
                   .map(([key, value]) => [key, Array.isArray(value) ? value : String(value)]),
               ),
             );
-            const controller = new AbortController();
-            const close = () => controller.abort();
-            reply.raw.on('close', close);
+
             const send = async (value: unknown) => {
               if (controller.signal.aborted) return;
               if (!reply.raw.write(`data: ${JSON.stringify(value)}\n\n`)) {
@@ -252,21 +278,7 @@ export async function createApp(options: Options) {
               }
             };
             try {
-              const end = Date.now() + 20_000;
-              while (!controller.signal.aborted) {
-                for (const event of batch.events) {
-                  await send({ event });
-                  cursor = event.id;
-                }
-                await send({ status: batch.status });
-                if (
-                  (!['queued', 'generating'].includes(batch.status) && batch.events.length < 100) ||
-                  Date.now() >= end
-                )
-                  break;
-                if (batch.events.length < 100) await delay(700, undefined, { signal: controller.signal });
-                batch = await service.activity(owner(req), req.params.id, generationId, cursor);
-              }
+              for await (const frame of frames) await send(frame);
             } catch {
               if (!controller.signal.aborted) await send({ error: 'Activity interrupted. Reconnecting…' });
             } finally {
