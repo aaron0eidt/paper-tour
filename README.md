@@ -92,8 +92,8 @@ stays the planner. Muse Image is not used.
 | Practical documents (contracts, leases, terms, letters, forms) | Plain words, neutral tone, amounts and dates exactly as written, framed as an explanation and not advice |
 
 The tour is written in the document's dominant language (a German sheet gets German narration). A question can ask for
-the answer in another language, with quotes kept in the original. Practical documents use the same pipeline but are not
-among the measured runs below.
+the answer in another language, with quotes kept in the original. The measured runs below
+include a lease, terms of service and a German letter.
 
 ## Measured results
 
