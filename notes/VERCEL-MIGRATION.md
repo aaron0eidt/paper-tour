@@ -2,6 +2,16 @@
 
 Branch: `codex/vercel-ai-sdk-migration`, based on merged `main`.
 
+## Current cleanup
+
+The earlier one-shot writer has now been retired, along with `TOUR_WRITER`, its strategy
+registry, coverage-repair code and unused worker inspection-cache queries. Guided jobs
+use the harness; persistent-agent jobs keep their durable engine. Active agent writing
+rules moved to `agent/writing.ts`, retaining their prompt version and content. Shared
+provider, source and canonical validation modules remain in use. Existing tours and
+stored records are preserved. The verification record below describes the migration
+before this cleanup; see `GENERATION-ARCHITECTURE.md` for retirement details.
+
 ## Product contract
 
 Preserve the PDF reader, tour ordering and playback, narration/audio controls, live native plots/scenes, floating question dock, language choice, voice questions, selected-region questions, library/settings, activity details and pause/resume/cancel. SDK integration sits below these features. Persisted tours remain compatible. A model-transport change must not weaken source grounding, numerical verification or geometry checks.

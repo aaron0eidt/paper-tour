@@ -1,22 +1,16 @@
 # Generation architecture consolidation
 
-Keep the SDK migration branch and all reader contracts. Consolidate orchestration and
-extension points before deciding whether a generation strategy can be retired.
+Queued guided tours and durable agent turns share one runtime entry point. The guided
+generator is bound in `generation/generator.ts`; the obsolete one-shot Muse writer,
+writer registry and `TOUR_WRITER` configuration have been removed.
 
-1. Give queued tours and durable agent turns one runtime entry point. Select writers
-   through a registry, and share provider model validation and recorded structured calls.
-2. Split paper tools by responsibility: source reads, visual inspection and tour editing.
-   Each tool owns its description, schema, argument preparation, execution, stage and
-   concurrency classification. A registry derives SDK definitions and validates dispatch.
-3. Preserve the durable journal as the only writer of state and published tours. Keep tool
-   names, schemas, results, error corrections and image-delivery checks compatible.
-4. Exercise every strategy and SDK boundary in tests, then run real upload/generation,
-   questions, voice and reader checks. Record concrete differences between the detailed
-   walkthrough and guided harness before removing either strategy.
+Paper tools are grouped by source reads, visual inspection and tour editing. Each tool
+owns its schema, execution, progress stage and concurrency classification. The durable
+journal commits state and publishes agent tours atomically.
 
-The older walkthrough still has page-coverage and visual-inspection behavior that differs
-from the guided harness. Retaining it behind the common registry is intentional during
-this audit. This work does not add paper-specific prompts.
+The agent's active writing rules now live in `agent/writing.ts`. Shared source context,
+coverage planning, schema validation and visual direction remain active dependencies
+under `muse/`; that directory is not an obsolete generation strategy.
 
 ## Activity UI
 
@@ -28,9 +22,9 @@ Keep the existing reader and activity design, including its original icons and d
 checklist. The temporary compact redesign was reverted following user feedback. Only
 the streaming transport and meaningful task labels change.
 
-## Verification
+## Historical migration verification
 
-Verified on 29 October 2026:
+Verified on 29 October 2026 before writer retirement (the counts below describe that revision):
 
 - One runtime now routes queued tours, durable turns and startup recovery. The writer
   registry preserves both `TOUR_WRITER=harness` and `TOUR_WRITER=muse`.
@@ -69,15 +63,21 @@ is included as documentation. The canonical argument, source, geometry, chronolo
 publication validators remain unchanged and still reject invalid actions. The same
 adapter serves both generation paths; no hidden transport retry bypasses these checks.
 
-## Retirement assessment
+## Writer retirement
 
-Do not delete the older writer during this change. It remains a supported setting and
-has full-page visual inspection/coverage semantics, while the guided harness selects
-central ideas and adapts to different document types. The durable agent can also cover
-the full document, but retiring a setting needs a deliberate migration and broader
-parity checks on longer papers and image-heavy documents. The shared `muse` schema,
-source and provider modules are active dependencies of the other paths, not obsolete
-files merely because they share that directory name.
+The one-shot writer, coverage-repair merger and inspection-only prompts/tests were
+removed. Its completed-inspection and batch-checkpoint lookups were also removed from
+`TourWorker` and `TourGenerationInput`: guided generation never consumed them. Agent
+visual observations, checkpoint recovery and image caching remain in the durable agent.
+No saved tours, database records or historical activity events are deleted. Old
+`TOUR_WRITER` environment entries no longer select a strategy; ordinary queued jobs
+use the harness, while jobs persisted with the agent engine retain their engine.
 
-Next retirement work can remove the old writer registry entry, its implementation and
-its strategy-only tests once its users/settings and coverage requirements are migrated.
+The lecture fixture's scripted provider was updated to recognize the optional formula
+suggestion wording. Its existing rendering assertions remain in place. Shared SDK call
+recording keeps a direct multimodal/redaction test after the old writer tests are retired.
+
+Retirement verification on 29 October 2026: production build and player tests passed;
+276 server tests passed with seven database-only skips; Python ran 62 tests with one
+existing skip. All 332 database integration tests passed with no failures or skips.
+No live provider calls or browser smoke checks were repeated for this cleanup.

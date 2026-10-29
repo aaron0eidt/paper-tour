@@ -26,8 +26,8 @@ export interface Config {
   maxPages: number;
   analysisTimeoutMs: number;
   muse: MuseConfig;
-  /** harness: short main-idea tours (notes/HARNESS.md); muse: the earlier one-shot, page-by-page writer. */
-  tours: { writer: 'harness' | 'muse'; preset: 'quick' | 'standard' | 'deep' };
+  /** Guided tour length (notes/HARNESS.md); persistent agents are configured separately. */
+  tours: { preset: 'quick' | 'standard' | 'deep' };
   agent?: { enabled: boolean; maxTurns: number; maxOutputTokens: number; maxRuntimeMs: number };
 }
 export function config(): Config {
@@ -59,7 +59,6 @@ export function config(): Config {
     maxPages: 100,
     analysisTimeoutMs: 300_000,
     tours: {
-      writer: choice('TOUR_WRITER', ['harness', 'muse'], 'harness'),
       preset: choice('TOUR_PRESET', ['quick', 'standard', 'deep'], 'deep'),
     },
     agent: {

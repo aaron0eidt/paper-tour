@@ -144,7 +144,7 @@ npm run test:integration
 Integration tests require the local Supabase stack. `Dockerfile` and `compose.yaml` provide an
 optional deployment setup; environment variables are listed in `.env.example`.
 
-New tours use the guided harness by default (`TOUR_WRITER=harness`, `TOUR_PRESET=deep`). It plans
+New tours use the guided harness (`TOUR_PRESET=deep`). It plans
 explanations, directs independent steps concurrently, then gives each detail step its preceding overview
 to build on. `quick` and `standard` remain available. Activity shows readable narration, concurrent
 work and timing diagnostics; the floating question bubble also shows progress.
@@ -164,14 +164,15 @@ Meta's count/retrieve endpoints remain explicit provider capabilities, and its n
 endpoint implements the SDK transcription contract. The reader and its existing activity protocol
 remain compatible. See [the migration plan](notes/VERCEL-MIGRATION.md) for decisions and verification.
 
-Generation queue handling is centralized in `server/src/generation/runtime.ts`; writer
-selection lives in `generation/writers.ts`. Paper tools are grouped under `agent/tools/`
-by source reads, visual inspection and tour editing. Registering a tool supplies its schema,
-execution, progress stage and concurrency classification together. Both writers share SDK call
-recording and the provider schema adapter; the durable journal retains canonical validation.
+Generation queue handling is centralized in `server/src/generation/runtime.ts`; the guided
+generator is bound in `generation/generator.ts`. The earlier one-shot writer and its
+`TOUR_WRITER` setting have been removed; existing saved tours remain readable. Paper tools
+are grouped under `agent/tools/` by source reads, visual inspection and tour editing. Registering a tool supplies its schema,
+execution, progress stage and concurrency classification together. Guided generation uses SDK call
+recording; the persistent agent uses the provider schema adapter and durable canonical validation.
 The existing Activity design now consumes AI SDK UI message streams, with raw diagnostics
 still available in Technical details. See [the architecture audit](notes/GENERATION-ARCHITECTURE.md)
-for real-provider results and the assessment of retiring the older writer.
+for real-provider results and the writer retirement details.
 
 For local SDK timing and token diagnostics, set `AI_SDK_DEVTOOLS=true` and run
 `npm --prefix server exec -- devtools`. Development dependencies are required. Traces contain only

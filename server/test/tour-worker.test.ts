@@ -272,68 +272,6 @@ test(
           );
         },
       );
-      await t.test('regeneration supplies only matching ready visual inspection candidates', async () => {
-        const fresh = await fixture();
-        const first = await generation(fresh.analysisId);
-        await worker.generate(fresh.documentId, fresh.analysisId, first.id);
-        const second = (await service.generateTour(owner, fresh.documentId, true)).generation;
-        let candidate: Record<string, unknown> | undefined;
-        const inspect = new TourWorker(
-          db,
-          storage,
-          c,
-          {
-            ...generator,
-            generate: async (input) => {
-              candidate = input.previousVisualInspection;
-              return {
-                tour,
-                metadata: {
-                  provider: 'test-double',
-                  model: 'test-model',
-                  sourceSha256: input.doc.source.sha256,
-                  analysisId: input.analysisId,
-                },
-              };
-            },
-          },
-          async () => [image],
-        );
-        await inspect.generate(fresh.documentId, fresh.analysisId, second.id);
-        assert.equal(candidate?.model, 'test-model');
-        assert.equal(candidate?.sourceSha256, doc.source.sha256);
-        assert.equal(candidate?.analysisId, fresh.analysisId);
-        await db.query(
-          "update tour_generations set metadata=jsonb_set(metadata,'{sourceSha256}',to_jsonb($2::text)) where analysis_id=$1 and status='ready'",
-          [fresh.analysisId, 'b'.repeat(64)],
-        );
-        const third = (await service.generateTour(owner, fresh.documentId, true)).generation;
-        candidate = undefined;
-        await inspect.generate(fresh.documentId, fresh.analysisId, third.id);
-        assert.equal(candidate, undefined, 'mismatching source hashes cannot become reuse candidates');
-        const fourth = (await service.generateTour(owner, fresh.documentId, true)).generation;
-        const differentModel = new TourWorker(
-          db,
-          storage,
-          c,
-          {
-            ...generator,
-            model: 'other-model',
-            generate: async (input) => {
-              assert.equal(
-                input.previousVisualInspection,
-                undefined,
-                'inspection candidates must match the active model',
-              );
-              return { tour, metadata: {} };
-            },
-          },
-          async () => [image],
-        );
-        await db.query('update tour_generations set model=$2 where id=$1', [fourth.id, 'other-model']);
-        await differentModel.generate(fresh.documentId, fresh.analysisId, fourth.id);
-        assert.equal((await generation(fresh.analysisId)).status, 'ready');
-      });
       await t.test(
         'invalid output fails cleanly, retry reuses the task, and transient exhaustion becomes failed',
         async () => {

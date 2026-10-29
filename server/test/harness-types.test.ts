@@ -150,10 +150,10 @@ function plainDirection(r: Request, extra: object = {}) {
 /** All native schemas are available now; this scripted author follows the planner's
  * suggested board for these document-type fixtures instead of inferring it from availability. */
 function suggestedBoard(r: Request): 'bars' | 'flow' | 'formula' | undefined {
-  const suggestion = /^BOARD(?: \([^)]*\))?: (.+)$/m.exec(r.brief)?.[1] ?? '';
+  const suggestion = /^BOARD(?: \([^)]*\)| SUGGESTION, NOT A REQUIREMENT)?: (.+)$/m.exec(r.brief)?.[1] ?? '';
   if (suggestion.includes('as bars')) return 'bars';
   if (suggestion.includes('a flow')) return 'flow';
-  if (suggestion.includes('equation term by term')) return 'formula';
+  if (suggestion.includes('use a formula board')) return 'formula';
   return undefined;
 }
 const steps = (tour: Tour) => tour.chapters.flatMap((c) => c.steps);

@@ -2,14 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { MuseConfig } from '../src/config';
 import type { Doc } from '../../shared/paper';
-import type { TourGenerationInput, TourImage, TourProgress } from '../src/tour-generator';
+import type { TourGenerationInput, TourImage } from '../src/tour-generator';
 import { ProcessingError } from '../src/errors';
 import { MuseClient, providerFailureReason } from '../src/muse/client';
 import { checkImages, paperContext } from '../src/muse/context';
-import { MuseTourGenerator } from '../src/muse/generator';
 import { materializeTour, TourValidationError } from '../src/muse/schema';
-import { writingInstructions, PROMPT_VERSION } from '../src/muse/prompts';
+import { writingInstructions, PROMPT_VERSION } from '../src/agent/writing';
 import { walkthroughGoals } from '../src/muse/planning';
+import { recordedCalls } from '../src/ai/recorded-calls';
+import { imageParts } from '../src/harness/calls';
 
 const settings: MuseConfig = {
   apiKey: 'unit-test-key',
@@ -242,7 +243,7 @@ test('tour materialization binds identity and rejects fabricated references/timi
   assert.throws(() => materializeTour(longHold, doc, 'doc', 'en-US'), TourValidationError);
 });
 
-test('walkthrough requires forward reading order, content coverage and precise highlights', () => {
+test('agent tour validation requires forward reading order, content coverage and precise highlights', () => {
   const pages = structuredClone(doc);
   pages.figures = [];
   pages.pages.push({ n: 2, width: 600, height: 800 });
@@ -293,208 +294,6 @@ test('camera materialization pins a broad model focus to the declared source sen
   value.chapters[0].steps[0].actions[0] = { type: 'focus', target: 'p1.b1' };
   const result = materializeTour(value, doc, 'doc', 'en-US');
   assert.equal((result.tour.chapters[0].steps[0].actions[0] as any).target, 'p1.s1');
-});
-
-test('regeneration reuses visual evidence only when model, analysis and every image hash match', async () => {
-  let inspections = 0, writings = 0;
-  const generator = new MuseTourGenerator(settings, provider((request) => {
-    if (request.response_format.json_schema.name === 'paper_visual_observations') {
-      inspections++;
-      return response({ observations: images.map((image) => ({ targetId: image.targetId, description: 'Verified visible chart.', readable: true, uncertainties: [] })) });
-    }
-    writings++; return response(draft());
-  }));
-  const original = await generator.generate(input);
-  const regenerated = await generator.generate({ ...input, previousVisualInspection: original.metadata });
-  assert.equal(inspections, 1); assert.equal(writings, 2);
-  assert.equal(regenerated.metadata.reusedVisualInspection, true);
-  for (const mutate of [
-    (cached: any) => { cached.imagesReviewed.sources[0].sha256 = 'wrong'; },
-    (cached: any) => { cached.analysisId = 'another-analysis'; },
-    (cached: any) => { cached.model = 'another-model'; },
-    (cached: any) => { cached.visualObservations.pop(); },
-  ]) {
-    const cached = structuredClone(original.metadata); mutate(cached);
-    const result = await generator.generate({ ...input, previousVisualInspection: cached });
-    assert.equal(result.metadata.reusedVisualInspection, false);
-  }
-  assert.equal(inspections, 5);
-});
-
-test('multimodal generation reviews all images, retains global paper context, and records evidence', async () => {
-  const many = structuredClone(input);
-  many.doc.pages = Array.from({ length: 15 }, (_, i) => ({ n: i + 1, width: 600, height: 800 }));
-  many.doc.source.num_pages = 15;
-  many.images = [
-    ...many.doc.pages.map(
-      (page): TourImage => ({
-        targetId: `page${page.n}`,
-        kind: 'page',
-        page: page.n,
-        label: `Page ${page.n}`,
-        dataUrl: png,
-      }),
-    ),
-    images[1],
-  ];
-  let calls = 0;
-  const visualIds: string[] = [];
-  const progress: TourProgress[] = [];
-  const pageSteps = Array.from({ length: 14 }, (_, i) => ({
-    id: `visual-page-${i + 2}`, source: `page${i + 2}`, say: 'Explain the visual content on this page.',
-    evidence: [`page${i + 2}`], actions: [{ type: 'focus', target: `page${i + 2}` }],
-  }));
-  const completeDraft = {
-    title: 'All content pages', chapters: [
-      { ...draft().chapters[0], steps: [...draft().chapters[0].steps, ...pageSteps.slice(0, 7)] },
-      { id: 'remaining-pages', title: 'Remaining pages', steps: pageSteps.slice(7) },
-    ],
-  };
-  const generator = new MuseTourGenerator(
-    settings,
-    provider((request) => {
-      calls++;
-      assert(JSON.stringify(request.messages).includes('The blue bar is larger.'));
-      const content = request.messages[1].content;
-      assert(content.some((part: any) => part.type === 'image_url' && part.image_url.url === png));
-      if (request.response_format.json_schema.name === 'paper_visual_observations') {
-        const ids = request.response_format.json_schema.schema.properties.observations.items.properties.targetId
-          .enum as string[];
-        visualIds.push(...ids);
-        return response({
-          observations: ids.map((targetId) => ({
-            targetId,
-            description: 'Visible chart or paper page.',
-            readable: true,
-            uncertainties: [],
-          })),
-        });
-      }
-      return response(completeDraft);
-    }),
-  );
-  const result = await generator.generate(many, async (value) => {
-    progress.push(value);
-  });
-  assert.equal(calls, 3);
-  assert.deepEqual(
-    visualIds,
-    many.images.map((image) => image.targetId),
-  );
-  assert.equal(result.metadata.fullPaperContext, true);
-  assert.equal(result.metadata.promptVersion, PROMPT_VERSION);
-  assert.equal((result.metadata.imagesReviewed as any).count, 16);
-  assert.equal(result.tour.doc_sha256, doc.source.sha256);
-  assert.equal(progress.at(-1)?.stage, 'validating');
-  assert.equal((result.metadata.imagesReviewed as any).sources[0].sha256.length, 64);
-});
-
-test('over-limit page coverage is rejected before sending paper content to the provider', async () => {
-  const scanned = structuredClone(input);
-  scanned.doc.blocks = []; scanned.doc.sentences = []; scanned.doc.figures = [];
-  scanned.doc.pages = Array.from({ length: 61 }, (_, i) => ({ n: i + 1, width: 600, height: 800 }));
-  scanned.images = scanned.doc.pages.map((page) => ({ targetId: `page${page.n}`, kind: 'page', page: page.n, label: 'Scanned page', dataUrl: png }));
-  let calls = 0;
-  const generator = new MuseTourGenerator(settings, provider(() => { calls++; return response({}); }));
-  await assert.rejects(generator.generate(scanned), assertCode('context_limit'));
-  assert.equal(calls, 0);
-});
-
-test('a bounded missing-page completion fills coverage without rewriting valid explanations', async () => {
-  const expanded = structuredClone(input);
-  expanded.doc.pages.push({ n: 2, width: 600, height: 800 });
-  expanded.images.push({ ...images[0], targetId: 'page2', page: 2 });
-  expanded.doc.blocks[0].sentences.push('p1.s2', 'p1.s3');
-  expanded.doc.sentences.push(
-    { ...doc.sentences[0], id: 'p1.s2' }, { ...doc.sentences[0], id: 'p1.s3' },
-    { ...doc.sentences[0], id: 'p2.s1', page: 2, block: 'p2.b1' },
-  );
-  expanded.doc.blocks.push({ ...doc.blocks[0], id: 'p2.b1', page: 2, sentences: ['p2.s1'] });
-  const textStep = (id: string) => ({ id: `explain-${id}`, source: id, evidence: [id], say: 'Explain the important claim in its paper context.', actions: [{ type: 'focus', target: id }, { type: 'highlight', targets: [id] }] });
-  const incomplete: any = draft();
-  incomplete.chapters[0].steps.push(...['p1.s1', 'p1.s2', 'p1.s3'].map(textStep));
-  const calls: string[] = [];
-  const generator = new MuseTourGenerator(settings, provider((request) => {
-    const name = request.response_format.json_schema.name;
-    calls.push(name);
-    if (name === 'paper_visual_observations') return response({ observations: expanded.images.map((image) => ({ targetId: image.targetId, description: 'Directly visible content.', readable: true, uncertainties: [] })) });
-    if (name === 'paper_tour_coverage') {
-      assert(JSON.stringify(request.messages).includes('p2.s1'));
-      assert(request.messages[1].content.some((part: any) => part.type === 'image_url'));
-      return response({ steps: [textStep('p2.s1')] });
-    }
-    return response(incomplete);
-  }));
-  const result = await generator.generate(expanded);
-  assert.deepEqual(calls, ['paper_visual_observations', 'paper_tour_draft', 'paper_tour_coverage']);
-  assert.equal(result.tour.chapters[0].steps.length, 5);
-  assert.deepEqual(result.metadata.coverageRepairPages, [2]);
-  assert.equal(result.tour.chapters[0].steps.at(-1)!.id, 'explain-p2.s1');
-});
-
-test('one invalid model draft is repaired against real IDs before publication', async () => {
-  let drafts = 0;
-  const generator = new MuseTourGenerator(
-    settings,
-    provider((request) => {
-      if (request.response_format.json_schema.name === 'paper_visual_observations')
-        return response({
-          observations: images.map((image) => ({
-            targetId: image.targetId,
-            description: 'Visible chart.',
-            readable: true,
-            uncertainties: [],
-          })),
-        });
-      drafts++;
-      if (drafts === 1) return response(draft('fig999'));
-      assert(JSON.stringify(request.messages).includes('unknown document element fig999'));
-      return response(draft());
-    }),
-  );
-  const generated = await generator.generate(input);
-  assert.equal(drafts, 2);
-  assert.equal(generated.tour.chapters[0].steps[0].actions[0].type, 'zoom');
-});
-
-test('a second invalid draft fails without manufacturing a replacement tour', async () => {
-  let drafts = 0;
-  const generator = new MuseTourGenerator(
-    settings,
-    provider((request) => {
-      if (request.response_format.json_schema.name === 'paper_visual_observations')
-        return response({
-          observations: images.map((image) => ({
-            targetId: image.targetId,
-            description: 'Visible chart.',
-            readable: true,
-            uncertainties: [],
-          })),
-        });
-      drafts++;
-      return response(draft('fig999'));
-    }),
-  );
-  await assert.rejects(generator.generate(input), TourValidationError);
-  assert.equal(drafts, 2);
-});
-
-test('model switching routes image inspection and writing to the chosen reasoning model', async () => {
-  for (const model of ['muse-wonder-1.0', 'muse-spark-1.3', 'muse-spark-1.2', 'muse-spark-1.1', 'muse-spark-1.3-contributor', 'muse-spark-1.2-contributor']) {
-    const requested: string[] = [];
-    const base = new MuseTourGenerator(settings, provider((request) => {
-      requested.push(request.model);
-      if (request.response_format.json_schema.name === 'paper_visual_observations')
-        return response({ observations: images.map((image) => ({ targetId: image.targetId, description: 'Real image evidence.', readable: true, uncertainties: [] })) });
-      return response(draft());
-    }));
-    const selected = base.withModel(model);
-    const result = await selected.generate(input);
-    assert.deepEqual(requested, [model, model]);
-    assert.equal(result.metadata.model, model);
-  }
-  for (const unsupported of ['muse-image-1.0', 'muse-voice-transcribe-1.0', 'sam-3.1', 'made-up-model'])
-    assert.throws(() => new MuseTourGenerator(settings).withModel(unsupported), assertCode('unsupported_model'));
 });
 
 test('streamed Muse output survives split UTF-8/CRLF frames and records real deltas and usage', async () => {
@@ -555,47 +354,27 @@ test('SDK partial output streams only public narration before the structured res
   } finally { clearTimeout(timer); release(); }
 });
 
-test('generation activity captures actual multimodal prompts without inline image bytes', async () => {
+test('shared call recording captures multimodal evidence without inline image bytes', async () => {
   const recorded: { type: string; data: Record<string, unknown> }[] = [];
-  const generator = new MuseTourGenerator(settings, provider((request) => request.response_format.json_schema.name === 'paper_visual_observations'
-    ? response({ observations: images.map((image) => ({ targetId: image.targetId, description: 'Blue bar larger than red bar', readable: true, uncertainties: [] })) })
-    : response(draft())));
-  await generator.generate({ ...input, onEvent: async (type, data) => { recorded.push({ type, data }); } });
+  const client = new MuseClient(settings, provider((request) => {
+    assert(JSON.stringify(request.messages).includes('data:image/png;base64,'));
+    return response({ say: 'The blue bar is larger than the red bar.' });
+  }));
+  const { call, completions } = recordedCalls(client, {
+    ...input,
+    onEvent: async (type, data) => { recorded.push({ type, data }); },
+  }, settings.model, 'test-recording');
+  await call([
+    { role: 'user', content: [{ type: 'text', text: paperContext(doc) }, ...imageParts(images)] },
+  ], 'explanation', {
+    type: 'object', properties: { say: { type: 'string' } }, required: ['say'], additionalProperties: false,
+  }, 1000, 'medium', new AbortController().signal);
   const started = recorded.find((event) => event.type === 'model.started');
-  assert(started); assert(JSON.stringify(started.data).includes('p1.s1')); assert(JSON.stringify(started.data).includes('fig1'));
-  assert(!JSON.stringify(recorded).includes('data:image')); assert(!JSON.stringify(recorded).includes(settings.apiKey));
+  assert(started);
+  assert(JSON.stringify(started.data).includes('p1.s1'));
+  assert(JSON.stringify(started.data).includes('fig1'));
+  assert(!JSON.stringify(recorded).includes('data:image'));
+  assert(!JSON.stringify(recorded).includes(settings.apiKey));
+  assert.equal(completions.length, 1);
   assert(recorded.some((event) => event.type === 'model.completed'));
-});
-
-test('validated visual batch checkpoints survive retries and invalidate on changed evidence', async () => {
-  let inspections = 0;
-  const events: { type: string; data: Record<string, unknown> }[] = [];
-  const transport = provider((request) => {
-    if (request.response_format.json_schema.name === 'paper_visual_observations') {
-      inspections++;
-      return response({ observations: images.map((image) => ({ targetId: image.targetId, description: 'Verified visible chart.', readable: true, uncertainties: [] })) });
-    }
-    return response(draft());
-  });
-  const generator = new MuseTourGenerator(settings, transport);
-  const original = await generator.generate({ ...input, onEvent: async (type, data) => { events.push({ type, data }); } });
-  const checkpoint = events.find((event) => event.type === 'inspection.batch.completed')!;
-  assert(checkpoint);
-  const batch = { cacheKey: String(checkpoint.data.cacheKey), observations: checkpoint.data.observations, generationId: 'previous-run' };
-  const retried = await generator.generate({ ...input, previousVisualBatches: [batch] });
-  assert.equal(inspections, 1); assert.equal(retried.metadata.reusedVisualBatches, 1);
-  assert.deepEqual(retried.tour, original.tour);
-  for (const changed of [
-    { ...input, analysisId: 'different-analysis' },
-    { ...input, doc: { ...doc, source: { ...doc.source, sha256: 'b'.repeat(64) } } },
-    { ...input, images: images.map((image) => ({ ...image, label: image.label + ' changed' })) },
-  ]) {
-    const result = await generator.generate({ ...changed, previousVisualBatches: [batch] });
-    assert.equal(result.metadata.reusedVisualBatches, 0);
-  }
-  const bad = await generator.generate({ ...input, previousVisualBatches: [{ ...batch, observations: [] }] });
-  assert.equal(bad.metadata.reusedVisualBatches, 0);
-  const differentModel = await new MuseTourGenerator({ ...settings, model: 'muse-wonder-1.0' }, transport).generate({ ...input, previousVisualBatches: [batch] });
-  assert.equal(differentModel.metadata.reusedVisualBatches, 0);
-  assert.equal(inspections, 6);
 });

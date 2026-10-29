@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import { createToolRegistry, defineTool, wire } from '../src/agent/tools/registry';
 import { paperTools } from '../src/agent/tools';
 import type { RunState, ToolScope } from '../src/agent/tools';
-import { createTourGenerator } from '../src/generation/writers';
+import { createTourGenerator } from '../src/generation/generator';
 import { HarnessTourGenerator } from '../src/harness/generator';
-import { MuseTourGenerator } from '../src/muse/generator';
 
 test('a new paper tool registers schema, progress stage and execution in one module', async () => {
   const tool = defineTool({
@@ -47,7 +46,7 @@ test('a new paper tool registers schema, progress stage and execution in one mod
   assert.equal(paperTools.effect('view_visuals'), 'write', 'Delivering an image changes durable context state');
 });
 
-test('one generation factory binds guided and walkthrough strategies without losing model selection', () => {
+test('guided generation preserves model selection and rejects unsupported models', () => {
   const config = {
     apiKey: 'test-key',
     baseUrl: 'https://api.meta.ai/v1',
@@ -55,17 +54,13 @@ test('one generation factory binds guided and walkthrough strategies without los
     language: 'en',
     timeoutMs: 5000,
   };
-  const guided = createTourGenerator(config, { writer: 'harness', preset: 'deep' });
-  const walkthrough = createTourGenerator(config, { writer: 'muse', preset: 'deep' });
+  const guided = createTourGenerator(config, 'deep');
   assert(guided instanceof HarnessTourGenerator);
-  assert(walkthrough instanceof MuseTourGenerator);
-  for (const generator of [guided, walkthrough]) {
-    assert.equal(generator.model, config.model);
-    assert.equal(generator.withModel!('muse-spark-1.3-contributor').model, 'muse-spark-1.3-contributor');
-    assert.throws(() => generator.withModel!('unsupported'), /supports paper text and images/);
-  }
+  assert.equal(guided.model, config.model);
+  assert.equal(guided.withModel!('muse-spark-1.3-contributor').model, 'muse-spark-1.3-contributor');
+  assert.throws(() => guided.withModel!('unsupported'), /supports paper text and images/);
   assert.throws(
-    () => createTourGenerator({ ...config, model: 'unsupported' }, { writer: 'harness', preset: 'deep' }),
+    () => createTourGenerator({ ...config, model: 'unsupported' }, 'deep'),
     /supports paper text and images/,
   );
 });

@@ -6,7 +6,7 @@ import type { SettingsService } from '../settings';
 import { TourWorker } from '../tour-worker';
 import { PaperAgent } from '../agent/runner';
 import { recoverInterruptedTours } from '../tour-recovery';
-import { createTourGenerator } from './writers';
+import { createTourGenerator } from './generator';
 
 export interface GenerationJob {
   documentId: string;
@@ -26,12 +26,12 @@ export function createGenerationRuntime(
     db,
     storage,
     config,
-    createTourGenerator(config.muse, config.tours),
+    createTourGenerator(config.muse, config.tours.preset),
     undefined,
     async (owner, model) => {
       const access = await settings.resolveMuse(owner, model);
       return {
-        generator: createTourGenerator(access.config, config.tours),
+        generator: createTourGenerator(access.config, config.tours.preset),
         secret: access.config.apiKey,
         source: access.source,
         version: access.version,

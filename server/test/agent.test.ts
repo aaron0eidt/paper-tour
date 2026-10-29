@@ -1,5 +1,5 @@
 import { reportedUsage } from '../../shared/activity';
-import { createMuseTourGenerator } from '../src/muse/generator';
+import { createTourGenerator } from '../src/generation/generator';
 import { createApp } from '../src/app';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -624,7 +624,7 @@ test(
         await db.query("update agent_runs set status='paused' where id=$1", [f.run]);
         await db.query("update tour_generations set status='needs_configuration' where id=$1", [f.g.id]);
         const before = jobs.length;
-        await new TourWorker(db, storage, c, createMuseTourGenerator(muse), images).reconcile(enqueue, f.id);
+        await new TourWorker(db, storage, c, createTourGenerator(muse, 'deep'), images).reconcile(enqueue, f.id);
         assert.equal(jobs.length, before);
         assert.equal((await service.generateTour(owner, f.id)).generation.agentRunId, f.run);
         assert.equal(

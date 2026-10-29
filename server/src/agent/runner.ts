@@ -12,7 +12,7 @@ import { generationRecorder } from '../activity';
 import { ProcessingError } from '../errors';
 import { isContributorModel } from '../muse/models';
 import { paperContext } from '../muse/context';
-import { writingInstructions, PROMPT_VERSION } from '../muse/prompts';
+import { writingInstructions, PROMPT_VERSION } from './writing';
 import { MAX_CONTENT_PAGES, walkthroughGoals } from '../muse/planning';
 import { TourValidationError } from '../muse/schema';
 import { ResponsesClient, responseUsage, type AgentResponse, type ResponseItem } from './responses';
