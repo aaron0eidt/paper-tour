@@ -1,3 +1,5 @@
+import { ProgramBoard } from './ProgramBoard';
+import { PlotlyBoard } from './PlotlyBoard';
 import { DistributionBoard } from './DistributionBoard';
 import { HeatmapBoard } from './HeatmapBoard';
 import { ScatterBoard } from './ScatterBoard';
@@ -182,6 +184,8 @@ const BoardView = memo(function BoardView({
         </header>
       )}
       <div className="board-body" ref={bodyRef}>
+        {item.kind === 'program' && <ProgramBoard item={item} playback={playback} />}
+        {item.kind === 'plotly' && <PlotlyBoard item={item} />}
         {item.kind === 'formula' && <FormulaBoard item={item} focus={focus} />}
         {item.kind === 'flow' && <FlowBoard item={item} focus={focus} playing={playback.playing} />}
         {item.kind === 'bars' && <BarsBoard item={item} focus={focus} playback={playback} from={from} range={range} />}

@@ -1,3 +1,5 @@
+import { programProblems } from '../../shared/program';
+import { plotlyProblems } from '../../shared/plotly';
 import { canonicalDistribution, distributionProblems } from '../../shared/distribution';
 import { canonicalHeatmap, heatmapProblems } from '../../shared/heatmap';
 import { plotProblems, powerOfTen, type PlotItem } from '../../shared/plot';
@@ -110,6 +112,8 @@ export function checkBoardItem(raw: unknown, where: string, warn: (message: stri
   const title = text(raw.title) ? { title: raw.title as string } : {};
   const list = (v: unknown) => (Array.isArray(v) ? v.filter(isObj) : []);
   switch (raw.kind) {
+    case 'program': {const problems=programProblems(raw);return problems.length?fail(problems.join(' ')):(raw as unknown as BoardItem);}
+    case 'plotly': {const problems=plotlyProblems(raw);return problems.length?fail(problems.join(' ')):(raw as unknown as BoardItem);}
     case 'scene': {
       const problems = sceneProblems(raw);
       return problems.length ? fail(problems.join(' ')) : (raw as unknown as BoardItem);
@@ -561,7 +565,7 @@ export function barStandsOut(focused: number | null, index: number): boolean {
 
 /** The tag of a board whose numbers are not the paper's: invented example values, or values computed from a formula. */
 export function sourceTag(item: BoardItem): { text: string; label: string } | null {
-  if (item.kind !== 'heatmap' && item.kind !== 'scatter' && item.kind !== 'timeline' && item.kind !== 'distribution')
+  if (item.kind !== 'program' && item.kind !== 'plotly' && item.kind !== 'heatmap' && item.kind !== 'scatter' && item.kind !== 'timeline' && item.kind !== 'distribution')
     return null;
   if (item.source === 'illustrative') return { text: 'illustrative', label: 'Invented example values, not measured' };
   if (item.kind === 'heatmap' && item.source === 'formula')

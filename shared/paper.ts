@@ -1,3 +1,6 @@
+import type { VisualArtifactRef } from './visualArtifacts';
+import type { ProgramItem } from './program';
+import type { PlotlyItem } from './plotly';
 import type { PlotItem } from './plot';
 export type { PlotItem } from './plot';
 import type { SceneItem } from './scene';
@@ -302,6 +305,8 @@ export interface FormulaTerm {
 /** What the side board shows: the model fills a template, the player animates it. */
 export type BoardItem =
   | PlotItem
+  | ProgramItem
+  | PlotlyItem
   | SceneItem
   | HeatmapItem
   | ScatterItem
@@ -320,6 +325,7 @@ export type BoardItem =
 
 /** Show an item on the side board; it stays, across steps, until another board item or board_clear. */
 export interface BoardAction {
+  artifact?: VisualArtifactRef;
   type: 'board';
   item: BoardItem;
   at_word?: number;

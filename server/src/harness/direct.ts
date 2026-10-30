@@ -272,7 +272,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
 function actionsFor(beat: Beat, targets?: BeatTargets, visual?: StepVisual): CueAction[] {
   const board: CueAction[] =
     !visual || visual.visual !== 'none' || exampleRules(beat, visual).offered ? ['board_focus'] : [];
-  if (beat.kind === 'formula') return board;
+  if (beat.kind === 'formula') return board.length ? board : targets?.visuals.length ? ['box'] : [];
   return [
     ...(beat.target
       ? targets?.table || targets?.measured?.some((t) => t.kind === 'component' || t.kind === 'panel')
@@ -402,7 +402,11 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
             ? ['action', 'target', ...(pen ? ['region'] : []), 'label', 'anchor']
             : ['action', 'target', 'anchor'],
           properties: {
-            action: strict ? { type: 'string', enum: actions } : { type: 'string' },
+            action: strict
+              ? actions.length
+                ? { type: 'string', enum: actions }
+                : { type: 'string', maxLength: 0 }
+              : { type: 'string' },
             target: !strict
               ? { type: 'string' }
               : ids.length

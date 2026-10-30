@@ -54,6 +54,9 @@ import {
   type AskRequest,
 } from './harness/ask';
 import { MuseClient } from './muse/client';
+import type { VisualArtifact } from '../../shared/visualArtifacts';
+import { VisualArtifactService } from './visuals/artifacts';
+import { activeBoard, persistAnswerVisuals, withVisualParameters } from './visuals/persistence';
 
 export type Enqueue = (
   kind: 'analyze' | 'delete' | 'generate_tour' | 'agent_turn',
@@ -152,6 +155,7 @@ export class DocumentService implements Library {
     readonly catalog?: Pick<MetaModelCatalog, 'get' | 'validateSelection'>,
     readonly settings?: SettingsService,
     readonly agentEnabled = false,
+    readonly visualArtifacts = new VisualArtifactService(db),
   ) {}
   tourProfiles(owner: string) {
     return new TourProfileStore(this.db).list(owner);
@@ -766,7 +770,37 @@ export class DocumentService implements Library {
       : { rows: [] };
     if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
     const doc = analysis.doc as Doc;
+    asked.analysisId = analysis.id;
     validateAskedSelection(asked, doc);
+    if ((asked.visualId === undefined) !== (asked.visualRevision === undefined))
+      throw new HttpError(400, 'invalid_visual_reference', 'Choose a saved visual and its revision together.');
+    let visual: VisualArtifact | undefined;
+    if (!asked.visualId && asked.activeVisual) {
+      const previous = conversation
+        ? [...conversation.messages].reverse().find((message) => message.status === 'completed' && message.answer)
+            ?.answer
+        : undefined;
+      const tourSteps = tour?.chapters.flatMap((chapter) => chapter.steps) ?? [];
+      const baseline =
+        previous && (!asked.stepId || previous.steps.some((step) => step.id === asked.stepId))
+          ? activeBoard(previous.steps, asked.stepId)
+          : activeBoard(tourSteps, asked.stepId);
+      asked.activeVisual = baseline ? withVisualParameters(baseline.item, asked.activeVisual) : undefined;
+      if (baseline?.artifact) {
+        asked.visualId = baseline.artifact.id;
+        asked.visualRevision = baseline.artifact.revision;
+      }
+    }
+    if (asked.visualId) {
+      visual = await this.visualArtifacts.get(owner, id, { id: asked.visualId, revision: asked.visualRevision! });
+      if (visual.analysisId !== analysis.id)
+        throw new HttpError(
+          409,
+          'visual_analysis_mismatch',
+          'This visual belongs to another document analysis. Open its original conversation or start a new visual.',
+        );
+      asked.activeVisual = withVisualParameters(visual.item, asked.activeVisual);
+    }
     const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
     const run = () =>
       this.answer(owner, {
@@ -787,7 +821,22 @@ export class DocumentService implements Library {
             : Promise.resolve([]),
         signal,
       });
-    if (!conversation) return run();
+    if (!conversation) {
+      const answer = await run();
+      signal?.throwIfAborted();
+      const stored = await persistAnswerVisuals(
+        this.db,
+        this.visualArtifacts,
+        owner,
+        id,
+        analysis.id,
+        answer,
+        undefined,
+        visual,
+      );
+      signal?.throwIfAborted();
+      return stored;
+    }
     const { messageId, history } = await this.conversationStore.begin(owner, id, conversation.id, asked);
     asked.history = history;
     const parentSink = currentSink();
@@ -799,7 +848,18 @@ export class DocumentService implements Library {
         parentSink?.(answerable, step, language);
       }, run);
       signal?.throwIfAborted();
-      const saved = { ...answer, conversationId: conversation.id, messageId };
+      const stored = await persistAnswerVisuals(
+        this.db,
+        this.visualArtifacts,
+        owner,
+        id,
+        analysis.id,
+        answer,
+        conversation.id,
+        visual,
+      );
+      signal?.throwIfAborted();
+      const saved = { ...stored, conversationId: conversation.id, messageId };
       await this.conversationStore.finish(owner, id, conversation.id, messageId, 'completed', saved);
       return saved;
     } catch (error) {

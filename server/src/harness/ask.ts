@@ -1,3 +1,7 @@
+import { boardSignature } from './assemble';
+import { indexElements } from '../elements';
+import { isAuthoredVisual } from '../visuals/inspect';
+import { reviewAuthoredWithModel } from '../visuals/model-author';
 import { randomUUID } from 'node:crypto';
 import type { Doc, Step, Tour } from '../../../shared/paper';
 import { validateSelection } from '../../../shared/selection';
@@ -17,7 +21,7 @@ import { paperBlock } from './paper-block';
 import { SHARED_RULES } from './prompts';
 import { ANSWERABLE, type Answerable, type AskAnswer, type AskRequest, type StepSink } from './ask-types';
 import { evidenceText, findStep, retrieve } from './ask-retrieval';
-import { answerSchema, askContext, askInstructions } from './ask-authoring';
+import { answerSchema, askContext, askInstructions, checkedActiveVisual } from './ask-authoring';
 import { shownBoards } from './ask-boards';
 import {
   answerBoardProblems,
@@ -111,7 +115,8 @@ export interface AskInput {
  * start on it while the rest is written, and a repair afterwards keeps the steps already shown.
  */
 export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnswer; completions: Completion[] }> {
-  const { client, doc, request } = input;
+  const { client, doc } = input;
+  const request = { ...input.request, activeVisual: checkedActiveVisual(input.request) };
   const started = Date.now();
   if (request.selection) validateSelection(request.selection, doc);
   const step = findStep(input.tour, request.stepId);
@@ -128,7 +133,8 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
     'The say fields contain only explanations addressed to the learner.',
     'Never narrate schema, rendering instructions or authoring rules.',
   ];
-  const shown = shownBoards(input.tour, request.stepId);
+  const signature = request.activeVisual ? boardSignature(request.activeVisual) : null;
+  const shown = shownBoards(input.tour, request.stepId).filter((board) => !signature || board.signature !== signature);
   const task = `${askInstructions(language)}\n${authoringRules.join(' ')}\nKeep quotations in the original document language. Explain them in the answer language.\n\n${askContext(request, retrieval, doc, step, input.image, shown)}`;
   const messages: MuseMessage[] = [
     { role: 'developer', content: SHARED_RULES },
@@ -200,6 +206,11 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
             stopped = true;
             return;
           }
+          // Authored code is withheld until isolated execution and rendered-source review finish.
+          if (next.actions.some((action) => action.type === 'board' && isAuthoredVisual(action.item))) {
+            stopped = true;
+            return;
+          }
           shownSteps.push(next);
           firstStepMs ??= Date.now() - started;
           sink(verdict, next, spokenIn);
@@ -213,8 +224,10 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       }
     };
   };
-  const first = { effort: askEffort(request, doc), maxTokens: FIRST_TOKENS };
-  let retry = RETRY;
+  // Editing live code/figure JSON needs output room; more hidden reasoning is not the remedy for truncation.
+  const editingVisual = request.activeVisual && isAuthoredVisual(request.activeVisual);
+  const first = { effort: askEffort(request, doc), maxTokens: editingVisual ? 12_000 : FIRST_TOKENS };
+  let retry = editingVisual ? { effort: 'low' as Effort, maxTokens: 18_000 } : RETRY;
   /** Send the answer back for a correction; the steps the learner already has stay as they are. */
   const correct = (value: unknown, instruction: string) =>
     messages.push(
@@ -308,6 +321,21 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       followups: answer?.followups ?? [],
     };
   if (!answer) throw new ProcessingError('muse_invalid_response', 'The model returned no usable answer.');
+  // Review actual rendered frames before publishing authored scenes. Repair forks an item, never a saved tour.
+  for (const step of answer.steps) {
+    for (const action of step.actions) {
+      if (action.type !== 'board' || !isAuthoredVisual(action.item)) continue;
+      action.item = await reviewAuthoredWithModel(action.item, {
+        client,
+        narration: step.say,
+        evidence: context.evidence,
+        signal,
+        allowedSourceRefs: indexElements(doc).map((element) => element.id),
+        sourceImages: [...(input.images ?? []), ...(input.image ? [input.image] : [])].map((image) => image.dataUrl),
+        onCompletion: (completion) => completions.push(completion),
+      });
+    }
+  }
   console.log(
     JSON.stringify({
       event: 'answer_visuals',

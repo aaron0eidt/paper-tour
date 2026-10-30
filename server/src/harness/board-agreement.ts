@@ -326,6 +326,10 @@ export function boardTerms(item: BoardItem): BoardTerms {
   };
   label(item.title);
   switch (item.kind) {
+    case 'program':
+    case 'plotly':
+      label(item.objective);
+      break;
     case 'formula':
       math(item.latex);
       for (const term of list(item.terms)) {

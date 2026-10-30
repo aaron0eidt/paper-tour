@@ -1,4 +1,8 @@
 import { claimsNumericExample } from './example';
+import { randomUUID } from 'node:crypto';
+import { indexElements } from '../elements';
+import { isAuthoredVisual } from '../visuals/inspect';
+import { reviewAuthoredWithModel } from '../visuals/model-author';
 import type { TeachingPlan } from '../../../shared/teachingPlan';
 import {
   cleanTeachingPlan,
@@ -8,7 +12,7 @@ import {
   teachingTourPlan,
 } from './teaching-plan';
 import { lossSentence } from '../../../shared/coverage';
-import { splitWords, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
+import { splitWords, type BoardItem, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
 import { tourProfileGuidance } from '../../../shared/tourProfiles';
 import type { MuseConfig } from '../config';
@@ -277,6 +281,65 @@ export class HarnessTourGenerator implements TourGenerator {
       );
     const progress = (stage: TourProgress['stage'], done: number, total: number) =>
       onProgress?.({ stage, imagesDone: done, imagesTotal: total });
+    const elements = new Map(indexElements(doc).map((element) => [element.id, element]));
+    const inspectVisual = async (
+      item: BoardItem,
+      narration: string,
+      brief: string,
+      images: TourImage[],
+      beat: Beat,
+    ): Promise<BoardItem> => {
+      if (!isAuthoredVisual(item)) return item;
+      const callId = randomUUID(),
+        started = Date.now();
+      await input.onEvent?.('tool.started', {
+        callId,
+        name: 'render_visual',
+        arguments: { beat: beat.id, kind: item.kind },
+      });
+      try {
+        const reviewed = await reviewAuthoredWithModel(item, {
+          client: {
+            complete: (...args: Parameters<MuseClient['complete']>) => {
+              const [messages, name, schema, maxTokens, within] = args;
+              return call(messages, name, schema, maxTokens, 'low', within ?? signal, {
+                id: beat.id,
+                label:
+                  name === 'authored_visual_review'
+                    ? 'Check the rendered explanation'
+                    : 'Correct the rendered explanation',
+              });
+            },
+          },
+          narration,
+          evidence: [
+            brief,
+            ...item.sourceRefs.map((id) => `[${id}] ${elements.get(id)?.text ?? 'Unknown source'}`),
+          ].join('\n'),
+          sourceImages: images.map((image) => image.dataUrl),
+          allowedSourceRefs: [...elements.keys()],
+          signal,
+        });
+        await input.onEvent?.('tool.completed', {
+          callId,
+          name: 'render_visual',
+          beat: beat.id,
+          kind: reviewed.kind,
+          durationMs: Date.now() - started,
+        });
+        return reviewed;
+      } catch (error) {
+        await input.onEvent?.('tool.completed', {
+          callId,
+          name: 'render_visual',
+          beat: beat.id,
+          failed: true,
+          durationMs: Date.now() - started,
+          error: error instanceof Error ? error.message : 'Visual inspection failed.',
+        });
+        throw error;
+      }
+    };
     const prefix: MuseMessage[] = [
       { role: 'developer', content: SHARED_RULES },
       ...(tourProfileGuidance(input.profile)
@@ -821,6 +884,20 @@ export class HarnessTourGenerator implements TourGenerator {
           }
         }
       }
+      if (drawn)
+        drawn = {
+          ...drawn,
+          item: await inspectVisual(
+            drawn.item,
+            unitSteps(unit, best.solution, best.checks, language, drawn)
+              .filter((step) => step.actions.some((action) => action.type === 'board' && action.item === drawn!.item))
+              .map((step) => step.say)
+              .join('\n'),
+            unitBrief(unit, doc),
+            pages,
+            beat,
+          ),
+        };
       await progress('writing', ++directed, beats.length);
       return {
         steps: unitSteps(unit, best.solution, best.checks, language, drawn),
@@ -1126,6 +1203,15 @@ export class HarnessTourGenerator implements TourGenerator {
       const settled = degradeDirection(direction);
       const filled = withReadyView(settled.direction, now.targets, now.visual);
       if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: now.visual!.visual });
+      const ready = filled ?? settled.direction;
+      if (ready.board)
+        ready.board = await inspectVisual(
+          ready.board,
+          ready.say,
+          beatBrief(beat, doc, now.targets, now.visual),
+          seen,
+          beat,
+        );
       // What was given up for the time went for that; what failed its checks after the corrections, for that.
       const dropped = [...new Set<DroppedPart>([...(lean?.dropped ?? []), ...(settled.degraded?.dropped ?? [])])];
       const degraded: Degraded | undefined =
@@ -1147,7 +1233,7 @@ export class HarnessTourGenerator implements TourGenerator {
           : undefined;
       return {
         targets: now.targets,
-        direction: filled ?? settled.direction,
+        direction: ready,
         ...(degraded ? { degraded } : {}),
       };
     };

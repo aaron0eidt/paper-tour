@@ -1,3 +1,11 @@
+import { MuseClient } from '../muse/client';
+import { recordedCalls } from '../ai/recorded-calls';
+import { indexElements } from '../elements';
+import type { TourImage } from '../tour-generator';
+import { reviewAuthoredWithModel } from '../visuals/model-author';
+import { VisualArtifactService } from '../visuals/artifacts';
+import { persistTourVisuals } from '../visuals/persistence';
+import { assertReviewedState, prepareReviewedChapter, reviewedAudits } from './chapter-visuals';
 import { createHash } from 'node:crypto';
 import { tourDirection } from '../../../shared/tourDirection';
 import { tourProfileGuidance } from '../../../shared/tourProfiles';
@@ -615,12 +623,15 @@ export class PaperAgent {
             service: new DocumentService(this.db, this.storage, this.enqueue),
           };
           const calls = response.output.filter((item) => item.type === 'function_call');
+          const visualReview = { client: new MuseClient(access.config, this.transport), signal };
           // Reads may run concurrently; writes below are always serialized and committed with their results.
           const reads = calls.filter((call) => paperTools.effect(String(call.name)) === 'read');
           for (let offset = 0; offset < reads.length; offset += 4)
-            await Promise.all(reads.slice(offset, offset + 4).map((call) => this.tool(run, scope, call, record)));
+            await Promise.all(
+              reads.slice(offset, offset + 4).map((call) => this.tool(run, scope, call, record, visualReview)),
+            );
           for (const call of calls.filter((call) => paperTools.effect(String(call.name)) !== 'read')) {
-            if (await this.tool(run, scope, call, record)) return;
+            if (await this.tool(run, scope, call, record, visualReview)) return;
           }
         }
         const toolCalls = response.output.filter((item) => item.type === 'function_call');
@@ -775,6 +786,7 @@ export class PaperAgent {
     scope: Parameters<typeof executeTool>[0],
     call: ResponseItem,
     record: ReturnType<typeof generationRecorder>,
+    review: { client: MuseClient; signal: AbortSignal },
   ): Promise<boolean> {
     const callId = String(call.call_id),
       name = String(call.name);
@@ -791,6 +803,133 @@ export class PaperAgent {
     const toolStarted = Date.now();
     await record('tool.started', { callId, name, arguments: args });
     let readResult: Awaited<ReturnType<typeof executeTool>> | undefined;
+    let preparedArgs = args;
+    let reviewedVisuals: string[] = [];
+    let preflightError: unknown;
+    let audits = new Set<string>();
+    if (name === 'upsert_tour_chapter' || name === 'finish_tour') {
+      try {
+        const latest = await this.load(run.id);
+        if (!latest || ['cancelled', 'completed', 'paused'].includes(latest.status)) return true;
+        if (latest.status === 'pausing') {
+          await this.pause(latest, 'Paused by user');
+          return true;
+        }
+        const { rows: journal } = await this.db.query(
+          "select result from agent_tool_calls where run_id=$1 and name='upsert_tour_chapter'",
+          [run.id],
+        );
+        audits = reviewedAudits(journal);
+        if (name === 'finish_tour') assertReviewedState(scope, latest.state, audits);
+        else {
+          const elements = new Map(indexElements(scope.doc).map((element) => [element.id, element]));
+          const images: TourImage[] = [];
+          let visualIndex = 0;
+          const { call: recorded } = recordedCalls(
+            review.client,
+            { documentId: scope.documentId, analysisId: scope.analysisId, doc: scope.doc, images, onEvent: record },
+            run.model,
+            AGENT_VERSION + ':visual-review',
+          );
+          const client = {
+            complete: async (...parameters: Parameters<MuseClient['complete']>) => {
+              const [messages, callName, schema, maxTokens, within, , , effort] = parameters;
+              const budget = await this.load(run.id);
+              if (!budget || ['cancelled', 'completed', 'paused', 'pausing'].includes(budget.status))
+                throw new Error('The agent was interrupted before visual review. Saved work is preserved.');
+              const limits = this.config.agent ?? { maxTurns: 64, maxOutputTokens: 128000, maxRuntimeMs: 1200000 };
+              const available =
+                limits.maxOutputTokens - (Number(budget.output_tokens) - Number(budget.budget_base?.output ?? 0));
+              if (available < 128 || Number(budget.turns) - Number(budget.budget_base?.turns ?? 0) >= limits.maxTurns)
+                throw new Error(
+                  'Visual review reached the run budget. Resume from the saved checkpoint before resubmitting this chapter.',
+                );
+              const completion = await recorded(
+                messages,
+                callName,
+                schema,
+                Math.min(maxTokens, available),
+                effort ?? 'low',
+                within ?? review.signal,
+              );
+              await this.db.query('update agent_runs set turns=turns+1,output_tokens=output_tokens+$2 where id=$1', [
+                run.id,
+                completion.usage.completionTokens,
+              ]);
+              return completion;
+            },
+          };
+          const checked = await prepareReviewedChapter(
+            scope,
+            latest.state,
+            args,
+            async (item, step) => {
+              review.signal.throwIfAborted();
+              const refs = new Set([step.source, ...step.evidence, ...item.sourceRefs]);
+              const pages = new Set([...refs].flatMap((id) => elements.get(id)?.page ?? []));
+              const sources = scope.visuals
+                .filter((source) => refs.has(source.targetId) || pages.has(source.page))
+                .sort((a, b) => Number(refs.has(b.targetId)) - Number(refs.has(a.targetId)))
+                .slice(0, 3);
+              const sourceImages: string[] = [];
+              for (const source of sources) {
+                let image = images.find((image) => image.targetId === source.targetId);
+                if (!image) {
+                  const [hydrated] = (await hydrateImages(
+                    [{ type: 'input_image', storagePath: source.storagePath, sha256: source.sha256 }],
+                    this.storage,
+                    scope.visuals,
+                  )) as { image_url: string }[];
+                  image = {
+                    targetId: source.targetId,
+                    kind: source.kind,
+                    page: source.page,
+                    label: source.label,
+                    dataUrl: hydrated.image_url,
+                  };
+                  images.push(image);
+                }
+                sourceImages.push(image.dataUrl);
+              }
+              const visualCall = `${callId}:visual:${step.id}:${++visualIndex}`;
+              await record('tool.started', {
+                callId: visualCall,
+                name: 'render_visual',
+                arguments: { step: step.id, kind: item.kind },
+              });
+              try {
+                const visual = await reviewAuthoredWithModel(item, {
+                  client,
+                  narration: step.say,
+                  evidence: [...refs].map((id) => `[${id}] ${elements.get(id)?.text ?? 'Unknown source'}`).join('\n'),
+                  sourceImages,
+                  allowedSourceRefs: [...elements.keys()],
+                  signal: review.signal,
+                });
+                await record('tool.completed', {
+                  callId: visualCall,
+                  name: 'render_visual',
+                  output: { reviewed: true, step: step.id },
+                });
+                return visual;
+              } catch (error) {
+                await record('tool.completed', {
+                  callId: visualCall,
+                  name: 'render_visual',
+                  output: { error: error instanceof Error ? error.message : 'Rendered review failed' },
+                });
+                throw error;
+              }
+            },
+            audits,
+          );
+          preparedArgs = checked.args;
+          reviewedVisuals = checked.audits;
+        }
+      } catch (error) {
+        preflightError = error;
+      }
+    }
     if (paperTools.effect(name) === 'read') {
       try {
         readResult = await executeTool(scope, run.state, name, args);
@@ -802,7 +941,18 @@ export class PaperAgent {
       const {
         rows: [current],
       } = await tx.query('select * from agent_runs where id=$1 for update', [run.id]);
-      if (!current || current.status === 'cancelled') return true;
+      if (!current || ['cancelled', 'completed', 'paused'].includes(current.status)) return true;
+      if (current.status === 'pausing') {
+        await tx.query("update agent_runs set status='paused',reason='Paused by user',updated_at=now() where id=$1", [
+          run.id,
+        ]);
+        await tx.query(
+          "update tour_generations set status='paused',error='Paused by user',error_code='agent_paused',updated_at=now() where id=$1",
+          [run.generation_id],
+        );
+        await generationRecorder(tx, run.generation_id, '', run.id)('run.paused', { reason: 'Paused by user' });
+        return true;
+      }
       const {
         rows: [owned],
       } = await tx.query('select 1 from documents where id=$1 and owner_id=$2 and deleted_at is null', [
@@ -815,9 +965,13 @@ export class PaperAgent {
         return false;
       let result: Awaited<ReturnType<typeof executeTool>>;
       try {
+        if (preflightError) throw preflightError;
+        if (name === 'finish_tour') assertReviewedState(scope, current.state, audits);
         result = readResult
           ? { ...readResult, state: current.state }
-          : await executeTool(scope, current.state, name, args);
+          : await executeTool(scope, current.state, name, preparedArgs);
+        if (name === 'upsert_tour_chapter' && reviewedVisuals.length)
+          result.output = { ...(result.output as Record<string, unknown>), reviewedVisuals };
       } catch (error) {
         result = {
           state: current.state,
@@ -878,6 +1032,16 @@ export class PaperAgent {
           'insert into tours(document_id,analysis_id,title,script,generation_id) values($1,$2,$3,$4,$5) on conflict(generation_id) do update set generation_id=excluded.generation_id returning id',
           [scope.documentId, scope.analysisId, result.finished.tour.title, result.finished.tour, run.generation_id],
         );
+        const published = await persistTourVisuals(
+          new VisualArtifactService(this.db),
+          scope.owner,
+          scope.documentId,
+          scope.analysisId,
+          tour.id,
+          result.finished.tour,
+          tx,
+        );
+        await tx.query('update tours set script=$2 where id=$1', [tour.id, JSON.stringify(published)]);
         await tx.query(
           "update tour_generations set status='ready',stage='validating',result_tour_id=$2,metadata=$3,completed_at=now(),updated_at=now() where id=$1",
           [
@@ -899,12 +1063,7 @@ export class PaperAgent {
           [run.id],
         );
         await tx.query("update agent_steps set status='done' where run_id=$1 and step=$2", [run.id, run.turn_index]);
-        await generationRecorder(
-          tx,
-          run.generation_id,
-          '',
-          run.id,
-        )('tour.direction', tourDirection(result.finished.tour));
+        await generationRecorder(tx, run.generation_id, '', run.id)('tour.direction', tourDirection(published));
         await generationRecorder(tx, run.generation_id, '', run.id)('run.completed', { tourId: tour.id });
         await tx.query('update documents set updated_at=now() where id=$1', [scope.documentId]);
         return true;

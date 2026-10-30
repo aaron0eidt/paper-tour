@@ -1,3 +1,5 @@
+import { PROGRAM_SCHEMA, programProblems, type ProgramItem } from '../../../shared/program';
+import { PLOTLY_SCHEMA, plotlyProblems, type PlotlyItem } from '../../../shared/plotly';
 import { SCENE_SCHEMA, SCENE_MAX_OBJECTS, sceneProblems, type SceneItem } from '../../../shared/scene';
 import { PLOT_BOARD_SCHEMA, PLOT_LIMITS, plotProblems, type PlotItem } from '../../../shared/plot';
 import {
@@ -773,6 +775,16 @@ const partIds = (prefix: string, count: number) => Array.from({ length: count },
 
 /** One registration per native visualization. A new BoardItem kind must register all four capabilities. */
 const BOARD_TOOLS = {
+  program: {
+    schema: () => PROGRAM_SCHEMA,
+    check: (raw) => { if(raw===undefined)return none();const item={...(isObj(raw)?raw:{}),kind:'program'} as unknown as ProgramItem;const problems=programProblems(item);return {item:problems.length?null:item,problems}; },
+    focusIds: ['scene-1'], parts: () => ['scene-1'],
+  },
+  plotly: {
+    schema: () => PLOTLY_SCHEMA,
+    check: (raw) => { if(raw===undefined)return none();const item={...(isObj(raw)?raw:{}),kind:'plotly'} as unknown as PlotlyItem;const problems=plotlyProblems(item);return {item:problems.length?null:item,problems}; },
+    focusIds: ['plot-1'], parts: () => ['plot-1'],
+  },
   formula: {
     schema: formulaSchema,
     check: (raw) => checkFormula(raw),

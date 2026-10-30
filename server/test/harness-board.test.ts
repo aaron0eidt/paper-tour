@@ -793,6 +793,8 @@ test('every direction can choose a useful native board without changing its sour
   for (const kind of ['formula', 'figure', 'table', 'method', 'result'] as const) {
     assert.deepEqual(Object.keys(schema(kind).properties), [
       'plan',
+      'program',
+      'plotly',
       'formula',
       'flow',
       'bars',

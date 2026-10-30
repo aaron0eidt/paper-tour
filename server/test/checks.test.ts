@@ -507,7 +507,7 @@ test('a standard paper tour pauses once, after its result, and the answer follow
   assert.equal(steps(tour).at(steps(tour).indexOf(answers[0]) - 1)!.id, 'check-1');
   assert.deepEqual(tourProblems(tour, doc), []);
   assert.deepEqual((metadata as any).quickChecks, [{ id: 'check-1', chapter: 'evidence', kind: 'predict', hints: 2 }]);
-  assert.equal((metadata as any).promptVersion, 'paper-tour-harness@33');
+  assert.equal((metadata as any).promptVersion, 'paper-tour-harness@34');
   const plan = events.find((e) => e.type === 'plan.ready')!;
   assert.deepEqual(plan.data.checks, [{ chapter: 'evidence', after: 'result-1' }]);
   assert.deepEqual(

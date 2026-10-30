@@ -14,6 +14,8 @@ import { HttpError } from './errors';
 import type { Library } from './service';
 import type { ReaderState } from '../../shared/contracts';
 import type { CreateConversation } from '../../shared/conversations';
+import type { VisualArtifactService } from './visuals/artifacts';
+import { visualArtifactRoutes } from './visuals/routes';
 import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
 import { DEMO_PAPER, answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
@@ -45,7 +47,7 @@ const askBody = objectBody(
     conversationId: uuid,
     page: { type: 'integer', minimum: 1 },
     activeVisual: { type: 'object' },
-    visualId: text(200),
+    visualId: uuid,
     visualRevision: { type: 'integer', minimum: 1 },
     selection: objectBody(
       {
@@ -96,6 +98,7 @@ interface Options {
   demo?: boolean;
   /** Region snapping (snap.ts); defaults to one built from the service and settings when they can provide it. */
   snap?: SnapService;
+  visualArtifacts?: VisualArtifactService;
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -182,6 +185,7 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
+      if (options.visualArtifacts) visualArtifactRoutes(api, options.visualArtifacts, owner);
       api.post<{ Params: { id: string }; Body: Buffer }>(
         '/documents/:id/transcribe',
         { schema: { params: documentParams } },
@@ -668,7 +672,7 @@ export async function createApp(options: Options) {
       );
       api.post<{ Params: { id: string }; Body: AskRequest }>(
         '/documents/:id/ask',
-        { schema: { params: documentParams, body: askBody } },
+        { bodyLimit: 300000, schema: { params: documentParams, body: askBody } },
         async (req, reply): Promise<AskAnswer | FastifyReply> => {
           const ask = service.ask?.bind(service);
           if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');

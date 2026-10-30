@@ -12,11 +12,13 @@ import type { TourGenerationSummary } from '../../shared/contracts';
 import type { Doc } from '../../shared/paper';
 import { ROOT, type Config } from './config';
 import { Database, type Db } from './db';
-import { ProcessingError } from './errors';
+import { HttpError, ProcessingError } from './errors';
 import type { Enqueue } from './service';
 import type { FileStorage } from './storage';
 import type { TourGenerator, TourImage, TourProgress } from './tour-generator';
 import { clearPartial, partialSink } from './tour-partial';
+import { VisualArtifactService } from './visuals/artifacts';
+import { persistTourVisuals } from './visuals/persistence';
 import { isContributorModel } from './muse/models';
 const execute = promisify(execFile);
 
@@ -429,6 +431,23 @@ export class TourWorker {
             'insert into tours(document_id,analysis_id,title,script,generation_id) values($1,$2,$3,$4,$5) on conflict(generation_id) do update set generation_id=excluded.generation_id returning id',
             [documentId, analysisId, generated.tour.title, generated.tour, generationId],
           );
+          let script;
+          try {
+            script = await persistTourVisuals(
+              new VisualArtifactService(this.db),
+              row.owner_id,
+              documentId,
+              analysisId,
+              tour.id,
+              generated.tour,
+              tx,
+            );
+          } catch (error) {
+            if (error instanceof HttpError && error.code === 'invalid_visual')
+              throw new ProcessingError('invalid_tour', 'A generated visual did not pass its publication checks.');
+            throw error;
+          }
+          await tx.query('update tours set script=$2 where id=$1', [tour.id, script]);
           await tx.query(
             "update tour_generations set status='ready',stage='validating',images_done=$2,images_total=$2,result_tour_id=$3,metadata=$4,error=null,error_code=null,updated_at=now(),completed_at=now() where id=$1",
             [generationId, images.length, tour.id, generated.metadata],

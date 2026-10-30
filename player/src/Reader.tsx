@@ -14,6 +14,7 @@ import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
 import type { BBox, Doc, Tour } from './types';
+import type { BoardItem } from '../../shared/paper';
 import { markPlayback } from './marks';
 import { keyBelongsTo, keyCommand } from './keys';
 import type { KeyTarget } from './keys';
@@ -568,6 +569,18 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   // The answer that is still being written, so that its next steps join the engine that plays it.
   const writing = useRef<{ question: string; engine: TourEngine } | null>(null);
+  const visualDraft = useRef<{ engine: TourEngine; key: string | null; item: BoardItem } | null>(null);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const current = now.current.answer ?? now.current.engine;
+      const board = current?.getState().board;
+      const item = (event as CustomEvent<{ item?: BoardItem }>).detail?.item;
+      if (current && board?.item && item?.kind === board.item.kind)
+        visualDraft.current = { engine: current, key: board.key, item };
+    };
+    window.addEventListener('paper-tour:visual-revision', changed);
+    return () => window.removeEventListener('paper-tour:visual-revision', changed);
+  }, []);
   const dropAnswer = useCallback(() => {
     now.current.answer?.destroy();
     now.current.answer = null;
@@ -589,13 +602,17 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     const tour = main?.getState();
     const last = framed.current;
     const shown = last && camera.targetView === last.view ? last.cmd.action : null;
+    const visualEngine = now.current.answer ?? main;
+    const board = visualEngine?.getState().board;
+    const draft = visualDraft.current;
     return {
       stepId: tour && tour.status !== 'idle' ? main?.steps[tour.index]?.step.id : undefined,
       figureId: !regionSelection && ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
       selection: regionSnap.region ?? undefined,
       analysisId: loadedAnalysisId,
       page: currentPageRef.current,
-      activeVisual: (now.current.answer ?? main)?.getState().board.item ?? undefined,
+      activeVisual: draft?.engine === visualEngine && draft?.key === board?.key ? draft?.item : board?.item ?? undefined,
+      ...(board?.artifact ? { visualId: board.artifact.id, visualRevision: board.artifact.revision } : {}),
     };
   }, [camera, regionSelection, regionSnap.region, loadedAnalysisId]);
 

@@ -400,6 +400,16 @@ unsure or finds nothing, your rectangle is used and asking never waits. The serv
 the original PDF, alongside document text and conversation context. Pause and continue keep the current narration
 position; stopping a pending question aborts it.
 
+Questions are saved in **document conversations**, independently of saved tours. Use the conversation button to reopen
+questions or replay an explanation. A live visual can be changed by a follow-up question; its previous revision remains
+available. Returning to the tour keeps its playback position paused.
+
+For an explanation that benefits from a mathematical construction, the agent can author a live SVG program or an
+interactive Plotly figure, with sliders and host-computed functions. Execution, rendered review and targeted repair
+happen before publication. The existing native visualizations remain available. Architecture, extension points and
+verification are documented in [LIVE-VISUALS.md](notes/LIVE-VISUALS.md) and
+[ADAPTIVE-TEACHING.md](notes/ADAPTIVE-TEACHING.md).
+
 ## Provenance and team
 
 > **TO FILL IN (Aaron): only you can state this. Replace this note with the facts.**

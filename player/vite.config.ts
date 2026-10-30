@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 // /<paper>/paper.pdf, /<paper>/doc.json, /<paper>/tour.json.
 export default defineConfig(({ command }) => ({
   plugins: [react()],
+  worker: { format: 'es' },
   publicDir: command === 'serve' ? '../demo' : false,
   server: { port: 5174, strictPort: true, proxy: { '/api': 'http://127.0.0.1:3001' } },
   // pdf.js 4 uses modern syntax (top-level await, private methods) and is a large chunk by itself.
