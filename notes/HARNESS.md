@@ -147,7 +147,8 @@ instructions, and "choose IDs and labels only from the lists you are given".
    (`repeats`) or the model was not available (`unavailable`). The cause is in the events (`beat.omitted`,
    `beat.fallback` and `beat.degraded` carry it), in the generation's provenance (`omittedDetails` with `code` and
    `reason`, `degraded` with `causes`, and `leftOut`) and in the tour itself (`left_out`), from which the reader's cover
-   and recap say briefly what was left out and why, and the activity checklist says it per step.
+   and recap say briefly which steps and worked examples were left out and why (a lost visual or pen mark is not
+   worth a learner's attention there), and the activity checklist says it per step.
 7. **Time limits** (`pace.ts`). Each call has a limit by name (the card 40 s, the claims 60 s, the opening visual 20 s,
    a step 30 s at low effort and below and 45 s at medium and above). A call that outlives it fails as `muse_slow` and
    is asked again at once, for less: a slow step degrades instead of vanishing. Each such try reasons one rung less (a

@@ -72,18 +72,18 @@ test('a tour that left something out says what and why on its cover and on its r
 });
 
 test('a tour that lost nothing, or only pen marks, or is older than the record, says nothing about it', () => {
-  for (const value of [tour(), tour([]), tour([{ step: 'a', part: 'marks', cause: 'checks' }])])
+  for (const value of [tour(), tour([]), tour([{ step: 'a', part: 'marks', cause: 'checks' }]), tour([{ step: 'a', part: 'board', cause: 'slow' }])])
     for (const html of [cover(value), end(value)])
       check(!html.includes('left-out') && !html.includes('Not everything'), 'a note appeared');
 });
 
 test('each cause is told as it is, never as another', () => {
   const told = (cause: 'slow' | 'checks' | 'invalid' | 'repeats' | 'unavailable') =>
-    end(tour([{ step: 'a', part: 'board', cause }]));
-  check(told('slow').includes('1 visual left out: it took too long to write.'), 'slow');
-  check(told('checks').includes('1 visual left out: it did not pass the checks.'), 'checks');
-  check(told('invalid').includes('1 visual left out: it came back unusable.'), 'invalid');
-  check(told('repeats').includes('1 visual left out: it would have repeated earlier content.'), 'repeats');
+    end(tour([{ step: 'a', part: 'example', cause }]));
+  check(told('slow').includes('1 worked example left out: it took too long to write.'), 'slow');
+  check(told('checks').includes('1 worked example left out: it did not pass the checks.'), 'checks');
+  check(told('invalid').includes('1 worked example left out: it came back unusable.'), 'invalid');
+  check(told('repeats').includes('1 worked example left out: it would have repeated earlier content.'), 'repeats');
   check(told('unavailable').includes('the model was not available'), 'unavailable');
 });
 

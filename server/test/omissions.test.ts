@@ -22,6 +22,9 @@ import {
   type Request,
 } from './plan-fixture';
 
+/** The causes of the visuals a tour records as left out. */
+const boardsLost = (tour: Tour) => (tour.left_out ?? []).filter((item) => item.part === 'board').map((item) => item.cause);
+
 // A slow step degrades instead of vanishing, and whatever a tour leaves out of its plan is recorded with its real cause
 // (shared/coverage.ts): in the events, in the generation's provenance and in the tour, with scripted models (no network).
 
@@ -277,7 +280,9 @@ test('a board that fails its checks after the corrections is dropped for that, a
     checks.tour.left_out!.filter((l) => l.step === 'result-1'),
     [{ step: 'result-1', part: 'board', cause: 'checks' }],
   );
-  assert.equal(coverageNote(checks.tour.left_out!), '1 visual left out: it did not pass the checks');
+  // A lost visual is recorded with its cause; the learner's note leaves it to the checklist.
+  assert.deepEqual(boardsLost(checks.tour), ['checks']);
+  assert.equal(coverageNote(checks.tour.left_out!), null);
 
   const slow = await run(
     hangFirst(base, (task) => task.includes('STEP KIND: result'), 1),
@@ -286,7 +291,9 @@ test('a board that fails its checks after the corrections is dropped for that, a
   const given = slow.metadata.degraded.find((d: any) => d.beat === 'result-1');
   assert.deepEqual([given.dropped, given.causes], [['board'], { board: 'slow' }]);
   assert.deepEqual(efforts(slow.events, 'result-1'), ['low', 'minimal']);
-  assert.equal(coverageNote(slow.tour.left_out!), '1 visual left out: it took too long to write');
+  // A lost visual is recorded with its cause; the learner's note leaves it to the checklist.
+  assert.deepEqual(boardsLost(slow.tour), ['slow']);
+  assert.equal(coverageNote(slow.tour.left_out!), null);
 });
 
 test('a board that failed and could not be corrected in time is dropped for the time, not for a check it had no chance to pass', async () => {
@@ -321,7 +328,9 @@ test('a board that failed and could not be corrected in time is dropped for the 
   const timedOut = cause(late);
   assert.deepEqual([timedOut.dropped, timedOut.causes], [['board'], { board: 'slow' }]);
   assert.match(timedOut.problems.join(' '), /the correction took too long to write/);
-  assert.equal(coverageNote(late.tour.left_out!), '1 visual left out: it took too long to write');
+  // A lost visual is recorded with its cause; the learner's note leaves it to the checklist.
+  assert.deepEqual(boardsLost(late.tour), ['slow']);
+  assert.equal(coverageNote(late.tour.left_out!), null);
   // A correction that comes back and still fails is a check that failed.
   const failed = cause(
     await run(
@@ -497,7 +506,9 @@ test('a board that failed on the last try, after two unusable answers, is droppe
   assert.deepEqual([out.dropped, out.causes], [['board'], { board: 'checks' }]);
   assert.match(out.problems.join(' '), /the tries to correct it ran out/);
   assert.doesNotMatch(out.problems.join(' '), /no time left|too long/);
-  assert.equal(coverageNote(done.tour.left_out!), '1 visual left out: it did not pass the checks');
+  // A lost visual is recorded with its cause; the learner's note leaves it to the checklist.
+  assert.deepEqual(boardsLost(done.tour), ['checks']);
+  assert.equal(coverageNote(done.tour.left_out!), null);
   agree(done.events, done.tour);
 });
 
@@ -505,7 +516,9 @@ test('a board whose corrections came back unusable is dropped for that, and a sl
   const broken = await run(script(resultModel, isResult, ['ok', 'garbage', 'garbage']), 'standard');
   assert.deepEqual(boardOf(broken).causes, { board: 'invalid' });
   assert.match(boardOf(broken).problems.join(' '), /the correction came back unusable/);
-  assert.equal(coverageNote(broken.tour.left_out!), '1 visual left out: it came back unusable');
+  // A lost visual is recorded with its cause; the learner's note leaves it to the checklist.
+  assert.deepEqual(boardsLost(broken.tour), ['invalid']);
+  assert.equal(coverageNote(broken.tour.left_out!), null);
   agree(broken.events, broken.tour);
   // The first correction took too long, the second came back unusable: the second is how it ended.
   const mixed = await run(script(resultModel, isResult, ['ok', 'hang', 'garbage']), 'standard');

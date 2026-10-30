@@ -62,21 +62,20 @@ export function lossSentence({ part, cause, because }: LeftOut): string {
 export const lossDetail = (items: readonly LeftOut[]): string => unique(items).map(lossSentence).join(' ');
 
 /** The noun phrase of a group of the same part, as the reader counts it. */
-const COUNTED: Record<Exclude<LostPart, 'marks'>, [one: string, many: string]> = {
+const COUNTED: Record<Exclude<LostPart, 'marks' | 'board'>, [one: string, many: string]> = {
   step: ['planned step left out', 'planned steps left out'],
   narration: ['step explained only briefly', 'steps explained only briefly'],
   example: ['worked example left out', 'worked examples left out'],
-  board: ['visual left out', 'visuals left out'],
 };
 
 /**
  * What a learner is told when a tour is not all of its plan, briefly: what was left out and why, for example
- * "1 planned step left out: its worked example took too long to write". Pen marks are not counted: the step and what it
- * says stay. Null when nothing the learner would miss was lost.
+ * "1 planned step left out: its worked example took too long to write". Pen marks and side visuals are not counted: the
+ * step and what it says stay, and the activity checklist names them. Null when nothing the learner would miss was lost.
  */
 export function coverageNote(lost: readonly LeftOut[]): string | null {
   const groups: string[] = [];
-  for (const part of ['step', 'narration', 'example', 'board'] as const) {
+  for (const part of ['step', 'narration', 'example'] as const) {
     const items = unique(lost).filter((item) => item.part === part);
     if (!items.length) continue;
     const [one, many] = COUNTED[part];

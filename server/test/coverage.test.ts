@@ -68,22 +68,19 @@ test('the note a learner reads is brief and says what was left out and why', () 
   assert.equal(coverageNote([item('example', 'slow')]), '1 worked example left out: it took too long to write');
   assert.equal(coverageNote([item('narration', 'invalid')]), '1 step explained only briefly: it came back unusable');
   assert.equal(
-    coverageNote([item('board', 'checks', 'a'), item('board', 'checks', 'b')]),
-    '2 visuals left out: they did not pass the checks',
+    coverageNote([item('example', 'checks', 'a'), item('example', 'slow', 'b'), item('example', 'slow', 'c')]),
+    '3 worked examples left out: 1 did not pass the checks, 2 took too long to write',
   );
   assert.equal(
-    coverageNote([item('board', 'checks', 'a'), item('board', 'slow', 'b'), item('board', 'slow', 'c')]),
-    '3 visuals left out: 1 did not pass the checks, 2 took too long to write',
-  );
-  assert.equal(
-    coverageNote([item('board', 'slow', 'b'), item('step', 'slow', 'a')]),
-    '1 planned step left out: it took too long to write; 1 visual left out: it took too long to write',
+    coverageNote([item('example', 'slow', 'b'), item('step', 'slow', 'a')]),
+    '1 planned step left out: it took too long to write; 1 worked example left out: it took too long to write',
     'steps first, whatever the order they were lost in',
   );
 });
 
-test('pen marks are recorded but not counted: the step and what it says stay', () => {
+test('pen marks and side visuals are recorded but not counted: the step and what it says stay', () => {
   assert.equal(coverageNote([item('marks', 'checks')]), null);
+  assert.equal(coverageNote([item('board', 'checks', 'a'), item('board', 'slow', 'b')]), null);
   assert.equal(
     coverageNote([item('marks', 'checks', 'a'), item('example', 'checks', 'b')]),
     '1 worked example left out: it did not pass the checks',
