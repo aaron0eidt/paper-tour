@@ -117,6 +117,13 @@ await test('network voice without word boundaries retains timed word progress an
   }
 });
 
+await test('joke and sound-effect voices are never offered or picked', () => {
+  const source = new VoiceSource();
+  source.voices = [voice('Bad News'), voice('Zarvox'), voice('Bubbles'), samantha, voice('Anna', 'de-DE')];
+  equal(readVoices(source.controller()).map((v) => v.name), ['Samantha', 'Anna']);
+  equal(pickVoice(readVoices(source.controller()), { lang: 'en-US' })?.name, 'Samantha');
+});
+
 console.log(results.join('\n'));
 if (failures) throw new Error(`${failures} voice test(s) failed`);
 console.log(`\nall ${results.length} voice tests passed`);

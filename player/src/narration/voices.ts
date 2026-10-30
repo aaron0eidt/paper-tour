@@ -10,6 +10,16 @@ export function isGoogleVoice(voice: SpeechSynthesisVoice): boolean {
   return /^google(?:\s|$)/i.test(voice.name);
 }
 
+// macOS lists its joke and sound-effect voices beside the real ones; a tutor never narrates with them.
+const NOVELTY = new Set([
+  'albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos', 'deranged', 'good news', 'hysterical', 'jester',
+  'organ', 'pipe organ', 'superstar', 'trinoids', 'whisper', 'wobble', 'zarvox',
+]);
+
+export function isNoveltyVoice(voice: SpeechSynthesisVoice): boolean {
+  return NOVELTY.has(voice.name.trim().toLowerCase());
+}
+
 export function browserSpeech(): SpeechSynthesis | null {
   return typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
 }
@@ -18,7 +28,7 @@ export function readVoices(synth: SpeechSynthesis | null = browserSpeech()): Spe
   if (!synth) return [];
   try {
     const unique = new Map<string, SpeechSynthesisVoice>();
-    for (const voice of synth.getVoices()) unique.set(voiceId(voice), voice);
+    for (const voice of synth.getVoices()) if (!isNoveltyVoice(voice)) unique.set(voiceId(voice), voice);
     return [...unique.values()];
   } catch { return []; }
 }
