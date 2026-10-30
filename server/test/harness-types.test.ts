@@ -4,6 +4,7 @@ import type { MuseConfig } from '../src/config';
 import type { Action, BBox, BlockType, Doc, DocExercise, Step, Tour } from '../../shared/paper';
 import type { TourGenerationInput, TourImage } from '../src/tour-generator';
 import { HarnessTourGenerator } from './harness-fixture';
+import { about } from './plan-fixture';
 import { ARC_SPECS, arcTourPlan, fallbackArcPlan } from '../src/harness/arcs';
 import { findAnchor } from '../src/harness/assemble';
 import { checkFormula } from '../src/harness/board';
@@ -155,7 +156,7 @@ function plainDirection(r: Request, extra: object = {}) {
   const cue = r.schema.properties.cues.items.properties;
   const target = cue.target.enum?.find((id: string) => /^p\d/.test(id));
   const cues = target ? [{ action: 'highlight', target, label: '', anchor: 'explains the point' }] : [];
-  return { plan: 'p', say: SAY, cues, ...extra };
+  return { plan: 'p', say: `${SAY} ${about(extra)}`.trim(), cues, ...extra };
 }
 /** All native schemas are available now; this scripted author follows the planner's
  * suggested board for these document-type fixtures instead of inferring it from availability. */

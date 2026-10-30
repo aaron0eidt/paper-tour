@@ -113,11 +113,18 @@ instructions, and "choose IDs and labels only from the lists you are given".
    The model cannot name anything else. An exercise part is solved, checked numerically and taught in
    several steps instead.
 6. **Check in code, degrade instead of failing.** Narration, anchors, pen marks, worked examples and boards are
-   validated; the model corrects its whole answer up to twice, with every fault listed. What still fails is dropped
-   and recorded, not published: a step keeps its narration and page cues and loses the board, example or pen marks
-   (`degrade.ts`), and a step without usable narration takes the fallback step or, for a detail, is omitted. At the end,
-   a board that repeats an earlier step's data or fails a check of the whole tour goes with its cues. A tour fails only
-   when its other contents do.
+   validated (a board must also share something with its narration, `board-agreement.ts`: one whose title, labels and numbers
+   the narration never says and the sentences of the step never print counts as a failed board; the check is
+   conservative, since a false alarm drops a good board. On 145 boards of the saved tours (ten documents, English and
+   German) it flags three: a layout fixture, the fish "Arrivals within 5 cm" and the ants "Synchrony in tiny versus
+   huge", which only paraphrases its narration. The same check holds the method visual of an exercise part, but not
+   yet the frames of a worked example or the boards of an answer to a question, which are drawn in calls of their
+   own); the model corrects its whole answer up to twice, with every fault listed, a board's faults of every kind in
+   one turn. What still fails is dropped and recorded, not
+   published: a step keeps its narration and page cues and loses the board, example or pen marks (`degrade.ts`), and a
+   step without usable narration takes the fallback step or, for a detail, is omitted. At the end, a board that
+   repeats an earlier step's data or fails a check of the whole tour goes with its cues. A tour fails only when its
+   other contents do.
 7. **Time limits** (`pace.ts`). Each call has a limit by name (the card 40 s, the claims 60 s, the opening visual 20 s,
    a step 30 s at low effort and 45 s otherwise). A call that outlives it fails as `muse_slow` and is asked again at
    once. A step has 40 s for repairs: later repairs get what is left of it, at least 15 s, including a repair after a
