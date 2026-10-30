@@ -142,12 +142,25 @@ instructions, and "choose IDs and labels only from the lists you are given".
    published: a step keeps its narration and page cues and loses the board, example or pen marks (`degrade.ts`), and a
    step without usable narration takes the fallback step or, for a detail, is omitted. At the end, a board that
    repeats an earlier step's data or fails a check of the whole tour goes with its cues. A tour fails only when its
-   other contents do.
+   other contents do. Every loss has its cause (`shared/coverage.ts`): the model took too long (`slow`), what
+   it wrote failed the checks (`checks`), its answer could not be used (`invalid`), it would only repeat earlier content
+   (`repeats`) or the model was not available (`unavailable`). The cause is in the events (`beat.omitted`,
+   `beat.fallback` and `beat.degraded` carry it), in the generation's provenance (`omittedDetails` with `code` and
+   `reason`, `degraded` with `causes`, and `leftOut`) and in the tour itself (`left_out`), from which the reader's cover
+   and recap say briefly what was left out and why, and the activity checklist says it per step.
 7. **Time limits** (`pace.ts`). Each call has a limit by name (the card 40 s, the claims 60 s, the opening visual 20 s,
-   a step 30 s at low effort and 45 s otherwise). A call that outlives it fails as `muse_slow` and is asked again at
-   once. A step has 40 s for repairs: later repairs get what is left of it, at least 15 s, including a repair after a
-   first try that gave nothing usable. Past it, the step publishes without what failed. A slow call with a board
-   planned is asked again lean: low effort and no board.
+   a step 30 s at low effort and below and 45 s at medium and above). A call that outlives it fails as `muse_slow` and
+   is asked again at once, for less: a slow step degrades instead of vanishing. Each such try reasons one rung less (a
+   detail starts at medium, so medium, low, minimal) and drops the board it was planned to draw; a worked example the
+   step must show is asked for once more at less effort and then given up, which the step records as dropped for the
+   time. A lighter try asks for the narration alone and keeps what the earlier tries were told; its task teaches no worked
+   example (it has no field for one) and says so, and it has a repair of its own. A step that is nothing without its
+   example (its narration alone only repeats the overview) is left out for that reason. An exercise part whose solution is too slow
+   is asked again one rung lower (high, medium). A step has 40 s for repairs: later repairs get what is left of it, at
+   least 15 s, including a repair after a first try that gave nothing usable. Past it, the step publishes without what
+   failed, and the cause recorded is how its last correction ended: too slow, unusable, unavailable or, when it came
+   back and still failed, the checks; with no correction asked for, the time if the step had used its own, else the
+   checks (the tries ran out).
 8. **Partial tours.** Each time the next steps in tour order are finished, the generator announces the tour of exactly
    those steps (`tour.partial`), assembled and checked like the final one. The worker keeps the latest, and the reader
    plays it while the rest is written.

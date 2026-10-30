@@ -257,7 +257,8 @@ Exercise sheets also have task and part IDs in `doc.json` (`ex1`, `ex1.a`) that 
 blocks and sentences they cover.
 
 **A tour** has a `title`, the `paper` folder it belongs to, the `doc_sha256` of the `doc.json` it was written against,
-an optional `level`, `voices`, the `preset` it was written for and `suggested_questions`, and `chapters` of steps.
+an optional `level`, `voices`, the `preset` it was written for, `suggested_questions` and `left_out` (what the writer
+planned but could not put in, each with its cause, which the reader says on its cards), and `chapters` of steps.
 `doc_type` is `research_paper`, `exercise_sheet`, `lecture`, `contract`, `letter` or `other`; the reader uses it to pick
 its mode, so a lecture plays slide by slide.
 

@@ -1,4 +1,5 @@
 import type { GenerationEvent } from './activity';
+import { lossDetail, lossesFromEvents } from './coverage';
 import { uniqueGenerationEvents } from './generationDiagnostics';
 
 export type ChecklistState = 'pending' | 'active' | 'done' | 'failed' | 'unknown';
@@ -38,8 +39,26 @@ export function checklistEvent(event: GenerationEvent): GenerationEvent | null {
           })
         : [],
     };
-  } else if (['beat.started', 'beat.completed', 'beat.failed', 'beat.fallback', 'beat.omitted'].includes(event.type)) {
-    compact = { beat: data.beat, outcome: data.outcome };
+  } else if (
+    ['beat.started', 'beat.completed', 'beat.failed', 'beat.fallback', 'beat.omitted', 'beat.degraded'].includes(
+      event.type,
+    )
+  ) {
+    // The cause of a loss (a short code per part), never the checks' wording.
+    compact = {
+      beat: data.beat,
+      outcome: data.outcome,
+      code: data.code,
+      because: data.because,
+      dropped: data.dropped,
+      causes: data.causes,
+    };
+  } else if (event.type === 'board.duplicate') {
+    compact = {
+      dropped: Array.isArray(data.dropped)
+        ? data.dropped.map((drop) => ({ step: object(drop).step, beat: object(drop).beat }))
+        : [],
+    };
   } else if (['tool.started', 'tool.completed'].includes(event.type)) {
     const args = object(data.arguments),
       output = object(data.output),
@@ -190,9 +209,10 @@ export function generationChecklist(input: GenerationEvent[], status: string) {
       if (type === 'beat.failed') row.state = 'failed';
       if (['beat.completed', 'beat.fallback', 'beat.omitted'].includes(type)) {
         row.state = 'done';
+        // The cause comes with the event; a record from before it was kept says no more than what happened.
         const outcome = data.outcome ?? type.replace('beat.', '');
         if (outcome === 'fallback') row.detail = 'Prepared with fallback narration';
-        if (outcome === 'omitted') row.detail = 'Skipped to avoid repeating earlier content';
+        if (outcome === 'omitted') row.detail = 'Skipped; the reason was not recorded';
       }
     }
     if (type === 'tour.direction') {
@@ -200,6 +220,12 @@ export function generationChecklist(input: GenerationEvent[], status: string) {
       phase('validate').state = 'done';
       phase('publish').state = 'active';
     }
+  }
+  // What each step lost, and why, in plain words.
+  const losses = lossesFromEvents(events);
+  for (const row of items.values()) {
+    const lost = losses.filter((loss) => loss.step === row.id);
+    if (lost.length) row.detail = lossDetail(lost);
   }
   if (published || ['ready', 'completed'].includes(status)) {
     phases.forEach((row) => (row.state = 'done'));

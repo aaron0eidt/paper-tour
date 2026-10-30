@@ -1,5 +1,6 @@
 import { claimsNumericExample } from './example';
-import { splitWords, type Doc, type Step, type Tour } from '../../../shared/paper';
+import { lossSentence } from '../../../shared/coverage';
+import { splitWords, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
@@ -61,7 +62,16 @@ import {
   type CheckSite,
 } from './check';
 import type { BoardKind } from './board';
-import { boardStepsOf, degradeDirection, withoutBoards, type DroppedPart, type Degraded } from './degrade';
+import {
+  boardStepsOf,
+  degradeDirection,
+  leftOutOf,
+  withoutBoards,
+  type Degraded,
+  type DroppedPart,
+  type Omission,
+  type StepOutcome,
+} from './degrade';
 import {
   beatBrief,
   beatTargets,
@@ -137,14 +147,44 @@ function beatImage(beat: Beat, doc: Doc, images: TourImage[]): TourImage | undef
  * part's steps.
  */
 type BeatResult =
-  | { targets: BeatTargets; direction: Direction | null; degraded?: Degraded }
-  | { steps: Step[]; solved: boolean; checks: LineCheck[]; visual?: BoardKind; degraded?: Degraded };
+  | { targets: BeatTargets; direction: Direction | null; degraded?: Degraded; omission?: Omission }
+  | {
+      steps: Step[];
+      solved: boolean;
+      checks: LineCheck[];
+      visual?: BoardKind;
+      degraded?: Degraded;
+      omission?: Omission;
+    };
 
 const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused', 'muse_slow']);
 /** A beat survives the model's own faults and transient provider errors; credentials and rejected requests do not. */
 const recoverable = (error: unknown) =>
   error instanceof ProcessingError && (MODEL_FAULTS.has(error.code) || error.transient);
 const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+/** Why a model call gave nothing: it took too long, the provider could not be reached, or its answer was no use. */
+const faultOf = (error: unknown): LossCause =>
+  error instanceof ProcessingError && error.transient
+    ? 'unavailable'
+    : error instanceof ProcessingError && error.code === 'muse_slow'
+      ? 'slow'
+      : 'invalid';
+/** What a part's problems say of the correction that did not mend it: it came too late, was no use, or never came. */
+const lateNote = (correction: LossCause | null, cause: LossCause): string[] =>
+  correction === 'slow'
+    ? ['the correction took too long to write']
+    : correction === 'invalid'
+      ? ['the correction came back unusable']
+      : correction === 'unavailable'
+        ? ['the model was not available for the correction']
+        : correction
+          ? []
+          : [cause === 'slow' ? 'there was no time left to correct it' : 'the tries to correct it ran out'];
+const EFFORTS: readonly Effort[] = ['minimal', 'low', 'medium', 'high'];
+/** The reasoning effort one rung below the given one; minimal is the least. */
+const lower = (effort: Effort): Effort => EFFORTS[Math.max(0, EFFORTS.indexOf(effort) - 1)];
+const atMost = (effort: Effort, cap: Effort): Effort =>
+  EFFORTS[Math.min(EFFORTS.indexOf(effort), EFFORTS.indexOf(cap))];
 
 /**
  * Short tours of a document's main ideas (notes/HARNESS.md): understand the document once and say what kind it is
@@ -595,16 +635,20 @@ export class HarnessTourGenerator implements TourGenerator {
         },
       ];
       let best: { solution: Solution; checks: LineCheck[]; problems: string[] } | null = null;
+      let fault: LossCause = 'invalid';
+      // A solution that outlived its time is asked again at one rung less reasoning (pace.ts), so that the part keeps it.
+      let effort: Effort = 'high';
       // One repair at most, for an unusable answer or for lines that cannot be shown or do not check out; the part
       // keeps its best answer, and a line still in doubt is marked on the board.
       for (let attempt = 0; attempt < 2 && !(best && !best.problems.length); attempt++) {
         try {
-          const completion = await call(task, 'exercise_solution', solveSchema(unit), 24_000, 'high', signal, {
+          const completion = await call(task, 'exercise_solution', solveSchema(unit), 24_000, effort, signal, {
             id: beat.id,
             label: beat.point,
           });
           const { solution, problems } = cleanSolution(completion.value, unit, doc);
           if (!solution) {
+            fault = 'invalid';
             await input.onEvent?.('validation.failed', {
               stage: 'solution',
               beat: beat.id,
@@ -632,13 +676,18 @@ export class HarnessTourGenerator implements TourGenerator {
         } catch (error) {
           signal.throwIfAborted();
           if (!recoverable(error)) throw error;
+          fault = faultOf(error);
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
+          else if (fault === 'slow') {
+            effort = lower(effort);
+            if (attempt < 1) await input.onEvent?.('beat.lean', { beat: beat.id, effort, attempt: attempt + 1 });
+          }
         }
       }
       if (!best) {
         await progress('writing', ++directed, beats.length);
-        await input.onEvent?.('beat.fallback', { beat: beat.id });
-        return { steps: unitFallback(unit, doc), solved: false, checks: [] };
+        await input.onEvent?.('beat.fallback', { beat: beat.id, code: fault });
+        return { steps: unitFallback(unit, doc), solved: false, checks: [], omission: { code: fault } };
       }
       // The method visual the plan gave this task, drawn once the part is solved so that it fits the solution; one
       // repair, and a visual that still fails is dropped, flagged, with the solution lines as they were.
@@ -647,6 +696,8 @@ export class HarnessTourGenerator implements TourGenerator {
       const hosted = hasVisualHost(unit, best.solution);
       let drawn: UnitVisual | null = null;
       let lost = hosted ? [] : ['the part has no method step to show it'];
+      // Why the visual is missing: a check rejected it, or no usable answer came.
+      let why: LossCause = 'checks';
       if (planned && planned.visual !== 'none' && hosted) {
         const kind = planned.visual;
         const ask: MuseMessage[] = [
@@ -677,10 +728,12 @@ export class HarnessTourGenerator implements TourGenerator {
             });
             drawn = checked.visual;
             lost = checked.problems;
+            why = 'checks';
             if (!drawn) ask.push(...repairTurn(completion.value, checked.problems));
           } catch (error) {
             signal.throwIfAborted();
             if (!recoverable(error)) throw error;
+            why = faultOf(error);
             if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
           }
         }
@@ -695,14 +748,18 @@ export class HarnessTourGenerator implements TourGenerator {
           ? {
               degraded: {
                 dropped: ['board' as const],
-                problems: lost.length ? lost.slice(0, 8) : ['the model gave no usable board'],
+                problems: lost.length
+                  ? lost.slice(0, 8)
+                  : [why === 'slow' ? 'the board took too long to write' : 'the model gave no usable board'],
+                causes: { board: why },
               },
             }
           : {}),
       };
     };
     const results: BeatResult[] = new Array(beats.length);
-    const noVisual: StepVisual = { visual: 'none', idea: '', data: '' };
+    /** A step asked for its narration alone: no board, no worked example (a slow step, below). */
+    const alone: StepVisual = { visual: 'none', idea: '', data: '', bare: true };
     const faulty = (direction: Direction) =>
       Boolean(direction.boardProblems?.length || direction.visualProblems?.length || direction.exampleProblems?.length);
     const direct = async (beat: Beat, chosen: StepVisual | undefined): Promise<BeatResult> => {
@@ -764,28 +821,57 @@ export class HarnessTourGenerator implements TourGenerator {
       let rewrites = 0;
       let rewriting = false;
       let shortenedFrom: number | null = null;
-      // A call that outlived its time with nothing to repair is tried again lean (pace.ts): lightly reasoned, and without
-      // the board it was planned to draw, which is what takes the time. The step says so in what it lost.
-      let lean: Degraded | undefined;
+      // A call that outlived its time with nothing to repair is asked again for less (pace.ts), so that a slow step keeps
+      // its narration instead of vanishing: one rung less reasoning each time, and without the board it was planned to
+      // draw, which is what takes the time. A worked example the step must show is asked for once more at less effort,
+      // then given up; the step says what it lost, and that it was the time.
+      let slow = 0;
+      let ceiling: Effort = 'high';
+      let tries = 3;
+      const gave = new Set<'board' | 'example'>();
+      // Why the latest try gave no usable narration, for a step that ends without any; and whether that narration, asked
+      // for alone, was nothing without the worked example (it repeated the overview).
+      let fault: LossCause = 'invalid';
+      let hollow = false;
+      // What came of the latest correction of a faulty board, example or mark; null while none was asked for.
+      let correction: LossCause | null = null;
       const spent = () => Date.now() - began;
+      /** Asks for less from the next try; false when the step is already asked for its narration alone. */
+      const lighter = (attempt: number) => {
+        if (now.visual?.bare || (slow < 2 && now.example.required)) return false;
+        if (now.example.required) gave.add('example');
+        else if (now.visual && now.visual.visual !== 'none') gave.add('board');
+        // What the tries before were told still holds, and the lighter try has a repair of its own.
+        const told = now.task.slice(now.asked);
+        now = setup(alone);
+        now.task.push(...told);
+        now.asked = now.task.length;
+        requireExample = false;
+        tries = Math.max(tries, attempt + 3);
+        return true;
+      };
       // The model can correct its complete direction twice, with all validation faults in each reply. What still fails
       // afterwards is dropped and flagged (degradeDirection), never published and never a reason to fail the tour. A
       // step whose narration is usable stops asking once it has used its time for repairs: the board that still fails
       // goes the same way, so that one board that will not come right cannot hold the tour back.
+      let attempt = 0;
       for (
-        let attempt = 0;
-        attempt < 3 && !(direction && !rewriting && (!faulty(direction) || spent() >= this.pace.stepMs));
+        ;
+        attempt < tries && !(direction && !rewriting && (!faulty(direction) || spent() >= this.pace.stepMs));
         attempt++
       ) {
+        // Reasoning shares the provider's output budget. Complex scenes exhausted
+        // 6k tokens in reasoning alone and returned incomplete JSON on every retry.
+        const detailed = !gave.size && (beat.detail || attempt > 0);
+        const effort = atMost(detailed ? 'medium' : 'low', ceiling);
+        const own = this.pace.callMs('beat_direction', effort);
+        hollow = false;
+        // A faulty board, example or pen mark is being corrected by this try.
+        const correcting = !!direction && faulty(direction);
         try {
-          // Reasoning shares the provider's output budget. Complex scenes exhausted
-          // 6k tokens in reasoning alone and returned incomplete JSON on every retry.
-          const detailed = !lean && (beat.detail || attempt > 0);
-          const effort: Effort = detailed ? 'medium' : 'low';
-          const own = this.pace.callMs('beat_direction', effort);
           // A repair gets what is left of the step's time, and at least repairMs: one of a faulty board, and one after a
           // first try that gave nothing usable (its task carries the turn that says what to fix).
-          const repairing = direction ? faulty(direction) : now.task.length > now.asked;
+          const repairing = direction ? correcting : now.task.length > now.asked;
           const completion = await call(
             now.task,
             'beat_direction',
@@ -817,11 +903,15 @@ export class HarnessTourGenerator implements TourGenerator {
           const copied = cleaned && readsSource(cleaned.say, doc);
           const repeated = cleaned && overview && repeatsExplanation(cleaned.say, overview);
           const next = copied || repeated ? null : cleaned;
+          // Reading the source aloud is no use, which is not the same as repeating what the tour already said.
+          if (!next) fault = repeated ? 'repeats' : 'invalid';
+          hollow = !!now.visual?.bare && !!repeated;
+          if (correcting) correction = next ? 'checks' : 'invalid';
           if (repeated) {
             await input.onEvent?.('beat.duplicate', { beat: beat.id, attempt: attempt + 1 });
             now.task.push(
               ...repairTurn(completion.value, [
-                'This repeats the preceding overview. Teach a new worked example, cause-and-effect mechanism or comparison instead; do not rephrase the same symbol definitions.',
+                `This repeats the preceding overview. Teach a new ${now.visual?.bare ? '' : 'worked example, '}cause-and-effect mechanism or comparison instead; do not rephrase the same symbol definitions.`,
               ]),
             );
           }
@@ -902,36 +992,74 @@ export class HarnessTourGenerator implements TourGenerator {
         } catch (error) {
           signal.throwIfAborted();
           if (!recoverable(error)) throw error;
+          fault = faultOf(error);
+          if (correcting) correction = fault;
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
-          else if (
-            (error as ProcessingError).code === 'muse_slow' &&
-            !direction &&
-            !lean &&
-            now.visual &&
-            now.visual.visual !== 'none' &&
-            !now.example.required
-          ) {
-            await input.onEvent?.('beat.lean', { beat: beat.id, visual: now.visual.visual, attempt: attempt + 1 });
-            lean = { dropped: ['board'], problems: [`the ${now.visual.visual} took too long to write`] };
-            now = setup(noVisual);
-            requireExample = false;
+          else if (fault === 'slow') {
+            slow++;
+            ceiling = lower(effort);
+            if (!direction) {
+              const before = gave.size;
+              const asksLess = lighter(attempt) || ceiling !== effort;
+              // Said only when the next try asks for less than this one did: what was given up for the time, if anything, and its effort.
+              if (asksLess && attempt + 1 < tries)
+                await input.onEvent?.('beat.lean', {
+                  beat: beat.id,
+                  ...(gave.size > before && gave.has('board') && chosen ? { visual: chosen.visual } : {}),
+                  ...(gave.size > before ? { dropped: [...gave] } : {}),
+                  effort: ceiling,
+                  attempt: attempt + 1,
+                });
+            }
           }
         }
       }
       await progress('writing', ++directed, beats.length);
       if (!direction) {
-        await input.onEvent?.(beat.detail ? 'beat.omitted' : 'beat.fallback', { beat: beat.id });
-        return { targets: now.targets, direction };
+        // A step whose worked example was given up for the time, and whose narration alone is nothing without it, is left
+        // out for that; any other, for what went wrong with its latest try.
+        const omission: Omission =
+          gave.has('example') && hollow ? { code: 'slow', because: 'example' } : { code: fault };
+        // The step is left out when nothing stands in for it: a detail always, any other step when its stand-in (the
+        // planned point) only reads the source aloud.
+        const vanished = !ownSteps(beatIndex, { targets: now.targets, direction }).length;
+        await input.onEvent?.(vanished ? 'beat.omitted' : 'beat.fallback', { beat: beat.id, ...omission });
+        return { targets: now.targets, direction, omission };
       }
-      // A board, example or pen mark that still fails is dropped; the narration and the page cues stay.
+      const lean: Degraded | undefined = gave.size
+        ? {
+            dropped: [...gave],
+            problems: [...gave].map((part) =>
+              part === 'example'
+                ? 'the worked example took too long to write'
+                : `the ${chosen?.visual} took too long to write`,
+            ),
+            causes: Object.fromEntries([...gave].map((part) => [part, 'slow' as const])),
+          }
+        : undefined;
+      // A board, example or pen mark that still fails is dropped; the narration and the page cues stay. Its cause is how
+      // the latest correction ended; with none asked for, it is the time when the step used its own up, else the tries.
+      const failed: LossCause = faulty(direction) ? (correction ?? (attempt < tries ? 'slow' : 'checks')) : 'checks';
       const settled = degradeDirection(direction);
       const filled = withReadyView(settled.direction, now.targets, now.visual);
       if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: now.visual!.visual });
+      // What was given up for the time went for that; what failed its checks after the corrections, for that.
+      const dropped = [...new Set<DroppedPart>([...(lean?.dropped ?? []), ...(settled.degraded?.dropped ?? [])])];
       const degraded: Degraded | undefined =
         lean || settled.degraded
           ? {
-              dropped: [...new Set<DroppedPart>([...(lean?.dropped ?? []), ...(settled.degraded?.dropped ?? [])])],
-              problems: [...(lean?.problems ?? []), ...(settled.degraded?.problems ?? [])].slice(0, 8),
+              dropped,
+              problems: [
+                ...(lean?.problems ?? []),
+                ...(settled.degraded?.problems ?? []),
+                ...(settled.degraded ? lateNote(correction, failed) : []),
+              ].slice(0, 8),
+              // A worked example the plan never asked for (a false alarm of the example check) is no loss to tell of.
+              causes: Object.fromEntries(
+                dropped
+                  .filter((part) => part !== 'example' || exampleRules(beat, chosen).required)
+                  .map((part) => [part, lean?.causes?.[part] ?? failed]),
+              ),
             }
           : undefined;
       return {
@@ -994,14 +1122,15 @@ export class HarnessTourGenerator implements TourGenerator {
     const settle = (candidate: Tour) => {
       let tour = candidate;
       let problems = check(tour);
-      const late: { beat: string; dropped: ['board']; problems: string[] }[] = [];
+      const late: { beat: string; dropped: ['board']; problems: string[]; causes: { board: 'checks' } }[] = [];
       const named = boardStepsOf(tour, problems);
       if (named.size) {
         const bare = settleBoards(withoutBoards(tour, new Set(named.keys())));
         if (!check(bare).length) {
           tour = bare;
           problems = [];
-          for (const [beat, why] of named) late.push({ beat, dropped: ['board'], problems: why.slice(0, 8) });
+          for (const [beat, why] of named)
+            late.push({ beat, dropped: ['board'], problems: why.slice(0, 8), causes: { board: 'checks' } });
         }
       }
       return { tour, problems, late };
@@ -1151,10 +1280,15 @@ export class HarnessTourGenerator implements TourGenerator {
                 ? result.degraded
                   ? 'degraded'
                   : 'directed'
-                : beat.detail
-                  ? 'omitted'
-                  : 'fallback';
-          await input.onEvent?.('beat.completed', { beat: beat.id, outcome, durationMs: Date.now() - started });
+                : ownSteps(index, result).length
+                  ? 'fallback'
+                  : 'omitted';
+          await input.onEvent?.('beat.completed', {
+            beat: beat.id,
+            outcome,
+            ...(result.omission ? { code: result.omission.code } : {}),
+            durationMs: Date.now() - started,
+          });
           void announce();
         } catch (error) {
           await input.onEvent?.('beat.failed', {
@@ -1189,17 +1323,45 @@ export class HarnessTourGenerator implements TourGenerator {
         'The writer only repeated the source after repair. Try generating again.',
       );
     const { tour: assembled, repeats } = buildTour(beats.length);
-    if (repeats.dropped.length) await input.onEvent?.('board.duplicate', { dropped: repeats.dropped });
-    const { tour, problems, late } = settle(assembled);
+    // The tour's own checks name steps; what a step lost is the loss of its beat (an exercise part has several steps).
+    const owner = new Map(beats.flatMap((beat, i) => stepsOf(i).map((step) => [step.id, beat.id] as const)));
+    const beatOf = (step: string) => owner.get(step) ?? step;
+    // A dropped board names its beat too when that is not its step.
+    if (repeats.dropped.length)
+      await input.onEvent?.('board.duplicate', {
+        dropped: repeats.dropped.map((drop) => ({
+          ...drop,
+          ...(beatOf(drop.step) === drop.step ? {} : { beat: beatOf(drop.step) }),
+        })),
+      });
+    const settled = settle(assembled);
+    const { tour, problems } = settled;
+    const late = settled.late.map((drop) => ({ ...drop, beat: beatOf(drop.beat) }));
     for (const drop of late) await input.onEvent?.('beat.degraded', drop);
     const directions = results.map((result) => ('direction' in result ? result.direction : null));
     if (problems.length) {
       await input.onEvent?.('validation.failed', { stage: 'assemble', problems });
       throw new ProcessingError('invalid_tour', 'The generated tour did not pass document validation.');
     }
-    await input.onEvent?.('tour.direction', tourDirection(tour));
+    // What the plan had and the tour does not, with why (coverage.ts): the tour says so when it starts and ends.
+    const outcomes: StepOutcome[] = beats.map((beat, i) => {
+      const result = results[i];
+      const gone = (id: string) => late.some((drop) => drop.beat === id);
+      return {
+        beat: beat.id,
+        present: ownSteps(i, result).length > 0,
+        fallback: 'solved' in result ? !result.solved : !result.direction,
+        ...(result.omission ? { omission: result.omission } : {}),
+        ...(result.degraded ? { degraded: result.degraded } : {}),
+        ...(gone(beat.id) ? { late: true } : {}),
+        ...(repeats.dropped.some((drop) => beatOf(drop.step) === beat.id) ? { repeated: true } : {}),
+      };
+    });
+    const leftOut = leftOutOf(outcomes);
+    const published: Tour = leftOut.length ? { ...tour, left_out: leftOut } : tour;
+    await input.onEvent?.('tour.direction', tourDirection(published));
     return {
-      tour,
+      tour: published,
       metadata: {
         provider: 'meta',
         engine: 'harness',
@@ -1222,18 +1384,24 @@ export class HarnessTourGenerator implements TourGenerator {
             }
           : {}),
         paperCard: card,
-        fallbackBeats: beats
-          .filter((_, i) => {
-            const result = results[i];
-            return 'solved' in result ? !result.solved : !beats[i].detail && !result.direction;
-          })
-          .map((beat) => beat.id),
-        omittedDetails: beats
-          .filter(
-            (beat, i) =>
-              beat.detail && 'direction' in results[i] && !(results[i] as { direction: Direction | null }).direction,
-          )
-          .map((beat) => beat.id),
+        // The steps that stand in for their own explanation, and the steps left out whole (a detail, or a step whose
+        // fallback only read the document aloud), as the tour's record of what it left out (leftOut) has them.
+        fallbackBeats: outcomes.filter((outcome) => outcome.present && outcome.fallback).map((outcome) => outcome.beat),
+        // The steps left out whole, with the cause in a word (code) and in plain words (reason).
+        omittedDetails: outcomes.flatMap(({ beat, present, omission }) => {
+          if (present) return [];
+          const { code, because } = omission ?? { code: 'invalid' as const, because: undefined };
+          return [
+            {
+              beat,
+              code,
+              ...(because ? { because } : {}),
+              reason: lossSentence({ step: beat, part: 'step', cause: code, ...(because ? { because } : {}) }),
+            },
+          ];
+        }),
+        // Everything the tour lacks of its plan, as the tour itself says it.
+        leftOut,
         // The quick checks that close chapters (check.ts).
         ...(quickChecks.length ? { quickChecks: [...quickChecks].sort((a, b) => a.id.localeCompare(b.id)) } : {}),
         // What steps lost so that the tour could play: their board, worked example or pen marks, and why.
@@ -1251,13 +1419,16 @@ export class HarnessTourGenerator implements TourGenerator {
           shown: beats.flatMap((beat, i) => {
             const result = results[i];
             // A part's method visual shows on its method step.
-            if ('steps' in result) return result.visual ? [`${beat.id}:visual:${result.visual}`] : [];
+            if ('steps' in result)
+              return result.visual && !late.some((drop) => drop.beat === beat.id)
+                ? [`${beat.id}:visual:${result.visual}`]
+                : [];
             const direction = result.direction;
             return late.some((drop) => drop.beat === beat.id)
               ? []
               : direction?.example
                 ? direction.example.frames.map((frame, n) => `${beat.id}:frame-${n + 1}:${frame.item.kind}`)
-                : direction?.board && !repeats.dropped.some((drop) => drop.step === beat.id)
+                : direction?.board && !repeats.dropped.some((drop) => beatOf(drop.step) === beat.id)
                   ? [`${beat.id}:${direction.board.kind}`]
                   : [];
           }),
@@ -1266,7 +1437,7 @@ export class HarnessTourGenerator implements TourGenerator {
               direction?.boardProblems?.length ? [{ beat: beats[i].id, problems: direction.boardProblems }] : [],
             ),
             ...repeats.dropped.map((drop) => ({
-              beat: drop.step,
+              beat: beatOf(drop.step),
               problems: [`${drop.kind}: it repeats the board of step ${drop.repeats}`],
             })),
             ...late.map(({ beat, problems }) => ({ beat, problems })),

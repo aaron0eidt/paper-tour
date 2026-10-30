@@ -12,7 +12,9 @@ export interface Pace {
   callMs: (name: string, effort: Effort) => number;
   /**
    * What one step may spend on repairing its board, worked example or pen marks. Past it, a step that has a usable
-   * narration stops asking and takes the degrade rung (degrade.ts): it keeps the narration and loses what failed.
+   * narration stops asking and takes the degrade rung (degrade.ts): it keeps the narration and loses what failed. A step
+   * that has none is not held to it: it is asked again, for less each time (callMs falls with the effort), three tries
+   * at least and a few more when its lighter try, and a repair of that, come late.
    */
   stepMs: number;
   /** The least time a repair call gets, however little is left of the step's time. */
@@ -31,8 +33,11 @@ const SECONDS: Record<string, number> = {
   quick_check: 30,
 };
 
+// A step asked again after a call outlived its time reasons a rung less each time, so its limit falls with it: 45 s at
+// medium effort and above, 30 s below (generator.ts, the lean tries).
 export const PACE: Pace = {
-  callMs: (name, effort) => (name === 'beat_direction' ? (effort === 'low' ? 30 : 45) : (SECONDS[name] ?? 60)) * 1000,
+  callMs: (name, effort) =>
+    (name === 'beat_direction' ? (effort === 'medium' || effort === 'high' ? 45 : 30) : (SECONDS[name] ?? 60)) * 1000,
   stepMs: 40_000,
   repairMs: 15_000,
 };

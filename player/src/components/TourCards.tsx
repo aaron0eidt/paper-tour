@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import { coverageNote } from '../../../shared/coverage';
 import { chapterTakeaways, docTypeLabel, stepsLabel } from '../tourSummary';
 import { stoppedCopy } from '../partialTour';
 import type { Growth } from '../partialTour';
@@ -65,6 +66,7 @@ export function TourCover({ tour, steps, length, resumeAt, growth, onStart, onRe
           <span>{writing ? `${length} so far` : length}</span>
         </p>
         {growth && <GrowthNote growth={growth} />}
+        <LeftOutNote tour={tour} />
         {chapters.length > 1 && (
           <ol className={`tour-chapters${more ? ' more-below' : ''}`} aria-label="Chapters" ref={list}>
             {chapters.slice(0, MAX_LISTED).map((title, i) => (
@@ -94,6 +96,18 @@ export function TourCover({ tour, steps, length, resumeAt, growth, onStart, onRe
       </section>
     </div>
   );
+}
+
+/** What a finished tour says when it is not all of its plan: what was left out and why, as the writer recorded it. */
+export function LeftOutNote({ tour }: { tour: Tour }) {
+  const note = coverageNote(tour.left_out ?? []);
+  return note ? (
+    <p className="tour-note left-out" role="note">
+      <span>
+        <strong>Not everything planned is in this tour.</strong> {note}.
+      </span>
+    </p>
+  ) : null;
 }
 
 /** What a tour still being written says about the rest: it is on its way, or it will not come. */
@@ -165,6 +179,7 @@ export function TourEnd({ tour, stopped, questions, ready = [], onReplayChapter,
             <span>{stoppedCopy(stopped).detail}</span>
           </p>
         )}
+        <LeftOutNote tour={tour} />
         <ol className={`tour-takeaways${more ? ' more-below' : ''}`} ref={list}>
           {takeaways.map((item) => (
             <li key={item.chapter}>

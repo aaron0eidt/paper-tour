@@ -332,6 +332,7 @@ export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets,
     detail: beat.detail,
     ...(beat.move ? { move: beat.move } : {}),
     ...(beat.slides ? { slides: true } : {}),
+    ...(visual?.bare ? { bare: true } : {}),
     ...(type ? { type } : {}),
   };
 }
@@ -441,8 +442,8 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
   if ((beat.kind === 'figure' || beat.kind === 'formula') && !beat.move) {
     lines.push(
       beat.detail
-        ? 'TEACHING ROLE: build on the preceding overview with one concrete mechanism, worked example or contrast. Explain a new causal link and why it matters. Never restate the overview.'
-        : 'TEACHING ROLE: orient the learner: what this computes or depicts, its inputs and outputs, and its purpose. Leave a worked example or close-up causal mechanism for the following detail step.',
+        ? `TEACHING ROLE: build on the preceding overview with one concrete ${visual?.bare ? 'mechanism' : 'mechanism, worked example'} or contrast. Explain a new causal link and why it matters. Never restate the overview.`
+        : `TEACHING ROLE: orient the learner: what this computes or depicts, its inputs and outputs, and its purpose. Leave ${visual?.bare ? 'a' : 'a worked example or'} close-up causal mechanism for the following detail step.`,
     );
   }
   if (beat.role) lines.push(`THIS STEP OF THE TOUR: ${beat.role}`);
