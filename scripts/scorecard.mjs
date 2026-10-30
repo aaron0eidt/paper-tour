@@ -123,10 +123,48 @@ function boardNumbers(item) {
 // A number as the text prints it: signs differ (the minus sign is a different character in many PDFs), so only the
 // magnitude is compared, and thousands separators are dropped.
 const magnitude = (n) => String(Number(Math.abs(n).toPrecision(9)));
+// Scientific notation as the grounding reads it: a copy of the rules in server/src/harness/board.ts (numbersIn), which
+// shared/notation-cases.json keeps in step: both test files check the same table of cases.
+const SPACE = String.raw`(?:\s|\\[,;:!]|~)*`;
+const MULTIPLY = String.raw`(?:\\times|\\cdot|[×*·⋅∙]|[xX](?=${SPACE}10))`;
+const SIGNED = String.raw`[+−–-]?\d{1,3}`;
+const EXPONENT = String.raw`(?:\^\s*\{\s*\(?\s*(${SIGNED})\s*\)?\s*\}|\^\s*\(\s*(${SIGNED})\s*\)|(?:\^|\*\*)\s*(${SIGNED})|([⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,3}))(?![.,]?\d)`;
+const MANTISSA = String.raw`[+−-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?|\.\d+)`;
+const POWER = new RegExp(
+  String.raw`(?<![\p{L}\p{N}.,^])(?:(${MANTISSA})${SPACE}${MULTIPLY}${SPACE})?10\s*${EXPONENT}`,
+  'gu',
+);
+const E_NOTATION = /(?<![\p{L}\p{N}.])\d+(?:\.\d+)?[eE][+−-]?\d+/gu;
+const FLATTENED = /(?<![\p{L}\p{N}.,])([+−–-]?)([1-9][.,]\d{1,2})(?!\d)\s*[·×⋅∙]\s*10(?:([1-9]\d)|[−–-]([1-9]\d?))(?![.,]?\d)/gu;
+const plainMantissa = (text) =>
+  /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(text) ? text.replace(/,/g, '') : text.replace(',', '.');
+const exponentOf = (text) =>
+  text
+    .replace(/[−–⁻]/g, '-')
+    .replace(/⁺/g, '+')
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (digit) => '⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(digit));
+/** The numbers a text prints in scientific notation, with their signs. */
+export function scientificNumbers(text) {
+  const powers = [...text.matchAll(POWER)].map((m) => {
+    const exponent = exponentOf(m[2] ?? m[3] ?? m[4] ?? m[5]);
+    if (Math.abs(Number(exponent)) > 300) return NaN; // no power of ten of a double
+    if (m[1] === undefined) return Number(`1e${exponent}`);
+    const sign = /^[+−-]/.test(m[1]) ? m[1][0] : '';
+    return Number(`${sign.replace('−', '-')}${plainMantissa(m[1].slice(sign.length))}e${exponent}`);
+  });
+  return [
+    ...powers,
+    ...[...text.matchAll(E_NOTATION)].map((m) => Number(m[0].replace('−', '-'))),
+    ...[...text.matchAll(FLATTENED)].map((m) => Number(`${m[2].replace(',', '.')}e${m[3] ?? `-${m[4]}`}`)),
+  ].filter(Number.isFinite);
+}
 /** The magnitudes of every number printed in the document's text and captions. */
 function printedNumbers(doc) {
   const text = [...doc.blocks.map((b) => b.text), ...doc.figures.map((f) => f.caption ?? '')].join('\n');
-  return new Set((text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => magnitude(Number(n.replaceAll(',', '')))));
+  return new Set([
+    ...(text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => magnitude(Number(n.replaceAll(',', '')))),
+    ...scientificNumbers(text).map(magnitude),
+  ]);
 }
 
 /** Every ID a step points at. */

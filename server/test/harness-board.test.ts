@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import type { MuseConfig } from '../src/config';
 import type { Action, BBox, Doc, Step } from '../../shared/paper';
 import type { TourGenerationInput, TourImage } from '../src/tour-generator';
 import { HarnessTourGenerator } from './harness-fixture';
 import { planBeats } from '../src/harness/beats';
 import { findAnchor } from '../src/harness/assemble';
-import { checkBars, checkFlow, checkFormula, numbersIn } from '../src/harness/board';
+import { checkBars, checkBoard, checkFlow, checkFormula, eNotation, numbersIn } from '../src/harness/board';
 import { REGION_NAMES, regionOf, beatTargets, cleanDirection } from '../src/harness/direct';
 import { beatStep } from '../src/harness/assemble';
 import { BOARD_EXAMPLES } from '../src/harness/prompts';
@@ -912,6 +913,131 @@ test('scientific evidence retains magnitude and does not allow a different tiny 
   assert.deepEqual(numbersIn('1.1e-7 and 2.5 × 10^{-9}'), [1.1e-7, 2.5e-9]);
   assert.ok(checkBars({ bars: [{ label: 'gradient', value: 1.1e-7 }] }, '1.1e-7').item);
   assert.equal(checkBars({ bars: [{ label: 'gradient', value: 2.5e-10 }] }, '1.1e-10').item, null);
+});
+
+test('scientific notation is read in every unambiguous form a document prints it', () => {
+  for (const printed of [
+    '2.3 · 10^19',
+    '2.3×10^19',
+    '2.3 x 10^19',
+    '2.3 X 10^{19}',
+    '2.3·10¹⁹',
+    '2.3 ⋅ 10^+19',
+    '2,3 · 10^19',
+    '2.3e19',
+    '2.3E+19',
+    '2.3 \\times 10^{19}',
+    '2.3\\cdot10^{ 19 }',
+    '$2.3 \\times 10^{19}$ FLOPs',
+  ])
+    assert.deepEqual(numbersIn(printed), [2.3e19], printed);
+  assert.deepEqual(numbersIn('10^{19}'), [1e19]);
+  assert.deepEqual(numbersIn('ε = 10^−9, 10⁻⁹ or 10^{-9}'), [1e-9, 1e-9, 1e-9]);
+  assert.deepEqual(numbersIn('1.5·10⁻⁹ and 1.5 × 10^−9'), [1.5e-9, 1.5e-9]);
+  assert.deepEqual(numbersIn('−2.5 × 10^3, 1,024 × 10^3 and 5 x 10^2'), [-2500, 1024000, 500]);
+  assert.deepEqual(numbersIn('9.6 × 10^18'), [9.6e18], 'the same double a table cell of 9.6e18 holds');
+  // A power of ten is one number: its 10 and its exponent are not printed on their own.
+  assert.ok(!numbersIn('rate 10^−9 per step').includes(9));
+});
+
+// The table of notations is shared with the scorecard (scripts/scorecard.test.mjs), which keeps its own copy of the rules.
+const NOTATIONS: { text: string; values: number[]; absent?: number[] }[] = JSON.parse(
+  readFileSync(new URL('../../shared/notation-cases.json', import.meta.url), 'utf8'),
+);
+
+test('the table of notations is read as it says: what it holds, and what it does not', () => {
+  for (const { text, values, absent = [] } of NOTATIONS) {
+    const read = numbersIn(text);
+    for (const value of values) assert.ok(read.some((n) => sameValue(n, value)), `${text} holds ${value}: ${read}`);
+    for (const value of absent) assert.ok(!read.some((n) => sameValue(n, value)), `${text} is not ${value}: ${read}`);
+  }
+});
+
+const sameValue = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+
+test('a parenthesised exponent is one number whichever form the evidence and the expression use', () => {
+  assert.deepEqual(numbersIn('x*10^(-3)'), [1e-3]);
+  assert.ok(numbersIn('2*10^(-3)*x').includes(0.002));
+  const document = (expression: string, evidence: string) =>
+    checkBoard('plot', { kind: 'plot', x: [0, 10], y: [0, 1], source: 'document', curves: [{ expression, label: 'decay' }] }, evidence);
+  for (const [expression, evidence] of [
+    ['x*10^(-3)', 'The decay rate is 10^\u22123 per step.'],
+    ['2*10^(-3)*x', 'k = 2 \u00b7 10^\u22123'],
+    ['x*10^(3)', 'gain 10^3'],
+    ['2*10^-3*x', 'k = 2 \u00b7 10^{(-3)}'],
+  ])
+    assert.deepEqual(document(expression, evidence).problems, [], expression);
+  assert.match(document('x*10^(-4)', 'The decay rate is 10^\u22123 per step.').problems.join(' '), /not printed/);
+});
+
+test('LaTeX spacing around the multiplication sign does not split a power of ten', () => {
+  assert.deepEqual(numbersIn('2.3\\,\\times\\,10^{19}'), [2.3e19]);
+  assert.deepEqual(numbersIn('2.3~\\times~10^{19}'), [2.3e19]);
+  assert.deepEqual(numbersIn('2.3 \\; \\cdot \\; 10^{-3}'), [2.3e-3]);
+  assert.equal(eNotation('$2.3\\,\\times\\,10^{19}$'), '$2.3e19$');
+});
+
+test('what is not scientific notation stays the numbers it is', () => {
+  assert.deepEqual(numbersIn('2^10 and x^10 and pages 10-20'), [2, 10, 10, 10, 20]);
+  assert.deepEqual(numbersIn('(a+b) · 10^3 after 210^3'), [1000, 210, 3]);
+  assert.deepEqual(numbersIn('1e999'), [], 'a number that is not finite is not a number');
+  assert.deepEqual(numbersIn('10^999'), [10, 999], 'an exponent past a double is no power of ten');
+  assert.deepEqual(numbersIn('2.3 · 10^19.5'), [2.3, 10, 19.5]);
+});
+
+test('an exponent a PDF flattened to full size digits is read only where nothing else is plausible', () => {
+  // A decimal mantissa of 1.0 to 9.9, a multiplication sign, 10 and a two-digit exponent.
+  assert.deepEqual(numbersIn('2.3 · 1019'), [2.3, 1019, 2.3e19], 'the plain numbers stay, the product is added');
+  assert.deepEqual(numbersIn('GNMT + RL [38] 24.6 39.92 2.3 · 1019 1.4 · 1020').slice(-2), [2.3e19, 1.4e20]);
+  for (const printed of ['1.0 · 1020', '9.6×1018', '1,5 · 1019', '8.0 ⋅ 1021', '1.2∙1021', '2.3·1099'])
+    assert.ok(
+      numbersIn(printed).some((n) => n >= 1e18),
+      printed,
+    );
+  assert.deepEqual(numbersIn('1.5 · 10−9').at(-1), 1.5e-9, 'a glued minus is an exponent');
+  assert.deepEqual(numbersIn('2.5 · 10-12').at(-1), 2.5e-12);
+  // Everything else is the digits it prints.
+  for (const printed of [
+    '12.3 · 1019', // not a mantissa from 1 to 10
+    '0.5 · 1019',
+    '3 · 1019', // no decimal point
+    '2.3 · 105', // a one-digit exponent: 105 may just be 105
+    '2.3 · 1000',
+    '2.345 · 1019', // three decimals: not a mantissa from 1.0 to 9.99
+    '1,500 · 1024', // a thousands grouping, not a mantissa
+    '2.3 · 1005',
+    '2.3 · 10100', // three digits
+    '1019.5',
+    '2.3 x 1019', // the letter x
+    '2.3 * 1019',
+    '2.3 and 1019',
+    'ε = 10−9', // no mantissa: a subtraction as far as the text says
+    'v2.3 · 1019',
+  ])
+    assert.ok(
+      numbersIn(printed).every((n) => n < 1e18 && n > 1e-8),
+      printed,
+    );
+  // 1.5 · 1024 may be the product 1536 (a memory size): its own numbers stay readable beside the power.
+  assert.deepEqual(numbersIn('1.5 · 1024 MB'), [1.5, 1024, 1.5e24]);
+});
+
+test('the sign of a flattened mantissa is read as the sign of any number is', () => {
+  for (const printed of ['e = −1.6 · 10−19 C', 'q = -1.6 · 10-19', '−1.6×10−19', 'a = (−1.6 · 10−19)'])
+    assert.ok(numbersIn(printed).includes(-1.6e-19), printed);
+  assert.ok(!numbersIn('e = −1.6 · 10−19 C').includes(1.6e-19), 'a negative charge is not also a positive one');
+  assert.ok(numbersIn('+1.6 · 10−19').includes(1.6e-19));
+  // After a digit, a letter, ")" or "]" the sign is a subtraction, as NUMBER reads it.
+  for (const printed of ['5-1.6 · 10−19', 'x-1.6 · 10−19', '(a)-1.6 · 10−19', '[3]-1.6 · 10−19']) {
+    assert.ok(numbersIn(printed).includes(1.6e-19), printed);
+    assert.ok(!numbersIn(printed).includes(-1.6e-19), printed);
+  }
+});
+
+test('eNotation rewrites the explicit powers of ten of a text and nothing else', () => {
+  assert.equal(eNotation('2.3 · 10^19 FLOPs and 10⁻⁹'), '2.3e19 FLOPs and 1e-9');
+  assert.equal(eNotation('−1.5 × 10^{-3}'), '−1.5e-3');
+  assert.equal(eNotation('2.3 · 1019 and 2^10'), '2.3 · 1019 and 2^10', 'a flattened exponent is not rewritten');
 });
 
 test('signed measured bars retain the evidence signs around the player zero baseline', () => {

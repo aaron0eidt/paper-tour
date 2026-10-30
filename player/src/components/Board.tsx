@@ -556,7 +556,7 @@ function BarsBoard({ item, focus, playback, from, range }: { item: BarsItem; foc
             const length = row.x1 - row.x0;
             const ride = (positive ? -1 : 1) * length * (1 - progress);
             const digits = from && transition < 1 ? Math.max(places[i], decimalsOf(from.bars[i].value)) : places[i];
-            const text = formatValue(displayed.bars[i].value * progress, digits, item.unit);
+            const text = formatValue(displayed.bars[i].value * progress, digits, item.unit, displayed.bars[i].value);
             return (
               <g key={i} className={`bar${i === focused ? ' is-focus' : ''}`} style={ink(fill(i))}>
                 <g className="bar-state">

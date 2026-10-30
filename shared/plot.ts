@@ -155,11 +155,15 @@ export function evaluateExpression(tree: Expr, x: number, a = 1): number {
   return Number.isFinite(value) ? value : NaN;
 }
 
-const range = (v: unknown): v is [number, number] =>
+/**
+ * An axis range: finite, increasing and within ±1e6. A log axis may reach 1e30, where a document's counts and rates lie
+ * (training cost in FLOPs, a gradient of 1e-9), and is measured in ratio, since its decades are what it shows.
+ */
+const range = (v: unknown, log = false): v is [number, number] =>
   Array.isArray(v) &&
   v.length === 2 &&
-  v.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 1e6) &&
-  v[1] - v[0] >= 1e-6;
+  v.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= (log ? 1e30 : 1e6)) &&
+  (log && v[0] > 0 ? v[1] / v[0] >= 1.0001 : v[1] - v[0] >= 1e-6);
 const isRaw = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const clean = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
@@ -169,14 +173,17 @@ export const plotLog = (plot: Pick<PlotItem, 'x_scale' | 'y_scale'>, axis: 'x' |
   plot[`${axis}_scale`] === 'log';
 
 const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+/** Ten to the power `exp` as a board prints it: 10¹⁹, 10⁻⁹. */
+export const powerOfTen = (exp: number) =>
+  `10${exp < 0 ? '⁻' : ''}${[...String(Math.abs(exp))].map((digit) => SUPERSCRIPT[Number(digit)]).join('')}`;
+
 /** A number as a board prints it: three significant digits, and powers of ten for the very large or small. */
 export function formatNumber(value: number): string {
   if (value === 0) return '0';
   const abs = Math.abs(value);
   if (abs >= 1e5 || abs < 1e-3) {
     const [mantissa, exponent] = value.toExponential(2).split('e');
-    const power = [...String(Math.abs(Number(exponent)))].map((digit) => SUPERSCRIPT[Number(digit)]).join('');
-    return `${Number(mantissa)}×10${Number(exponent) < 0 ? '⁻' : ''}${power}`;
+    return `${Number(mantissa)}×${powerOfTen(Number(exponent))}`;
   }
   return String(Number(value.toPrecision(3))).replace('-', '−');
 }
@@ -186,7 +193,8 @@ export function plotProblems(raw: unknown): string[] {
   const p = raw as PlotItem;
   const problems: string[] = [];
   if (p.kind !== 'plot') problems.push('Unknown plot kind.');
-  if (!range(p.x) || !range(p.y)) problems.push('Plot axes need finite increasing ranges within ±1000000.');
+  if (!range(p.x, plotLog(p, 'x')) || !range(p.y, plotLog(p, 'y')))
+    problems.push('Plot axes need finite increasing ranges within ±1000000 (a log axis may reach 1e30).');
   for (const label of [p.title, p.x_label, p.y_label])
     if (label !== undefined && (typeof label !== 'string' || label.length > 80))
       problems.push('Plot labels must be short strings.');
@@ -194,7 +202,7 @@ export function plotProblems(raw: unknown): string[] {
     const scale = p[`${axis}_scale`];
     if (scale === undefined) continue;
     if (!(PLOT_SCALES as readonly unknown[]).includes(scale)) problems.push(`${axis}_scale: use linear or log`);
-    else if (scale === 'log' && range(p[axis]) && p[axis][0] <= 0)
+    else if (scale === 'log' && range(p[axis], true) && p[axis][0] <= 0)
       problems.push(`${axis}_scale: a log axis needs a range above zero, not ${p[axis][0]} to ${p[axis][1]}`);
   }
   if (p.source !== undefined && !(PLOT_SOURCES as readonly unknown[]).includes(p.source))
@@ -477,7 +485,12 @@ export function plotSegments(tree: Expr, plot: PlotItem, a = 1, samples = 160): 
   return segments;
 }
 
-const axisSchema = { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number', minimum: -1e6, maximum: 1e6 } };
+const axisSchema = (limit: number) => ({
+  type: 'array',
+  minItems: 2,
+  maxItems: 2,
+  items: { type: 'number', minimum: -limit, maximum: limit },
+});
 /** The plot board: curves with log axes, marks the code finds, and the document's measured points. */
 export const PLOT_BOARD_SCHEMA = {
   type: 'object',
@@ -486,15 +499,19 @@ export const PLOT_BOARD_SCHEMA = {
   properties: {
     kind: { const: 'plot' },
     title: { type: 'string', maxLength: 80 },
-    x: axisSchema,
-    y: axisSchema,
+    x: axisSchema(1e30),
+    y: axisSchema(1e30),
     x_label: { type: 'string', maxLength: 80 },
     y_label: { type: 'string', maxLength: 80 },
     x_scale: {
       enum: [...PLOT_SCALES],
-      description: 'log for values that span orders of magnitude (the x range must be above zero); default linear.',
+      description:
+        'log for values that span orders of magnitude (the x range must be above zero, up to 1e30); default linear, which stays within ±1000000.',
     },
-    y_scale: { enum: [...PLOT_SCALES], description: 'log y axis (the y range must be above zero); default linear.' },
+    y_scale: {
+      enum: [...PLOT_SCALES],
+      description: 'log y axis (the y range must be above zero, up to 1e30); default linear.',
+    },
     curves: {
       type: 'array',
       minItems: 1,
@@ -590,4 +607,7 @@ const {
   points: _points,
   ...curveProperties
 } = PLOT_BOARD_SCHEMA.properties;
-export const PLOT_SCHEMA = { ...PLOT_BOARD_SCHEMA, properties: curveProperties };
+export const PLOT_SCHEMA = {
+  ...PLOT_BOARD_SCHEMA,
+  properties: { ...curveProperties, x: axisSchema(1e6), y: axisSchema(1e6) },
+};
