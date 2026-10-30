@@ -10,7 +10,7 @@ import { TourGeneration } from '../components/TourGeneration';
 import { useModelCatalog } from './useModelCatalog';
 import { useSettings } from './useSettings';
 import { ProfileSettings } from './ProfileSettings';
-import { canUseModel } from './modelChoices';
+import { canUseModel, modelDisplayName } from './modelChoices';
 import '../library.css';
 
 interface Props {
@@ -104,6 +104,16 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
   const model = profile.data?.defaultModel ?? '';
   const selectedModel = models.catalog?.models.find((candidate) => candidate.id === model);
   const allowTraining = selectedModel?.contributor === true;
+  const uploadReady = !!profile.data && canUseModel(models.catalog, model, allowTraining) && !models.loading;
+  const uploadReason = !profile.data
+    ? profile.error
+      ? 'Your settings could not be loaded. Open settings to try again.'
+      : 'Loading your settings…'
+    : models.loading
+      ? 'Checking available models…'
+      : !uploadReady
+        ? 'Choose an available tour model in Settings to add a PDF.'
+        : undefined;
   const refreshDocuments = () => setRefresh((count) => count + 1);
 
   useEffect(() => {
@@ -187,13 +197,52 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
       <header className="library-header">
         <PaperMark />
         <div className="library-account">
-          <span className="library-account-email" title={email}>{email}</span>
-          <a className="library-settings-link" href={`${import.meta.env.BASE_URL}?settings=profile`} aria-label="Profile & Settings" title="Profile & Settings">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9.5 3-.6 2.2-2 .9-2-.6-2.4 4.1L4.1 11v2l-1.6 1.4 2.4 4.1 2-.6 2 .9.6 2.2h5l.6-2.2 2-.9 2 .6 2.4-4.1L19.9 13v-2l1.6-1.4-2.4-4.1-2 .6-2-.9L14.5 3z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span className="library-account-email" title={email}>
+            {email}
+          </span>
+          <a
+            className="library-settings-link"
+            href={`${import.meta.env.BASE_URL}?settings=profile`}
+            aria-label="Profile & Settings"
+            title="Profile & Settings"
+          >
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m9.5 3-.6 2.2-2 .9-2-.6-2.4 4.1L4.1 11v2l-1.6 1.4 2.4 4.1 2-.6 2 .9.6 2.2h5l.6-2.2 2-.9 2 .6 2.4-4.1L19.9 13v-2l1.6-1.4-2.4-4.1-2 .6-2-.9L14.5 3z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
             <span>Settings</span>
           </a>
-          <button type="button" className="library-sign-out" aria-label={signingOut ? 'Signing out…' : 'Sign out'} title="Sign out" onClick={() => void logout()} disabled={signingOut}>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 5H5v14h4M10 12h11m-4-4 4 4-4 4"/></svg>
+          <button
+            type="button"
+            className="library-sign-out"
+            aria-label={signingOut ? 'Signing out…' : 'Sign out'}
+            title="Sign out"
+            onClick={() => void logout()}
+            disabled={signingOut}
+          >
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 5H5v14h4M10 12h11m-4-4 4 4-4 4" />
+            </svg>
           </button>
         </div>
       </header>
@@ -209,12 +258,27 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
             </button>
           )}
         </div>
-        {models.error && <div className="model-catalog-error" role="alert"><p>{models.error}</p><button className="library-text-button" type="button" onClick={models.refresh}>Try again</button></div>}
-        {profile.error && <p className="library-error" role="alert">{profile.error} <button className="library-text-button" onClick={profile.refresh}>Retry settings</button></p>}
+        {models.error && (
+          <div className="model-catalog-error" role="alert">
+            <p>{models.error}</p>
+            <button className="library-text-button" type="button" onClick={models.refresh}>
+              Try again
+            </button>
+          </div>
+        )}
+        {profile.error && (
+          <p className="library-error" role="alert">
+            {profile.error}{' '}
+            <button className="library-text-button" onClick={profile.refresh}>
+              Retry settings
+            </button>
+          </p>
+        )}
         <UploadPanel
           model={model}
           allowTraining={allowTraining}
-          canUpload={!!profile.data && canUseModel(models.catalog, model, allowTraining) && !models.loading}
+          canUpload={uploadReady}
+          unavailableReason={uploadReason}
           onChanged={refreshDocuments}
           onUploaded={(documentId) => {
             setNotice({
@@ -231,6 +295,12 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
               Try again
             </button>
           </div>
+        )}
+        {selectedModel && (
+          <p className="library-upload-context">
+            New tours use <strong>{modelDisplayName(selectedModel)}</strong>
+            <a href={`${import.meta.env.BASE_URL}?settings=profile#tour-model`}>Change model</a>
+          </p>
         )}
         {notice && (
           <div className="library-feedback library-notice" role="status">
@@ -262,9 +332,22 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setQuery('');
+              }}
               placeholder="Find a paper"
               aria-label="Find a paper by title or filename"
             />
+            {query && (
+              <button
+                type="button"
+                className="library-search-clear"
+                onClick={() => setQuery('')}
+                aria-label="Clear search"
+              >
+                ×
+              </button>
+            )}
           </label>
           <label className="library-sort">
             Sort by
@@ -411,16 +494,18 @@ function DocumentCard({
           <span>Added {formatDate(item.createdAt)}</span>
         </p>
         {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
-        {canOpen && item.tourGeneration?.status !== 'ready' && (item.tourGeneration || (analysisReady && !item.tourCount)) && (
-          <TourGeneration
-            documentId={item.id}
-            generation={item.tourGeneration}
-            onChanged={onTourChanged}
-            canGenerate={analysisReady || !!item.tourGeneration}
-            onOpenTour={() => onOpen()}
-            compact
-          />
-        )}
+        {canOpen &&
+          item.tourGeneration?.status !== 'ready' &&
+          (item.tourGeneration || (analysisReady && !item.tourCount)) && (
+            <TourGeneration
+              documentId={item.id}
+              generation={item.tourGeneration}
+              onChanged={onTourChanged}
+              canGenerate={analysisReady || !!item.tourGeneration}
+              onOpenTour={() => onOpen()}
+              compact
+            />
+          )}
         <div className="library-document-actions">
           <button type="button" className="library-text-button" disabled={!canOpen} onClick={onOpen}>
             Open paper

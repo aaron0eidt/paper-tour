@@ -1,16 +1,4 @@
 :root {
-  --bg: #0d0f14;
-  --panel: #141720;
-  --panel-2: #1a1e29;
-  --line: #262b38;
-  --text: #e7e9f0;
-  --muted: #8a90a2;
-  --faint: #5d6375;
-  --accent: #7ea6ff;
-  --accent-strong: #4f7dff;
-  --warn: #ffb547;
-  --error: #ff6b6b;
-  --stage-bg: #1c1f28;
   --sidebar-w: 288px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color: var(--text);
@@ -269,6 +257,7 @@ kbd {
 /* -------------------------------------------------------------- main/stage */
 
 .main {
+  container: reader-main / inline-size;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -478,7 +467,7 @@ kbd {
   z-index: 30;
   padding: 4px 8px;
   border-radius: 6px;
-  background: rgba(13, 15, 20, 0.92);
+  background: var(--surface-glass);
   border: 1px solid var(--line);
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre;
@@ -500,8 +489,8 @@ kbd {
   max-width: min(300px, 70%);
   padding: 11px 14px;
   border-radius: 10px;
-  background: rgba(20, 23, 32, 0.96);
-  border: 1px solid #333a4d;
+  background: var(--surface-glass);
+  border: 1px solid var(--border-strong);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   font-size: 13.5px;
   line-height: 1.5;
@@ -510,7 +499,7 @@ kbd {
 }
 
 .note strong {
-  color: #fff;
+  color: var(--text-strong);
   font-weight: 650;
 }
 
@@ -518,8 +507,8 @@ kbd {
   font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(126, 166, 255, 0.14);
-  color: #c9d8ff;
+  background: var(--surface-selected);
+  color: var(--accent-ink);
 }
 
 .note-arrow {
@@ -591,7 +580,7 @@ kbd {
   padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: rgba(20, 23, 32, 0.9);
+  background: var(--surface-glass-soft);
   backdrop-filter: blur(6px);
   font-size: 12px;
   font-weight: 600;
@@ -604,7 +593,7 @@ kbd {
 }
 
 .chip.on {
-  color: #0d0f14;
+  color: var(--on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -650,7 +639,7 @@ kbd {
   list-style: none;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: rgba(20, 23, 32, 0.96);
+  background: var(--surface-glass);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -693,8 +682,8 @@ kbd {
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid rgba(255, 107, 107, 0.45);
-  background: rgba(40, 16, 20, 0.95);
-  color: #ffd0d0;
+  background: var(--error-surface);
+  color: var(--error-ink);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -717,7 +706,7 @@ kbd {
 
 .crash code {
   max-width: 640px;
-  color: #ffd0d0;
+  color: var(--error-ink);
   font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow-wrap: anywhere;
 }
@@ -825,7 +814,7 @@ button:disabled {
   margin-top: 2px;
   padding: 2px 8px;
   border-radius: 6px;
-  background: rgba(126, 166, 255, 0.14);
+  background: var(--surface-selected);
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
@@ -885,7 +874,7 @@ button:disabled {
 }
 
 .w.now {
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .speed {
@@ -940,4 +929,15 @@ button:disabled {
     animation-delay: 0ms !important;
     transition-duration: 1ms !important;
   }
+}
+
+/* Use the reader's available width, including when the navigation sidebar is visible. */
+@container reader-main (max-width: 850px) {
+  .controls { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; padding: 10px 16px; }
+  .narration { grid-column: 1 / -1; grid-row: 1; }
+}
+@container reader-main (max-width: 460px) {
+  .controls { grid-template-columns: minmax(0, 1fr); }
+  .transport { grid-row: 2; }
+  .controls > .settings { grid-row: 3; justify-content: space-between; }
 }

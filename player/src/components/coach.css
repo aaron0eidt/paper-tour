@@ -9,7 +9,7 @@
   padding: 14px 16px 14px;
   border: 1px solid rgba(126, 166, 255, 0.3);
   border-radius: 18px;
-  background: rgba(20, 23, 32, 0.92);
+  background: var(--surface-glass);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   backdrop-filter: blur(18px) saturate(140%);
   box-shadow:
@@ -62,7 +62,7 @@
   background: rgba(126, 166, 255, 0.07);
   font-size: 13.5px;
   line-height: 1.45;
-  color: #d3d8e6;
+  color: var(--text-secondary);
   animation: coach-in 260ms var(--coach-ease) both;
 }
 
@@ -90,8 +90,8 @@
   padding: 6px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #c9cdd9;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 550;
   cursor: pointer;
@@ -102,7 +102,7 @@
 }
 
 .coach-btn:hover {
-  border-color: rgba(126, 166, 255, 0.45);
+  border-color: var(--border-accent);
   background: rgba(126, 166, 255, 0.1);
   color: var(--text);
 }
@@ -114,7 +114,7 @@
 }
 
 .coach-btn.primary:hover {
-  background: #fff;
+  background: var(--ink-hover);
   color: var(--bg);
 }
 

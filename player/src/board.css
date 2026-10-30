@@ -44,11 +44,14 @@
 }
 
 .board {
-  --board-bg: #11141b;
-  --board-raised: #171b24;
-  --board-rule: #2c3240;
-  --board-edge: #7b8498;
-  --board-bar: #4a5366;
+  --text: var(--canvas-text);
+  --muted: var(--canvas-muted);
+  --faint: var(--canvas-edge);
+  --board-bg: var(--canvas-bg);
+  --board-raised: var(--canvas-raised);
+  --board-rule: var(--canvas-rule);
+  --board-edge: var(--canvas-edge);
+  --board-bar: var(--canvas-bar);
   position: absolute;
   top: 0;
   bottom: 0;

@@ -29,13 +29,13 @@
   border-color: #354866;
 }
 .tour-generation.pending strong {
-  color: #c0d2f8;
+  color: var(--accent-ink);
 }
 .tour-generation.ready strong {
-  color: #a8c9cc;
+  color: var(--success-ink);
 }
 .tour-generation.failed strong {
-  color: #f0b4b4;
+  color: var(--error-ink);
 }
 .tour-generation progress {
   display: block;
@@ -47,7 +47,7 @@
 .tour-generation button {
   flex-shrink: 0;
   padding: 8px 10px;
-  border: 1px solid #465775;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--panel-2);
   color: var(--accent);
@@ -67,7 +67,7 @@
   cursor: default;
 }
 .tour-generation p.tour-generation-error {
-  color: #f0b4b4;
+  color: var(--error-ink);
 }
 .tour-generation.compact {
   margin-top: 13px;

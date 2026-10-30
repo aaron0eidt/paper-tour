@@ -95,9 +95,14 @@ export function AgentStream({ events, status }: { events: GenerationEvent[]; sta
               {entry.detail && <p className="agent-tool-detail">{entry.detail}</p>}
               {entry.text && (
                 <div className="agent-speech">
-                  {entry.state !== 'running' && entry.text.length > 800 ? (
-                    <details>
-                      <summary>Read full message</summary>
+                  {entry.state !== 'running' && entry.text.length > 280 ? (
+                    <details className="agent-message-more">
+                      <summary>
+                        <span className="agent-message-preview">
+                          {entry.text.slice(0, 220).replace(/\s+\S*$/, '')}…
+                        </span>
+                        <span className="agent-message-toggle">Read full message</span>
+                      </summary>
                       <AgentMessage text={entry.text} />
                     </details>
                   ) : (
@@ -120,10 +125,9 @@ export function AgentStream({ events, status }: { events: GenerationEvent[]; sta
             if (feed.current) feed.current.scrollTop = feed.current.scrollHeight;
           }}
         >
-          Follow live activity ↓
+          {active ? 'Follow live activity ↓' : 'Jump to latest ↓'}
         </button>
       )}
-      <p className="agent-stream-note">Live messages and completed actions from your tour.</p>
     </section>
   );
 }

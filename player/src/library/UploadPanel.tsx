@@ -22,9 +22,17 @@ interface UploadPanelProps {
   model: string;
   allowTraining: boolean;
   canUpload: boolean;
+  unavailableReason?: string;
 }
 
-export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUpload }: UploadPanelProps) {
+export function UploadPanel({
+  onUploaded,
+  onChanged,
+  model,
+  allowTraining,
+  canUpload,
+  unavailableReason,
+}: UploadPanelProps) {
   const [stage, setStage] = useState<UploadStage>('idle');
   const [progress, setProgress] = useState(0);
   const [filename, setFilename] = useState('');
@@ -48,7 +56,10 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
 
   async function start(file: File, resume = false) {
     if (!resume && busy) return;
-    if (!resume && !canUpload) { setError('Check your model in Profile & Settings and confirm any Contributor permission before uploading.'); return; }
+    if (!resume && !canUpload) {
+      setError('Check your model in Profile & Settings and confirm any Contributor permission before uploading.');
+      return;
+    }
     const token = ++run.current;
     const active = () => token === run.current;
     setError(null);
@@ -70,7 +81,12 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
       if (!upload.reservation) {
         upload.reservation = await apiRequest<UploadReservation>('/api/documents', {
           method: 'POST',
-          body: JSON.stringify({ filename: file.name, size: file.size, model: upload.model, allowTraining: upload.allowTraining }),
+          body: JSON.stringify({
+            filename: file.name,
+            size: file.size,
+            model: upload.model,
+            allowTraining: upload.allowTraining,
+          }),
         });
         if (!active()) {
           // Cancellation can precede the reservation response. Remove the newly created row too.
@@ -225,6 +241,11 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
                     ? 'Canceling upload…'
                     : 'Upload needs attention'}
         </p>
+        {stage === 'idle' && !canUpload && unavailableReason && (
+          <p className="library-upload-unavailable" role="status">
+            {unavailableReason} <a href={`${import.meta.env.BASE_URL}?settings=profile`}>Open settings</a>
+          </p>
+        )}
         {busy && <progress value={progress} max="100" aria-label="Upload progress" />}
         {error && (
           <p className="library-error" role="alert">
@@ -238,7 +259,7 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
         accept="application/pdf,.pdf"
         className="library-file-input"
         aria-label="Choose a PDF"
-        disabled={busy || !canUpload}
+        disabled={busy || stage === 'failed' || !canUpload}
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) void start(file);
@@ -255,7 +276,12 @@ export function UploadPanel({ onUploaded, onChanged, model, allowTraining, canUp
           </button>
         )}
         {stage === 'idle' && (
-          <button type="button" className="library-button primary" disabled={!canUpload} onClick={() => input.current?.click()}>
+          <button
+            type="button"
+            className="library-button primary"
+            disabled={!canUpload}
+            onClick={() => input.current?.click()}
+          >
             Choose PDF
           </button>
         )}

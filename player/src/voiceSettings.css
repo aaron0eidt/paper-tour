@@ -41,7 +41,7 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
-  box-shadow: 0 12px 40px #0008;
+  box-shadow: var(--shadow-floating);
   z-index: 20;
   display: grid;
   gap: 18px;
@@ -116,7 +116,7 @@
 .reader-app .narration-text { font-size: 14px; line-height: 1.55; max-height: 3.1em; }
 .reader-app .narration-text .w { color: var(--muted); }
 .reader-app .narration-text .w.spoken { color: var(--text); }
-.reader-app .narration-text .w.now { color: #fff; }
+.reader-app .narration-text .w.now { color: var(--text-strong); }
 .reader-app .controls .settings { gap: 10px; padding-left: 16px; border-left: 1px solid var(--line); }
 @media (max-width: 860px) {
   .reader-app .controls { gap: 10px 14px; }

@@ -28,7 +28,7 @@
   top: 7px;
   height: 3px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--timeline-track);
   overflow: hidden;
   transition: top 140ms ease, height 140ms ease;
 }
@@ -85,9 +85,9 @@
   display: grid;
   gap: 1px;
   padding: 6px 10px;
-  border: 1px solid #333a4d;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: rgba(20, 23, 32, 0.96);
+  background: var(--surface-glass);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   font-size: 12px;
   line-height: 1.35;
@@ -131,7 +131,7 @@
 /* A tour still being written ends in a dashed stretch: what is expected, with nothing to play in it yet. A soft light
    moves along it, faster while the tour waits there. */
 .tl-pending .tl-rail {
-  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.22) 0 5px, transparent 5px 9px);
+  background: repeating-linear-gradient(90deg, var(--timeline-stripe) 0 5px, transparent 5px 9px);
 }
 
 .tl-pending .tl-rail::after {
@@ -200,7 +200,7 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
-  box-shadow: 0 12px 40px #0008;
+  box-shadow: var(--shadow-floating);
   font-size: 12px;
 }
 

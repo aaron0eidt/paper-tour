@@ -1,4 +1,5 @@
 import { TokenCounts } from './TokenCounts';
+import { activityEvents } from './activityEvents';
 import { AgentOrb, AgentStream } from './AgentStream';
 import { reportedUsage, type TokenUsage } from '../../../shared/activity';
 import { generationProgress } from '../../../shared/generationProgress';
@@ -22,6 +23,15 @@ function duration(ms: number): string {
     ? `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`
     : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
+
+const title = (event: GenerationEvent) =>
+  name(
+    ['model.started', 'tool.started'].includes(event.type)
+      ? event.data.name
+      : event.type === 'step.started'
+        ? event.data.stage
+        : event.type.replaceAll('.', ' '),
+  ).replace(/^paper /, '');
 
 export function GenerationActivity({
   documentId,
@@ -71,6 +81,7 @@ export function GenerationActivity({
   const runPath = `/api/documents/${documentId}/agent-runs/${agentRunId}`;
   async function control(action: 'pause' | 'resume' | 'cancel') {
     setControlling(true);
+    setError('');
     try {
       setRun(await apiRequest<AgentRun>(`${runPath}/${action}`, { method: 'POST' }));
       setRevision((n) => n + 1);
@@ -83,6 +94,8 @@ export function GenerationActivity({
   }
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showSystem, setShowSystem] = useState(false);
+  const [query, setQuery] = useState('');
+  const [failedOnly, setFailedOnly] = useState(false);
   const [tab, setTab] = useState<'input' | 'output' | 'request'>('output');
   const [copied, setCopied] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -91,6 +104,9 @@ export function GenerationActivity({
     else if (!open && dialog.current?.open) dialog.current.close();
   }, [open]);
   const [events, setEvents] = useState<GenerationEvent[]>([]);
+  const [includePrevious, setIncludePrevious] = useState(false);
+  const displayEvents = useMemo(() => activityEvents(events, includePrevious), [events, includePrevious]);
+  const attemptCount = events.filter((event) => event.type === 'run.started').length;
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('');
@@ -184,7 +200,7 @@ export function GenerationActivity({
   }, [documentId, generationId, agentRunId, open, revision]);
   const calls = useMemo(() => {
     const grouped = new Map<string, GenerationEvent[]>();
-    for (const event of events)
+    for (const event of displayEvents)
       if (event.data.callId) {
         const id = String(event.data.callId);
         const group = grouped.get(id) ?? [];
@@ -192,17 +208,32 @@ export function GenerationActivity({
         grouped.set(id, group);
       }
     return grouped;
-  }, [events]);
-  const rows = events.filter(
+  }, [displayEvents]);
+  const rows = displayEvents.filter(
     (event) => ['model.started', 'tool.started'].includes(event.type) || (showSystem && !event.data.callId),
   );
-  const selected = rows.find((event) => event.id === selectedId) ?? rows.at(-1);
+  const filteredRows = rows.filter((event) => {
+    const group = calls.get(String(event.data.callId)) ?? [];
+    const failed =
+      group.some(
+        (item) =>
+          item.type === 'model.failed' ||
+          (item.type === 'tool.completed' && !!(item.data.output as { error?: unknown })?.error),
+      ) || event.type.endsWith('failed');
+    return (
+      (!failedOnly || failed) &&
+      `${title(event)} ${event.type} ${event.data.model ?? ''}`
+        .toLocaleLowerCase()
+        .includes(query.trim().toLocaleLowerCase())
+    );
+  });
+  const selected = filteredRows.find((event) => event.id === selectedId) ?? filteredRows.at(-1);
   const selectedCall = selected?.data.callId ? (calls.get(String(selected.data.callId)) ?? []) : [];
   const replayedContext = selectedCall.find((event) => event.type === 'context.replayed');
   const preparedRequest = [...selectedCall].reverse().find((event) => event.type === 'model.prepared');
   const completion = selectedCall.find((event) => ['model.completed', 'tool.completed'].includes(event.type));
   const failure = completion ? undefined : [...selectedCall].reverse().find((event) => event.type === 'model.failed');
-  const usageByCall = reportedUsage(events);
+  const usageByCall = reportedUsage(displayEvents);
   const totals = usageByCall.size
     ? [...usageByCall.values()].reduce(
         (sum, value) => ({
@@ -247,14 +278,6 @@ export function GenerationActivity({
           : output
     : '';
   const text = view === 'details' ? payloadText(payload) : '';
-  const title = (event: GenerationEvent) =>
-    name(
-      ['model.started', 'tool.started'].includes(event.type)
-        ? event.data.name
-        : event.type === 'step.started'
-          ? event.data.stage
-          : event.type.replaceAll('.', ' '),
-    ).replace(/^paper /, '');
   return (
     <div className="generation-activity">
       <button type="button" className="activity-launch" onClick={() => setOpen(true)}>
@@ -270,10 +293,18 @@ export function GenerationActivity({
       >
         <header className="activity-dialog-header">
           <div>
-            <h2>Tour assistant</h2>
+            <h2>Tour activity</h2>
             <span>
-              {run?.status ?? (status ? status.replaceAll('_', ' ') : connected ? 'Live' : 'Connecting…')} ·{' '}
-              {diagnostics.modelCalls} model calls · {diagnostics.toolCalls} tools
+              {activityStatus === 'ready' || activityStatus === 'completed'
+                ? 'Completed'
+                : activityStatus === 'failed'
+                  ? 'Interrupted'
+                  : activityStatus
+                    ? name(activityStatus)
+                    : connected
+                      ? 'Live'
+                      : 'Connecting…'}{' '}
+              · {diagnostics.modelCalls} model calls · {diagnostics.toolCalls} tools
             </span>
           </div>
           <div className="activity-run-actions">
@@ -301,7 +332,7 @@ export function GenerationActivity({
           </div>
         </header>
         {open && (
-          <>
+          <div className="activity-body">
             <section className="activity-progress" aria-label="Current generation step">
               <AgentOrb active={working} />
               <div role="status" aria-live="polite">
@@ -338,6 +369,19 @@ export function GenerationActivity({
               <button type="button" aria-pressed={view === 'details'} onClick={() => setView('details')}>
                 Technical details
               </button>
+              {attemptCount > 1 && (
+                <label className="activity-history">
+                  <input
+                    type="checkbox"
+                    checked={includePrevious}
+                    onChange={(event) => {
+                      setIncludePrevious(event.target.checked);
+                      setSelectedId(null);
+                    }}
+                  />{' '}
+                  Include previous attempts ({attemptCount - 1})
+                </label>
+              )}
             </div>
             {run?.status === 'paused' && (
               <p className="activity-run-note" role="status">
@@ -349,100 +393,105 @@ export function GenerationActivity({
             {view === 'stream' ? (
               <>
                 {error && <p role="status">{error}</p>}
-                <AgentStream events={events} status={activityStatus} />
+                <AgentStream events={displayEvents} status={activityStatus} />
               </>
             ) : (
               <>
-                <section className="activity-diagnostics" aria-label="Workflow timing">
-                  <div className="activity-diagnostics-heading">
-                    <strong>Where the time goes</strong>
-                    <span>Recorded run · parallel requests overlap</span>
-                  </div>
-                  <dl>
-                    <div>
-                      <dt title="From the first model request to the latest completed action, or now while running. Intervening gaps and pauses may be included.">
-                        Run elapsed
-                      </dt>
-                      <dd>{diagnostics.elapsedMs === undefined ? '—' : duration(diagnostics.elapsedMs)}</dd>
+                <details className="activity-diagnostics">
+                  <summary>Timing &amp; performance</summary>
+                  <section aria-label="Workflow timing">
+                    <div className="activity-diagnostics-heading">
+                      <strong>Where the time goes</strong>
+                      <span>Recorded run · parallel requests overlap</span>
                     </div>
-                    <div>
-                      <dt title="Sum of recorded model request durations. Parallel requests overlap, so this can exceed elapsed time.">
-                        Combined model time
-                      </dt>
-                      <dd>{diagnostics.timedModels ? duration(diagnostics.modelMs) : '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>Document tools</dt>
-                      <dd>{diagnostics.timedTools ? duration(diagnostics.toolMs) : '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>First output · median</dt>
-                      <dd>
-                        {diagnostics.medianFirstOutputMs === undefined
-                          ? '—'
-                          : duration(diagnostics.medianFirstOutputMs)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Rejected / failed calls</dt>
-                      <dd>{diagnostics.failedCalls}</dd>
-                    </div>
-                  </dl>
-                  <p>
-                    Elapsed starts at the first model request and includes gaps between actions. Combined model time
-                    adds all request durations, including overlapping requests.
-                  </p>
-                  <p>{diagnostics.explanation}</p>
-                  {diagnostics.phases.length > 0 && (
-                    <p className="activity-timing-phases">
-                      {diagnostics.phases.map((phase) => `${phase.label}: ${duration(phase.durationMs)}`).join(' · ')}
+                    <dl>
+                      <div>
+                        <dt title="From the first model request to the latest completed action, or now while running. Intervening gaps and pauses may be included.">
+                          Run elapsed
+                        </dt>
+                        <dd>{diagnostics.elapsedMs === undefined ? '—' : duration(diagnostics.elapsedMs)}</dd>
+                      </div>
+                      <div>
+                        <dt title="Sum of recorded model request durations. Parallel requests overlap, so this can exceed elapsed time.">
+                          Combined model time
+                        </dt>
+                        <dd>{diagnostics.timedModels ? duration(diagnostics.modelMs) : '—'}</dd>
+                      </div>
+                      <div>
+                        <dt>Document tools</dt>
+                        <dd>{diagnostics.timedTools ? duration(diagnostics.toolMs) : '—'}</dd>
+                      </div>
+                      <div>
+                        <dt>First output · median</dt>
+                        <dd>
+                          {diagnostics.medianFirstOutputMs === undefined
+                            ? '—'
+                            : duration(diagnostics.medianFirstOutputMs)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Rejected / failed calls</dt>
+                        <dd>{diagnostics.failedCalls}</dd>
+                      </div>
+                    </dl>
+                    <p>
+                      Elapsed starts at the first model request and includes gaps between actions. Combined model time
+                      adds all request durations, including overlapping requests.
                     </p>
-                  )}
-                  {diagnostics.slowest.length > 0 && (
-                    <details>
-                      <summary>Slowest actions</summary>
-                      <ol>
-                        {diagnostics.slowest.map((action) => (
-                          <li key={action.callId}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSelectedId(rows.find((event) => event.data.callId === action.callId)?.id ?? null)
-                              }
-                            >
-                              <span>{action.name}</span>
-                              <strong>{duration(action.durationMs)}</strong>
-                            </button>
-                          </li>
-                        ))}
-                      </ol>
-                    </details>
-                  )}
-                  {diagnostics.direction && (
-                    <details>
-                      <summary>Tour presentation</summary>
-                      <p>
-                        {[
-                          diagnostics.direction.steps === undefined ? null : `${diagnostics.direction.steps} steps`,
-                          diagnostics.direction.words === undefined
-                            ? null
-                            : `${diagnostics.direction.words.toLocaleString()} narration words`,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
+                    <p>{diagnostics.explanation}</p>
+                    {diagnostics.phases.length > 0 && (
+                      <p className="activity-timing-phases">
+                        {diagnostics.phases.map((phase) => `${phase.label}: ${duration(phase.durationMs)}`).join(' · ')}
                       </p>
-                      <dl>
-                        {diagnostics.direction.actions.map((action) => (
-                          <div key={action.name}>
-                            <dt>{name(action.name)}</dt>
-                            <dd>{action.count}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                      <p>Actions recorded in the published tour.</p>
-                    </details>
-                  )}
-                </section>
+                    )}
+                    {diagnostics.slowest.length > 0 && (
+                      <details>
+                        <summary>Slowest actions</summary>
+                        <ol>
+                          {diagnostics.slowest.map((action) => (
+                            <li key={action.callId}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQuery('');
+                                  setFailedOnly(false);
+                                  setSelectedId(rows.find((event) => event.data.callId === action.callId)?.id ?? null);
+                                }}
+                              >
+                                <span>{action.name}</span>
+                                <strong>{duration(action.durationMs)}</strong>
+                              </button>
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
+                    {diagnostics.direction && (
+                      <details>
+                        <summary>Tour presentation</summary>
+                        <p>
+                          {[
+                            diagnostics.direction.steps === undefined ? null : `${diagnostics.direction.steps} steps`,
+                            diagnostics.direction.words === undefined
+                              ? null
+                              : `${diagnostics.direction.words.toLocaleString()} narration words`,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
+                        <dl>
+                          {diagnostics.direction.actions.map((action) => (
+                            <div key={action.name}>
+                              <dt>{name(action.name)}</dt>
+                              <dd>{action.count}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <p>Actions recorded in the published tour.</p>
+                      </details>
+                    )}
+                  </section>
+                </details>
                 <div className="activity-summary">
                   <TokenCounts usage={totals} pending={connected && ['queued', 'generating'].includes(status)} />
                   <label>
@@ -469,9 +518,36 @@ export function GenerationActivity({
                       : 'Connecting…'}
                   </p>
                 )}
+                <div className="activity-filters">
+                  <input
+                    type="search"
+                    aria-label="Find an activity"
+                    placeholder="Find an action or model…"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={failedOnly}
+                      onChange={(event) => setFailedOnly(event.target.checked)}
+                    />{' '}
+                    Needs attention
+                  </label>
+                  <span aria-live="polite">
+                    {filteredRows.length} {filteredRows.length === 1 ? 'event' : 'events'}
+                  </span>
+                </div>
                 <div className="activity-inspector-layout">
                   <nav className="activity-call-list" aria-label="Model calls and events">
-                    {rows.map((event, index) => {
+                    {!filteredRows.length && (
+                      <p className="activity-empty">
+                        {rows.length
+                          ? 'No matching activity. Try another search or turn off the filter.'
+                          : 'Actions will appear here as the tour is prepared.'}
+                      </p>
+                    )}
+                    {filteredRows.map((event, index) => {
                       const group = calls.get(String(event.data.callId)) ?? [];
                       const done = group.find((item) => ['model.completed', 'tool.completed'].includes(item.type));
                       const failed =
@@ -567,7 +643,7 @@ export function GenerationActivity({
                         <pre tabIndex={0} aria-label={`${isModel || isTool ? tab : 'Event'} payload`}>
                           {text}
                         </pre>
-                        <footer>
+                        <div className="activity-event-meta">
                           {isModel && tab === 'output'
                             ? completion
                               ? 'Response received · tour validation is recorded separately.'
@@ -581,7 +657,7 @@ export function GenerationActivity({
                                   ? 'Step input · the saved conversation was restored locally before dispatch; earlier messages are not repeated here.'
                                   : 'Actual messages · images are identified by source ID and page.'
                               : `Event ${selected.id} · ${selected.at}`}
-                        </footer>
+                        </div>
                       </>
                     ) : (
                       <p>Select a model call to inspect its inputs and output.</p>
@@ -590,7 +666,7 @@ export function GenerationActivity({
                 </div>
               </>
             )}
-          </>
+          </div>
         )}
       </dialog>
     </div>

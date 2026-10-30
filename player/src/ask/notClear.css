@@ -33,7 +33,7 @@
 }
 
 .not-clear-button.open {
-  border-color: rgba(126, 166, 255, 0.45);
+  border-color: var(--border-accent);
 }
 
 .not-clear-button svg {
@@ -55,7 +55,7 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
-  box-shadow: 0 12px 40px #0008;
+  box-shadow: var(--shadow-floating);
   animation: not-clear-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
@@ -78,7 +78,7 @@
   padding: 9px 11px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-subtle);
   color: var(--text);
   text-align: left;
   cursor: pointer;

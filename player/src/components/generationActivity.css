@@ -6,101 +6,232 @@
 }
 .activity-dialog {
   width: min(1080px, calc(100vw - 40px));
+  height: min(840px, calc(100dvh - 48px));
   max-height: calc(100dvh - 48px);
   box-sizing: border-box;
   margin: auto;
-  padding: 22px;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 14px;
   color: var(--text);
   background: var(--panel);
   font: inherit;
-  box-shadow: 0 20px 80px #0008;
+  box-shadow: var(--shadow-floating);
+  overflow: hidden;
+}
+.activity-dialog[open] {
+  display: flex;
+  flex-direction: column;
 }
 .activity-dialog::backdrop {
-  background: #05070bbd;
+  background: var(--backdrop);
+}
+/* A dialog can be launched from the reader or a compact library card. Own the controls in both contexts. */
+.activity-dialog button {
+  font: inherit;
+  font-size: 12px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--panel-2);
+  cursor: pointer;
+  white-space: normal;
+}
+.activity-dialog button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.activity-dialog button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.activity-dialog :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .activity-dialog-header {
+  flex: none;
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-bottom: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
 }
 .activity-dialog-header h2 {
-  margin: 0 0 5px;
-  font-size: 21px;
+  margin: 0 0 6px;
+  font-size: 20px;
   font-weight: 550;
 }
 .activity-dialog-header span {
   color: var(--muted);
   font-size: 12px;
 }
-.activity-summary {
+.activity-run-actions {
   display: flex;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.activity-run-actions button:last-child {
+  background: transparent;
+}
+.activity-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 20px 24px;
+  overflow: auto;
+  gap: 12px;
+}
+.activity-run-note,
+.activity-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  padding: 12px;
+}
+.activity-progress {
+  position: relative;
+  white-space: normal;
+}
+.activity-progress strong {
+  font-size: 14px;
+  font-weight: 550;
+}
+.activity-progress p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+  max-width: 76ch;
+}
+.activity-step-time {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.activity-progress .activity-saved-work {
+  color: var(--text);
+  font-size: 12px;
+}
+.activity-efficiency {
+  margin-top: 10px;
+  color: var(--warn);
+  font-size: 12px;
+}
+.activity-efficiency summary {
+  cursor: pointer;
+}
+.activity-efficiency ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+.activity-view-switch {
+  flex: none;
+}
+.activity-dialog .activity-view-switch button[aria-pressed='true'],
+.activity-dialog .activity-payload-toolbar button[aria-pressed='true'] {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.activity-summary {
+  display: flex;
+  flex: none;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
   padding: 10px 0;
-  border-top: 1px solid var(--line);
 }
 .activity-summary .token-meter {
   flex-basis: auto;
 }
 .activity-summary .token-counts {
   margin: 0;
-  gap: 24px;
+  gap: 20px;
 }
 .activity-summary .token-count {
   flex-direction: row;
   align-items: baseline;
-  gap: 8px;
+  gap: 7px;
 }
 .activity-summary .token-count dd {
-  font-size: 16px;
+  font-size: 15px;
 }
-.activity-summary label {
+.activity-summary label,
+.activity-filters label {
   display: flex;
   align-items: center;
   gap: 7px;
   color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
+}
+.activity-dialog input {
+  accent-color: var(--accent);
+}
+.activity-filters {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.activity-filters input[type='search'] {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 9px 11px;
+}
+.activity-filters > span {
+  color: var(--muted);
+  font-size: 11px;
 }
 .activity-inspector-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  height: min(600px, calc(100dvh - 240px));
-  min-height: 240px;
+  grid-template-columns: 270px minmax(0, 1fr);
+  flex: 1;
+  min-height: 280px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 9px;
   overflow: hidden;
 }
 .activity-call-list {
   overflow: auto;
   border-right: 1px solid var(--line);
-  padding: 5px;
+  padding: 6px;
   background: var(--bg);
+  overscroll-behavior: contain;
 }
-.tour-generation .activity-call-row {
+.activity-dialog .activity-call-row {
   display: block;
   text-align: left;
   width: 100%;
-  padding: 10px;
-  margin-bottom: 3px;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  padding: 11px 10px;
+  margin: 0 0 4px;
+  border-color: transparent;
   background: transparent;
-  color: var(--text);
 }
-.tour-generation .activity-call-row[aria-pressed='true'] {
-  background: var(--panel);
-  border-color: #465775;
+.activity-dialog .activity-call-row[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 .activity-call-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-weight: 550;
   font-size: 12px;
 }
@@ -108,25 +239,26 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #9cbfba;
-  flex-shrink: 0;
+  background: var(--success);
+  flex: none;
 }
 .activity-state-dot.running {
   background: var(--accent);
   animation: token-wait 1.6s ease-in-out infinite;
 }
 .activity-state-dot.failed {
-  background: #f0b4b4;
+  background: var(--error);
 }
 .activity-call-meta {
   display: block;
-  margin: 5px 0 0 13px;
+  margin: 6px 0 0 14px;
   color: var(--muted);
   font-size: 10px;
+  line-height: 1.6;
 }
 .activity-call-row .token-counts {
-  gap: 16px;
-  margin: 6px 0 0 13px;
+  gap: 12px;
+  margin: 6px 0 0 14px;
 }
 .activity-call-row .token-count {
   flex-direction: row;
@@ -134,7 +266,7 @@
   gap: 5px;
 }
 .activity-call-row .token-count dd {
-  font-size: 12px;
+  font-size: 11px;
 }
 .activity-call-row .token-count dt {
   font-size: 9px;
@@ -144,7 +276,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 14px;
+  padding: 16px;
   gap: 12px;
 }
 .activity-payload-heading {
@@ -152,17 +284,19 @@
   align-items: baseline;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
 }
 .activity-payload-heading span {
   font-size: 10px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .activity-payload-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .activity-payload-toolbar [role='group'] {
   display: flex;
@@ -171,152 +305,73 @@
 .activity-payload-toolbar button {
   text-transform: capitalize;
 }
-.tour-generation .activity-payload-toolbar button[aria-pressed='true'] {
-  background: #24314a;
-  border-color: var(--accent);
-}
 .activity-dialog pre {
   flex: 1;
-  min-height: 0;
+  min-height: 120px;
   overflow: auto;
   margin: 0;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--bg);
   color: var(--text);
   font-size: 11px;
-  line-height: 1.65;
+  line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
 }
-.activity-payload footer {
+.activity-event-meta {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
 }
 .activity-dialog .activity-failure {
-  color: #f0b4b4;
+  color: var(--error);
 }
-.activity-dialog :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-@media (max-width: 700px) {
-  .activity-dialog {
-    padding: 14px;
-    width: calc(100vw - 20px);
-    max-height: calc(100dvh - 20px);
-  }
-  .activity-inspector-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: 150px minmax(0, 1fr);
-    height: calc(100dvh - 230px);
-  }
-  .activity-call-list {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .activity-summary {
-    flex-wrap: wrap;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .activity-state-dot.running {
-    animation: none;
-  }
-}
-
-.activity-run-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-.activity-run-note {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 0 0 10px;
-  line-height: 1.5;
-}
-
-.activity-progress {
-  position: relative;
-  padding: 14px 16px;
-  margin-bottom: 12px;
+.activity-diagnostics {
+  flex: none;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--bg);
-  white-space: normal;
+  padding: 12px 14px;
 }
-.activity-progress strong {
-  font-size: 14px;
-}
-.activity-progress p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.activity-step-time {
-  display: block;
-  margin-top: 8px;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-}
-.activity-progress .activity-saved-work {
-  color: var(--text);
-}
-.activity-efficiency {
-  margin-top: 10px;
-  color: var(--warn);
-}
-.activity-efficiency summary {
+.activity-diagnostics > summary {
   cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
 }
-.activity-efficiency ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  line-height: 1.5;
-}
-.activity-inspector-layout {
-  height: min(500px, calc(100dvh - 440px));
-}
-
-.activity-diagnostics {
-  padding: 14px 0 16px;
-  border-top: 1px solid var(--line);
+.activity-diagnostics > section {
+  padding-top: 16px;
 }
 .activity-diagnostics-heading {
   display: flex;
   gap: 12px;
   justify-content: space-between;
   align-items: baseline;
+  flex-wrap: wrap;
 }
 .activity-diagnostics-heading > span,
 .activity-diagnostics p,
 .activity-diagnostics dt {
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 .activity-diagnostics dl {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 12px;
-  margin: 14px 0 10px;
+  margin: 14px 0;
 }
 .activity-diagnostics dd {
   margin: 4px 0 0;
   font-size: 18px;
   font-variant-numeric: tabular-nums;
-  color: var(--text);
 }
 .activity-diagnostics p {
   margin: 6px 0;
 }
-.activity-diagnostics summary {
+.activity-diagnostics details summary {
   cursor: pointer;
   color: var(--accent);
   margin-top: 10px;
@@ -339,18 +394,66 @@
   padding: 8px 0;
   color: var(--muted);
 }
-.activity-diagnostics li button:hover {
-  color: var(--text);
-}
-.activity-diagnostics li strong {
-  font-variant-numeric: tabular-nums;
-}
-@media (max-width: 600px) {
+@media (max-width: 700px) {
+  .activity-dialog {
+    width: calc(100vw - 20px);
+    height: calc(100dvh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+  .activity-dialog-header {
+    padding: 16px;
+    align-items: start;
+  }
+  .activity-dialog-header h2 {
+    font-size: 18px;
+  }
+  .activity-body {
+    padding: 16px;
+  }
+  .activity-inspector-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 150px minmax(260px, 1fr);
+    flex: none;
+    min-height: 450px;
+  }
+  .activity-call-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .activity-run-actions {
+    gap: 5px;
+  }
+  .activity-filters input[type='search'] {
+    flex-basis: 100%;
+  }
   .activity-diagnostics dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .activity-diagnostics-heading {
-    flex-wrap: wrap;
-    gap: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-state-dot.running {
+    animation: none;
   }
+}
+.activity-view-switch {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.activity-history {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+@media (max-width: 700px) {
+  .activity-history {
+    flex-basis: 100%;
+    margin: 8px 0 0;
+  }
+}
+/* Generation state colors must not recolor all nested inspector headings. */
+.tour-generation .activity-dialog strong {
+  color: var(--text);
 }

@@ -1,0 +1,22 @@
+Theme architecture
+
+Preference and browser synchronization: player/src/theme.ts.
+Palette definitions: player/src/themes.css. Default is the existing dark theme; light overrides semantic tokens.
+Settings controls: player/src/library/ProfileSettings.tsx.
+
+Components consume semantic tokens such as --panel, --text, --muted, --surface-glass, --surface-selected,
+--border-accent, --on-accent and feedback tokens. Define a new theme's palette centrally, rather than adding
+root[data-theme] selectors throughout component styles or changing colors from React.
+
+To add a theme:
+1. Add its id and label to THEME_OPTIONS in theme.ts. Keep system as the preference that follows the OS.
+2. Add a :root[data-theme='id'] palette in themes.css, including its color-scheme.
+3. Verify text, muted text, links, primary buttons and status messages on each surface; extend the palette contrast test.
+4. Check library, connection/model settings, collapsed/expanded ask dock, language menu, tour cover, activity and timeline.
+
+PDF pages and annotations retain their source colors. Mathematical live canvases have an independent --canvas-*
+palette so semantic illustration colors retain their tested contrast. A theme can override those canvas tokens as a
+coherent set; do not change a canvas background alone while leaving its text or authored colors unchanged.
+
+Theme selection is local to the browser, applied before React mounts, synchronized between tabs, and follows OS
+changes only when System is selected. Storage failure still allows changing appearance for the current visit.
