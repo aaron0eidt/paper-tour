@@ -1,4 +1,4 @@
-import type { Step } from '../../../shared/paper';
+import type { BoardItem, Step } from '../../../shared/paper';
 import type { RegionSelection } from '../../../shared/selection';
 
 /** One earlier exchange; a follow-up question may build on it. */
@@ -9,6 +9,11 @@ export interface AskTurn {
 /** A learner's question, with where they are in the tour and what they are looking at. */
 export interface AskRequest {
   question: string;
+  conversationId?: string;
+  page?: number;
+  activeVisual?: BoardItem;
+  visualId?: string;
+  visualRevision?: number;
   responseLanguage?: string;
   tourId?: string;
   analysisId?: string;
@@ -24,6 +29,8 @@ export const ANSWERABLE = ['yes', 'partly', 'no'] as const;
 export type Answerable = (typeof ANSWERABLE)[number];
 /** The answer as a micro-tour: steps in the tour contract, plus two questions to ask next. */
 export interface AskAnswer {
+  conversationId?: string;
+  messageId?: string;
   answerable: Answerable;
   language?: string;
   steps: Step[];

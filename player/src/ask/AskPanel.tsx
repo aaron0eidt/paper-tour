@@ -1,4 +1,9 @@
 import { useVoiceInput } from './voice';
+import { ConversationHistory } from './ConversationHistory';
+import { useConversations } from './useConversations';
+import { latestAnswer, threadContext } from './conversations';
+import type { ConversationContext, ConversationMessage } from '../../../shared/conversations';
+import { isLibraryConfigured } from '../library/client';
 import { LanguagePicker } from './LanguagePicker';
 // The ask bar: a field below the stage that opens into a tray with the tour's suggested questions
 // when it ends, a waiting state, the answer's verdict and follow-ups, and errors in plain words. It does not play
@@ -10,20 +15,26 @@ import { answerText, askErrorMessage, askQuestion, isCancelled, MAX_HISTORY } fr
 import type { Answerable, AskAnswer, AskRequest, AskSource, AskTurn } from './api';
 import { openQuestions, waitingLabel } from './answer';
 import { AnswerKeeper, prefetchPossible } from './prefetch';
-import { AlertIcon, AnswerIcon, MicrophoneIcon, PauseIcon, RegionIcon, ResumeIcon, SendIcon, SparkIcon, StopIcon } from './icons';
+import {
+  AlertIcon,
+  AnswerIcon,
+  MicrophoneIcon,
+  PauseIcon,
+  RegionIcon,
+  ResumeIcon,
+  SendIcon,
+  SparkIcon,
+  StopIcon,
+} from './icons';
 import type { RegionSelection } from './regionSelection';
 import './ask.css';
 
 /** Where the learner is when they ask: the tour step, and the figure, panel or equation on screen. */
-export interface AskContext {
-  analysisId?: string;
-  stepId?: string;
-  figureId?: string;
-  selection?: RegionSelection;
-}
+export type AskContext = ConversationContext;
 
 export interface AskPanelProps {
   source: AskSource;
+  onRestoreContext?(context: ConversationContext): void | Promise<void>;
   tourId?: string | null;
   /** Read when a question is sent, so the answer builds on what the learner just heard and sees. */
   context?(): AskContext;
@@ -97,6 +108,10 @@ export function AskPanel(props: AskPanelProps) {
   const { source, tourId, suggestions, ended = false, away = false, answering = false, className } = props;
   const [draft, setDraft] = useState('');
   const [language, setLanguage] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const sessions = useConversations('documentId' in source && isLibraryConfigured() ? source.documentId : undefined);
+  const persistent = 'documentId' in source && isLibraryConfigured();
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [history, setHistory] = useState<AskTurn[]>([]);
   const [focused, setFocused] = useState(false);
@@ -117,25 +132,35 @@ export function AskPanel(props: AskPanelProps) {
     },
   });
   const voiceBusy = voice.phase !== 'idle';
-  const busy = phase.kind === 'thinking';
+  const busy = phase.kind === 'thinking' || streaming;
   const key = sourceKey(source);
   // Answers asked for ahead of the learner (prefetch.ts); the panel redraws when one is kept, to mark its chip.
   const keeper = useMemo(() => new AnswerKeeper(askQuestion), []);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => keeper.subscribe(redraw), [keeper]);
 
-  // A new document or tour starts a new conversation. Leaving the document stops the background questions too.
+  // Changing tours leaves document conversations intact. Leaving the document stops background questions.
   useEffect(() => {
     setDraft('');
     setPhase({ kind: 'idle' });
     setHistory([]);
+    setStreaming(false);
+    setHistoryOpen(false);
     return () => {
       const pending = request.current;
       request.current = null;
       pending?.abort();
       keeper.clear();
     };
-  }, [key, tourId, keeper]);
+  }, [key, keeper]);
+
+  // Reopening a document restores the selected thread and its question, but never starts playback.
+  const restoredThread = sessions.active?.id;
+  useEffect(() => {
+    if (request.current) return;
+    const last = latestAnswer(sessions.current.current);
+    if (last?.answer) setPhase({ kind: 'answered', question: last.question, answer: last.answer });
+  }, [restoredThread, sessions.current]);
 
   useEffect(() => {
     if (props.selection && !props.selecting) input.current?.focus();
@@ -148,6 +173,7 @@ export function AskPanel(props: AskPanelProps) {
     setPhase((current) => (current.kind === 'answered' ? { kind: 'idle' } : current));
     if (writing.current) {
       writing.current = false;
+      setStreaming(false);
       request.current?.abort();
       request.current = null;
     }
@@ -187,10 +213,11 @@ export function AskPanel(props: AskPanelProps) {
       question,
       responseLanguage: language || undefined,
       tourId: tourId ?? undefined,
-      ...where,
-      history,
+      ...threadContext(where, sessions.current.current),
+      conversationId: sessions.current.current?.id,
+      history: persistent ? undefined : history,
     }),
-    [language, tourId, history],
+    [language, tourId, history, persistent, sessions.current],
   );
 
   // An answer is here, from the network or kept ahead: remember it, show its verdict and hand it to the reader to play.
@@ -220,12 +247,14 @@ export function AskPanel(props: AskPanelProps) {
       const controller = new AbortController();
       request.current = controller;
       setDraft(question);
+      setStreaming(true);
       // Where the learner is, read before the tour is set aside.
       const sent = requestFor(question, latest.current.context?.() ?? {});
-      const early = keeper.take(source, sent);
+      const early = persistent ? null : keeper.take(source, sent);
       if (early) {
         // Answered ahead of time: the tour is set aside and the answer plays, with no wait to show.
         request.current = null;
+        setStreaming(false);
         latest.current.onAsk?.(question);
         deliver(question, early);
         return;
@@ -247,15 +276,33 @@ export function AskPanel(props: AskPanelProps) {
       };
       let answer: AskAnswer;
       try {
-        answer = await keeper.answer(
-          source,
-          sent,
-          controller.signal,
-          latest.current.onAnswerPart ? progress : undefined,
-        );
+        if (persistent) {
+          const thread = await sessions.ensure(
+            {
+              analysisId: sent.analysisId,
+              tourId: sent.tourId,
+              stepId: sent.stepId,
+              page: sent.page,
+              figureId: sent.figureId,
+              selection: sent.selection,
+              visualId: sent.visualId,
+              visualRevision: sent.visualRevision,
+            },
+            question,
+            controller.signal,
+          );
+          if (thread) {
+            sent.conversationId = thread.id;
+            sent.analysisId = thread.context.analysisId;
+          }
+        }
+        const transport = persistent ? askQuestion : keeper.answer.bind(keeper);
+        answer = await transport(source, sent, controller.signal, latest.current.onAnswerPart ? progress : undefined);
       } catch (error) {
         if (request.current !== controller) return;
         request.current = null;
+        setStreaming(false);
+        if (persistent) void sessions.refresh();
         // Steps were already playing: the answer ends with them, rather than failing after the learner heard it begin.
         if (begun) return finish(question, begun);
         // Stopped by the learner: back to the question, ready to edit or send again.
@@ -267,10 +314,12 @@ export function AskPanel(props: AskPanelProps) {
       }
       if (request.current !== controller) return;
       request.current = null;
+      setStreaming(false);
+      if (persistent) void sessions.refresh();
       if (begun) finish(question, answer);
       else deliver(question, answer);
     },
-    [busy, voiceBusy, source, keeper, requestFor, deliver, finish],
+    [busy, voiceBusy, source, keeper, requestFor, deliver, finish, persistent, sessions.ensure, sessions.refresh],
   );
 
   // The tour's last step asks for the answers to its suggested questions, one at a time, with the request a click on
@@ -279,13 +328,16 @@ export function AskPanel(props: AskPanelProps) {
   const prefetchKey = wanted ? `${wanted.stamp}\n${wanted.questions.join('\n')}` : '';
   useEffect(() => {
     const now = latest.current.prefetch;
-    if (!now?.questions.length || !prefetchPossible(source, import.meta.env)) {
+    if (persistent || !now?.questions.length || !prefetchPossible(source, import.meta.env)) {
       keeper.hold();
       return;
     }
     const where = latest.current.context?.() ?? {};
-    keeper.prefetch(source, now.questions.map((question) => requestFor(question, where)));
-  }, [prefetchKey, keeper, source, requestFor]);
+    keeper.prefetch(
+      source,
+      now.questions.map((question) => requestFor(question, where)),
+    );
+  }, [prefetchKey, keeper, source, requestFor, persistent]);
 
   // A question picked outside the field goes through the same flow as one typed in it.
   const askNow = useRef(ask);
@@ -355,7 +407,11 @@ export function AskPanel(props: AskPanelProps) {
       </p>
     );
   else if (phase.kind === 'stopped')
-    status = <p className="ask-status" role="status">Answer stopped. Your playback position is saved.</p>;
+    status = (
+      <p className="ask-status" role="status">
+        Answer stopped. Your playback position is saved.
+      </p>
+    );
   else if (phase.kind === 'answered' && !typing)
     status = (
       <p className={`ask-status ${phase.answer.answerable}`} role="status">
@@ -400,8 +456,13 @@ export function AskPanel(props: AskPanelProps) {
     );
   if ((answering || props.answerPaused) && !busy && !voiceBusy && !props.selecting)
     actions.push(
-      <button type="button" className="ask-action resume" key="answer-control" onMouseDown={keepFocus}
-        onClick={() => answering ? props.onPauseAnswer?.() : props.onContinueAnswer?.()}>
+      <button
+        type="button"
+        className="ask-action resume"
+        key="answer-control"
+        onMouseDown={keepFocus}
+        onClick={() => (answering ? props.onPauseAnswer?.() : props.onContinueAnswer?.())}
+      >
         {answering ? <PauseIcon /> : <ResumeIcon />}
         <span>{answering ? 'Pause answer' : 'Continue answer'}</span>
       </button>,
@@ -420,6 +481,7 @@ export function AskPanel(props: AskPanelProps) {
   if (open)
     tray.current = (
       <div className="ask-tray-body">
+        {phase.kind !== 'idle' && <p className="ask-question">{phase.question}</p>}
         {voice.error && (
           <p className="ask-status failed" role="alert">
             {voice.error}
@@ -465,6 +527,21 @@ export function AskPanel(props: AskPanelProps) {
       </div>
     );
 
+  const replay = async (message: ConversationMessage) => {
+    if (!message.answer) return;
+    try {
+      await latest.current.onRestoreContext?.(message.context);
+      setHistoryOpen(false);
+      latest.current.onAsk?.(message.question);
+      setPhase({ kind: 'answered', question: message.question, answer: message.answer });
+      setDraft('');
+      latest.current.onAnswer(message.answer, message.question);
+    } catch (error) {
+      setHistoryOpen(false);
+      setPhase({ kind: 'failed', question: message.question, message: askErrorMessage(error) });
+    }
+  };
+
   const empty = !draft.trim();
   const expanded = focused || busy || open || !empty;
   return (
@@ -484,9 +561,30 @@ export function AskPanel(props: AskPanelProps) {
         {props.selection && !props.selecting && (
           <div className="ask-selection-chip">
             {props.selectionPreview}
-            <span><strong>Selected region</strong><small>Page {props.selection.page} · {props.selectionSnapped ? 'snapped to the object · ' : ''}included with your question</small></span>
-            <button type="button" onClick={props.onSelectRegion} disabled={busy || voiceBusy} aria-label="Change selected region">Change</button>
-            <button type="button" onClick={props.onClearRegion} disabled={busy || voiceBusy} aria-label="Remove selected region" title="Remove selected region">×</button>
+            <span>
+              <strong>Selected region</strong>
+              <small>
+                Page {props.selection.page} · {props.selectionSnapped ? 'snapped to the object · ' : ''}included with
+                your question
+              </small>
+            </span>
+            <button
+              type="button"
+              onClick={props.onSelectRegion}
+              disabled={busy || voiceBusy}
+              aria-label="Change selected region"
+            >
+              Change
+            </button>
+            <button
+              type="button"
+              onClick={props.onClearRegion}
+              disabled={busy || voiceBusy}
+              aria-label="Remove selected region"
+              title="Remove selected region"
+            >
+              ×
+            </button>
           </div>
         )}
         <form className="ask-bar" onSubmit={submit}>
@@ -497,19 +595,61 @@ export function AskPanel(props: AskPanelProps) {
             rows={1}
             value={draft}
             readOnly={busy || voiceBusy || props.selecting}
-            placeholder={props.selecting ? 'Select a region on the page…' : props.selection ? 'Ask about this region…' : phase.kind === 'answered' ? 'Ask a follow-up…' : 'Ask about this document…'}
+            placeholder={
+              props.selecting
+                ? 'Select a region on the page…'
+                : props.selection
+                  ? 'Ask about this region…'
+                  : phase.kind === 'answered'
+                    ? 'Ask a follow-up…'
+                    : 'Ask about this document…'
+            }
             aria-label="Ask a question about this document"
             enterKeyHint="send"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
           />
           {empty && !focused && !busy && <kbd className="ask-kbd">/</kbd>}
+          {persistent && (
+            <button
+              type="button"
+              className="ask-conversations"
+              aria-label="Open document conversations"
+              aria-pressed={!!sessions.active}
+              title={sessions.active ? `Conversation: ${sessions.active.title}` : 'Saved conversations'}
+              disabled={busy || voiceBusy}
+              onClick={() => {
+                setHistoryOpen(true);
+                void sessions.refresh();
+              }}
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z" />
+                <path d="M8 9h8M8 13h5" />
+              </svg>
+            </button>
+          )}
           <LanguagePicker value={language} disabled={busy || voiceBusy} onChange={setLanguage} />
           {props.onSelectRegion && (
-            <button type="button" className={`ask-region${props.selecting || props.selection ? ' selected' : ''}`}
-              disabled={busy || voiceBusy} aria-label={props.selecting ? 'Cancel region selection' : 'Select a region to ask about'}
-              aria-pressed={!!props.selecting} title="Select a figure, equation or passage"
-              onClick={props.selecting ? props.onCancelSelection : props.onSelectRegion}>
+            <button
+              type="button"
+              className={`ask-region${props.selecting || props.selection ? ' selected' : ''}`}
+              disabled={busy || voiceBusy}
+              aria-label={props.selecting ? 'Cancel region selection' : 'Select a region to ask about'}
+              aria-pressed={!!props.selecting}
+              title="Select a figure, equation or passage"
+              onClick={props.selecting ? props.onCancelSelection : props.onSelectRegion}
+            >
               <RegionIcon />
             </button>
           )}
@@ -567,6 +707,39 @@ export function AskPanel(props: AskPanelProps) {
           )}
         </form>
       </div>
+      {persistent && (
+        <ConversationHistory
+          open={historyOpen}
+          threads={sessions.threads}
+          active={sessions.active}
+          loading={sessions.loading}
+          error={sessions.error}
+          onClose={() => setHistoryOpen(false)}
+          onSelect={(id) => {
+            void sessions.open(id).then((thread) => {
+              if (!thread) return;
+              const last = latestAnswer(thread);
+              latest.current.onResume?.();
+              setHistory([]);
+              setDraft('');
+              setPhase(
+                last?.answer ? { kind: 'answered', question: last.question, answer: last.answer } : { kind: 'idle' },
+              );
+            });
+          }}
+          onNew={() => {
+            sessions.startNew();
+            setHistory([]);
+            setPhase({ kind: 'idle' });
+            setDraft('');
+            setHistoryOpen(false);
+            latest.current.onResume?.();
+            input.current?.focus();
+          }}
+          onReplay={(message) => void replay(message)}
+          onRefresh={() => void sessions.refresh()}
+        />
+      )}
     </section>
   );
 }
