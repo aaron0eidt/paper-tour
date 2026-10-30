@@ -572,6 +572,24 @@
             },
             "at_word": {
               "$ref": "#/$defs/atWord"
+            },
+            "artifact": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "revision"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
             }
           },
           "required": [
@@ -814,8 +832,8 @@
               "maxItems": 2,
               "items": {
                 "type": "number",
-                "minimum": -1e30,
-                "maximum": 1e30
+                "minimum": -1e+30,
+                "maximum": 1e+30
               }
             },
             "y": {
@@ -824,8 +842,8 @@
               "maxItems": 2,
               "items": {
                 "type": "number",
-                "minimum": -1e30,
-                "maximum": 1e30
+                "minimum": -1e+30,
+                "maximum": 1e+30
               }
             },
             "x_label": {
@@ -1772,6 +1790,251 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "title",
+            "objective",
+            "code",
+            "parameters",
+            "data",
+            "source",
+            "sourceRefs"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "program"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "objective": {
+              "type": "string",
+              "maxLength": 600,
+              "description": "What the reader should understand from the visible mathematical change."
+            },
+            "code": {
+              "type": "string",
+              "maxLength": 16000,
+              "description": "A JavaScript function expression receiving {t,params,data,theme,math,svg}. t is 0..1 and follows speech. Return svg.scene(content), an SVG string. Use the documented drawing/math helpers, loops and your own functions; no imports, DOM, fetch or independent timers. The runtime executes only isolated WebAssembly.",
+              "minLength": 1
+            },
+            "parameters": {
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "label",
+                  "value",
+                  "min",
+                  "max",
+                  "step"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "min": {
+                    "type": "number"
+                  },
+                  "max": {
+                    "type": "number"
+                  },
+                  "step": {
+                    "type": "number"
+                  }
+                }
+              }
+            },
+            "data": {
+              "type": "array",
+              "maxItems": 24,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "values"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "values": {
+                    "type": "array",
+                    "maxItems": 3000,
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "document",
+                "illustrative"
+              ]
+            },
+            "sourceRefs": {
+              "type": "array",
+              "maxItems": 30,
+              "items": {
+                "type": "string",
+                "maxLength": 100
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "plotly"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "objective": {
+              "type": "string",
+              "maxLength": 600
+            },
+            "figure": {
+              "type": "string",
+              "maxLength": 150000,
+              "description": "Plotly figure JSON with data and layout. Allowed traces: scatter, bar, heatmap, contour, scatter3d, surface. Include labeled axes/units and exactly sourced measurements. No HTML, URLs, images, scripts or external resources."
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "document",
+                "illustrative"
+              ]
+            },
+            "sourceRefs": {
+              "type": "array",
+              "maxItems": 30,
+              "items": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "parameter": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 80
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "min": {
+                      "type": "number"
+                    },
+                    "max": {
+                      "type": "number"
+                    },
+                    "step": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "label",
+                    "value",
+                    "min",
+                    "max",
+                    "step"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "functions": {
+              "type": "array",
+              "maxItems": 6,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "trace": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 11
+                  },
+                  "expression": {
+                    "type": "string",
+                    "maxLength": 220,
+                    "description": "Bounded arithmetic expression using x, a, and sin/cos/tanh/exp/log/sqrt. a is the interactive parameter."
+                  },
+                  "domain": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "samples": {
+                    "type": "integer",
+                    "minimum": 20,
+                    "maximum": 400
+                  }
+                },
+                "required": [
+                  "trace",
+                  "expression",
+                  "domain",
+                  "samples"
+                ]
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "title",
+            "objective",
+            "figure",
+            "source",
+            "sourceRefs",
+            "parameter",
+            "functions"
+          ]
         }
       ]
     }

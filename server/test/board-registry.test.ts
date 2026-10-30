@@ -4,6 +4,8 @@ import { BOARD_KINDS, boardPart, boardPartIds, boardParts, checkBoard, type Boar
 
 // One authored payload per tool exercises dispatch, source checking and focus wiring together.
 const inputs = {
+  program: {objective:'Show a changing square',code:'({t,svg})=>svg.scene(svg.text(30,30,t))',parameters:[],data:[],source:'illustrative',sourceRefs:[]},
+  plotly: {objective:'Compare the two printed results',figure:JSON.stringify({data:[{type:'bar',x:['Before','After'],y:[-2,4]}]}),functions:[],source:'document',sourceRefs:['results']},
   formula: {
     latex: 'y=2x',
     terms: [

@@ -1,3 +1,4 @@
+import type { VisualArtifactRef } from '../../shared/visualArtifacts';
 // Tour engine: plays a tour step by step against a narrator. Framework-free and deterministic,
 // so it can be driven by tests with a fake narrator and fake timers.
 
@@ -55,6 +56,7 @@ export interface CameraCommand {
 
 /** The side board: an item stays across steps until replaced or cleared; its focus belongs to the current step. */
 export interface BoardState {
+  artifact?: VisualArtifactRef;
   /** Key of the action that put the item on the board; null when the board is empty. */
   key: string | null;
   item: BoardItem | null;
@@ -64,7 +66,7 @@ export interface BoardState {
 
 export const EMPTY_BOARD: BoardState = { key: null, item: null, focus: null };
 /** The board kinds this player draws; a saved tour may carry a kind it does not (a removed one), which is skipped. */
-export const BOARD_KINDS: readonly string[] = [
+export const BOARD_KINDS: readonly string[] = ['program','plotly',
   'formula',
   'flow',
   'bars',
@@ -152,7 +154,7 @@ export function boardAfter(board: BoardState, a: BoardControl, key: string, curr
   // Older saved tours may contain removed video boards. Skip them without opening an empty panel or stalling playback.
   if (a.type === 'board')
     return BOARD_KINDS.includes(a.item.kind)
-      ? { key, item: a.item, focus: null }
+      ? { key, item: a.item, focus: null, ...(a.artifact ? { artifact: a.artifact } : {}) }
       : EMPTY_BOARD;
   if (a.type === 'board_clear') return EMPTY_BOARD;
   return current && board.item ? { ...board, focus: a.part } : board;

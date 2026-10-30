@@ -816,5 +816,5 @@ test('the prompts and the visual plan state the rules briefly', () => {
   // The rule on worked-example frames (they count toward the kind limits) added one numbered point.
   // The timeline and distribution kinds added one line each to the catalog of kinds.
   // The rule on a results step that stands on a table, and that a formula is mathematics, added a sentence each.
-  assert.ok(plan.length < 3_400, `${plan.length} characters`);
+  assert.ok(plan.length < 3_800, `${plan.length} characters`);
 });

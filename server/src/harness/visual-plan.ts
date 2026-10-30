@@ -124,6 +124,8 @@ export function allocateFrames(plan: VisualPlan, beats: Beat[], settled: Readonl
 }
 
 const KINDS_HELP: Record<BoardKind, string> = {
+  program: 'a paper-specific animated mathematical construction with actual numerical intermediate states, vectors, matrices, geometry or computation.',
+  plotly: 'interactive measured-data comparisons or mathematical functions with labeled axes and units.',
   heatmap:
     'how every item relates to every other (weights, attention, alignment, similarity, correlation, confusion), a mask, a grid of results over two settings, or a formula’s value over two indices.',
   scatter:
@@ -139,7 +141,7 @@ const KINDS_HELP: Record<BoardKind, string> = {
   scene: 'vectors or geometry (angles, projections, distances) when geometry is the point.',
 };
 /** The kinds in the order the task lists them: the ones that show relationships come first. */
-const KINDS_ORDER: BoardKind[] = [
+const KINDS_ORDER: BoardKind[] = ['program', 'plotly',
   'heatmap',
   'scatter',
   'shapes',
@@ -191,6 +193,8 @@ export function visualPlanSchema(beats: Beat[], { sheet }: PlanOptions = {}) {
 
 /** What each kind is for on an exercise sheet: the method of a task, drawn from what the task gives. */
 const SHEET_KINDS_HELP: Partial<Record<BoardKind, string>> = {
+  program: KINDS_HELP.program,
+  plotly: KINDS_HELP.plotly,
   heatmap:
     'a grid of counts or probabilities that sets the problem up: natural frequencies for a conditional probability (rows are the groups, columns the outcomes), a table of outcomes, a contingency or confusion table, a formula’s values over two indices.',
   bars: 'a few values that the method compares or splits (the probabilities of the cases it combines, the parts of a total), never the numbers the task already lists.',
@@ -204,7 +208,7 @@ const SHEET_KINDS_HELP: Partial<Record<BoardKind, string>> = {
     'the distribution a probability task is about (a normal, binomial, Poisson or exponential with the parameters the task gives), never with the range the task asks the chance of shaded.',
 };
 /** The kinds an exercise sheet's plan lists, in the order the task names them. */
-const SHEET_ORDER: BoardKind[] = ['heatmap', 'shapes', 'scene', 'plot', 'distribution', 'bars', 'scatter', 'flow'];
+const SHEET_ORDER: BoardKind[] = ['program', 'plotly','heatmap', 'shapes', 'scene', 'plot', 'distribution', 'bars', 'scatter', 'flow'];
 
 /** The task of the plan call for an exercise sheet: a visual only where the method gains from one. */
 function sheetPlanTask(language: string): string {

@@ -219,6 +219,8 @@ const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
  */
 export function boardSignature(item: BoardItem): string | null {
   switch (item.kind) {
+    case 'program': return `program|${item.code}|${JSON.stringify(item.parameters)}|${JSON.stringify(item.data)}`;
+    case 'plotly': return `plotly|${item.figure}|${JSON.stringify(item.parameter)}|${JSON.stringify(item.functions)}`;
     case 'formula':
       return `formula|${squash(item.latex)}`;
     case 'bars':

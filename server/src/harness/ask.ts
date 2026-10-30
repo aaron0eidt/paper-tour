@@ -1,3 +1,6 @@
+import { indexElements } from '../elements';
+import { isAuthoredVisual } from '../visuals/inspect';
+import { reviewAuthoredWithModel } from '../visuals/model-author';
 import { randomUUID } from 'node:crypto';
 import type { Doc, Step, Tour } from '../../../shared/paper';
 import { validateSelection } from '../../../shared/selection';
@@ -200,6 +203,11 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
             stopped = true;
             return;
           }
+          // Authored code is withheld until isolated execution and rendered-source review finish.
+          if (next.actions.some((action) => action.type === 'board' && isAuthoredVisual(action.item))) {
+            stopped = true;
+            return;
+          }
           shownSteps.push(next);
           firstStepMs ??= Date.now() - started;
           sink(verdict, next, spokenIn);
@@ -308,6 +316,21 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       followups: answer?.followups ?? [],
     };
   if (!answer) throw new ProcessingError('muse_invalid_response', 'The model returned no usable answer.');
+  // Review actual rendered frames before publishing authored scenes. Repair forks an item, never a saved tour.
+  for (const step of answer.steps) {
+    for (const action of step.actions) {
+      if (action.type !== 'board' || !isAuthoredVisual(action.item)) continue;
+      action.item = await reviewAuthoredWithModel(action.item, {
+        client,
+        narration: step.say,
+        evidence: context.evidence,
+        signal,
+        allowedSourceRefs: indexElements(doc).map((element) => element.id),
+        sourceImages: [...(input.images ?? []), ...(input.image ? [input.image] : [])].map((image) => image.dataUrl),
+        onCompletion: (completion) => completions.push(completion),
+      });
+    }
+  }
   console.log(
     JSON.stringify({
       event: 'answer_visuals',

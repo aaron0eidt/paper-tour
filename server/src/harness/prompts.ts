@@ -1,3 +1,4 @@
+import { AUTHORED_VISUAL_GUIDANCE } from '../visuals/guidance';
 import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
 import { EXAMPLE_TASK } from './example';
 import type { BoardKind } from './board';
@@ -50,6 +51,8 @@ const CUE_HELP: Record<string, string> = {
   spotlight: 'spotlight dims everything else.',
 };
 const FOCUS_HELP: Record<BoardKind, string> = {
+  program: 'The program animates using t at the words being spoken; board_focus target scene-1 names the complete live scene.',
+  plotly: 'The plot supports hover/zoom and parameter changes; board_focus target plot-1 names the chart.',
   scene:
     'board_focus lights up object-1, object-2 etc by its position in the scene objects array, while stable object IDs identify the same quantity across frames.',
   plot: 'board_focus lights up curve-1, curve-2 or curve-3 while you explain its behaviour, and mark-1, mark-2 and so on, the computed points, in the order you listed them (its guides to the axes draw in).',
@@ -289,6 +292,8 @@ export const BOARD_EXAMPLES = {
 const example = (value: unknown) => `EXAMPLE from another document: ${JSON.stringify(value)}`;
 
 export const BOARD_TASK: Record<BoardKind, string> = {
+  program: AUTHORED_VISUAL_GUIDANCE,
+  plotly: AUTHORED_VISUAL_GUIDANCE,
   scene: `BOARD: a native scene combines positioned text, math, rectangles, circles, arrows, vectors, numeric matrices and safe function plots. Keep objects stable across example frames so positions and values transform instead of replacing the whole illustration. Use normalized boxes x,y,w,h inside0..1; arrow/vector w,h are signed endpoint deltas. Keep text readable, avoid overlapping foreground content, and explicitly mark unlabeled axes/containers background:true. No executable code or media.`,
   plot: `BOARD: an illustrative function plot, never claimed as measured data, for a shape that matters (saturation, decay, periodicity, a crossover); curves that are all straight lines are rejected. Fill plot with kind plot, x/y increasing finite ranges, 1-3 curves with expression and a short LaTeX label. Expressions use x, optional parameter a, pi/e, + - * / ^, parentheses, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max or softmax(x,0). No code, properties or unknown functions. Optional parameter {from,to} sweeps a; omit for fixed curves. Explain what changes and why, and use curve-1 etc for focus.
 - marks (at most 4) are facts about the curves that the code finds and draws as labelled points with guides to the axes: root (curve; where it crosses zero), extremum (curve and which, max or min, inside the range), crossing (curve and other; where two curves meet) or value (curve and at, the x the document states). root and crossing count from the left with nth (default 1; a crossing at the left edge of the range counts, so start the range after it to skip it). Ask for a mark when the point is a fact about the curves (the break-even, the peak, the zero, where one cost overtakes another) and never give a position or write its number: the code finds it, and a mark that does not exist is refused. label is optional, a few words. Focus a mark with mark-1 and so on. With marks, the plot may hold straight lines, since their crossing is the point.
