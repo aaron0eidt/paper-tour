@@ -90,9 +90,14 @@ export interface CheckMaterial {
   title: string;
   /** The narration of the chapter's steps, in order. */
   narration: string[];
-  sentences: { id: string; text: string }[];
+  sentences: { id: string; text: string; page?: number }[];
   /** Figures, tables and equations the chapter pointed at. */
-  elements: { id: string; label: string }[];
+  elements: { id: string; label: string; page?: number }[];
+  /**
+   * The page the camera is on when the question is asked, for a paper, whose tour reads forward: the answer points at
+   * what is on that page or after it, and never goes back for it. Lecture slides keep every target.
+   */
+  from?: number;
   /** Whether there is enough to ask about, and something to point at when the answer comes. */
   ready: boolean;
 }
@@ -108,8 +113,15 @@ const idsOf = (action: Action): string[] =>
  * The material of a chapter from its finished steps: their narration, the sentences they highlighted (then the beats'
  * evidence) and the figures, tables and equations they pointed at (a panel counts as its figure).
  */
-export function checkMaterial(title: string, steps: Step[], beats: Beat[], doc: Doc): CheckMaterial {
+export function checkMaterial(title: string, steps: Step[], beats: Beat[], doc: Doc, forward = false): CheckMaterial {
   const text = new Map(doc.sentences.map((s) => [s.id, s.text]));
+  const pages = new Map([
+    ...doc.sentences.map((s) => [s.id, s.page] as const),
+    ...doc.blocks.map((b) => [b.id, b.page] as const),
+    ...doc.equations.map((e) => [e.id, e.page] as const),
+    ...doc.figures.flatMap((f) => [f.id, ...f.panels.map((p) => p.id)].map((id) => [id, f.page] as const)),
+    ...doc.pages.map((p) => [`page${p.n}`, p.n] as const),
+  ]);
   const figures = new Map(doc.figures.flatMap((f) => [[f.id, f] as const, ...f.panels.map((p) => [p.id, f] as const)]));
   const equations = new Map(doc.equations.map((e) => [e.id, e]));
   const pointed = [
@@ -119,7 +131,7 @@ export function checkMaterial(title: string, steps: Step[], beats: Beat[], doc: 
   const sentences = [...new Set(pointed)]
     .filter((id) => text.has(id))
     .slice(0, MAX_SENTENCES)
-    .map((id) => ({ id, text: clip(text.get(id)!) }));
+    .map((id) => ({ id, text: clip(text.get(id)!), page: pages.get(id) }));
   const elements = [...new Set(pointed.flatMap((id) => figures.get(id)?.id ?? (equations.has(id) ? [id] : [])))]
     .slice(0, MAX_ELEMENTS)
     .map((id) => {
@@ -130,29 +142,54 @@ export function checkMaterial(title: string, steps: Step[], beats: Beat[], doc: 
         label: figure
           ? clip(`${figure.kind === 'table' ? 'Table' : 'Figure'} ${figure.number}: ${figure.caption}`)
           : equationName(equation!),
+        page: pages.get(id),
       };
     });
   const narration = steps.map((step) => step.say);
+  const camera = forward ? lastCamera(steps) : undefined;
+  const from = camera && 'target' in camera ? pages.get(camera.target) : undefined;
   return {
     title,
     narration,
     sentences,
     elements,
+    ...(from ? { from } : {}),
     ready: spoken(narration.join(' ')) >= MIN_NARRATION && sentences.length + elements.length > 0,
   };
 }
 
-/** The ids the answer's cue may point at: the chapter's own elements first, since a figure is the clearer cue. */
-export const checkTargets = (m: CheckMaterial) => [...m.elements.map((e) => e.id), ...m.sentences.map((s) => s.id)];
+/**
+ * The ids the answer's cue may point at: the chapter's own elements first, since a figure is the clearer cue. In a paper
+ * these are the ones on the page the camera is on or after it (a page before is allowed, as the tour may turn back by
+ * one), so that the answer does not fly back for what the chapter showed earlier; when nothing is, all of them, the
+ * latest first.
+ */
+export function checkTargets(m: CheckMaterial): string[] {
+  const all = [...m.elements, ...m.sentences];
+  if (m.from === undefined) return all.map((t) => t.id);
+  const ahead = all.filter((t) => (t.page ?? Infinity) >= m.from! - 1);
+  return (ahead.length ? ahead : [...all].sort((a, b) => (b.page ?? 0) - (a.page ?? 0))).map((t) => t.id);
+}
 
 /** The chapter as the check call reads it. */
 export function checkBrief(m: CheckMaterial): string {
+  const pointable = new Set(checkTargets(m));
+  const shown = [
+    ...m.elements.map((e) => ({ id: e.id, line: `[${e.id}] ${e.label}` })),
+    ...m.sentences.map((s) => ({ id: s.id, line: `[${s.id}] ${s.text}` })),
+  ];
+  const earlier = shown.filter((t) => !pointable.has(t.id)).map((t) => t.line);
   return [
     `CHAPTER "${m.title}". WHAT THE TOUR JUST SAID, step by step:`,
     ...m.narration.map((say, i) => `${i + 1}. ${say}`),
+    ...(m.from === undefined
+      ? []
+      : [`Page ${m.from} is on screen when the question is asked: the answer points at what is shown there or later.`]),
     'WHAT IT POINTED AT (the IDs "target" may use):',
-    ...m.elements.map((e) => `[${e.id}] ${e.label}`),
-    ...m.sentences.map((s) => `[${s.id}] ${s.text}`),
+    ...shown.filter((t) => pointable.has(t.id)).map((t) => t.line),
+    ...(earlier.length
+      ? ['SHOWN EARLIER, on pages the answer does not go back to (not for "target"):', ...earlier]
+      : []),
   ].join('\n');
 }
 

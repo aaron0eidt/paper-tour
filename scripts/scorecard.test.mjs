@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { boardOrigin, boardSignature, render, scientificNumbers, scoreTour, summarize } from './scorecard.mjs';
+import { boardOrigin, boardSignature, readingOrder, render, scientificNumbers, scoreTour, summarize } from './scorecard.mjs';
 
 // The scorecard reads a tour folder and counts what is in it; run with: node --test scripts/scorecard.test.mjs
 
@@ -161,6 +161,9 @@ test('leaves a number empty when the file it comes from is missing', () => {
       'seconds',
       'sentBack',
       'lines',
+      'pages',
+      'back',
+      'front',
     ])
       assert.equal(score[key], null, key);
   } finally {
@@ -312,8 +315,131 @@ test('the summary adds the counts and joins the kinds', () => {
     assert.deepEqual(all.kinds, ['bars', 'formula', 'heatmap', 'plot', 'scatter']);
     const text = render([one]);
     assert.match(text, /^tour\s+type\s+steps/);
+    assert.match(text, /camera page of each step\nsample\s+- - - -\n/, 'no pages without the document');
     assert.match(text, /sample\s+paper\s+4\s+26/);
     assert.match(text, /all 1\s+4\s+26/);
+  } finally {
+    done();
+  }
+});
+
+// ------------------------------------------------------------------------------------------------ reading order
+
+const paper = {
+  ...doc,
+  pages: [1, 2, 3, 4, 5].map((n) => ({ n, width: 600, height: 800 })),
+  sections: [
+    { id: 's-abs', title: 'Abstract', level: 1, page: 1, block: 'p1.b1' },
+    { id: 's-1', title: '1 | INTRODUCTION', level: 1, page: 1, block: 'p1.b3' },
+    { id: 's-1-1', title: '1.1 | Setting', level: 1, page: 2, block: 'p2.b1' },
+    { id: 's-2', title: '2 | METHOD', level: 1, page: 3, block: 'p3.b1' },
+    { id: 's-3', title: '3 | RESULTS', level: 1, page: 5, block: 'p5.b1' },
+  ],
+  blocks: [
+    ['p1.b1', 1, 'heading', []],
+    ['p1.b2', 1, 'paragraph', ['p1.s1']],
+    ['p1.b3', 1, 'heading', []],
+    ['p1.b4', 1, 'paragraph', ['p1.s2']],
+    ['p2.b1', 2, 'heading', []],
+    ['p2.b2', 2, 'paragraph', ['p2.s1']],
+    ['p3.b1', 3, 'heading', []],
+    ['p3.b2', 3, 'paragraph', ['p3.s1']],
+    ['p4.b1', 4, 'paragraph', ['p4.s1']],
+    ['p5.b1', 5, 'heading', []],
+    ['p5.b2', 5, 'paragraph', ['p5.s1']],
+  ].map(([id, page, type, sentences]) => ({ id, page, type, bbox: [0, 0, 1, 1], text: '', sentences })),
+  sentences: [
+    ['p1.s1', 'p1.b2'],
+    ['p1.s2', 'p1.b4'],
+    ['p2.s1', 'p2.b2'],
+    ['p3.s1', 'p3.b2'],
+    ['p4.s1', 'p4.b1'],
+    ['p5.s1', 'p5.b2'],
+  ].map(([id, block]) => ({ id, page: Number(id[1]), block })),
+  figures: [{ id: 'tab1', page: 5, caption: 'Table 1.', panels: [] }],
+};
+const walk = (chapters) => ({
+  ...tour,
+  chapters: chapters.map((targets, c) => ({
+    id: `c${c}`,
+    title: `Chapter ${c}`,
+    steps: targets.map((target, i) =>
+      step(
+        `c${c}s${i}`,
+        'one two three',
+        target
+          ? [
+              { type: target.startsWith('tab') ? 'zoom' : 'focus', target },
+              { type: 'highlight', targets: ['p1.s1'] },
+            ]
+          : [],
+      ),
+    ),
+  })),
+});
+
+test('reading order counts the steps that jump back more than a page and the returns to the front after the first chapter', () => {
+  // The opening may point at the front; then the method, back to the introduction and its subsection, a table, a gap.
+  const flown = walk([
+    ['p1.s2', 'p3.s1'],
+    ['p1.s2', 'tab1', 'p2.s1', null, 'p4.s1', 'p3.s1'],
+  ]);
+  const order = readingOrder(flown, paper);
+  assert.deepEqual(order.pages, [1, 3, 1, 5, 2, null, 4, 3]);
+  assert.equal(
+    order.back,
+    2,
+    'method to the introduction, table to the subsection; one page back (4 to 3) is not counted',
+  );
+  assert.equal(order.front, 2, 'the subsection of the introduction is the front too; the first chapter is the opening');
+  // A tour that reads forward has neither.
+  const forward = readingOrder(walk([['p1.s2'], ['p3.s1', 'p4.s1', 'tab1']]), paper);
+  assert.deepEqual([forward.back, forward.front], [0, 0]);
+  // Without an introduction there is no front to return to.
+  const bare = { ...paper, sections: paper.sections.filter((s) => s.id !== 's-1') };
+  assert.equal(readingOrder(flown, bare).front, 0);
+  assert.equal(readingOrder(flown, bare).back, 2);
+});
+
+test('a title that only mentions an introduction is not the introduction, and a numbered one in any form is', () => {
+  const flown = walk([['p1.s2'], ['p1.s2', 'p3.s1']]);
+  const titled = (title) => ({
+    ...paper,
+    sections: [
+      { id: 's-title', title: 'An Introduction to Soil Probes', level: 1, page: 1, block: 'p1.b1' },
+      { id: 's-1', title, level: 1, page: 1, block: 'p1.b3' },
+      ...paper.sections.slice(2),
+    ],
+  });
+  // The title heading is not where the front ends: the real introduction is, so a return to its text is a return to the front.
+  assert.equal(readingOrder(flown, titled('1 | INTRODUCTION')).front, 1);
+  for (const title of [
+    'Introduction',
+    'II. INTRODUCTION',
+    'I | Introduction',
+    '1. Einleitung',
+    '1 Introduction and Motivation',
+    'Introduction and Related Work',
+  ])
+    assert.equal(readingOrder(flown, titled(title)).front, 1, title);
+  // Only a title that is not an introduction leaves the paper without a front.
+  assert.equal(readingOrder(flown, titled('1 | Background')).front, 0);
+});
+
+test('the scorecard reports the reading order of a tour against its document', () => {
+  const sample = walk([
+    ['p1.s2', 'p3.s1'],
+    ['p1.s2', 'tab1', 'p2.s1'],
+  ]);
+  const { dir, docs, done } = folders({ tour: sample, doc: paper });
+  try {
+    const score = scoreTour(dir, { docs });
+    assert.deepEqual([score.back, score.front], [2, 2]);
+    assert.deepEqual(score.pages, [1, 3, 1, 5, 2]);
+    const all = summarize([score, { ...score, back: null, front: null }]);
+    assert.deepEqual([all.back, all.front], [2, 2], 'a tour without its document adds nothing');
+    assert.match(render([score]), /sample\s+1 3 1 5 2\n/);
+    assert.match(render([score]), /back\s+front/);
   } finally {
     done();
   }

@@ -1066,6 +1066,7 @@ export class HarnessTourGenerator implements TourGenerator {
         chapter,
         site.beats.map((i) => beats[i]),
         doc,
+        plan.type === 'research_paper',
       );
       if (!material.ready) return skip('too little to ask about');
       const task: MuseMessage[] = [
