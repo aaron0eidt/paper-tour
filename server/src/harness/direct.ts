@@ -5,6 +5,7 @@ import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
 import type { Beat } from './beats';
 import { deckBrief } from './deck';
 import { BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
+import { agreementCheck } from './board-agreement';
 import type { DocType } from './doctype';
 import { proseSentences } from './paper-block';
 import type { DirectOptions } from './prompts';
@@ -68,6 +69,8 @@ export interface BeatTargets {
   /** The actual figure crop supplied to this direction call. Absent means no fine visual targeting. */
   imaged?: string;
   measured?: MeasuredTarget[];
+  /** The text the step stands on: its sentences, or a figure's caption and citations, or its equation; no table cells. */
+  source?: string;
 }
 
 /** Named areas of a figure or panel for pen marks: a 3 by 3 grid with some overlap, the four halves, or the whole. */
@@ -202,6 +205,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
         ]
       : [beat.target];
     const table = figure?.kind === 'table' ? { table: figure.id } : {};
+    const source = figure ? [figure.caption, ...quote(figure.referenced_by)].join('\n') : (equation?.text ?? '');
     if (!numeric || !figure)
       return {
         page,
@@ -210,7 +214,8 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
         tableCells,
         ...table,
         ...parts,
-        evidence: figure ? [figure.caption, ...quote(figure.referenced_by)].join('\n') : (equation?.text ?? ''),
+        source,
+        evidence: source,
       };
     // A table's numbers come from what its brief quotes: the caption, the citing sentences and the cells.
     const cited = figure.referenced_by.slice(0, 4);
@@ -226,6 +231,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
       ...parts,
       ...(more.length ? { visualEvidence: more } : {}),
       ...(views.length ? { views } : {}),
+      source,
       evidence: evidence.join('\n'),
     };
   }
@@ -240,7 +246,8 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
   );
   const ids = doc.blocks.filter((b) => blocks.has(b.id)).flatMap((b) => b.sentences);
   const targets = { page, sentences: ids.slice(0, 60), visuals: [], ...parts };
-  if (!numeric) return { ...targets, evidence: quote(beat.evidence).join('\n') };
+  const source = quote(beat.evidence).join('\n');
+  if (!numeric) return { ...targets, source, evidence: source };
   const have = [...new Set([...beat.evidence, ...(beat.boardEvidence ?? [])])];
   const more = dataSentences(doc, visual, have);
   const quoted = quote([...have, ...more]);
@@ -250,6 +257,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
   const views = offeredViews(table, visual);
   return {
     ...targets,
+    source,
     evidence: [...quoted, ...(table ? [tableEvidence(doc, table)] : [])].join('\n'),
     ...(more.length ? { visualEvidence: more } : {}),
     ...(table ? { table: table.id } : {}),
@@ -324,6 +332,7 @@ export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets,
     detail: beat.detail,
     ...(beat.move ? { move: beat.move } : {}),
     ...(beat.slides ? { slides: true } : {}),
+    ...(visual?.bare ? { bare: true } : {}),
     ...(type ? { type } : {}),
   };
 }
@@ -433,8 +442,8 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
   if ((beat.kind === 'figure' || beat.kind === 'formula') && !beat.move) {
     lines.push(
       beat.detail
-        ? 'TEACHING ROLE: build on the preceding overview with one concrete mechanism, worked example or contrast. Explain a new causal link and why it matters. Never restate the overview.'
-        : 'TEACHING ROLE: orient the learner: what this computes or depicts, its inputs and outputs, and its purpose. Leave a worked example or close-up causal mechanism for the following detail step.',
+        ? `TEACHING ROLE: build on the preceding overview with one concrete ${visual?.bare ? 'mechanism' : 'mechanism, worked example'} or contrast. Explain a new causal link and why it matters. Never restate the overview.`
+        : `TEACHING ROLE: orient the learner: what this computes or depicts, its inputs and outputs, and its purpose. Leave ${visual?.bare ? 'a' : 'a worked example or'} close-up causal mechanism for the following detail step.`,
     );
   }
   if (beat.role) lines.push(`THIS STEP OF THE TOUR: ${beat.role}`);
@@ -451,6 +460,11 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
         ? 'VISUAL FOR THIS STEP: none beyond the numerical worked example this step must show (example frames). Teach the rest on the page with highlights and marks.'
         : visualLine(visual),
     );
+    // The board is checked against the narration (board-agreement.ts): one explanation, not two.
+    if (visual.visual !== 'none')
+      lines.push(
+        'The board and "say" are one explanation: say what the board shows, with its title, labels and symbols, and draw only what you say.',
+      );
     if (exampleRules(beat, visual).offered && visual.frames?.length)
       lines.push(
         `WORKED EXAMPLE FRAMES MAY USE ONLY: ${exampleKinds(visual).join(', ')}. Pick each frame's kind by what it shows; the tour counts them toward its limit of each kind, so do not use another.`,
@@ -539,9 +553,10 @@ const ajv = new Ajv2020({ strict: false, allErrors: true });
 
 /**
  * Keep a direction whose shape and narration are usable; drop just the cues with an action or target this beat may not
- * use. The board is checked here too, against the rules for a tour step (visual-rules.ts): one that fails comes back as
- * `boardProblems`, without the board. A planned step keeps only its planned board, and an example only when its plan
- * allows one. Pen marks that cannot be drawn as asked are left out and come back as `visualProblems`.
+ * use. The board is checked here too, against the rules for a tour step (visual-rules.ts) and against the narration,
+ * which must be about it (board-agreement.ts): one that fails comes back as `boardProblems`, without the board. A
+ * planned step keeps only its planned board, and an example only when its plan allows one. Pen marks that cannot be
+ * drawn as asked are left out and come back as `visualProblems`.
  */
 export function cleanDirection(
   value: unknown,
@@ -603,7 +618,15 @@ export function cleanDirection(
   const results = reportsResults(beat, targets.table);
   const candidates = plannedKinds(visual)
     .filter((kind) => d[kind] !== undefined && d[kind] !== null)
-    .map((kind) => ({ kind, check: groundedCheck(checkBoard(kind, d[kind], targets.evidence), results) }));
+    .map((kind) => ({
+      kind,
+      check: agreementCheck(
+        groundedCheck(checkBoard(kind, d[kind], targets.evidence), results),
+        say,
+        { kind, value: d[kind] },
+        { source: targets.source },
+      ),
+    }));
   const boards = candidates.filter((c) => c.check.item);
   const boardProblems = candidates.flatMap((c) => c.check.problems.map((p) => `${c.kind}: ${p}`));
   if (boards.length > 1)
@@ -630,9 +653,10 @@ export function cleanDirection(
 
 /**
  * A step the plan put on a table's own numbers (withTableBoard) whose direction left the board out gets the best ready
- * board of the table: it is built from cells of the table and passed the same checks as a model's board, so a results
- * step never goes without its numbers. A board the model drew that failed its checks stays dropped and flagged, and a
- * step with an example is left alone. Null when nothing is added.
+ * board of the table: it is built from cells of the table and passes the checks of a board, not the one against the
+ * narration (board-agreement.ts), since it is the table the step stands on; so a results step never goes without its
+ * numbers. A board the model drew that failed its checks (that one included) stays dropped and flagged, and a step with
+ * an example is left alone. Null when nothing is added.
  */
 export function withReadyView(direction: Direction, targets: BeatTargets, visual?: StepVisual): Direction | null {
   const view = targets.views?.[0];

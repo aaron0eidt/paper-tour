@@ -1,6 +1,6 @@
 import { canonicalDistribution, distributionProblems } from '../../shared/distribution';
 import { canonicalHeatmap, heatmapProblems } from '../../shared/heatmap';
-import { plotProblems, type PlotItem } from '../../shared/plot';
+import { plotProblems, powerOfTen, type PlotItem } from '../../shared/plot';
 import { canonicalScatter, scatterProblems } from '../../shared/scatter';
 import { sceneProblems } from '../../shared/scene';
 import { canonicalShapes, shapesProblems } from '../../shared/shapes';
@@ -620,12 +620,27 @@ export function decimalsOf(value: number): number {
   return places > 6 ? 3 : Math.min(4, places);
 }
 
-/** A value as the board prints it: grouped digits, fixed places, and a % sign when that is the unit. */
-export function formatValue(value: number, places: number, unit?: string): string {
+/** A value of a thousand trillion or more as a power of ten, its mantissa with the places it was reported with
+ * (1.2345e20 is "1.2345×10²⁰", not twenty-one digits). `value` is what is shown, `final` the value it is counting to. */
+function powerValue(value: number, final: number): string {
+  const [lead, exp] = Math.abs(final).toExponential().split('e'); // the shortest digits that read back as the value
+  const places = decimalsOf(Number(lead));
+  let exponent = Number(exp);
+  if (Number((Math.abs(final) / 10 ** exponent).toFixed(places)) >= 10) exponent++; // 9.99996 rounds up to 10.0000
+  const mantissa = Number((value / 10 ** exponent).toFixed(places));
+  return mantissa === 0 ? '0' : `${mantissa.toFixed(places)}×${powerOfTen(exponent)}`;
+}
+
+/** A value as the board prints it: grouped digits, fixed places, and a % sign when that is the unit. A count that
+ * runs up to `final` keeps the form of that value, so that it does not change on the way. */
+export function formatValue(value: number, places: number, unit?: string, final = value): string {
   const rounded = Number(value.toFixed(places)) || 0; // no "-0.0" on the way up from zero
   // A nonzero result must never disappear merely because the normal decimal
-  // label has fewer places than its magnitude requires.
-  const text = value !== 0 && rounded === 0
+  // label has fewer places than its magnitude requires; a count of operations
+  // (2.3×10¹⁹) is a power of ten, not twenty digits.
+  const text = Math.abs(final) >= 1e15
+    ? powerValue(value, final)
+    : value !== 0 && rounded === 0
     ? Number(value.toPrecision(3)).toExponential()
     : rounded.toLocaleString('en-US', { minimumFractionDigits: places, maximumFractionDigits: places });
   return unit === '%' ? `${text}%` : text;

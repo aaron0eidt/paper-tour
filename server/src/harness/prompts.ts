@@ -5,7 +5,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@32';
+export const HARNESS_VERSION = 'paper-tour-harness@33';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -374,6 +374,8 @@ export interface DirectOptions {
   /** The kind of document, which sets the tone; a research paper by default. */
   type?: DocType;
   detail?: boolean;
+  /** The step is asked for its narration alone: no board and no worked example, so the task teaches neither. */
+  bare?: boolean;
 }
 
 /** How a slide step speaks: the lecturer's explanation, connected into the story, never the bullets read out. */
@@ -386,7 +388,7 @@ const SLIDE_VOICE = [
 export function directTask(
   language: string,
   brief: string,
-  { actions, board, words, fewest, move, slides, type, detail }: DirectOptions,
+  { actions, board, words, fewest, move, slides, type, detail, bare }: DirectOptions,
 ) {
   const pen = actions.includes('arrow') || actions.includes('circle');
   const page = actions.filter((a) => CUE_HELP[a]);
@@ -405,9 +407,10 @@ export function directTask(
   rules.push(
     'Scope results to the actual dataset, metric, baselines and conditions shown. A better score in a comparison is not universal superiority and does not establish why the improvement occurred. Do not invent causal links between compute cost, training size and accuracy; distinguish a mechanism the authors establish from a comparison they report.',
   );
-  rules.push(
-    'For every numerical example or function illustration, explicitly state the simplifying assumptions in the narration or board title. A scalar or lower-dimensional stand-in is not the full vector or matrix operation: say which special case is shown. Define the axes and parameter values needed to interpret it. Label invented inputs illustrative, never measured results from the document.',
-  );
+  if (!bare)
+    rules.push(
+      'For every numerical example or function illustration, explicitly state the simplifying assumptions in the narration or board title. A scalar or lower-dimensional stand-in is not the full vector or matrix operation: say which special case is shown. Define the axes and parameter values needed to interpret it. Label invented inputs illustrative, never measured results from the document.',
+    );
   rules.push(
     'Keep the page readable. For prose use a gentle sentence highlight, not page dimming. Reserve a spotlight for isolating a genuinely crowded diagram component when its surrounding detail interferes with understanding; an ordinary paragraph or whole page does not need it. Choose one primary emphasis per teaching moment and never pile dimming over another mark on the same content. A board should add a worked example or explanation rather than another copy of the same highlight.',
   );
@@ -417,7 +420,9 @@ export function directTask(
     );
   if (detail)
     rules.push(
-      'This follows an overview that the learner has already heard. Add ONE new worked example, mechanism, comparison or consequence. Do not repeat its introduction, symbol definitions or summary. Label made-up example inputs as illustrative; do not present them as paper results.',
+      bare
+        ? 'This follows an overview that the learner has already heard. Add ONE new mechanism, comparison or consequence. Do not repeat its introduction, symbol definitions or summary.'
+        : 'This follows an overview that the learner has already heard. Add ONE new worked example, mechanism, comparison or consequence. Do not repeat its introduction, symbol definitions or summary. Label made-up example inputs as illustrative; do not present them as paper results.',
       'For a diagram detail, point at the individual measured operation while explaining that operation, then the next operation when the narration reaches it. Use an enclosing panel only when the claim concerns the group structure or a relationship across its stages; do not keep outlining the whole panel while naming separate operations.',
     );
   if (help.length)
@@ -437,7 +442,9 @@ export function directTask(
     `TASK: write ONE step of a guided tour in ${JSON.stringify(language)} and say what to point at.`,
     brief,
     'NATIVE BOARD CHOICE: when the brief has a VISUAL FOR THIS STEP line, draw exactly that visual (or no board when it says none); otherwise a step may draw one top-level board, whatever the suggested board below. Choose the kind that shows what the document is trying to show at this step. Relations, weights, masks, a grid of results or a formula over two indices→heatmap. A trade-off between two quantities measured in the document→scatter (its own numbers, never illustrative). How matrix dimensions combine through an operation→shapes. How an output responds to an input or parameter, when the shape matters (saturation, decay, periodicity, a crossover; never a straight line)→plot. Dates, notice periods, deadlines, the steps of a procedure→timeline. A spread that narrows or shifts, before and after, the chance of a tail→distribution. The parts of an equation→formula. One key comparison on a single metric→bars. A real dependency structure with a branch, a merge or a loop that the page does not draw→flow (a chain of boxes is a list). Vector/matrix transformations with actual values or combined visual explanations→scene. A scene contains objects with stable id,type,x,y,w,h, optional color/text/values/plot/background. Types text/math/rect/circle/arrow/vector/matrix/plot are native, positions normalized0..1; vectors/arrows use signed endpoint deltas. Use stable IDs and meaningful motion across example frames. To place a vector, arrow or circle on a plot, set plotId to that plot object ID and give x,y and endpoint deltas in its DATA domain; never guess normalized canvas alignment with axes. Unbound shapes use normalized canvas units. Scene matrix values need source evidence or checked example provenance. A vector/matrix teaching example should transform its actual coordinates or values, not just move a title. Coordinates are layout, never substitute for declaring a numeric value in text or a matrix. Use example.frames for a numerical worked transformation; never also supply a top-level board. A step that reports results (a result or a table) draws only the document’s own numbers in bars, heatmap or scatter, copied exactly from the quoted evidence. Plot expressions use the safe functions listed in the example contract, variable x and optional parameter a.',
-    EXAMPLE_TASK,
+    bare
+      ? 'This step shows no worked example and no numbers of your own: explain the mechanism or consequence in words.'
+      : EXAMPLE_TASK,
     'FIGURE CHECK: before finalizing, verify every left/right/up/down statement against the actual axis labels, axis direction and the compared points. A desirable corner is not necessarily the trajectory of a parameter sweep. Separate direction of movement from whether each metric improves. Preserve multi-objective trade-offs instead of replacing a two-axis source plot with a one-metric chart that hides the cost; a scatter keeps both axes. Describe dominance only for the configurations and matched conditions the paper supports. If the needed positions are not clear, state the grounded metric relationship without inventing a spatial direction.',
     SOURCE_VISUAL_POLICY,
     ...(!detail && (!board || ['plot', 'formula', 'scene'].includes(board))
@@ -450,7 +457,7 @@ export function directTask(
     'LIVE PDF TUTORING: cue each important explanation at the exact spoken phrase that names its source element. Walk through the actual figure components, equation or table rows in narration order, using source highlights, measured outlines and concise explanatory labels. Use arrows only when their exact target is available and the renderer can keep their labels/strokes clear of printed content; never draw across table values. Do not point generically at an entire page while discussing a specific part. When source geometry cannot isolate an equation term reliably, copy that actual equation into a formula board and work through its terms rather than inventing coordinates. Use emphasis selectively so the current explanation remains obvious and readable.',
     'SOURCE ANCHORS: connect explanations to the actual equation, figure, table and sentences in the PDF. Combine precise source highlights/boxes with a live plot or transformation when the explanation concerns behavior the static source cannot show; do not require exhausting source annotations before choosing a useful side visual. If copying a formula alongside the paper, preserve the source equation and work with its actual terms: build/highlight the relevant subexpression, substitute values, or connect it to an informative plot/transformation. Do not replace source content with an unrelated generic diagram or copy the equation merely to repeat it.',
     'VISUAL PLAN FIRST: use plan to name the point of this step and what the page alone does not show, then the board kind that makes it visible, or none. Show separate quantities with their units and roles, never numbers squeezed into labels such as "Inputs -1.5 2". Coordinate each visual change with the explanation. Complexity helps only when it explains more: avoid a decorative picture and an empty three-box summary.',
-    'BE SELECTIVE: spend side-board space only on a point whose explanation gains from seeing a mechanism, relationship, trade-off, transformation or parameter effect. There is no visual quota, and no board is better than a weak one. Never repeat the same data twice, redraw what is on screen, or use a scene as a coloured text slide, a list of table rows or prose inside shapes. If the PDF already has the useful plot or table, teach its axes, baseline and important cases there with grounded cues. A glossary, trivial unit conversion, restated conclusion or recap is not a teaching contribution, and a recap needs no invented numerical case. Keep the PDF spacious when source cues suffice. This is not permission to omit a required worked example: render its actual quantities and transformation.',
+    `BE SELECTIVE: spend side-board space only on a point whose explanation gains from seeing a mechanism, relationship, trade-off, transformation or parameter effect. There is no visual quota, and no board is better than a weak one. Never repeat the same data twice, redraw what is on screen, or use a scene as a coloured text slide, a list of table rows or prose inside shapes. If the PDF already has the useful plot or table, teach its axes, baseline and important cases there with grounded cues. A glossary, trivial unit conversion, restated conclusion or recap is not a teaching contribution, and a recap needs no invented numerical case. Keep the PDF spacious when source cues suffice.${bare ? '' : ' This is not permission to omit a required worked example: render its actual quantities and transformation.'}`,
     'SELF-CORRECTION: a validation reply lists every detected field/problem in your last direction. Return the complete corrected direction, preserving valid narration, assumptions, inputs and frames. Fix all listed problems together. Unused top-level boards must be omitted, including when example.frames supplies the visuals; never add dummy objects to satisfy a schema. A scene text/math object needs its actual nonempty text, and a matrix needs its actual values. If a chosen representation cannot express signed values, use a scene matrix or function plot instead. Do not remove a required example or replace it with prose to evade validation.',
     ...rules.map((rule, i) => `${i + 1}. ${rule}`),
     ...(pen ? [`${example(BOARD_EXAMPLES.pen)} (cues only)`] : []),

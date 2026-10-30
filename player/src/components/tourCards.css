@@ -132,7 +132,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* What a tour still being written says about the rest, and what a tour that stopped says about what it has. */
+/* What a tour still being written says about the rest, what a tour that stopped says about what it has, and what a finished tour left out of its plan. */
 .tour-note {
   display: flex;
   align-items: flex-start;
@@ -153,7 +153,8 @@
   animation: tour-note-pulse 1.6s ease-in-out infinite;
 }
 
-.tour-note.stopped {
+.tour-note.stopped,
+.tour-note.left-out {
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;

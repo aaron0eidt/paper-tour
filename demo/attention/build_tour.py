@@ -1,4 +1,6 @@
-"""Builder for demo/attention/tour.json: edit the tour here, then run this file.
+"""Builder for the hand-written tour of the first scaffold (server/test/fixtures/attention-handcrafted.tour.json),
+which the tests keep as a reference for figure direction. The demo tour (demo/attention/tour.json) is written by the
+pipeline instead (npm run demo:prepare -- attention --regenerate).
 
 The narration and actions are hand-written below. The builder only turns anchor words into
 at_word indexes (so edits to the narration cannot silently shift timings) and writes the JSON
@@ -427,7 +429,7 @@ if __name__ == '__main__':
     tour = build()
     text = dump(tour)
     assert json.loads(text) == tour
-    out = sys.argv[1] if len(sys.argv) > 1 else f'{ROOT}/tour.json'
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, '../../server/test/fixtures/attention-handcrafted.tour.json')
     open(out, 'w').write(text)
     words = sum(len(s['say'].split()) for c in tour['chapters'] for s in c['steps'])
     steps = sum(len(c['steps']) for c in tour['chapters'])

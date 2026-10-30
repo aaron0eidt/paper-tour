@@ -162,19 +162,35 @@ export function scatterProblems(raw: unknown): string[] {
   return problems;
 }
 
-/** The clean item: trimmed text, options kept only when set. Call it once scatterProblems is empty. */
+/**
+ * Whether a linear axis cannot show these values: all above zero and spanning 1000 times or more (the small ones pile up
+ * at the start), or spanning 10 times or more past what tick labels spell out (a thousand trillion, a thousandth), as a
+ * count of operations or a gradient does. A log axis shows them, with powers of ten for labels. Values within a decade
+ * stay linear, where an axis labelled in powers of ten shows them better than a log axis of one or two ticks would.
+ */
+export function needsLogAxis(values: number[]): boolean {
+  if (!values.length || !values.every((value) => value > 0)) return false;
+  const [low, high] = [Math.min(...values), Math.max(...values)];
+  const spread = high / low;
+  return spread >= 1000 || (spread >= 10 && (high >= 1e15 || low < 1e-3));
+}
+
+/** The clean item: trimmed text, options kept only when set, a log axis where a linear one cannot show the values. Call it once scatterProblems is empty. */
 export function canonicalScatter(raw: unknown): ScatterItem {
   const item = raw as Record<string, unknown>;
   const title = clean(item.title);
+  const points = item.points as Record<string, unknown>[];
+  const log = (axis: 'x' | 'y') =>
+    item[`${axis}_log`] === true || needsLogAxis(points.map((point) => point[axis] as number));
   return {
     kind: 'scatter',
     ...(title ? { title } : {}),
     x_label: clean(item.x_label),
     y_label: clean(item.y_label),
-    ...(item.x_log === true ? { x_log: true } : {}),
-    ...(item.y_log === true ? { y_log: true } : {}),
+    ...(log('x') ? { x_log: true } : {}),
+    ...(log('y') ? { y_log: true } : {}),
     ...(item.better ? { better: item.better as ScatterItem['better'] } : {}),
-    points: (item.points as Record<string, unknown>[]).map((point) => {
+    points: points.map((point) => {
       const series = clean(point.series);
       return { label: clean(point.label), x: point.x as number, y: point.y as number, ...(series ? { series } : {}) };
     }),

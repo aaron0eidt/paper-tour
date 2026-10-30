@@ -31,7 +31,7 @@ import {
   type VisualPlan,
 } from '../src/harness/visual-plan';
 import { tableViews } from '../src/harness/tables';
-import { PACE, limited, type Pace } from '../src/harness/pace';
+import { PACE, limited, outlasting, type Pace } from '../src/harness/pace';
 
 // The first step arrives sooner (notes/ROADMAP.md, "no waiting"): the opening step of a paper has its visual planned alone,
 // ahead of the plan of the whole tour; the plan keeps that choice and counts it toward the tour's limits; a call that
@@ -408,9 +408,10 @@ test('a repair after a first try that gave nothing usable is held to the step’
   const slow = (name: string, effort: string) =>
     name === 'beat_direction' ? 2000 : PACE.callMs(name, effort as never);
   const events: Seen[] = [];
-  const { tour } = await run(hangs, events, { ...PACE, callMs: slow, stepMs: 0, repairMs: 60 });
+  // The limit starts before the request is built and sent, so a busy machine eats into what the hung request sees.
+  const { tour } = await run(hangs, events, { ...PACE, callMs: slow, stepMs: 0, repairMs: 300 });
   assert.ok(
-    waited >= 50 && waited < 1000,
+    waited >= 150 && waited < 1000,
     `the repair was given up on after the least time a repair gets, not ${waited} ms`,
   );
   assert.equal(asked, 3, 'a try, the repair that hung, and another');
@@ -509,4 +510,42 @@ test('the first try of the card and the opening reasons as little as the API all
   assert.deepEqual(efforts('paper_card'), ['minimal']);
   assert.deepEqual(efforts('opening_visual'), ['minimal']);
   assert.deepEqual(efforts('visual_plan'), ['medium', 'medium'], 'the plan and its repair both reason at medium');
+});
+
+test('a provider that is briefly unavailable is waited out, one wait per retry; any other fault goes to the caller', async () => {
+  const down = () => new ProcessingError('muse_unavailable', 'The model is temporarily unavailable.', true);
+  const never = new AbortController().signal;
+  let tries = 0;
+  const value = await outlasting(never, [0, 0, 0], async () => {
+    if (++tries < 3) throw down();
+    return 'answer';
+  });
+  assert.deepEqual([value, tries], ['answer', 3], 'two outages and then the answer');
+  tries = 0;
+  await assert.rejects(
+    outlasting(never, [0, 0], async () => {
+      tries++;
+      throw down();
+    }),
+    /temporarily unavailable/,
+  );
+  assert.equal(tries, 3, 'a try and a retry per wait, then the caller hears of it');
+  tries = 0;
+  await assert.rejects(
+    outlasting(never, [0, 0], async () => {
+      tries++;
+      throw new ProcessingError('muse_slow', 'The model took longer than 45 s.');
+    }),
+    /longer than 45 s/,
+  );
+  assert.equal(tries, 1, 'a slow call is for its caller to ask again, for less');
+  const stop = new AbortController();
+  const began = Date.now();
+  const waiting = outlasting(stop.signal, [10_000], async () => {
+    throw down();
+  });
+  setTimeout(() => stop.abort(), 20);
+  await assert.rejects(waiting);
+  assert.ok(Date.now() - began < 2000, 'a cancelled generation does not sit out the wait');
+  assert.deepEqual(PACE.outages, [2_000, 4_000, 8_000], 'the waits of a real generation');
 });

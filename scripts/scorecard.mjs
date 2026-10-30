@@ -123,10 +123,48 @@ function boardNumbers(item) {
 // A number as the text prints it: signs differ (the minus sign is a different character in many PDFs), so only the
 // magnitude is compared, and thousands separators are dropped.
 const magnitude = (n) => String(Number(Math.abs(n).toPrecision(9)));
+// Scientific notation as the grounding reads it: a copy of the rules in server/src/harness/board.ts (numbersIn), which
+// shared/notation-cases.json keeps in step: both test files check the same table of cases.
+const SPACE = String.raw`(?:\s|\\[,;:!]|~)*`;
+const MULTIPLY = String.raw`(?:\\times|\\cdot|[×*·⋅∙]|[xX](?=${SPACE}10))`;
+const SIGNED = String.raw`[+−–-]?\d{1,3}`;
+const EXPONENT = String.raw`(?:\^\s*\{\s*\(?\s*(${SIGNED})\s*\)?\s*\}|\^\s*\(\s*(${SIGNED})\s*\)|(?:\^|\*\*)\s*(${SIGNED})|([⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,3}))(?![.,]?\d)`;
+const MANTISSA = String.raw`[+−-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?|\.\d+)`;
+const POWER = new RegExp(
+  String.raw`(?<![\p{L}\p{N}.,^])(?:(${MANTISSA})${SPACE}${MULTIPLY}${SPACE})?10\s*${EXPONENT}`,
+  'gu',
+);
+const E_NOTATION = /(?<![\p{L}\p{N}.])\d+(?:\.\d+)?[eE][+−-]?\d+/gu;
+const FLATTENED = /(?<![\p{L}\p{N}.,])([+−–-]?)([1-9][.,]\d{1,2})(?!\d)\s*[·×⋅∙]\s*10(?:([1-9]\d)|[−–-]([1-9]\d?))(?![.,]?\d)/gu;
+const plainMantissa = (text) =>
+  /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(text) ? text.replace(/,/g, '') : text.replace(',', '.');
+const exponentOf = (text) =>
+  text
+    .replace(/[−–⁻]/g, '-')
+    .replace(/⁺/g, '+')
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (digit) => '⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(digit));
+/** The numbers a text prints in scientific notation, with their signs. */
+export function scientificNumbers(text) {
+  const powers = [...text.matchAll(POWER)].map((m) => {
+    const exponent = exponentOf(m[2] ?? m[3] ?? m[4] ?? m[5]);
+    if (Math.abs(Number(exponent)) > 300) return NaN; // no power of ten of a double
+    if (m[1] === undefined) return Number(`1e${exponent}`);
+    const sign = /^[+−-]/.test(m[1]) ? m[1][0] : '';
+    return Number(`${sign.replace('−', '-')}${plainMantissa(m[1].slice(sign.length))}e${exponent}`);
+  });
+  return [
+    ...powers,
+    ...[...text.matchAll(E_NOTATION)].map((m) => Number(m[0].replace('−', '-'))),
+    ...[...text.matchAll(FLATTENED)].map((m) => Number(`${m[2].replace(',', '.')}e${m[3] ?? `-${m[4]}`}`)),
+  ].filter(Number.isFinite);
+}
 /** The magnitudes of every number printed in the document's text and captions. */
 function printedNumbers(doc) {
   const text = [...doc.blocks.map((b) => b.text), ...doc.figures.map((f) => f.caption ?? '')].join('\n');
-  return new Set((text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => magnitude(Number(n.replaceAll(',', '')))));
+  return new Set([
+    ...(text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => magnitude(Number(n.replaceAll(',', '')))),
+    ...scientificNumbers(text).map(magnitude),
+  ]);
 }
 
 /** Every ID a step points at. */
@@ -164,6 +202,81 @@ function findDoc(folder, tour, docsDir) {
     if (doc) return doc;
   }
   return null;
+}
+
+// Reading order: where the camera of each step goes, by page. A guide reads forward; a step that flies back to the
+// front of the paper or to an earlier part of it breaks the thread.
+const INTRODUCTION =
+  /^(?:introduction|einleitung|introducción|introduccion|introduzione)(?:\s+(?:and|&|und|y|e)\s+[\p{L}\s]+)?$/iu;
+
+/** A section's title without the number in front of it ("1 | Introduction", "II. INTRODUCTION"). */
+const titled = (section) =>
+  section.title
+    .replace(/^\d+(?:\.\d+)*\.?\s*[|:)\-–]?\s*/, '')
+    .replace(/^[IVXLC]+\s*[|:).\-–]\s*/, '')
+    .trim();
+
+/** The leading number of a section: its printed number, else the one its title starts with ("1.1 | Study system"). */
+const sectionNumber = (section) =>
+  section.number ?? /^((?:\d+(?:\.\d+)*|[IVXLC]+))(?=[\s.|:)-])/i.exec(section.title.trim())?.[1] ?? '';
+
+/**
+ * Where the abstract and the introduction end, as the block that opens the next section that is not nested in the
+ * introduction (by number or by level); null when the document has no introduction, or nothing after it.
+ */
+function frontEnd(doc) {
+  const sections = doc.sections ?? [];
+  const at = sections.findIndex((s) => INTRODUCTION.test(titled(s)));
+  if (at < 0) return null;
+  const intro = sections[at];
+  const number = sectionNumber(intro);
+  const next = sections.slice(at + 1).find((s) => {
+    const mine = sectionNumber(s);
+    return !((number && mine.startsWith(`${number}.`)) || s.level > intro.level);
+  });
+  const blocks = doc.blocks ?? [];
+  const block = next && blocks.findIndex((b) => b.id === next.block);
+  return block >= 0 ? block : null;
+}
+
+/**
+ * The page the camera of each step goes to (the target of its first focus or zoom; null for a step that moves it
+ * nowhere), whether that is the abstract or the introduction, and the two counts the tour is judged by: steps whose
+ * page is more than one before the previous step's (back), and steps after the first chapter that return to the
+ * abstract or the introduction (front).
+ */
+export function readingOrder(tour, doc) {
+  const blocks = new Map((doc.blocks ?? []).map((b, i) => [b.id, { page: b.page, at: i }]));
+  const where = new Map(blocks);
+  for (const s of doc.sentences ?? []) {
+    const block = blocks.get(s.block);
+    if (block) where.set(s.id, { page: s.page ?? block.page, at: block.at });
+  }
+  for (const e of doc.equations ?? []) where.set(e.id, { page: e.page, at: blocks.get(e.block)?.at ?? null });
+  for (const f of doc.figures ?? []) {
+    where.set(f.id, { page: f.page, at: null });
+    for (const p of f.panels ?? []) where.set(p.id, { page: f.page, at: null });
+  }
+  for (const p of doc.pages ?? []) where.set(`page${p.n}`, { page: p.n, at: null });
+  const end = frontEnd(doc);
+  const endPage = end === null ? 0 : (doc.blocks[end].page ?? 0);
+  // A figure has no place among the blocks: it is in the front when its page ends before the next section opens.
+  const inFront = (spot) => end !== null && (spot.at !== null ? spot.at < end : spot.page < endPage);
+  const steps = tour.chapters.flatMap((chapter, c) => chapter.steps.map((step) => ({ step, first: c === 0 })));
+  const pages = [];
+  let back = 0;
+  let front = 0;
+  let before = null;
+  for (const { step, first } of steps) {
+    const target = step.actions.find((a) => a.type === 'focus' || a.type === 'zoom')?.target;
+    const spot = where.get(target);
+    pages.push(spot?.page ?? null);
+    if (!spot?.page) continue;
+    if (before !== null && spot.page < before - 1) back++;
+    if (!first && inFront(spot)) front++;
+    before = spot.page;
+  }
+  return { pages, back, front };
 }
 
 /** What the run's tokens cost at list price, in US dollars; null without usage or a price for the model. */
@@ -226,6 +339,7 @@ export function scoreTour(folder, { docs = join(root, 'demo') } = {}) {
   const seconds = sum(
     steps.map((step) => words(step.say) / WORDS_PER_SECOND + (step.hold_ms ?? DEFAULT_HOLD_MS) / 1000),
   );
+  const reading = doc && readingOrder(tour, doc);
   return {
     tour: basename(resolve(folder)),
     type: TYPES[tour.doc_type] ?? tour.doc_type ?? '-',
@@ -242,6 +356,9 @@ export function scoreTour(folder, { docs = join(root, 'demo') } = {}) {
     repeated,
     checkpoints: steps.filter((step) => step.checkpoint).length,
     ids: known ? { found: targets.filter((id) => known.has(id)).length, all: targets.length } : null,
+    pages: reading ? reading.pages : null,
+    back: reading ? reading.back : null,
+    front: reading ? reading.front : null,
     lines,
     calls: metadata?.modelCalls ?? null,
     tokens: metadata?.usage?.totalTokens ?? null,
@@ -280,6 +397,8 @@ export function summarize(scores) {
     other: total('other'),
     repeated: total('repeated'),
     checkpoints: total('checkpoints'),
+    back: total('back'),
+    front: total('front'),
     ids: ids.length ? { found: sum(ids.map((s) => s.ids.found)), all: sum(ids.map((s) => s.ids.all)) } : null,
     lines: lines.length
       ? {
@@ -337,6 +456,8 @@ export function render(scores) {
       ['degr', (s) => num(s.degraded)],
       ['ids', (s) => ratio(s.ids)],
       ['lines', (s) => ratio(s.lines && { found: s.lines.ok, all: s.lines.all })],
+      ['back', (s) => num(s.back)],
+      ['front', (s) => num(s.front)],
     ],
     rows,
   );
@@ -358,6 +479,9 @@ export function render(scores) {
   );
   const width = Math.max(...rows.map((r) => r.tour.length));
   const kinds = rows.map((s) => `${s.tour.padEnd(width)}  ${s.kinds.join(' ') || dash}`);
+  const order = scores.map(
+    (s) => `${s.tour.padEnd(width)}  ${s.pages ? s.pages.map((page) => page ?? dash).join(' ') : dash}`,
+  );
   const mean = (key, digits = 1) => {
     const present = scores.map((s) => s[key]).filter((n) => n !== null);
     return present.length ? (sum(present) / present.length).toFixed(digits) : dash;
@@ -369,6 +493,9 @@ export function render(scores) {
     '',
     'board kinds',
     ...kinds,
+    '',
+    'camera page of each step',
+    ...order,
     '',
     `mean per tour: ${mean('steps')} steps, ${mean('words', 0)} words, ${mean('minutes')} min to play, ` +
       `${mean('calls', 0)} model calls, ${mean('seconds')} s to write`,
@@ -386,6 +513,8 @@ const LEGEND = [
   'every number is printed in doc.json.',
   'illus: declared illustrative. other: equations, flows, functions and drawings.',
   'repeat: a board whose data an earlier step already showed. checkpoints: steps where the learner tries first.',
+  "back: steps whose camera page is more than one before the previous step's. front: steps after the first chapter",
+  'whose camera is on the abstract or the introduction. Both need doc.json.',
 ];
 
 function main(argv) {

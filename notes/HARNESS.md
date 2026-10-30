@@ -100,7 +100,25 @@ instructions, and "choose IDs and labels only from the lists you are given".
    says the document is something else.
 2. **Plan the steps.** Code does it for a paper (by its claims, else by its argument) and for an exercise sheet. One
    call does it for a slide deck and for other kinds of document. The preset sets the size: a standard tour has 10 to
-   12 steps, never more than 30.
+   12 steps, never more than 30. A claim tour reads forward through the paper (`claim-anchors.ts`): the abstract and
+   the introduction only state a claim, so the claims call may cite the body alone for a claim's reason, evidence and
+   catch (the schema lists no front-matter sentence there, code removes any that slip through, and the authors' own
+   limits it is shown are body sentences too), and only the opening step points at the front. Front matter is the
+   abstract, the introduction and a review of others' work (related work anywhere; a plain background section only
+   right after the introduction and when it holds no equation). A figure or table belongs to it only when no sentence
+   of the body cites it and it is printed before the body, an equation when its section is front matter; a teaser is
+   no reason for a claim. Each chapter's "what changed" step points at the sentence that matches the claim best (BM25)
+   in what the sections of the earliest things the claim rests on say before them, else at the best match among the
+   sentences the claim itself cites (those no step shows included, wherever the paper prints them), and else at the
+   sentences where the authors state it; never at the lead of a section or any sentence that neither the claim cites nor
+   shares words with it, nor at the sentence the next step begins with; the authors' own sentences for the claim go to the writer as a note, not
+   to the camera. The evidence points at its tables and figures, the catch at the limitations; the cited sentences are
+   kept in the paper's order. A reason the paper gives after its evidence is taught after it. Chapters take the order
+   that costs the camera the fewest jumps back (`bestOrder`), and a catch from the end of the paper is told after the
+   last claim when the next chapter starts earlier; the catches kept are those of the claims the model lists first. The
+   quick check of a paper answers on the page the camera is on or after it (`checkTargets`), not on one it showed
+   earlier. `scripts/scorecard.mjs` reports the result as `back` (steps whose page is more than one before the
+   previous step's) and `front` (steps after the first chapter on the abstract or the introduction).
 3. **Plan the opening visual.** For a paper, a small call at `minimal` effort chooses the board of the first step
    from the card alone, while the claims are still being found, so that the first step does not wait for the plan of
    the whole tour. Without a usable answer the first step waits for that plan.
@@ -113,16 +131,37 @@ instructions, and "choose IDs and labels only from the lists you are given".
    The model cannot name anything else. An exercise part is solved, checked numerically and taught in
    several steps instead.
 6. **Check in code, degrade instead of failing.** Narration, anchors, pen marks, worked examples and boards are
-   validated; the model corrects its whole answer up to twice, with every fault listed. What still fails is dropped
-   and recorded, not published: a step keeps its narration and page cues and loses the board, example or pen marks
-   (`degrade.ts`), and a step without usable narration takes the fallback step or, for a detail, is omitted. At the end,
-   a board that repeats an earlier step's data or fails a check of the whole tour goes with its cues. A tour fails only
-   when its other contents do.
+   validated (a board must also share something with its narration, `board-agreement.ts`: one whose title, labels and numbers
+   the narration never says and the sentences of the step never print counts as a failed board; the check is
+   conservative, since a false alarm drops a good board. On 145 boards of the saved tours (ten documents, English and
+   German) it flags three: a layout fixture, the fish "Arrivals within 5 cm" and the ants "Synchrony in tiny versus
+   huge", which only paraphrases its narration. The same check holds the method visual of an exercise part, but not
+   yet the frames of a worked example or the boards of an answer to a question, which are drawn in calls of their
+   own); the model corrects its whole answer up to twice, with every fault listed, a board's faults of every kind in
+   one turn. What still fails is dropped and recorded, not
+   published: a step keeps its narration and page cues and loses the board, example or pen marks (`degrade.ts`), and a
+   step without usable narration takes the fallback step or, for a detail, is omitted. At the end, a board that
+   repeats an earlier step's data or fails a check of the whole tour goes with its cues. A tour fails only when its
+   other contents do. Every loss has its cause (`shared/coverage.ts`): the model took too long (`slow`), what
+   it wrote failed the checks (`checks`), its answer could not be used (`invalid`), it would only repeat earlier content
+   (`repeats`) or the model was not available (`unavailable`). The cause is in the events (`beat.omitted`,
+   `beat.fallback` and `beat.degraded` carry it), in the generation's provenance (`omittedDetails` with `code` and
+   `reason`, `degraded` with `causes`, and `leftOut`) and in the tour itself (`left_out`), from which the reader's cover
+   and recap say briefly which steps and worked examples were left out and why (a lost visual or pen mark is not
+   worth a learner's attention there), and the activity checklist says it per step.
 7. **Time limits** (`pace.ts`). Each call has a limit by name (the card 40 s, the claims 60 s, the opening visual 20 s,
-   a step 30 s at low effort and 45 s otherwise). A call that outlives it fails as `muse_slow` and is asked again at
-   once. A step has 40 s for repairs: later repairs get what is left of it, at least 15 s, including a repair after a
-   first try that gave nothing usable. Past it, the step publishes without what failed. A slow call with a board
-   planned is asked again lean: low effort and no board.
+   a step 30 s at low effort and below and 45 s at medium and above). A call that outlives it fails as `muse_slow` and
+   is asked again at once, for less: a slow step degrades instead of vanishing. Each such try reasons one rung less (a
+   detail starts at medium, so medium, low, minimal) and drops the board it was planned to draw; a worked example the
+   step must show is asked for once more at less effort and then given up, which the step records as dropped for the
+   time. A lighter try asks for the narration alone and keeps what the earlier tries were told; its task teaches no worked
+   example (it has no field for one) and says so, and it has a repair of its own. A step that is nothing without its
+   example (its narration alone only repeats the overview) is left out for that reason. An exercise part whose solution is too slow
+   is asked again one rung lower (high, medium). A step has 40 s for repairs: later repairs get what is left of it, at
+   least 15 s, including a repair after a first try that gave nothing usable. Past it, the step publishes without what
+   failed, and the cause recorded is how its last correction ended: too slow, unusable, unavailable or, when it came
+   back and still failed, the checks; with no correction asked for, the time if the step had used its own, else the
+   checks (the tries ran out).
 8. **Partial tours.** Each time the next steps in tour order are finished, the generator announces the tour of exactly
    those steps (`tour.partial`), assembled and checked like the final one. The worker keeps the latest, and the reader
    plays it while the rest is written.
@@ -175,6 +214,17 @@ equation.
 1. **Retrieve.** BM25 over sentences, captions, equations and section titles, plus the current step's evidence and its
    neighbours: the top 12 passages and any figure among them. A question about "this" or "here" adds the crop on
    screen, or the box the user drew.
+   *What the learner points at is the topic.* With a selected region or the figure or equation on screen, the search
+   uses that element's own text (the sentences and labels in the region, a figure's caption, the labels inside it and
+   the sentences that cite it, an equation with the sentences around it; the nearest sentences for a region with no
+   text). A question made only of generic words ("explain", "was heißt das?", `ask-generic.ts`) is about that and
+   nothing else, however it opens ("und warum?", "and what is this?"): no step narration, no earlier exchanges, in the
+   search or in the prompt. A question with a topic of its own leads, and the selection tips the ranking; the
+   narration counts in full when the step points at the same elements, otherwise only its sentences that share words
+   with the selection. Only a reference to the conversation itself ("you said …", "your last answer", "du hast
+   gesagt", "vorhin") brings all of it back; a bare "earlier" or "zuvor" does not, papers say those too. The prompt
+   gets the same parts, and names the boards the tour showed without their titles when the step is about something
+   else.
 2. **Answer** (Spark at `minimal` effort, `low` for a calculation or an exercise sheet, `medium` on the retry after an
    unusable answer): `plan`; `answerable` (yes, partly or
    no); one to three `steps`, each with `say` (at most 60 words) and cues restricted to the retrieved IDs; an optional

@@ -707,8 +707,10 @@ test('a step whose narration is unusable takes the fallback beat, even when its 
   ).generate({ ...input, onEvent: record(events) });
   assert.ok(steps(tour).length > 3);
   assert.ok(!steps(tour).some((s) => s.id === 'formula-2'));
-  assert.ok((metadata.omittedDetails as string[]).includes('formula-2'));
-  assert.ok(events.some((e) => e.type === 'beat.omitted' && e.data.beat === 'formula-2'));
+  // Its narration never came out usable, and that is what the record says.
+  const omitted = (metadata.omittedDetails as { beat: string; code: string }[]).find((d) => d.beat === 'formula-2');
+  assert.equal(omitted?.code, 'invalid');
+  assert.ok(events.some((e) => e.type === 'beat.omitted' && e.data.beat === 'formula-2' && e.data.code === 'invalid'));
   assert.equal(events.find((e) => e.type === 'beat.completed' && e.data.beat === 'formula-2')!.data.outcome, 'omitted');
 });
 
@@ -788,7 +790,7 @@ test('a step loses its board and board cues but keeps its narration and page cue
 // ------------------------------------------------------------------------------------------------------- the prompts
 
 test('the prompts and the visual plan state the rules briefly', () => {
-  assert.equal(HARNESS_VERSION, 'paper-tour-harness@32');
+  assert.equal(HARNESS_VERSION, 'paper-tour-harness@33');
   const prompt = (board?: Parameters<typeof directTask>[2]['board']) =>
     directTask('en', 'BRIEF', { actions: ['highlight', 'board_focus'], board, words: 120 });
   assert.match(prompt(), /A step that reports results \(a result or a table\) draws only the document’s own numbers/);

@@ -2,7 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Action, BoardItem, Step } from '../../shared/paper';
 import { HarnessTourGenerator } from './harness-fixture';
-import { EXPLAIN, card, direct, doc, input, planFor, provider, reply, settings, type Request } from './plan-fixture';
+import {
+  EXPLAIN,
+  about,
+  card,
+  direct,
+  doc,
+  input,
+  planFor,
+  provider,
+  reply,
+  settings,
+  type Request,
+} from './plan-fixture';
 import { boardSignature, dropRepeatedBoards } from '../src/harness/assemble';
 import { planBeats, type Beat } from '../src/harness/beats';
 import { BOARD_KINDS } from '../src/harness/board';
@@ -302,7 +314,7 @@ test('a planned step keeps only its planned board, and a step planned without on
       { label: 'Cost cut', value: 18.2 },
     ],
   };
-  const answer = { plan: 'p', say: EXPLAIN, cues: [], flow, bars };
+  const answer = { plan: 'p', say: `${EXPLAIN} ${about({ flow, bars })}`, cues: [], flow, bars };
   const planned: StepVisual = { visual: 'flow', idea: 'Show the loop.', data: '' };
   const none: StepVisual = { visual: 'none', idea: '', data: '' };
   const kept = cleanDirection(answer, method, beatTargets(method, doc, planned), false, planned)!;
@@ -339,7 +351,7 @@ function model(
     if (request.name === 'paper_card') return card;
     if (request.name === 'visual_plan') return planFor(request, (id) => plan[id] ?? 'none');
     const id = /STEP KIND: (\w+)/.exec(request.task)?.[1] ?? '';
-    return direct(request, EXPLAIN, boards[id] ?? {});
+    return direct(request, boards[id] ? `${EXPLAIN} ${about(boards[id])}` : EXPLAIN, boards[id] ?? {});
   };
 }
 /** A flow with a loop: the valve's effect is read again by the probe. A chain of the same boxes would be rejected. */

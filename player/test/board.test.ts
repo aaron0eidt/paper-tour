@@ -370,6 +370,25 @@ test('values print with the places they were reported with', () => {
   eq(formatValue(0.1234, decimalsOf(0.1234)), '0.1234', 'short reported paper precision is retained');
   eq(formatValue(12.5, 1, '%'), '12.5%');
   eq(formatValue(12.5, 1, 'BLEU'), '12.5', 'other units are shown once, not per value');
+  eq(formatValue(2.3e19, decimalsOf(2.3e19)), '2.3×10¹⁹', 'a count of operations is a power of ten, not twenty digits');
+  eq(formatValue(-4e15, 0), '-4×10¹⁵');
+  eq(formatValue(123456789012, 0), '123,456,789,012', 'billions keep their digits');
+  eq(formatValue(1.2345e20, decimalsOf(1.2345e20)), '1.2345×10²⁰', 'a power of ten keeps the digits it was reported with');
+  eq(formatValue(2e19, decimalsOf(2e19)), '2×10¹⁹');
+  eq(formatValue(9.6e18, decimalsOf(9.6e18)), '9.6×10¹⁸');
+  eq(formatValue(1.23456e21, decimalsOf(1.23456e21)), '1.2346×10²¹', 'at most 4 places, as a decimal prints');
+  eq(formatValue(1.23456789e21, decimalsOf(1.23456789e21)), '1.235×10²¹', 'a long tail needs only 3');
+  eq(formatValue(9.99996e20, decimalsOf(9.99996e20)), '1.0000×10²¹', 'a mantissa that rounds up to 10 moves the exponent');
+  eq(formatValue(9.99999e19, 0, undefined, 9.99999e19), '1.0000×10²⁰');
+  eq(formatValue(9.99996e20 * 0.5, 0, undefined, 9.99996e20), '0.5000×10²¹', 'and so does every step on the way there');
+});
+
+test('a count up to a power of ten keeps that form all the way, counting its mantissa', () => {
+  const shown = [0.01, 0.1, 0.4, 0.7, 1].map((progress) => formatValue(2.3e19 * progress, 0, undefined, 2.3e19));
+  eq(shown, ['0', '0.2×10¹⁹', '0.9×10¹⁹', '1.6×10¹⁹', '2.3×10¹⁹']);
+  eq(formatValue(0, 0, undefined, 2.3e19), '0', 'nothing yet is 0');
+  eq(formatValue(-2.3e19 * 0.4, 0, undefined, -2.3e19), '-0.9×10¹⁹');
+  eq(formatValue(5e14 * 0.5, 0, undefined, 5e14), '250,000,000,000,000', 'under a thousand trillion it counts in digits');
 });
 
 test('bars share a zero line; labels go above them on a narrow board', () => {

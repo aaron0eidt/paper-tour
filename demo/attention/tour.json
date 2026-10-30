@@ -1,426 +1,673 @@
 {
   "schema": "paper-tour/tour@0.1",
-  "title": "Attention Is All You Need: a guided tour",
+  "title": "Attention Replaces Recurrence for Translation",
   "paper": "attention",
   "doc_sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
   "level": "grad",
+  "doc_type": "research_paper",
   "voices": {
-    "host": {"lang": "en-US", "name_hint": "Samantha", "rate": 1.0},
-    "expert": {"lang": "en-US", "name_hint": "Daniel", "rate": 1.0}
+    "host": {
+      "lang": "en-US",
+      "rate": 1
+    }
   },
   "chapters": [
     {
-      "id": "recurrence",
-      "title": "The trouble with recurrence",
+      "id": "problem",
+      "title": "Why sequential models are too slow",
       "steps": [
         {
-          "id": "welcome",
-          "say": "Welcome to a guided tour of Attention Is All You Need, the twenty seventeen paper that introduced the Transformer.",
+          "id": "problem-1",
+          "say": "This document proposes a new translation architecture and asks how to escape step-by-step recurrent computation. Its main claims are attention-only sequence transduction, significantly faster parallelizable training, and new state-of-the-art translation quality.",
           "actions": [
-            {"type": "focus", "target": "p1.b2"},
-            {"type": "highlight", "targets": ["p1.s1"], "at_word": 6}
-          ]
-        },
-        {
-          "id": "abstract",
-          "say": "The starting point: the dominant sequence models were recurrent or convolutional encoder-decoder networks, the best of them connected through attention. The proposal is the Transformer, based solely on attention, dispensing with recurrence and convolutions entirely.",
-          "actions": [
-            {"type": "focus", "target": "p1.b12"},
-            {"type": "highlight", "targets": ["p1.s11"], "at_word": 4},
-            {"type": "highlight", "targets": ["p1.s12"], "at_word": 14},
-            {"type": "highlight", "targets": ["p1.s13"], "color": "green", "at_word": 21}
-          ]
-        },
-        {
-          "id": "sequential",
-          "say": "Why drop recurrence? A recurrent network computes each hidden state from the previous one, which rules out parallelizing within a training example. Later efficiency tricks helped, but that sequential constraint remained.",
-          "actions": [
-            {"type": "focus", "target": "p2.b3"},
-            {"type": "highlight", "targets": ["p2.s5"], "at_word": 6},
-            {"type": "highlight", "targets": ["p2.s6"], "color": "orange", "at_word": 15},
-            {"type": "highlight", "targets": ["p2.s7"], "style": "underline", "at_word": 22},
-            {"type": "highlight", "targets": ["p2.s8"], "color": "pink", "at_word": 26}
-          ]
-        },
-        {
-          "id": "attention-only",
-          "say": "Attention already modeled dependencies regardless of distance, but almost always alongside a recurrent network. The Transformer keeps only the attention, and reaches a new state of the art in translation after just twelve hours on eight P100 GPUs.",
-          "actions": [
-            {"type": "highlight", "targets": ["p2.s9"]},
-            {"type": "highlight", "targets": ["p2.s10"], "at_word": 8},
-            {"type": "highlight", "targets": ["p2.s11"], "color": "green", "at_word": 16},
-            {"type": "highlight", "targets": ["p2.s12"], "color": "green", "at_word": 21}
-          ]
-        },
-        {
-          "id": "distance",
-          "speaker": "expert",
-          "say": "It's also about distance. In convolutional models like ByteNet and ConvS2S, relating two positions takes more operations the farther apart they are. In the Transformer it's constant, at the cost of some averaging that multi-head attention counteracts.",
-          "actions": [
-            {"type": "focus", "target": "p2.b7"},
-            {"type": "highlight", "targets": ["p2.s14"], "style": "underline", "at_word": 5},
-            {"type": "highlight", "targets": ["p2.s15"], "color": "orange", "at_word": 11},
-            {"type": "highlight", "targets": ["p2.s17"], "color": "green", "at_word": 26}
+            {
+              "type": "focus",
+              "target": "p2.s5"
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p2.s5"
+              ],
+              "color": "yellow",
+              "at_word": 11
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p2.s6"
+              ],
+              "color": "yellow",
+              "at_word": 12
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p2.s8"
+              ],
+              "color": "yellow",
+              "at_word": 11
+            }
           ]
         }
       ]
     },
     {
-      "id": "architecture",
-      "title": "The architecture in one picture",
+      "id": "claim-1",
+      "title": "Attention-only sequence transduction model",
       "steps": [
         {
-          "id": "fig1-overview",
-          "say": "Here is the whole model, Figure 1: the encoder on the left, the decoder on the right. Each is a stack of N identical layers, with N equals six.",
+          "id": "idea-1",
+          "say": "The conclusion is that a full encoder-decoder translator can be built from attention alone. Because recurrent and convolutional layers are replaced by stacked multi-head self-attention, global dependencies are drawn directly between input and output positions without step-by-step recurrence.",
           "actions": [
-            {"type": "zoom", "target": "fig1"},
-            {"type": "box", "target": "fig1", "region": [0.11, 0.368, 0.475, 0.728], "label": "Encoder", "color": "blue", "at_word": 8, "persist": true},
-            {"type": "box", "target": "fig1", "region": [0.525, 0.0, 0.882, 0.728], "label": "Decoder", "color": "orange", "at_word": 13, "persist": true},
-            {"type": "note", "anchor": "fig1", "region": [0.02, 0.54, 0.095, 0.59], "text": "**N = 6** identical layers in each stack", "side": "left", "at_word": 20}
+            {
+              "type": "focus",
+              "target": "p2.s24"
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p2.s24"
+              ],
+              "color": "yellow",
+              "at_word": 10
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p2.s25"
+              ],
+              "color": "yellow",
+              "at_word": 22
+            }
           ]
         },
         {
-          "id": "encoder-layer",
-          "say": "Each encoder layer has two sub-layers: multi-head self-attention, then a position-wise feed-forward network. Each one is wrapped in a residual connection followed by layer normalization; those are the Add and Norm boxes.",
+          "id": "method-1",
+          "say": "Stacked attention works because each layer splits its work. The board shows one head's slice as an illustrative special case. A wide input row meets a tall projection, so width 512 becomes width 64 for that head. Eight such heads run side by side in different learned subspaces, then rejoin to width 512 at similar cost to one large head. Feed-forward layers then process each position separately.",
           "actions": [
-            {"type": "box", "target": "fig1", "region": [0.125, 0.553, 0.455, 0.695], "color": "green", "at_word": 6},
-            {"type": "box", "target": "fig1", "region": [0.125, 0.388, 0.455, 0.52], "color": "green", "at_word": 11},
-            {"type": "note", "anchor": "fig1", "region": [0.0, 0.394, 0.437, 0.42], "text": "Each sub-layer outputs `LayerNorm(x + Sublayer(x))`, always of width **d_model = 512**", "side": "left", "at_word": 16}
-          ]
+            {
+              "type": "focus",
+              "target": "p3.s2"
+            },
+            {
+              "type": "board",
+              "item": {
+                "kind": "shapes",
+                "title": "One head projects 512 to 64",
+                "terms": [
+                  {
+                    "kind": "matrix",
+                    "name": "X",
+                    "rows": "n",
+                    "cols": "512"
+                  },
+                  {
+                    "kind": "op",
+                    "op": "times"
+                  },
+                  {
+                    "kind": "matrix",
+                    "name": "W^Q_i",
+                    "rows": "512",
+                    "cols": "64"
+                  },
+                  {
+                    "kind": "op",
+                    "op": "equals"
+                  },
+                  {
+                    "kind": "matrix",
+                    "name": "head_i",
+                    "rows": "n",
+                    "cols": "64"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p3.s2"
+              ],
+              "color": "blue"
+            },
+            {
+              "type": "board_focus",
+              "part": 0,
+              "at_word": 21
+            },
+            {
+              "type": "board_focus",
+              "part": 2,
+              "at_word": 32
+            }
+          ],
+          "hold_ms": 800
         },
         {
-          "id": "decoder-cross",
-          "say": "The decoder layer adds a third sub-layer in the middle, which performs multi-head attention over the output of the encoder stack. That lets every decoder position attend over all input positions.",
+          "id": "figure-1",
+          "say": "The Transformer handles translation with attention alone and no recurrence or convolution. Because its encoder and decoder stacks use only multi-head attention and feed-forward blocks. The test is WMT 2014 translation measured in BLEU: 28.4 on English-to-German, over 2 BLEU above the previous best including ensembles, and 41.8 on English-to-French as a new single-model best. That covers those two text tasks, not other modalities.",
           "actions": [
-            {"type": "box", "target": "fig1", "region": [0.562, 0.41, 0.792, 0.469], "color": "green", "at_word": 5}
-          ]
-        },
-        {
-          "id": "decoder-mask",
-          "say": "Its first sub-layer is masked, so a position cannot attend to later positions. With the outputs also shifted right by one, each prediction depends only on earlier outputs.",
-          "actions": [
-            {"type": "box", "target": "fig1", "region": [0.562, 0.576, 0.792, 0.659], "color": "pink", "at_word": 4},
-            {"type": "box", "target": "fig1", "region": [0.555, 0.932, 0.8, 1.0], "color": "pink", "at_word": 17}
-          ]
-        },
-        {
-          "id": "output-head",
-          "say": "At the top, a linear layer and a softmax turn the decoder stack's output into next-token probabilities.",
-          "actions": [
-            {"type": "box", "target": "fig1", "region": [0.562, 0.095, 0.792, 0.183], "color": "green", "at_word": 4}
+            {
+              "type": "zoom",
+              "target": "fig1"
+            },
+            {
+              "type": "board_clear"
+            },
+            {
+              "type": "box",
+              "target": "fig1",
+              "region": [
+                0.1180328,
+                0.3769575,
+                0.4639344,
+                0.7214765
+              ],
+              "color": "green",
+              "at_word": 14
+            },
+            {
+              "type": "box",
+              "target": "fig1",
+              "region": [
+                0.204918,
+                0.5961969,
+                0.4393443,
+                0.6599553
+              ],
+              "color": "green",
+              "at_word": 19
+            },
+            {
+              "type": "box",
+              "target": "fig1",
+              "region": [
+                0.5344262,
+                0.2136465,
+                0.8737705,
+                0.7203579
+              ],
+              "color": "green",
+              "at_word": 23
+            }
           ]
         }
       ]
     },
     {
-      "id": "scaled-attention",
-      "title": "Scaled dot-product attention",
+      "id": "claim-2",
+      "title": "Faster more parallelizable training",
       "steps": [
         {
-          "id": "attention-def",
-          "say": "So what does attention compute? It maps a query and a set of key-value pairs to an output: a weighted sum of the values, where each weight comes from how well the query fits the corresponding key.",
+          "id": "idea-2",
+          "say": "The Transformer trains much faster and parallelizes better because self-attention handles all positions together. The old recurrent way builds h_t from h_{t-1} step by step, so n tokens need n sequential steps, while the illustrative timeline shows those n steps collapsing into one parallel attention block.",
           "actions": [
-            {"type": "clear"},
-            {"type": "focus", "target": "p3.b7"},
-            {"type": "highlight", "targets": ["p3.s16"], "at_word": 6},
-            {"type": "highlight", "targets": ["p3.s17"], "at_word": 19}
+            {
+              "type": "focus",
+              "target": "p6.s25"
+            },
+            {
+              "type": "board",
+              "item": {
+                "kind": "timeline",
+                "title": "Illustrative chain versus one step",
+                "unit": "step",
+                "source": "illustrative",
+                "anchor": {
+                  "label": "Layer input"
+                },
+                "events": [
+                  {
+                    "label": "Step 1 done",
+                    "after": "Layer input",
+                    "offset": 1,
+                    "position": 1
+                  },
+                  {
+                    "label": "Attention done",
+                    "after": "Layer input",
+                    "offset": 1,
+                    "position": 1
+                  },
+                  {
+                    "label": "Step n done",
+                    "after": "Layer input",
+                    "offset": 4,
+                    "position": 4
+                  }
+                ],
+                "spans": [
+                  {
+                    "label": "Recurrent chain",
+                    "from": "Step 1 done",
+                    "to": "Step n done",
+                    "role": "term",
+                    "start": 1,
+                    "end": 4
+                  },
+                  {
+                    "label": "Parallel block",
+                    "from": "Layer input",
+                    "to": "Attention done",
+                    "role": "window",
+                    "start": 0,
+                    "end": 1
+                  }
+                ]
+              }
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p6.s25"
+              ],
+              "color": "yellow",
+              "at_word": 10
+            },
+            {
+              "type": "board_focus",
+              "part": 3,
+              "at_word": 29
+            },
+            {
+              "type": "board_focus",
+              "part": 4,
+              "at_word": 42
+            }
+          ],
+          "hold_ms": 800
+        },
+        {
+          "id": "figure-2",
+          "say": "All positions interact in one parallel step with self-attention. A recurrent layer must process tokens in order, so each token waits for the previous hidden state, forcing sequential steps that grow with sentence length. As an illustrative analogy, it is like messaging everyone together versus relaying a message down a line.",
+          "actions": [
+            {
+              "type": "zoom",
+              "target": "tab1"
+            },
+            {
+              "type": "board_clear"
+            },
+            {
+              "type": "box",
+              "target": "p6.b4",
+              "color": "blue",
+              "at_word": 4
+            },
+            {
+              "type": "box",
+              "target": "p6.b5",
+              "color": "blue",
+              "at_word": 20
+            }
           ]
         },
         {
-          "id": "sdpa-figure",
-          "say": "The paper's version is the left half of Figure 2. Multiply the queries with the keys, scale, optionally mask, apply a softmax, and multiply the resulting weights with the values.",
+          "id": "result-1",
+          "say": "The Transformer trains much faster on translation than recurrent alternatives because self-attention runs in parallel across positions. The base model finishes in 12 hours and the big model in 3.5 days on eight P100 GPUs. The plot titled BLEU dev against PPL dev shows perplexity on the horizontal and BLEU on the vertical, with better up-left, where big sits above base, while single-head and two-layer variants sit lower-right.",
           "actions": [
-            {"type": "zoom", "target": "fig2.a"},
-            {"type": "box", "target": "fig2.a", "region": [0.257, 0.786, 0.598, 0.86], "color": "blue", "at_word": 10, "persist": true},
-            {"type": "box", "target": "fig2.a", "region": [0.308, 0.643, 0.548, 0.717], "color": "blue", "at_word": 16, "persist": true},
-            {"type": "box", "target": "fig2.a", "region": [0.238, 0.505, 0.615, 0.577], "color": "blue", "at_word": 18, "persist": true},
-            {"type": "box", "target": "fig2.a", "region": [0.257, 0.367, 0.596, 0.439], "color": "blue", "at_word": 21, "persist": true},
-            {"type": "box", "target": "fig2.a", "region": [0.391, 0.226, 0.757, 0.298], "color": "blue", "at_word": 23, "persist": true}
+            {
+              "type": "focus",
+              "target": "p7.s24"
+            },
+            {
+              "type": "board",
+              "item": {
+                "kind": "scatter",
+                "title": "BLEU (dev) against PPL (dev)",
+                "x_label": "PPL (dev)",
+                "y_label": "BLEU (dev)",
+                "better": "up-left",
+                "points": [
+                  {
+                    "label": "base",
+                    "x": 4.92,
+                    "y": 25.8
+                  },
+                  {
+                    "label": "single-head",
+                    "x": 5.29,
+                    "y": 24.9
+                  },
+                  {
+                    "label": "two-layer",
+                    "x": 6.11,
+                    "y": 23.7
+                  },
+                  {
+                    "label": "big",
+                    "x": 4.33,
+                    "y": 26.4
+                  }
+                ],
+                "source": "document"
+              }
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p7.s24"
+              ],
+              "color": "green",
+              "at_word": 20
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p7.s26"
+              ],
+              "color": "green",
+              "at_word": 29
+            },
+            {
+              "type": "board_focus",
+              "part": 3,
+              "at_word": 57
+            },
+            {
+              "type": "board_focus",
+              "part": 2,
+              "at_word": 65
+            }
+          ],
+          "hold_ms": 800
+        },
+        {
+          "id": "limitation-1",
+          "say": "The speed advantage does not automatically extend to very long sequences. The authors note self-attention cost grows with length, so they suggest limiting attention to a neighborhood of size r, which lengthens dependency paths. Do not conclude unrestricted attention stays cheap for arbitrarily long inputs.",
+          "actions": [
+            {
+              "type": "focus",
+              "target": "p7.s2"
+            },
+            {
+              "type": "board_clear"
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p7.s1"
+              ],
+              "color": "orange",
+              "at_word": 8
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p7.s2"
+              ],
+              "color": "orange",
+              "at_word": 22
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p7.s3"
+              ],
+              "color": "orange",
+              "at_word": 31
+            }
           ]
         },
         {
-          "id": "mask",
-          "say": "The mask is how the decoder hides the future. Inside this same attention, every connection to a later position is set to minus infinity before the softmax, so it gets zero weight.",
+          "id": "check-1",
+          "say": "Before the next step: if self-attention is limited to a nearby neighborhood for very long inputs, what happens to the longest dependency path?",
           "actions": [
-            {"type": "spotlight", "target": "fig2.a", "region": [0.238, 0.367, 0.615, 0.577], "at_word": 1},
-            {"type": "note", "anchor": "fig2.a", "region": [0.238, 0.505, 0.615, 0.577], "text": "Illegal connections are set to `−∞` before the softmax, so their weight is **0**", "side": "left", "at_word": 22}
-          ]
+            {
+              "type": "focus",
+              "target": "p7.s2"
+            }
+          ],
+          "checkpoint": {
+            "prompt": "Before the next step: if self-attention is limited to a nearby neighborhood for very long inputs, what happens to the longest dependency path?",
+            "hints": [
+              "Think back to the part about handling very long sequences.",
+              "Full attention links any two spots in one step; limited windows change that.",
+              "Longer spans then need many hops chained together."
+            ]
+          }
         },
         {
-          "id": "equation-1",
-          "say": "Packing the queries, keys and values into matrices Q, K and V gives equation one: the softmax of Q times K transpose, divided by the square root of d k, multiplied by V.",
+          "id": "check-1-answer",
+          "say": "It grows to order n over r. Restricting each position to r neighbors forces signals to hop across more steps to span the sequence.",
           "actions": [
-            {"type": "clear"},
-            {"type": "focus", "target": "eq1"},
-            {"type": "highlight", "targets": ["p4.s7", "p4.s8"]},
-            {"type": "box", "target": "eq1", "label": "Equation 1", "color": "blue", "at_word": 13}
-          ]
-        },
-        {
-          "id": "why-scale",
-          "say": "Why scale? For large d k, unscaled dot products lose to additive attention, and the authors suspect why: they grow large, pushing the softmax into regions with extremely small gradients. Scaling by one over root d k counteracts this.",
-          "actions": [
-            {"type": "focus", "target": "p4.b10"},
-            {"type": "highlight", "targets": ["p4.s14"], "color": "orange", "at_word": 6},
-            {"type": "highlight", "targets": ["p4.s15"], "at_word": 16},
-            {"type": "highlight", "targets": ["p4.s16"], "color": "green", "at_word": 30}
-          ]
-        },
-        {
-          "id": "variance",
-          "speaker": "expert",
-          "say": "The footnote makes it concrete: if the components of q and k are independent with mean zero and variance one, their dot product has variance d k. Dividing by root d k restores variance one.",
-          "actions": [
-            {"type": "focus", "target": "p4.b13"},
-            {"type": "highlight", "targets": ["p4.s21"], "at_word": 13},
-            {"type": "highlight", "targets": ["p4.s22"], "at_word": 24},
-            {"type": "note", "anchor": "p4.b13", "text": "`Var(q · k) = d_k`, so `Var(q · k / √d_k) = 1`", "side": "bottom", "at_word": 24}
+            {
+              "type": "focus",
+              "target": "p7.s3"
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p7.s3"
+              ],
+              "color": "green",
+              "at_word": 1
+            }
           ]
         }
       ]
     },
     {
-      "id": "multi-head",
-      "title": "Multi-head attention",
+      "id": "claim-3",
+      "title": "State-of-the-art translation quality",
       "steps": [
         {
-          "id": "mh-figure",
-          "say": "The right half of Figure 2 is multi-head attention. Queries, keys and values are projected h times with different learned projections, attention runs on each in parallel, and the outputs are concatenated and projected once more.",
+          "id": "idea-3",
+          "say": "Translation quality reaches a new state of the art on English-German and English-French. It moves past the previous best recurrent, convolutional and ensemble systems because attention alone captures long-range dependencies through shorter paths and joint subspaces. The EN-DE BLEU scores board shows the Transformer big bar above prior ensembles and single models.",
           "actions": [
-            {"type": "zoom", "target": "fig2.b"},
-            {"type": "box", "target": "fig2.b", "region": [0.014, 0.645, 0.896, 0.776], "color": "blue", "at_word": 14, "persist": true},
-            {"type": "box", "target": "fig2.b", "region": [0.019, 0.43, 0.87, 0.585], "color": "blue", "at_word": 21, "persist": true},
-            {"type": "box", "target": "fig2.b", "region": [0.287, 0.278, 0.558, 0.35], "color": "blue", "at_word": 31, "persist": true},
-            {"type": "box", "target": "fig2.b", "region": [0.31, 0.12, 0.545, 0.2], "color": "blue", "at_word": 33, "persist": true}
-          ]
+            {
+              "type": "focus",
+              "target": "p8.s9"
+            },
+            {
+              "type": "board",
+              "item": {
+                "kind": "bars",
+                "title": "EN-DE BLEU scores",
+                "unit": "BLEU",
+                "higher_is_better": true,
+                "bars": [
+                  {
+                    "label": "Transformer big",
+                    "value": 28.4
+                  },
+                  {
+                    "label": "ConvS2S Ensemble",
+                    "value": 26.36
+                  },
+                  {
+                    "label": "GNMT Ensemble",
+                    "value": 26.3
+                  },
+                  {
+                    "label": "MoE",
+                    "value": 26.03
+                  }
+                ]
+              }
+            },
+            {
+              "type": "board_focus",
+              "part": 0,
+              "at_word": 43
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p8.s9"
+              ],
+              "color": "yellow"
+            }
+          ],
+          "hold_ms": 800
         },
         {
-          "id": "mh-numbers",
-          "say": "The paper uses h equals eight heads, each working in sixty-four dimensions: the model width of five hundred twelve, divided by eight. So the total cost is similar to one head with full dimensionality.",
+          "id": "method-2",
+          "say": "Long-range links stay easy to learn because every position reaches every other in one step. The grid shows illustrative layer 5 attention, with rows as queries and columns as keys, so the making row lighting the distant difficult column means direct weighting without intermediate steps. Different heads can learn different such links at once, so averaging does not wash them out. These numbers are illustrative.",
           "actions": [
-            {"type": "spotlight", "target": "fig2.b", "region": [0.0, 0.42, 1.0, 0.6], "at_word": 5},
-            {"type": "note", "anchor": "fig2.b", "region": [0.83, 0.46, 1.0, 0.58], "text": "**h = 8** heads, each with `d_k = d_v = 512 / 8 = 64`", "side": "right", "at_word": 10}
-          ]
+            {
+              "type": "focus",
+              "target": "p5.s3"
+            },
+            {
+              "type": "board",
+              "item": {
+                "kind": "heatmap",
+                "title": "Illustrative layer 5 attention",
+                "rows": [
+                  "making",
+                  "it",
+                  "more",
+                  "difficult"
+                ],
+                "cols": [
+                  "making",
+                  "it",
+                  "more",
+                  "difficult"
+                ],
+                "values": [
+                  [
+                    0.1,
+                    0.05,
+                    0.25,
+                    0.6
+                  ],
+                  [
+                    0.1,
+                    0.7,
+                    0.1,
+                    0.1
+                  ],
+                  [
+                    0.05,
+                    0.1,
+                    0.7,
+                    0.15
+                  ],
+                  [
+                    0.15,
+                    0.05,
+                    0.2,
+                    0.6
+                  ]
+                ],
+                "source": "illustrative",
+                "view": "links",
+                "unit": "weight"
+              }
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p5.s4"
+              ],
+              "color": "blue",
+              "at_word": 10
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p5.s3"
+              ],
+              "color": "blue",
+              "at_word": 10
+            },
+            {
+              "type": "board_focus",
+              "part": 0,
+              "at_word": 32
+            }
+          ],
+          "hold_ms": 800
         },
-        {
-          "id": "mh-why",
-          "say": "Why several heads? They let the model jointly attend to information from different representation subspaces at different positions. With a single head, averaging inhibits this.",
-          "actions": [
-            {"type": "clear"},
-            {"type": "focus", "target": "p5.b2"},
-            {"type": "highlight", "targets": ["p5.s3"], "at_word": 7},
-            {"type": "highlight", "targets": ["p5.s4"], "color": "orange", "at_word": 20}
-          ]
-        },
-        {
-          "id": "mh-ablation",
-          "speaker": "expert",
-          "say": "The ablations agree. In Table 3, a single head is zero point nine BLEU worse than the best setting, but quality also drops off with too many heads.",
-          "actions": [
-            {"type": "zoom", "target": "tab3", "region": [0.0, 0.0, 1.0, 0.335]},
-            {"type": "highlight", "targets": ["p9.b6"], "color": "pink", "at_word": 7},
-            {"type": "highlight", "targets": ["p9.b5", "p9.b9"], "color": "green", "at_word": 17},
-            {"type": "highlight", "targets": ["p9.b10"], "color": "orange", "at_word": 20}
-          ]
-        },
-        {
-          "id": "three-uses",
-          "say": "In the full model, multi-head attention appears in three ways: encoder-decoder attention, with queries from the decoder and keys and values from the encoder; self-attention in the encoder; and masked self-attention in the decoder.",
-          "actions": [
-            {"type": "focus", "target": "p5.b9"},
-            {"type": "highlight", "targets": ["p5.s11"], "color": "blue", "at_word": 10},
-            {"type": "highlight", "targets": ["p5.s14"], "color": "green", "at_word": 24},
-            {"type": "highlight", "targets": ["p5.s17", "p5.s18"], "color": "pink", "at_word": 29}
-          ]
-        }
-      ]
-    },
-    {
-      "id": "positions",
-      "title": "Word order, and why self-attention",
-      "steps": [
-        {
-          "id": "positional",
-          "say": "With no recurrence and no convolution, the model has no built-in notion of word order. So positional encodings are added to the input embeddings at the bottom of both stacks.",
-          "actions": [
-            {"type": "zoom", "target": "fig1", "region": [0.0, 0.7, 1.0, 0.9]},
-            {"type": "box", "target": "fig1", "region": [0.0, 0.742, 0.36, 0.797], "color": "pink", "at_word": 16},
-            {"type": "box", "target": "fig1", "region": [0.645, 0.745, 1.0, 0.797], "color": "pink", "at_word": 19}
-          ]
-        },
-        {
-          "id": "sinusoids",
-          "say": "They are sines and cosines of different frequencies. The authors hypothesized this lets the model attend by relative position easily. Learned embeddings worked about as well, but sinusoids may extrapolate to longer sequences.",
-          "actions": [
-            {"type": "focus", "target": "p6.b11"},
-            {"type": "highlight", "targets": ["p6.s8"], "at_word": 2},
-            {"type": "box", "target": "p6.b11", "color": "blue", "at_word": 7},
-            {"type": "highlight", "targets": ["p6.s12"], "at_word": 17},
-            {"type": "highlight", "targets": ["p6.s13"], "color": "blue", "at_word": 20},
-            {"type": "highlight", "targets": ["p6.s14"], "color": "green", "at_word": 27}
-          ]
-        },
-        {
-          "id": "table-1",
-          "say": "Section four makes the case with Table 1, comparing layer types on complexity per layer, minimum sequential operations, and maximum path length between positions.",
-          "actions": [
-            {"type": "zoom", "target": "tab1"},
-            {"type": "box", "target": "tab1", "region": [0.318, 0.0, 0.562, 1.0], "color": "blue", "at_word": 12, "persist": true},
-            {"type": "box", "target": "tab1", "region": [0.584, 0.0, 0.71, 1.0], "color": "orange", "at_word": 16, "persist": true},
-            {"type": "box", "target": "tab1", "region": [0.732, 0.0, 0.99, 1.0], "color": "green", "at_word": 20, "persist": true}
-          ]
-        },
-        {
-          "id": "table-1-rows",
-          "say": "A recurrent layer needs order n sequential operations, and its path length is order n. Self-attention connects all positions with a constant number of operations, so both are order one.",
-          "actions": [
-            {"type": "highlight", "targets": ["p6.b5"], "color": "pink", "at_word": 1},
-            {"type": "highlight", "targets": ["p6.b4"], "color": "green", "at_word": 15}
-          ]
-        },
-        {
-          "id": "table-1-cost",
-          "say": "The price is order n squared times d per layer, versus n times d squared for recurrence. That's faster whenever the sequence length n is smaller than the representation size d, which is the usual case for sentences in translation.",
-          "actions": [
-            {"type": "spotlight", "target": "tab1", "region": [0.0, 0.36, 0.52, 0.66], "at_word": 1},
-            {"type": "note", "anchor": "tab1", "region": [0.38, 0.36, 0.5, 0.66], "text": "Self-attention is cheaper when **n < d**", "side": "right", "at_word": 18}
-          ]
-        }
-      ]
-    },
-    {
-      "id": "results",
-      "title": "Training and results",
-      "steps": [
-        {
-          "id": "training",
-          "say": "The models were trained on WMT twenty fourteen: four and a half million English-German sentence pairs, and thirty-six million English-French sentences. On eight P100 GPUs, the base model took twelve hours, the big one three and a half days.",
-          "actions": [
-            {"type": "clear"},
-            {"type": "focus", "target": "p7.b7"},
-            {"type": "highlight", "targets": ["p7.s16"], "color": "blue", "at_word": 8},
-            {"type": "highlight", "targets": ["p7.s18"], "color": "blue", "at_word": 17},
-            {"type": "highlight", "targets": ["p7.s22"], "color": "green", "at_word": 22},
-            {"type": "highlight", "targets": ["p7.s24"], "color": "green", "at_word": 26},
-            {"type": "highlight", "targets": ["p7.s26"], "color": "green", "at_word": 32}
-          ]
-        },
-        {
-          "id": "table-2-en-de",
-          "say": "Now Table 2. On English-to-German, the big Transformer reaches twenty-eight point four BLEU, more than two points above the best previous models, ensembles included.",
-          "actions": [
-            {"type": "zoom", "target": "tab2"},
-            {"type": "highlight", "targets": ["p8.b14"], "at_word": 6, "persist": true},
-            {"type": "box", "target": "tab2", "region": [0.469, 0.925, 0.518, 0.949], "color": "green", "at_word": 9, "persist": true},
-            {"type": "box", "target": "tab2", "region": [0.461, 0.763, 0.525, 0.783], "color": "orange", "at_word": 17}
-          ]
-        },
-        {
-          "id": "table-2-en-fr",
-          "say": "On English-to-French it scores forty-one point eight, a new single-model state of the art, and higher than every ensemble in the table.",
-          "actions": [
-            {"type": "box", "target": "tab2", "region": [0.586, 0.925, 0.635, 0.949], "color": "green", "at_word": 4, "persist": true},
-            {"type": "box", "target": "tab2", "region": [0.579, 0.613, 0.642, 0.786], "color": "orange", "at_word": 15}
-          ]
-        },
-        {
-          "id": "table-2-cost",
-          "say": "Then look at training cost. Even the base model beats every earlier model and ensemble on English-to-German, at a fraction of their estimated training cost.",
-          "actions": [
-            {"type": "highlight", "targets": ["p8.b13"], "color": "blue", "at_word": 7},
-            {"type": "box", "target": "tab2", "region": [0.788, 0.841, 0.911, 0.871], "color": "blue", "at_word": 19}
-          ]
-        },
-        {
-          "id": "bleu-discrepancy",
-          "speaker": "expert",
-          "say": "A detail for careful readers: the text of section six point one gives forty-one point zero for English-to-French, while the abstract and Table 2 both report forty-one point eight.",
-          "actions": [
-            {"type": "clear"},
-            {"type": "focus", "target": "p8.b20"},
-            {"type": "highlight", "targets": ["p8.s13"], "color": "orange", "at_word": 13},
-            {"type": "note", "anchor": "p8.s13", "text": "Section 6.1 says **41.0**; the abstract and Table 2 say **41.8**", "at_word": 18}
-          ]
-        }
-      ]
-    },
-    {
-      "id": "visualizations",
-      "title": "What the heads learned",
-      "steps": [
         {
           "id": "figure-3",
-          "say": "The appendix looks inside the trained model. Figure 3 shows encoder self-attention in layer five of six, for the word making only, one color per head. Many heads reach the distant words more difficult.",
+          "say": "The Transformer achieves the best reported quality on the two tested translation benchmarks because its scores top prior single and ensemble systems. On English-German newstest2014, the big model reaches 28.4 BLEU versus 26.36 BLEU for the strongest prior ConvS2S ensemble, a gain over 2 BLEU. This covers only WMT 2014 English-German and English-French newstest2014, not other languages or tasks.",
           "actions": [
-            {"type": "zoom", "target": "fig3"},
-            {"type": "box", "target": "fig3", "region": [0.518, 0.0, 0.545, 0.31], "color": "blue", "at_word": 20},
-            {"type": "box", "target": "fig3", "region": [0.706, 0.695, 0.757, 1.0], "color": "orange", "at_word": 30}
-          ]
-        },
-        {
-          "id": "figure-4-top",
-          "say": "Figure 4 shows two heads, also in layer five, apparently involved in anaphora resolution. The top panel is the full attention pattern of head five.",
-          "actions": [
-            {"type": "zoom", "target": "fig4"},
-            {"type": "box", "target": "fig4.a", "label": "Head 5, all words", "color": "blue", "at_word": 15}
-          ]
-        },
-        {
-          "id": "figure-4-bottom",
-          "say": "The bottom panel isolates the word its, for heads five and six. The attention is very sharp: it lands on application, and on Law, the word its refers to.",
-          "actions": [
-            {"type": "zoom", "target": "fig4.b"},
-            {"type": "box", "target": "fig4.b", "region": [0.3003, 0.0122, 0.3219, 0.2878], "color": "blue", "at_word": 6},
-            {"type": "box", "target": "fig4.b", "region": [0.3377, 0.6918, 0.3592, 0.9878], "color": "orange", "at_word": 20},
-            {"type": "box", "target": "fig4.b", "region": [0.0381, 0.6918, 0.0597, 0.9878], "color": "orange", "at_word": 23}
-          ]
-        },
-        {
-          "id": "figure-5",
-          "say": "Figure 5 shows two more heads from the same layer. Their patterns seem related to the structure of the sentence, and they clearly learned to perform different tasks.",
-          "actions": [
-            {"type": "zoom", "target": "fig5"},
-            {"type": "box", "target": "fig5.a", "color": "green", "at_word": 3},
-            {"type": "box", "target": "fig5.b", "color": "pink", "at_word": 10}
-          ]
-        },
-        {
-          "id": "caution",
-          "speaker": "expert",
-          "say": "A word of caution: these are a few selected examples, and the captions hedge with words like apparently and seems. Suggestive pictures, not proof of what each head does.",
-          "actions": [
-            {"type": "focus", "target": "p15.b5"},
-            {"type": "highlight", "targets": ["p15.s2"], "at_word": 9},
-            {"type": "highlight", "targets": ["p15.s1"], "color": "orange", "at_word": 19}
+            {
+              "type": "zoom",
+              "target": "tab2"
+            },
+            {
+              "type": "board_clear"
+            },
+            {
+              "type": "box",
+              "target": "tab2",
+              "color": "green",
+              "at_word": 9
+            },
+            {
+              "type": "box",
+              "target": "p8.b14",
+              "color": "green",
+              "at_word": 26
+            },
+            {
+              "type": "box",
+              "target": "p8.b12",
+              "color": "green",
+              "at_word": 36
+            }
           ]
         }
       ]
     },
     {
-      "id": "wrap-up",
-      "title": "Wrap-up",
+      "id": "takeaway",
+      "title": "What to remember and try next",
       "steps": [
         {
-          "id": "conclusion",
-          "say": "To sum up: the Transformer replaces recurrent layers with multi-headed self-attention, trains significantly faster than recurrent or convolutional architectures, and set a new state of the art on both WMT twenty fourteen translation tasks.",
+          "id": "takeaway-1",
+          "say": "Attention alone gives both speed and quality in translation. Because parallel direct links replace sequential steps while preserving long dependencies, training runs faster and tested pairs reach new records. The reach is the reported translation tasks, not other modalities. Please ask about why multiple heads beat one head.",
           "actions": [
-            {"type": "focus", "target": "p10.b20"},
-            {"type": "highlight", "targets": ["p10.s7"], "at_word": 5},
-            {"type": "highlight", "targets": ["p10.s8"], "color": "green", "at_word": 11},
-            {"type": "highlight", "targets": ["p10.s9"], "color": "blue", "at_word": 22}
-          ]
-        },
-        {
-          "id": "outlook",
-          "say": "Beyond translation, a four-layer Transformer did surprisingly well on English constituency parsing, in Table 4. The authors planned to extend it to images, audio and video. Thanks for taking the tour.",
-          "actions": [
-            {"type": "zoom", "target": "tab4"},
-            {"type": "highlight", "targets": ["p10.b7", "p10.b12"], "color": "green", "at_word": 3},
-            {"type": "focus", "target": "p10.b21", "at_word": 16},
-            {"type": "highlight", "targets": ["p10.s12"], "color": "blue", "at_word": 22}
+            {
+              "type": "focus",
+              "target": "p10.s7"
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p10.s7"
+              ],
+              "color": "yellow"
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p10.s8"
+              ],
+              "color": "yellow",
+              "at_word": 20
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p10.s9"
+              ],
+              "color": "yellow",
+              "at_word": 26
+            },
+            {
+              "type": "highlight",
+              "targets": [
+                "p10.s10"
+              ],
+              "color": "yellow",
+              "at_word": 33
+            }
           ]
         }
       ]
     }
+  ],
+  "preset": "standard",
+  "suggested_questions": [
+    "Why scale dot products by square-root dimension?",
+    "Why mask future positions in decoder?",
+    "Why do multiple heads beat one head?"
   ]
 }

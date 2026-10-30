@@ -97,62 +97,81 @@ include a lease, terms of service and a German letter.
 
 ## Measured results
 
-Ten documents, one run each, on 2026-10-29: four papers (machine translation, a robot fish, quantum field theory,
+Ten documents, one run each, on 2026-10-30: four papers (machine translation, a robot fish, quantum field theory,
 ant ecology), one lecture deck, two exercise sheets (English probability, German linear algebra), a 63-page UK
 tenancy agreement, a terms-of-service document and a German data-protection letter. All with `muse-spark-1.3`, the
-`standard` preset and prompt version `paper-tour-harness@29`. This is ten documents, not a benchmark: there is no
-baseline, no repeated run and no human rating. The PDFs are not in the repository, and `attention` here is a generated
-tour of the same paper as the hand-written demo.
+`standard` preset and prompt version `paper-tour-harness@33`. This is ten documents, not a benchmark: there is no
+baseline, no repeated run and no human rating. The PDFs are not in the repository; `attention` is the paper of the
+demo tour (from another run).
 
 The numbers come from `node scripts/scorecard.mjs`, which reads the finished tours and makes no model calls:
 
 ```
-tour           type      steps  words   min  chap  calls  tok k   usd   secs  resent  degr      ids  lines
-----------------------------------------------------------------------------------------------------------
-attention      paper         8    398   2.6     4     12    200  0.35  104.8       1     0    25/25      -
-eval-fish      paper        12    645   4.2     4     21    358  0.60   94.9       3     0    40/40      -
-eval-casimir   paper        12    656   4.3     5     17    358  0.57   98.4       2     0    36/36      -
-eval-ants      paper        12    633   4.2     5     16    309  0.50   87.3       1     0    40/40      -
-eval-slides    lecture      10    855   5.6     5     19    301  0.57  125.9       7     1    56/56      -
-eval-sheet-en  sheet        20    779   5.2     7     11    119  0.28   63.7       0     0    56/56   7/13
-eval-sheet-de  sheet        21    744   4.9     7     12    179  0.40   91.4       0     1    48/48   9/14
-eval-lease     contract     10    706   4.6     6     15    548  0.80   87.3       1     0    31/31      -
-eval-terms     contract      9    613   4.0     6     13    225  0.38   86.0       0     0    30/30      -
-eval-letter    letter        5    296   1.9     4      8     64  0.13   53.0       0     0    16/16      -
-----------------------------------------------------------------------------------------------------------
-all 10                     119   6325  41.6    53    144   2663  4.58  892.7      15     2  378/378  16/27
+tour           type      steps  words   min  chap  calls  tok k   usd   secs  resent  degr      ids  lines  back  front
+-----------------------------------------------------------------------------------------------------------------------
+attention      paper        11    526   3.5     4     15    217  0.34   71.2       1     0    37/37      -     0      0
+eval-fish      paper        14    726   4.8     5     21    332  0.50  103.6       4     1    43/43      -     2      0
+eval-casimir   paper        14    684   4.5     5     18    348  0.53   84.8       1     0    41/41      -     0      0
+eval-ants      paper        14    674   4.4     5     19    348  0.51  145.8       2     1    42/42      -     0      0
+eval-slides    lecture      12    923   6.0     4     16    212  0.38  115.7       3     2    60/60      -     1      0
+eval-sheet-en  sheet        20    840   5.6     7     12    130  0.30   73.8       0     0    56/56   7/13     0      0
+eval-sheet-de  sheet        22    768   5.1     7     12    177  0.38   87.9       0     0    55/55   9/15     0      0
+eval-lease     contract     10    725   4.7     6     15    541  0.77  102.6       3     2    30/30      -     4      0
+eval-terms     contract      9    648   4.2     6     13    221  0.33   90.5       2     1    28/28      -     2      0
+eval-letter    letter        5    312   2.0     4      9     71  0.14   67.7       1     0    17/17      -     0      0
+-----------------------------------------------------------------------------------------------------------------------
+all 10                     131   6826  44.8    53    150   2597  4.18  943.6      17     7  409/409  16/28     9      0
 
 tour           type      boards  kinds  doc  in text  illus  other  repeat  dropped  checkpoints
 ------------------------------------------------------------------------------------------------
-attention      paper          6      4    1        0      1      4       0        0            0
-eval-fish      paper          8      6    1        1      3      4       0        0            0
-eval-casimir   paper          7      5    2        0      1      4       0        0            0
-eval-ants      paper          5      5    1        1      2      2       0        0            0
-eval-slides    lecture        5      4    1        1      3      1       0        0            0
-eval-sheet-en  sheet         10      3    0        0      1      9       0        0            5
-eval-sheet-de  sheet         10      2    0        0      0     10       0        0            5
-eval-lease     contract       7      6    2        1      3      2       0        0            0
-eval-terms     contract       5      4    1        0      3      1       0        0            0
+attention      paper          4      4    1        1      2      1       0        0            1
+eval-fish      paper          4      4    1        1      1      2       0        1            1
+eval-casimir   paper          5      5    0        0      3      2       0        0            1
+eval-ants      paper          4      4    1        1      2      1       0        1            1
+eval-slides    lecture        3      3    1        1      2      0       0        1            1
+eval-sheet-en  sheet         10      3    1        1      0      9       0        0            5
+eval-sheet-de  sheet         12      3    0        0      0     12       0        0            5
+eval-lease     contract       5      5    1        1      2      2       0        0            0
+eval-terms     contract       5      4    2        0      0      3       0        0            0
 eval-letter    letter         2      2    0        0      1      1       0        0            0
 ------------------------------------------------------------------------------------------------
-all 10                       65     10    9        4     18     38       0        0           10
+all 10                       54     10    8        6     13     33       0        3           15
+
+
+camera page of each step
+attention      2 6 6 8 7 6 7 7 7 7 10
+eval-fish      1 5 5 6 5 4 7 7 7 5 6 8 6 8
+eval-casimir   1 2 3 9 9 9 10 10 10 9 9 10 11 11
+eval-ants      2 5 4 6 6 6 8 8 8 9 10 11 15 16
+eval-slides    3 7 11 13 15 19 20 13 21 25 28 31
+eval-sheet-en  1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 2 2 2 1
+eval-sheet-de  1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 2 2 2 5
+eval-lease     10 26 36 7 23 17 41 13 17 5
+eval-terms     2 5 7 12 19 17 16 15 1
+eval-letter    1 1 1 1 1
 ```
 
 What the numbers say, and what they do not:
 
-- **Every document got a tour.** All ten completed, including the 63-page lease; writing one took 53 to 126 seconds
-  with 8 to 21 model calls, about $0.13 to $0.80 at Muse Spark's list price
+- **Every document got a tour.** All ten completed, including the 63-page lease; writing one took 68 to 146 seconds
+  with 9 to 21 model calls, about $0.14 to $0.77 at Muse Spark's list price
   ([server/src/muse/pricing.ts](server/src/muse/pricing.ts)).
-- **Size.** Papers, the deck and the practical documents took 5 to 12 steps and 2 to 5.6 minutes of narration. A sheet
-  takes an overview, a takeaway and a try-first checkpoint plus solution steps per exercise, so 20 and 21 steps.
-- **Diversity.** All ten board kinds appear across the tours; each paper, deck or contract uses 4 to 6 different kinds,
+- **Size.** Papers, the deck and the practical documents took 5 to 14 steps and 2 to 6 minutes of narration. A sheet
+  takes an overview, a takeaway and a try-first checkpoint plus solution steps per exercise, so 20 and 22 steps.
+- **Reading order.** A paper tour reads forward: after its first chapter no step goes back to the abstract or the
+  introduction (`front`), and in 53 steps of the four papers the camera jumps back by more than a page twice (`back`).
+  Before claims were anchored where the paper develops them (2026-10-29, `harness@32`), the same papers went back to
+  the front 12 times and jumped back 9 times. Contracts are read by topic, not in page order.
+- **Diversity.** All ten board kinds appear across the tours; each paper, deck or contract uses 3 to 5 different kinds,
   and no board repeats the data of an earlier one.
-- **Document values.** Of 65 boards, 9 present numbers as the document's own and 4 more use values printed in the
-  text; 18 are declared illustrative and 38 are equations, flows, functions, timelines or drawings.
-- **Grounding.** All 378 IDs the tours point at exist in `doc.json`.
-- **Checks at work.** The checks sent back 15 drafts, which were written again; two steps lost a part (a board or pen
-  marks) and kept their narration. No tour failed.
-- **Exercise lines.** Of 27 solution lines, 16 checked as correct, none as wrong, and 11 could not be checked
+- **Document values.** Of 54 boards, 8 present numbers as the document's own and 6 more use values printed in the
+  text; 13 are declared illustrative and 33 are equations, flows, functions, timelines or drawings.
+- **Grounding.** All 409 IDs the tours point at exist in `doc.json`.
+- **Checks at work.** The checks sent back 17 drafts, which were written again. Seven steps lost a part and kept their
+  narration (`degr`): three boards (one failed its checks, two took too long to write) and four worked examples the
+  plan had not asked for, which failed their checks. The activity checklist names each with its cause. No step and no
+  tour was lost.
+- **Exercise lines.** Of 28 solution lines, 16 checked as correct, none as wrong, and 12 could not be checked
   numerically and are marked unverified.
 
 To reproduce a row, write a tour with `server/run-tour.ts` (see the quick start) and run the scorecard on its folder.
@@ -173,7 +192,10 @@ cd player && npm install && npm run dev
 
 Then open http://localhost:5174/?paper=attention. The paper is not in the repo, because its arXiv license does not
 allow re-hosting, so the first line downloads it. `validate.py` checks that the download is the exact file the tour was
-written for. `demo/attention/tour.json` is a hand-written tour of 38 steps, so the reader works without any key.
+written for. `demo/attention/tour.json` is a tour the pipeline wrote for this paper in one real run (`npm run
+demo:prepare -- attention --regenerate`), not edited, so the reader works without any key. To ask its suggested
+questions without a key as well, run `npm run demo:offline` in a second terminal: it answers them from
+`demo/attention/answers.json`, saved by the same run.
 
 **Write a tour for your own PDF.** This makes real Meta API calls, about $0.30 to $0.70 per tour at list price. Install
 Tesseract first (`brew install tesseract` on macOS, `apt-get install tesseract-ocr` on Debian or Ubuntu); figure labels
@@ -224,8 +246,9 @@ Tools in `ingest/`:
 - `outline.py <folder>` prints sections, figures and every sentence with its ID. Use it when writing a tour by hand.
 - `check_tour.py <folder>/tour.json <out-dir>` renders every step's targets the way the player frames them, one PNG per
   camera move, and prints the word each timed action fires on.
-- `demo/attention/build_tour.py` is the source of the hand-written demo tour; it turns anchor words into `at_word`
-  indexes.
+- `demo/attention/build_tour.py` writes the hand-written tour of the first scaffold, which the tests keep as a
+  reference for figure direction (`server/test/fixtures/attention-handcrafted.tour.json`); it turns anchor words into
+  `at_word` indexes.
 
 Player keys: `Space` or `K` play and pause, `←` and `→` previous and next step, `Shift` with an arrow previous and
 next sentence, `[` and `]` previous and next chapter, `Home` and `End` first and last step, `R` replay the sentence,
@@ -257,7 +280,8 @@ Exercise sheets also have task and part IDs in `doc.json` (`ex1`, `ex1.a`) that 
 blocks and sentences they cover.
 
 **A tour** has a `title`, the `paper` folder it belongs to, the `doc_sha256` of the `doc.json` it was written against,
-an optional `level`, `voices`, the `preset` it was written for and `suggested_questions`, and `chapters` of steps.
+an optional `level`, `voices`, the `preset` it was written for, `suggested_questions` and `left_out` (what the writer
+planned but could not put in, each with its cause, which the reader says on its cards), and `chapters` of steps.
 `doc_type` is `research_paper`, `exercise_sheet`, `lecture`, `contract`, `letter` or `other`; the reader uses it to pick
 its mode, so a lecture plays slide by slide.
 

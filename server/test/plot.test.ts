@@ -285,6 +285,42 @@ test('a log axis needs a range above zero, samples evenly in ratio and never dra
   assert.match(problemsOf({ ...loglog, marks: [{ type: 'root', curve: 1 }] }), /no roots|log y axis cannot show/);
 });
 
+test('a log axis may span powers of ten far beyond a linear one: counts of operations and rates', () => {
+  const scaling = (change: Record<string, unknown> = {}) =>
+    cost({
+      x: [1e18, 1e24],
+      y: [1, 100],
+      x_scale: 'log',
+      curves: [{ expression: '100/(x/10^18)^0.2', label: 'loss' }],
+      ...change,
+    });
+  assert.deepEqual(plotProblems(scaling()), []);
+  assert.deepEqual(plotProblems(scaling({ x: [1e-9, 1e-7] })), [], 'tiny ranges are measured in ratio');
+  assert.deepEqual(plotProblems(scaling({ x: [1e-30, 1e30] })), []);
+  assert.deepEqual(plotProblems(scaling({ x: [1e18, 1e24], y: [1e-9, 1e-3], y_scale: 'log' })), []);
+  // A linear axis keeps its limits, and a log one its own: finite, increasing, above zero, within 1e30.
+  assert.match(problemsOf(scaling({ x_scale: 'linear' })), /finite increasing ranges within ±1000000/);
+  assert.match(problemsOf(scaling({ x: [1, 1e31] })), /finite increasing ranges/);
+  assert.match(problemsOf(scaling({ x: [1e18, 1e18 * 1.00001] })), /finite increasing ranges/);
+  assert.match(problemsOf(scaling({ x: [1e24, 1e18] })), /finite increasing ranges/);
+  assert.match(problemsOf(scaling({ x: [0, 1e24] })), /x_scale: a log axis needs a range above zero, not 0 to 1e\+24/);
+  // Measured points of such a plot are checked against the axes as ever.
+  assert.deepEqual(plotProblems(scaling({ points: [{ x: 2.3e19, y: 25.16 }] })), []);
+  assert.match(problemsOf(scaling({ points: [{ x: 2.3e25, y: 25.16 }] })), /point 1 .* lies outside the axes/);
+  const [segment] = plotSegments(parse('100/(x/10^18)^0.2'), scaling() as PlotItem, 1, 60);
+  const ratios = segment.slice(1).map(([x], i) => x / segment[i][0]);
+  near(Math.max(...ratios), Math.min(...ratios), 1e-9);
+  // The contracts agree: the board's schema leaves the range to the code (the provider fails a schema with a limit of
+  // 1e30) and the canonical tour schema takes it; a plot inside a scene keeps its linear limits.
+  assert.equal(PLOT_BOARD_SCHEMA.properties.x.items.maximum, undefined);
+  assert.equal(PLOT_SCHEMA.properties.x.items.maximum, 1e6);
+  const canonical = JSON.parse(readFileSync(new URL('../../schema/tour.schema.json', import.meta.url), 'utf8'));
+  const board = canonical.$defs.boardItem.oneOf.find((item: any) => item.properties.kind?.const === 'plot');
+  assert.equal(new Ajv({ strict: false }).compile(board)(scaling()), true);
+  assert.equal(new Ajv({ strict: false }).compile(board)(scaling({ x: [1, 1e31] })), false);
+  assert.equal(new Ajv({ strict: false }).compile(PLOT_BOARD_SCHEMA)(scaling()), true);
+});
+
 test("measured points sit inside the axes and are always the document's own numbers", () => {
   const points = [
     { x: 5, y: 25 },

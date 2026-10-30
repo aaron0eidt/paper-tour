@@ -34,7 +34,15 @@ import { isTourGenerationActive } from './library/tourGeneration';
 import { apiRequest, ApiRequestError, getSupabase } from './library/client';
 import { usePartialTour } from './library/usePartialTour';
 import type { PartialSource } from './library/usePartialTour';
-import { currentStatus, growthOf, partialPath, playablePartial, withPlayableSteps } from './partialTour';
+import {
+  currentStatus,
+  growsInPlace,
+  growthOf,
+  partialPath,
+  playablePartial,
+  tourSourceKey,
+  withPlayableSteps,
+} from './partialTour';
 import { readGrowthPlan, simulatedSource } from './dev/growth';
 import type { DocumentManifest, ReaderState, SearchHit, TourPartialView } from '../../shared/contracts';
 import type { OverlayEntry } from './engine';
@@ -360,6 +368,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const fromPartial = !finishedTour && !!partialTour;
   const growth = fromPartial ? growthOf(follow.held, status) : null;
   const growing = !!growth && growth.phase !== 'stopped';
+  const sourceKey = tourSourceKey(manifest?.selectedTour?.id, !!finishedTour, generationId);
 
   // The tour says what the document is: a lecture plays as a deck, one slide at a time; anything else as a paper.
   const deck = useMemo(() => readerMode(tourSource, loaded?.sizes ?? []) === 'deck', [tourSource?.doc_type, loaded?.sizes]);
@@ -456,11 +465,16 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // The engine plays the tour. While the tour is written it grows in place (TourEngine.extend), so the learner's place,
   // the camera and the board stay as they are. Only another tour (one written again with other steps, or one picked from
   // the saved ones) gets an engine of its own; a learner who was in the old one's lineage stays on the step they were on.
-  const handle = useRef<{ engine: TourEngine; unsubscribe(): void; partial: boolean } | null>(null);
+  // Which is which is decided by where the tour comes from (growsInPlace), not by its step IDs.
+  const handle = useRef<{ engine: TourEngine; unsubscribe(): void; partial: boolean; key: string } | null>(null);
+  // The saved tour the learner just picked: when it arrives it replaces what plays, even a tour being written.
+  const picked = useRef<string | null>(null);
   const carry = useRef<{ stepId: string; playing: boolean; after: boolean } | null>(null);
-  const [incoming, setIncoming] = useState<{ prepared: Prepared; growing: boolean; partial: boolean } | null>(null);
+  const [incoming, setIncoming] = useState<{ prepared: Prepared; growing: boolean; partial: boolean; key: string } | null>(
+    null,
+  );
   const adopt = useCallback(
-    (next: Prepared, open: boolean, partial: boolean) => {
+    (next: Prepared, open: boolean, partial: boolean, key: string) => {
       const held = handle.current;
       const e = new TourEngine(next.tour, {
         narrator: new SilentNarrator(),
@@ -490,7 +504,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         held.unsubscribe();
         held.engine.destroy();
       }
-      handle.current = { engine: e, unsubscribe, partial };
+      handle.current = { engine: e, unsubscribe, partial, key };
       setEngine(e);
     },
     [camera],
@@ -507,26 +521,30 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       }
       return;
     }
-    if (held?.engine.extend(prepared.tour, growing)) {
+    const chosen = picked.current !== null && sourceKey === tourSourceKey(picked.current, true, null);
+    if (chosen) picked.current = null;
+    if (held && growsInPlace(held, sourceKey, chosen) && held.engine.extend(prepared.tour, growing)) {
       held.partial = fromPartial;
+      held.key = sourceKey;
       setIncoming(null);
       return;
     }
     // A tour written again with other steps than the ones that play: what plays goes on to its end, and then the new one
     // takes over. Any other tour (one picked from the saved ones) replaces it at once.
     const playing = held?.engine.getState();
-    if (held?.partial && playing?.status === 'playing' && !playing.waiting) {
+    if (!chosen && held?.partial && playing?.status === 'playing' && !playing.waiting) {
       held.engine.close();
-      setIncoming({ prepared, growing, partial: fromPartial });
+      setIncoming({ prepared, growing, partial: fromPartial, key: sourceKey });
       return;
     }
-    adopt(prepared, growing, fromPartial);
-    if (held?.partial) setToast((t) => ({ text: 'The tour was written again; this is the new version', n: (t?.n ?? 0) + 1 }));
-  }, [prepared, growing, fromPartial, adopt]);
+    adopt(prepared, growing, fromPartial, sourceKey);
+    if (held?.partial && !chosen)
+      setToast((t) => ({ text: 'The tour was written again; this is the new version', n: (t?.n ?? 0) + 1 }));
+  }, [prepared, growing, fromPartial, sourceKey, adopt]);
   useEffect(() => {
     if (!incoming || (mainState.status === 'playing' && !mainState.waiting)) return;
     setIncoming(null);
-    adopt(incoming.prepared, incoming.growing, incoming.partial);
+    adopt(incoming.prepared, incoming.growing, incoming.partial, incoming.key);
     setToast((t) => ({ text: 'The tour was written again; this is the new version', n: (t?.n ?? 0) + 1 }));
   }, [incoming, mainState.status, mainState.waiting, adopt]);
   useEffect(
@@ -1284,6 +1302,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                       leaveAnswer();
                       engine?.pause();
                       setSelection([]);
+                      if (tourId !== manifest.selectedTour?.id) picked.current = tourId;
                       setActiveTour(tourId);
                       setTab('tour');
                     }
@@ -1359,6 +1378,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     engine?.pause();
                     setSelection([]);
                     savedPosition.current = null;
+                    picked.current = event.target.value;
                     setActiveTour(event.target.value);
                     setTab('tour');
                   }}

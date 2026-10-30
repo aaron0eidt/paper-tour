@@ -240,33 +240,85 @@ export function checkFormula(
 
 // ---------------------------------------------------------------------------------------------------- bars
 
-const NUMBER = /([-−–+]?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE]([+-]?\d+))?(?:\s?([kKMB])(?!\p{L}))?/gu;
+const NUMBER = /([-−–+]?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE]([+−-]?\d+))?(?:\s?([kKMB])(?!\p{L}))?/gu;
 const SCALE: Record<string, number> = { k: 1e3, K: 1e3, M: 1e6, B: 1e9 };
+
+// Scientific notation as documents print it. Explicit forms are rewritten to e-notation before the numbers are read:
+// "2.3 × 10^19", "2.3·10¹⁹", "2.3 x 10^{19}", "2,3 \cdot 10^{-9}", "10^(-3)" and a bare "10^{19}" (a power of ten is
+// one number, not a 10 and a 19). A mantissa is a plain number; in "(a+b) × 10^3" only the power is read. LaTeX spacing
+// (\, \; ~) may surround the multiplication sign.
+const SPACE = String.raw`(?:\s|\\[,;:!]|~)*`;
+const MULTIPLY = String.raw`(?:\\times|\\cdot|[×*·⋅∙]|[xX](?=${SPACE}10))`;
+const SIGNED = String.raw`[+−–-]?\d{1,3}`;
+const EXPONENT = String.raw`(?:\^\s*\{\s*\(?\s*(${SIGNED})\s*\)?\s*\}|\^\s*\(\s*(${SIGNED})\s*\)|(?:\^|\*\*)\s*(${SIGNED})|([⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,3}))(?![.,]?\d)`;
+const MANTISSA = String.raw`[+−-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?|\.\d+)`;
+const POWER = new RegExp(
+  String.raw`(?<![\p{L}\p{N}.,^])(?:(${MANTISSA})${SPACE}${MULTIPLY}${SPACE})?10\s*${EXPONENT}`,
+  'gu',
+);
+const SUPERSCRIPT_DIGITS = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+
+/** A mantissa as e-notation takes it: no grouping commas, a decimal point for a German decimal comma. */
+const plainMantissa = (text: string) =>
+  /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(text) ? text.replace(/,/g, '') : text.replace(',', '.');
+
+/** A power of ten as the text of its exponent has it: "−9", "⁻⁹" and "{-9}" are all -9. */
+const exponentOf = (written: string) =>
+  written
+    .replace(/[−–⁻]/g, '-')
+    .replace(/⁺/g, '+')
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (d) => String(SUPERSCRIPT_DIGITS.indexOf(d)));
+
+/**
+ * Scientific notation whose exponent a PDF flattened to full size digits ("2.3 · 1019" for 2.3 · 10^19), as the number
+ * it was. It is only that where nothing else is plausible: a mantissa from 1.0 to 9.99 (a decimal point, one or two
+ * decimals, no thousands grouping, and a sign of its own, read as in NUMBER), a multiplication sign (· × ⋅ ∙, never the
+ * letter x), "10", and an exponent of exactly two digits 10 to 99 or a minus and one or two digits. Anything else
+ * ("12.3 · 1019", "0.5 · 1000", "3 · 1019", "2.3 · 105", "1,500 · 1024", "1019.5") stays the digits it is. The reading is added to the plain
+ * numbers, never in place of them: "1.5 · 1024" may be that product.
+ */
+const FLATTENED = /(?<![\p{L}\p{N}.,])([+−–-]?)([1-9][.,]\d{1,2})(?!\d)\s*[·×⋅∙]\s*10(?:([1-9]\d)|[−–-]([1-9]\d?))(?![.,]?\d)/gu;
+
+/** A text with its explicit powers of ten written as e-notation: "2.3 × 10^19" is "2.3e19" and "10⁻⁹" is "1e-9". */
+export function eNotation(source: string): string {
+  return source.replace(POWER, (whole, mantissa: string | undefined, braced, paren, bare, script) => {
+    const exponent = exponentOf(braced ?? paren ?? bare ?? script);
+    if (Math.abs(Number(exponent)) > 300) return whole;
+    if (mantissa === undefined) return `1e${exponent}`;
+    const sign = /^[+−-]/.test(mantissa) ? mantissa[0] : '';
+    return `${sign}${plainMantissa(mantissa.slice(sign.length))}e${exponent}`;
+  });
+}
 
 /**
  * Every number a text prints, read the way a reader would: 1,024 is 1024, 0,5 may also be 0.5, −2.1 is negative while
- * the 20 in "10-20" is not, and 100K is both 100 and 100000.
+ * the 20 in "10-20" is not, 100K is both 100 and 100000, and 2.3 × 10^19 is 2.3e19 (see POWER and FLATTENED).
  */
 export function numbersIn(source: string): number[] {
   const out: number[] = [];
-  source = source.replace(
-    /([+−-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:\\times|\\cdot|[×*])\s*10\s*\^\s*\{?([+−-]?\d+)\}?/g,
-    (_, value, power) => `${value}e${power.replace('−', '-')}`,
-  );
+  const flattened: number[] = [];
+  for (const m of source.matchAll(FLATTENED)) {
+    // The mantissa's own sign, as NUMBER reads it: after ")" or "]" it subtracts (after a digit or letter it never matches).
+    const negative = m[1] !== '' && m[1] !== '+' && !/[)\]]/.test(source[m.index - 1] ?? ' ');
+    flattened.push(Number(`${negative ? '-' : ''}${m[2].replace(',', '.')}e${m[3] ?? `-${m[4]}`}`));
+  }
+  source = eNotation(source);
   for (const m of source.matchAll(NUMBER)) {
     const before = source[m.index - 1] ?? ' ';
     const sign = m[1] && m[1] !== '+' && !/[\p{L}\p{N})\]]/u.test(before) ? -1 : 1;
     const digits = m[2].replace(/,+$/, '');
     const grouped = /^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?$/.test(digits);
-    const values = grouped ? [Number(digits.replace(/,/g, ''))] : digits.split(',').filter(Boolean).map(Number);
-    if (!grouped && /^\d+,\d+$/.test(digits)) values.push(Number(digits.replace(',', '.')));
-    for (const value of values.filter(Number.isFinite)) {
-      const scientific = sign * value * (m[3] === undefined ? 1 : 10 ** Number(m[3]));
+    const parts = grouped ? [digits.replace(/,/g, '')] : digits.split(',').filter(Boolean);
+    if (!grouped && /^\d+,\d+$/.test(digits)) parts.push(digits.replace(',', '.'));
+    for (const part of parts) {
+      // Read from the printed digits, so 9.6e18 is the double a table's own 9.6e18 is.
+      const scientific = sign * Number(m[3] === undefined ? part : `${part}e${exponentOf(m[3])}`);
+      if (!Number.isFinite(scientific)) continue;
       out.push(scientific);
       if (m[4]) out.push(scientific * SCALE[m[4]]);
     }
   }
-  return out;
+  return [...out, ...flattened];
 }
 
 const sameNumber = (a: number, b: number) => a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));

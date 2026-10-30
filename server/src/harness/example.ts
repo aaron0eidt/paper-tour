@@ -1,6 +1,6 @@
 import { splitWords, type Action, type BoardItem } from '../../../shared/paper';
 import { evaluateExpression, parseExpression } from '../../../shared/plot';
-import { LEGACY_BOARD_KINDS, boardSchema, checkBoard, numbersIn, type BoardKind } from './board';
+import { LEGACY_BOARD_KINDS, boardSchema, checkBoard, eNotation, numbersIn, type BoardKind } from './board';
 
 export interface ExampleFrame {
   anchor: string;
@@ -115,12 +115,8 @@ function visibleText(item: BoardItem): string[] {
 function visibleNumbers(item: BoardItem): number[] {
   const labels = visibleText(item)
     .map((text) =>
-      text
-        .replace(/\b(?:key|head|token|node|component|layer|position)\s+\d+\b/gi, '')
-        .replace(
-          /([+−-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:\\times|\\cdot|[×*])\s*10\s*\^\s*\{?([+−-]?\d+)\}?/g,
-          (_, value, power) => `${value}e${power.replace('−', '-')}`,
-        )
+      // 2.3 × 10^19 is one number, not a 2.3, a 10 and a 19
+      eNotation(text.replace(/\b(?:key|head|token|node|component|layer|position)\s+\d+\b/gi, ''))
         .replace(/\\[A-Za-z]+/g, ' ')
         .replace(/\^\s*(?:\{\(?[+−-]?\d+\)?\}|\([+−-]?\d+\)|[+−-]?\d+)/g, ''),
     )

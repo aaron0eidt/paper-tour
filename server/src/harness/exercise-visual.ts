@@ -1,5 +1,6 @@
 import type { BoardItem, Doc } from '../../../shared/paper';
 import { findAnchor } from './assemble';
+import { agreementCheck } from './board-agreement';
 import { boardPart, boardPartIds, boardSchema, checkBoard, type BoardKind } from './board';
 import { TONE } from './doctype';
 import { leaksResult, type Solution, type Unit } from './exercise';
@@ -125,8 +126,8 @@ const boardText = (item: BoardItem) => JSON.stringify(item);
 
 /**
  * The visual from the model's answer, or null with the problems for one repair turn: the planned board has to pass its
- * checks and the rules of a tour step, must not show the answer, and each focus cue needs a part of the board and its
- * anchor in the narration.
+ * checks and the rules of a tour step, be about the narration of the method (board-agreement.ts), must not show the answer, and each focus cue needs a part of the board and its anchor in the
+ * narration.
  */
 export function cleanUnitVisual(
   value: unknown,
@@ -139,7 +140,16 @@ export function cleanUnitVisual(
   const given = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   if (given[kind] === undefined || given[kind] === null)
     return { visual: null, problems: [`draw the planned ${kind} board in "${kind}"`] };
-  const check = groundedCheck(checkBoard(kind, given[kind], visualEvidence(unit, doc, solution, visual)), false);
+  const said = solution.method.say;
+  const check = agreementCheck(
+    groundedCheck(checkBoard(kind, given[kind], visualEvidence(unit, doc, solution, visual)), false),
+    said,
+    { kind, value: given[kind] },
+    {
+      source: givenText(unit, doc),
+      repair: `Redraw the board so that it shows what the method narration explains, with the task's givens`,
+    },
+  );
   const problems = check.problems.map((problem) => `${kind}: ${problem}`);
   if (!check.item)
     return { visual: null, problems: problems.length ? problems : [`draw the planned ${kind} board in "${kind}"`] };
@@ -150,7 +160,6 @@ export function cleanUnitVisual(
         `the board shows the result of the exercise (${solution.answer.latex}) in a label, a title or a value: show the givens and the structure of the method only`,
       ],
     };
-  const said = solution.method.say;
   const parts = new Set<number>();
   const words = new Set<number>();
   const focus = (Array.isArray(given.focus) ? given.focus : [])

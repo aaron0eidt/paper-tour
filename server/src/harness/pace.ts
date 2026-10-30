@@ -12,11 +12,18 @@ export interface Pace {
   callMs: (name: string, effort: Effort) => number;
   /**
    * What one step may spend on repairing its board, worked example or pen marks. Past it, a step that has a usable
-   * narration stops asking and takes the degrade rung (degrade.ts): it keeps the narration and loses what failed.
+   * narration stops asking and takes the degrade rung (degrade.ts): it keeps the narration and loses what failed. A step
+   * that has none is not held to it: it is asked again, for less each time (callMs falls with the effort), three tries
+   * at least and a few more when its lighter try, and a repair of that, come late.
    */
   stepMs: number;
   /** The least time a repair call gets, however little is left of the step's time. */
   repairMs: number;
+  /**
+   * The waits before a call the provider could not take (a 5xx or a 429) is sent again, one per retry. Its outages come
+   * in bursts of several seconds, which the callers' own quick retries all fell into: 9 steps of 10 tours in one burst.
+   */
+  outages: readonly number[];
 }
 
 const SECONDS: Record<string, number> = {
@@ -31,11 +38,52 @@ const SECONDS: Record<string, number> = {
   quick_check: 30,
 };
 
+// A step asked again after a call outlived its time reasons a rung less each time, so its limit falls with it: 45 s at
+// medium effort and above, 30 s below (generator.ts, the lean tries).
 export const PACE: Pace = {
-  callMs: (name, effort) => (name === 'beat_direction' ? (effort === 'low' ? 30 : 45) : (SECONDS[name] ?? 60)) * 1000,
+  callMs: (name, effort) =>
+    (name === 'beat_direction' ? (effort === 'medium' || effort === 'high' ? 45 : 30) : (SECONDS[name] ?? 60)) * 1000,
   stepMs: 40_000,
   repairMs: 15_000,
+  outages: [2_000, 4_000, 8_000],
 };
+
+/**
+ * Runs a model call, waiting out a provider that could not take it (a transient error: a 5xx or a 429) with the given
+ * waits, one per retry, while `again` allows. Any other failure, and the last transient one, goes to the caller.
+ */
+export async function outlasting<T>(
+  signal: AbortSignal,
+  waits: readonly number[],
+  run: () => Promise<T>,
+  again: () => boolean = () => true,
+): Promise<T> {
+  for (let retry = 0; ; retry++) {
+    try {
+      return await run();
+    } catch (error) {
+      const wait = waits[retry];
+      if (!(error instanceof ProcessingError) || !error.transient || wait === undefined || signal.aborted || !again())
+        throw error;
+      await waitOut(signal, wait);
+      signal.throwIfAborted();
+    }
+  }
+}
+
+/** Waits the given time, or less when the generation is cancelled meanwhile. */
+function waitOut(signal: AbortSignal, ms: number): Promise<void> {
+  return new Promise((done) => {
+    if (signal.aborted) return done();
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+    function finish() {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      done();
+    }
+  });
+}
 
 /**
  * Runs a model call with a time limit. A call that outlives it fails with `muse_slow`, a fault of the model like an

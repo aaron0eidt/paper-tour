@@ -1,4 +1,5 @@
 import type { GenerationEvent } from './activity';
+import { coverageNote, lossesFromEvents } from './coverage';
 import { uniqueGenerationEvents } from './generationDiagnostics';
 import { modelActivityNames } from './generationTimeline';
 
@@ -70,9 +71,12 @@ export function generationProgress(events: GenerationEvent[], status: string) {
     needs_configuration: 'Waiting for a Meta connection',
   };
   let title = terminal[status] ?? 'Waiting for the next action';
+  // A tour that is not all of its plan says what was left out and why.
+  const note = coverageNote(lossesFromEvents(events));
+  const left = note ? ` Not everything planned is in it (${note}).` : '';
   let detail =
     status === 'ready' || status === 'completed'
-      ? 'Ready to play. Follow the tour or ask about any part of the document.'
+      ? `Ready to play. Follow the tour or ask about any part of the document.${left}`
       : 'Your work is saved as each chapter is completed.';
   if (!terminal[status] && active) {
     const tool = active.data.name;
