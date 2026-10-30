@@ -15,8 +15,8 @@ import { idEnum } from './schema-budget';
 // grade: nothing is scored and no answer is called wrong. One small call per chapter writes it from what the chapter
 // said; code decides where checks go, keeps the hints from giving the answer away, and builds the two steps.
 
-/** Most checks in a tour by preset: none in a quick tour, two in a standard one. */
-export const CHECK_LIMIT: Record<Preset, number> = { quick: 0, standard: 2, deep: 3 };
+/** Most checks in a tour by preset: none in a quick tour, one in a standard one, two in a deep one. */
+export const CHECK_LIMIT: Record<Preset, number> = { quick: 0, standard: 1, deep: 2 };
 /** The steps a check adds: the question and the answer. */
 export const CHECK_STEPS = 2;
 /** Shorter tours are not interrupted. */

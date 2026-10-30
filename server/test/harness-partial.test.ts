@@ -25,7 +25,7 @@ function transport(gate?: { kind: string; opened: Promise<void> }): typeof fetch
     const task: string = body.messages.map((m: any) => text(m.content)).join('\n');
     if (name === 'paper_card') return reply(card);
     if (['visual_plan', 'opening_visual'].includes(name)) return reply({ plan: 'none', beats: [] });
-    // A quick check closes the method and the evidence chapter of a standard paper tour.
+    // A quick check closes the evidence chapter of a standard paper tour.
     if (name === 'quick_check') return reply(checkReply({ schema } as never));
     if (gate && task.includes(`STEP KIND: ${gate.kind}`)) await gate.opened;
     const cue = schema.properties.cues.items.properties;
@@ -70,7 +70,7 @@ test('the tour so far is announced each time the next steps in order are finishe
   const partials = events.filter((e) => e.type === 'tour.partial');
   assert.ok(partials.length >= 1);
   assert.equal(final.length, total);
-  assert.equal(final.filter((s) => s.checkpoint).length, 2, 'the checks are part of the tour that is announced');
+  assert.equal(final.filter((s) => s.checkpoint).length, 1, 'the check is part of the tour that is announced');
   let before = 0;
   for (const { data } of partials) {
     const tour = data.tour as Tour;

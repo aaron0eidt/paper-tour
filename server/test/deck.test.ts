@@ -470,7 +470,8 @@ test('a deck tour is planned slide by slide, narrated in the lecturer’s voice,
 });
 
 test('a lecture pauses after its sections that teach: a quick check, then the answer on the slide', async () => {
-  // Six content slides as six steps in three sections; the last section is the summary, which no check follows.
+  // Six content slides as six steps in three sections; the last section is the summary, which no check follows. A deep
+  // tour has room for the two sections before it (a standard one for one), which shows the order.
   const sections = {
     ...plan,
     beats: [3, 4, 5, 6, 7, 8].map((n) => ({
@@ -484,7 +485,7 @@ test('a lecture pauses after its sections that teach: a quick check, then the an
   const events: { type: string; data: any }[] = [];
   const { tour, all, requests, metadata } = await run(
     model((r) => (r.name === 'deck_plan' ? sections : r.name === 'quick_check' ? checkReply(r as never) : undefined)),
-    'standard',
+    'deep',
     deck,
     events,
   );

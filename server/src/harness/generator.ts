@@ -140,8 +140,6 @@ type BeatResult =
   | { targets: BeatTargets; direction: Direction | null; degraded?: Degraded }
   | { steps: Step[]; solved: boolean; checks: LineCheck[]; visual?: BoardKind; degraded?: Degraded };
 
-/** The API takes a reasoning effort below `low` (notes/META-MODELS.md) that the type does not list yet; ask.ts does the same. */
-const MINIMAL = 'minimal' as unknown as Effort;
 const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused', 'muse_slow']);
 /** A beat survives the model's own faults and transient provider errors; credentials and rejected requests do not. */
 const recoverable = (error: unknown) =>
@@ -283,7 +281,7 @@ export class HarnessTourGenerator implements TourGenerator {
         try {
           // The first try reasons as little as the API allows: the card is read off the document, the schema holds every
           // ID to a listed one and the checks below hold the rest; a repair reasons more.
-          const completion = await call(messages, 'paper_card', schema, 12_000, attempt ? 'medium' : MINIMAL, signal);
+          const completion = await call(messages, 'paper_card', schema, 12_000, attempt ? 'medium' : 'minimal', signal);
           const problems = cardProblems(completion.value, looseSchema);
           if (!problems.length) card = cleanCard(completion.value as PaperCard, doc);
           else {
@@ -336,7 +334,7 @@ export class HarnessTourGenerator implements TourGenerator {
       try {
         for (let attempt = 0; attempt < 2 && !chosen; attempt++) {
           try {
-            const completion = await call(task, 'opening_visual', visualPlanSchema([beat]), 4_000, MINIMAL, signal, {
+            const completion = await call(task, 'opening_visual', visualPlanSchema([beat]), 4_000, 'minimal', signal, {
               id: beat.id,
               label: 'Design the opening visual',
             });
@@ -529,15 +527,8 @@ export class HarnessTourGenerator implements TourGenerator {
       if (!rest.length) visuals = new Map(settled);
       for (let attempt = 0; attempt < 2 && !visuals; attempt++) {
         try {
-          // The first try reasons lightly: the plan is held to the tour's limits in code; a repair reasons more.
-          const completion = await call(
-            task,
-            'visual_plan',
-            visualPlanSchema(rest, options),
-            8_000,
-            attempt ? 'medium' : 'low',
-            signal,
-          );
+          // The plan sets the tour's visuals, so it reasons at medium; the opening step no longer waits for it.
+          const completion = await call(task, 'visual_plan', visualPlanSchema(rest, options), 8_000, 'medium', signal);
           const checked = cleanVisualPlan(completion.value, plannable, options, settled);
           visuals = checked.plan;
           adjusted = checked.adjusted;
@@ -760,6 +751,7 @@ export class HarnessTourGenerator implements TourGenerator {
           visual,
           targets,
           task,
+          asked: task.length,
           schema: directionSchema(beat, targets, true, visual),
           example: exampleRules(beat, visual),
         };
@@ -791,6 +783,9 @@ export class HarnessTourGenerator implements TourGenerator {
           const detailed = !lean && (beat.detail || attempt > 0);
           const effort: Effort = detailed ? 'medium' : 'low';
           const own = this.pace.callMs('beat_direction', effort);
+          // A repair gets what is left of the step's time, and at least repairMs: one of a faulty board, and one after a
+          // first try that gave nothing usable (its task carries the turn that says what to fix).
+          const repairing = direction ? faulty(direction) : now.task.length > now.asked;
           const completion = await call(
             now.task,
             'beat_direction',
@@ -799,9 +794,7 @@ export class HarnessTourGenerator implements TourGenerator {
             effort,
             signal,
             { id: beat.id, label: beat.point },
-            direction && faulty(direction)
-              ? Math.min(own, Math.max(this.pace.repairMs, this.pace.stepMs - spent()))
-              : own,
+            repairing ? Math.min(own, Math.max(this.pace.repairMs, this.pace.stepMs - spent())) : own,
           );
           const rawSay = (completion.value as { say?: unknown } | null)?.say;
           requireExample ||=

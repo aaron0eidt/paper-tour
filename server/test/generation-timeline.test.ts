@@ -99,6 +99,17 @@ test('harness entries show public narration and honest call labels without expos
   assert.match(rows[1].detail, /draft/);
 });
 
+test('the claims and the opening visual calls have readable labels', () => {
+  const rows = generationTimeline([
+    e('1', 'model.started', { callId: 'a', name: 'claims' }),
+    e('2', 'model.started', { callId: 'b', name: 'opening_visual' }),
+  ]);
+  assert.deepEqual(
+    rows.map((row) => row.title),
+    ['Find the main claims', 'Plan the first visual'],
+  );
+});
+
 test('parallel writing calls use their actual planned explanation labels', () => {
   const entries = generationTimeline([
     {

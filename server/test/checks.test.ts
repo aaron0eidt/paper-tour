@@ -65,11 +65,13 @@ const paper = () =>
   ]);
 const chaptersOf = (plan: TourPlan, preset: Preset) => checkSites(plan, preset).map((site) => site.chapter.id);
 
-test('a standard paper tour checks the mechanism and the result, a quick one nothing, a deep one up to three', () => {
-  assert.deepEqual(CHECK_LIMIT, { quick: 0, standard: 2, deep: 3 });
+test('a standard paper tour checks one chapter, a quick one nothing, a deep one up to two', () => {
+  assert.deepEqual(CHECK_LIMIT, { quick: 0, standard: 1, deep: 2 });
   assert.deepEqual(chaptersOf(paper(), 'quick'), []);
-  assert.deepEqual(chaptersOf(paper(), 'standard'), ['method', 'evidence']);
-  const sites = checkSites(paper(), 'standard');
+  // The mechanism and the result both qualify; one check goes to the middle of them, two to each.
+  assert.deepEqual(chaptersOf(paper(), 'standard'), ['evidence']);
+  assert.deepEqual(chaptersOf(paper(), 'deep'), ['method', 'evidence']);
+  const sites = checkSites(paper(), 'deep');
   assert.deepEqual(
     sites.map((site) => [site.n, site.beats]),
     [
@@ -78,7 +80,11 @@ test('a standard paper tour checks the mechanism and the result, a quick one not
     ],
     'numbered in order; a check follows the last beat of its chapter',
   );
-  // Five chapters of substance: three checks, spread through them and never in the last.
+  assert.deepEqual(
+    checkSites(paper(), 'standard').map((site) => [site.n, site.beats]),
+    [[1, [4, 5]]],
+  );
+  // Six chapters of substance: one check in a standard tour, two in a deep one, spread through them and never in the last.
   const long = planOf('research_paper', [
     ['c1', [beat('method-1', 'method', 'c1')]],
     ['c2', [beat('method-2', 'method', 'c2')]],
@@ -88,8 +94,8 @@ test('a standard paper tour checks the mechanism and the result, a quick one not
     ['c6', [beat('result-1', 'result', 'c6')]],
     ['end', [beat('takeaway-1', 'takeaway', 'end')]],
   ]);
-  assert.deepEqual(chaptersOf(long, 'standard'), ['c2', 'c5'], 'two, apart');
-  assert.deepEqual(chaptersOf(long, 'deep'), ['c2', 'c4', 'c6'], 'three, apart');
+  assert.deepEqual(chaptersOf(long, 'standard'), ['c4'], 'one, in the middle');
+  assert.deepEqual(chaptersOf(long, 'deep'), ['c2', 'c5'], 'two, apart');
 });
 
 test('only chapters that teach something are checked: not the problem, the claim, the catch or the takeaway', () => {
@@ -114,8 +120,10 @@ test('only chapters that teach something are checked: not the problem, the claim
     ['claim-3', [beat('method-1', 'method', 'claim-3', { move: 'why' })]],
     ['takeaway', [beat('takeaway-1', 'takeaway', 'takeaway', { move: 'takeaway' })]],
   ]);
-  // Claim 2 only states and qualifies; the last chapter never closes with a check.
-  assert.deepEqual(chaptersOf(claims, 'standard'), ['claim-1', 'claim-3']);
+  // Claim 2 only states and qualifies; the last chapter never closes with a check. A deep tour has room for both
+  // chapters that teach, a standard one for the later.
+  assert.deepEqual(chaptersOf(claims, 'deep'), ['claim-1', 'claim-3']);
+  assert.deepEqual(chaptersOf(claims, 'standard'), ['claim-3']);
 });
 
 test('a lecture is checked where a chapter has two points or a point with a figure or a board; a text lecture too', () => {
@@ -126,7 +134,9 @@ test('a lecture is checked where a chapter has two points or a point with a figu
     ['cost', [beat('point-5', 'point', 'cost', { board: 'formula' })]],
     ['wrap', [beat('point-6', 'point', 'wrap', { slides: [6] })]],
   ]);
-  assert.deepEqual(chaptersOf(lecture, 'standard'), ['loops', 'cost']);
+  // Three chapters qualify (two points, a point with a figure, a point with a board); the intro and the wrap do not.
+  assert.deepEqual(chaptersOf(lecture, 'deep'), ['loops', 'cost']);
+  assert.deepEqual(chaptersOf(lecture, 'standard'), ['recursion']);
   assert.deepEqual(chaptersOf(lecture, 'quick'), []);
 });
 
@@ -418,73 +428,91 @@ async function run(preset: Preset, fn = model(), events: Event[] = []) {
 }
 const ids = (list: Step[]) => list.map((s) => s.id);
 
-test('a standard paper tour pauses after its mechanism and after its result, and each answer follows', async () => {
+test('a standard paper tour pauses once, after its result, and the answer follows', async () => {
   const names: string[] = [];
   const events: Event[] = [];
   const { tour, metadata } = await run('standard', model(undefined, names), events);
   const method = tour.chapters.find((c) => c.id === 'method')!.steps;
   const evidence = tour.chapters.find((c) => c.id === 'evidence')!.steps;
-  assert.deepEqual(ids(method), ['method-1', 'formula-1', 'figure-1', 'check-1', 'check-1-answer']);
-  assert.deepEqual(ids(evidence), ['result-1', 'check-2', 'check-2-answer']);
+  assert.deepEqual(ids(method), ['method-1', 'formula-1', 'figure-1'], 'one check is enough for a standard tour');
+  assert.deepEqual(ids(evidence), ['result-1', 'check-1', 'check-1-answer']);
   assert.deepEqual(
     tour.chapters.map((c) => c.id),
     ['problem', 'idea', 'method', 'evidence', 'limits', 'takeaway'],
   );
-  assert.equal(steps(tour).length, 8 + 4);
-  assert.equal(names.filter((n) => n === 'quick_check').length, 2, 'one small call per chapter');
+  assert.equal(steps(tour).length, 8 + 2);
+  assert.equal(names.filter((n) => n === 'quick_check').length, 1, 'one small call per chapter checked');
   const asks = steps(tour).filter((s) => s.checkpoint);
-  assert.deepEqual(ids(asks), ['check-1', 'check-2']);
-  for (const ask of asks) {
-    assert.equal(ask.say, ask.checkpoint!.prompt);
-    assert.equal(ask.checkpoint!.hints.length, 2);
-  }
+  assert.deepEqual(ids(asks), ['check-1']);
+  assert.equal(asks[0].say, asks[0].checkpoint!.prompt);
+  assert.equal(asks[0].checkpoint!.hints.length, 2);
   // The answer comes next, and points at the page with a cue the document has.
   const answers = steps(tour).filter((s) => s.id.endsWith('-answer'));
-  assert.equal(answers.length, 2);
-  for (const answer of answers) {
-    const cue = answer.actions.find((a) => a.type === 'highlight' || a.type === 'box');
-    assert.ok(cue, `${answer.id} marks something`);
-    assert.equal(steps(tour).at(steps(tour).indexOf(answer) - 1)!.id, answer.id.replace('-answer', ''));
-  }
+  assert.equal(answers.length, 1);
+  const cue = answers[0].actions.find((a) => a.type === 'highlight' || a.type === 'box');
+  assert.ok(cue, `${answers[0].id} marks something`);
+  assert.equal(steps(tour).at(steps(tour).indexOf(answers[0]) - 1)!.id, 'check-1');
   assert.deepEqual(tourProblems(tour, doc), []);
-  assert.deepEqual((metadata as any).quickChecks, [
-    { id: 'check-1', chapter: 'method', kind: 'predict', hints: 2 },
-    { id: 'check-2', chapter: 'evidence', kind: 'predict', hints: 2 },
-  ]);
+  assert.deepEqual((metadata as any).quickChecks, [{ id: 'check-1', chapter: 'evidence', kind: 'predict', hints: 2 }]);
   assert.equal((metadata as any).promptVersion, 'paper-tour-harness@32');
   const plan = events.find((e) => e.type === 'plan.ready')!;
-  assert.deepEqual(plan.data.checks, [
-    { chapter: 'method', after: 'figure-1' },
-    { chapter: 'evidence', after: 'result-1' },
-  ]);
+  assert.deepEqual(plan.data.checks, [{ chapter: 'evidence', after: 'result-1' }]);
   assert.deepEqual(
-    events
-      .filter((e) => e.type === 'check.written')
-      .map((e) => [e.data.check, e.data.chapter, e.data.hints])
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    [
-      ['check-1', 'method', 2],
-      ['check-2', 'evidence', 2],
-    ],
+    events.filter((e) => e.type === 'check.written').map((e) => [e.data.check, e.data.chapter, e.data.hints]),
+    [['check-1', 'evidence', 2]],
   );
 });
 
-test('the check call sees the chapter as the tour told it, and the chapter alone', async () => {
-  const briefs: string[] = [];
-  await run(
-    'standard',
-    model((request) => {
-      briefs.push(request.messages.at(-1)!);
-      return checkReply(request);
-    }),
+test('a deep paper tour pauses after two of its chapters, in order, and each answer follows its question', async () => {
+  const names: string[] = [];
+  const events: Event[] = [];
+  const { tour, metadata } = await run('deep', model(undefined, names), events);
+  assert.deepEqual(ids(tour.chapters[0].steps).slice(-2), ['check-1', 'check-1-answer']);
+  assert.deepEqual(ids(tour.chapters[1].steps).slice(-2), ['check-2', 'check-2-answer']);
+  assert.equal(names.filter((n) => n === 'quick_check').length, 2, 'one small call per chapter');
+  assert.deepEqual(ids(steps(tour).filter((s) => s.checkpoint)), ['check-1', 'check-2']);
+  const all = ids(steps(tour));
+  for (const n of [1, 2]) assert.equal(all[all.indexOf(`check-${n}`) + 1], `check-${n}-answer`);
+  assert.deepEqual(tourProblems(tour, doc), []);
+  assert.deepEqual(
+    (metadata as any).quickChecks.map((c: any) => [c.id, c.chapter]),
+    [
+      ['check-1', 'page-1'],
+      ['check-2', 'page-2'],
+    ],
   );
+  assert.equal(events.find((e) => e.type === 'plan.ready')!.data.checks.length, 2);
+});
+
+test('the check call sees the chapter as the tour told it, and the chapter alone', async () => {
+  const asked = async (preset: Preset) => {
+    const briefs: string[] = [];
+    await run(
+      preset,
+      model((request) => {
+        briefs.push(request.messages.at(-1)!);
+        return checkReply(request);
+      }),
+    );
+    return briefs;
+  };
+  const [evidence, ...rest] = await asked('standard');
+  assert.equal(rest.length, 0, 'one chapter, one call');
+  assert.ok(evidence.includes('CHAPTER "Evidence"'));
+  assert.equal(evidence.split(EXPLAIN).length - 1, 1, 'what the one step of the chapter said');
+  assert.ok(evidence.includes('[p2.s1]'));
+  assert.ok(!evidence.includes('[fig1]') && !evidence.includes('[eq1]'), 'not another chapter’s');
+  assert.match(evidence, /TASK: write ONE quick check/);
+
+  const briefs = await asked('deep');
   assert.equal(briefs.length, 2);
-  const method = briefs.find((b) => b.includes('CHAPTER "How it works"'))!;
-  const evidence = briefs.find((b) => b.includes('CHAPTER "Evidence"'))!;
-  assert.ok(method && evidence);
-  assert.equal(method.split(EXPLAIN).length - 1, 3, 'what the three steps of the chapter said');
-  assert.ok(method.includes('[fig1]') && method.includes('[eq1]'), 'the figure and equation it pointed at');
-  assert.ok(!evidence.includes('[fig1]'), 'not another chapter’s');
+  const intro = briefs.find((b) => b.includes('CHAPTER "Page 1 · Introduction"'))!;
+  const results = briefs.find((b) => b.includes('CHAPTER "Page 2 · Results"'))!;
+  assert.ok(intro && results);
+  assert.equal(intro.split(EXPLAIN).length - 1, 4, 'what the four steps of the chapter said');
+  assert.equal(results.split(EXPLAIN).length - 1, 3);
+  assert.ok(intro.includes('[fig1]') && !intro.includes('[eq1]'), 'the figure it pointed at, not the equation');
+  assert.ok(results.includes('[eq1]') && !results.includes('[fig1]'), 'the equation it pointed at, not the figure');
   for (const brief of briefs) assert.match(brief, /TASK: write ONE quick check/);
 });
 
@@ -507,7 +535,7 @@ test('a chapter the model finds nothing to ask about gets no check, and the tour
   assert.ok(steps(tour).every((s) => !s.checkpoint));
   assert.deepEqual(
     events.filter((e) => e.type === 'check.skipped').map((e) => e.data.reason),
-    ['nothing in the chapter to predict or recall', 'nothing in the chapter to predict or recall'],
+    ['nothing in the chapter to predict or recall'],
   );
 });
 
@@ -518,7 +546,7 @@ test('a question that gives the answer away is sent back once with what to fix, 
     'standard',
     model((request) => {
       seen.push(request.task);
-      // Each chapter's first try states the answer in its question; the repaired try is fine.
+      // The first try states the answer in its question; the repaired try is fine.
       return request.task.includes('The answer did not match the schema')
         ? checkReply(request)
         : checkReply(request, {
@@ -530,13 +558,13 @@ test('a question that gives the answer away is sent back once with what to fix, 
     events,
   );
   const failed = events.filter((e) => e.type === 'validation.failed' && e.data.stage === 'check');
-  assert.equal(failed.length, 2, 'one per chapter');
+  assert.equal(failed.length, 1, 'one chapter, one repair');
   assert.match(String(failed[0].data.problems), /prompt: it gives the answer away/);
-  assert.equal(seen.length, 4, 'a try and a repair for each chapter');
-  assert.equal(seen.filter((task) => task.includes('gives the answer away')).length, 2, 'the repair says what to fix');
+  assert.equal(seen.length, 2, 'a try and a repair');
+  assert.equal(seen.filter((task) => task.includes('gives the answer away')).length, 1, 'the repair says what to fix');
   assert.deepEqual(
     ids(steps(tour)).filter((id) => id.startsWith('check-')),
-    ['check-1', 'check-1-answer', 'check-2', 'check-2-answer'],
+    ['check-1', 'check-1-answer'],
   );
   assert.match(
     steps(tour).find((s) => s.id === 'check-1')!.say,
@@ -559,7 +587,7 @@ test('a check that cannot be fixed is left out and the tour is whole; so is one 
       steps(tour).every((s) => !s.checkpoint),
       label,
     );
-    assert.equal(events.filter((e) => e.type === 'check.skipped').length, 2, label);
+    assert.equal(events.filter((e) => e.type === 'check.skipped').length, 1, label);
     assert.equal((metadata as any).quickChecks, undefined, label);
     assert.deepEqual((metadata as any).fallbackBeats, [], label);
     assert.deepEqual(tourProblems(tour, doc), [], label);
@@ -586,7 +614,7 @@ test('the tour so far carries the check with its chapter, and the planned count 
     const list = steps(data.tour as Tour);
     assert.equal(list.length, data.ready);
     assert.deepEqual(ids(list), ids(final.slice(0, data.ready)), 'always the leading steps of the final tour');
-    assert.equal(data.planned, final.length, 'two checks of two steps are planned from the start');
+    assert.equal(data.planned, final.length, 'the check of two steps is planned from the start');
     assert.deepEqual(tourProblems(data.tour as Tour, doc), []);
   }
   // A check always arrives with the step it follows, never alone: the list never ends between the question and the answer.

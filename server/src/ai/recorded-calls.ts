@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { ProcessingError } from '../errors';
 import type { TourGenerationInput } from '../tour-generator';
-import { MuseClient, type Completion, type MuseMessage } from '../muse/client';
+import { MuseClient, type Completion, type Effort, type MuseMessage } from '../muse/client';
 import { imageEvidence } from '../muse/context';
-export type Effort = 'low' | 'medium' | 'high';
+export type { Effort };
 
 /** A model call that records its real inputs and output as activity events; images are logged by hash only. */
 export function recordedCalls(client: MuseClient, input: TourGenerationInput, model: string, promptVersion: string) {

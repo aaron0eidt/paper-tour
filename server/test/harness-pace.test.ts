@@ -383,6 +383,46 @@ test('a step whose board keeps failing is repaired twice, and at once when it ha
   assert.equal(quick.filter((e) => e.type === 'beat.degraded' && e.data.beat === 'result-1').length, 1);
 });
 
+test('a repair after a first try that gave nothing usable is held to the step’s time like any other repair', async () => {
+  const { requests, fetch } = model({});
+  let asked = 0;
+  let waited = 0;
+  const hangs: typeof globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    if (
+      body.response_format.json_schema.name !== 'beat_direction' ||
+      !JSON.stringify(body.messages).includes('STEP KIND: result')
+    )
+      return fetch(url as never, init);
+    // The first try says too little to use; the repair that follows it hangs until it is given up on.
+    if (!asked++) return reply({ plan: 'p', say: 'too short', cues: [] });
+    if (asked > 2) return fetch(url as never, init);
+    const since = Date.now();
+    return new Promise<Response>((_, reject) =>
+      init!.signal!.addEventListener('abort', () => {
+        waited = Date.now() - since;
+        reject(new Error('aborted'));
+      }),
+    );
+  }) as typeof globalThis.fetch;
+  const slow = (name: string, effort: string) =>
+    name === 'beat_direction' ? 2000 : PACE.callMs(name, effort as never);
+  const events: Seen[] = [];
+  const { tour } = await run(hangs, events, { ...PACE, callMs: slow, stepMs: 0, repairMs: 60 });
+  assert.ok(
+    waited >= 50 && waited < 1000,
+    `the repair was given up on after the least time a repair gets, not ${waited} ms`,
+  );
+  assert.equal(asked, 3, 'a try, the repair that hung, and another');
+  assert.equal(requests.filter(isResult).length, 1, 'only the last try reached the model');
+  assert.ok(
+    steps(tour).some((s) => s.id === 'result-1'),
+    'the step was written by the next try',
+  );
+  assert.equal(steps(tour).length, ids.length);
+  assert.equal(events.filter((e) => e.type === 'model.failed').length, 1);
+});
+
 test('a call that outlives its time is tried again lean: lightly reasoned and without the board it was planned to draw', async () => {
   let first = true;
   const slow = (name: string, effort: string) => (name === 'beat_direction' ? 400 : PACE.callMs(name, effort as never));
@@ -460,7 +500,7 @@ test('a card that is too slow is asked for again at once, and the tour still pla
   assert.equal(events.filter((e) => e.type === 'model.failed').length, 1);
 });
 
-test('the first try of the card and the opening reasons as little as the API allows, the plan lightly; a repair reasons more', async () => {
+test('the first try of the card and the opening reasons as little as the API allows, the plan and its repair reason at medium', async () => {
   const bad = model({ plan: () => ({ plan: 'p', beats: [entry('ghost', 'bars', 'x')] }) });
   const events: Seen[] = [];
   await run(bad.fetch, events);
@@ -468,5 +508,5 @@ test('the first try of the card and the opening reasons as little as the API all
     events.filter((e) => e.type === 'model.started' && e.data.name === name).map((e) => e.data.reasoningEffort);
   assert.deepEqual(efforts('paper_card'), ['minimal']);
   assert.deepEqual(efforts('opening_visual'), ['minimal']);
-  assert.deepEqual(efforts('visual_plan'), ['low', 'medium'], 'the plan was repaired once, at higher effort');
+  assert.deepEqual(efforts('visual_plan'), ['medium', 'medium'], 'the plan and its repair both reason at medium');
 });

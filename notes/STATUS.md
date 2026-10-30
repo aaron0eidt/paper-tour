@@ -1,4 +1,25 @@
-# Status (2026-10-29)
+# Status (2026-10-30)
+
+## The generation pipeline now (2026-10-30)
+
+- **How a tour is written** (`server/src/harness/generator.ts`; [HARNESS.md](HARNESS.md) has the detail): for a paper
+  the card and the claims are asked in parallel, and the opening step's visual is planned alone from the card, so that
+  the first step does not wait for the plan of the whole tour. That plan is one call at medium effort, and code holds
+  it to the diversity limits (each board kind once, formula and plot twice, at most 60% of the steps with a board).
+  The steps are directed in parallel, each from a schema that lists only the IDs it may point at. Code checks every
+  narration, pen mark, example and board; what still fails after two corrections is dropped and recorded (the degrade
+  ladder), so one bad board never fails the tour.
+- **Time and progress:** every call has a time limit, and a step has 40 s for repairs, a repair after an unusable first
+  try included; a slow call is asked again at once, lean when it had a board planned. The finished leading steps are
+  announced as partial tours, which the reader plays while the rest is written.
+- **Quick checks** (a prediction or recall question after a chapter, practice and never graded) keep tours concise:
+  none in a quick tour, one in a standard one, two in a deep one.
+- **Changed today:** the visual plan reasons at medium (papers got only 3 to 4 boards at low); the check limits above;
+  the repair cap; `minimal` is a member of the `Effort` type, so its casts are gone; the claims and the opening visual
+  have readable labels in the generation activity.
+- **Checks:** the server type-check passes and all 695 server tests ran (688 passed, 7 database skips). No real model
+  call was made for this entry, so the effect of the new check limits and of the medium plan on real tours is not
+  measured.
 
 ## The richer-visuals branch (2026-10-29, evening)
 
@@ -59,9 +80,11 @@
      changed since.
 - **Decisions for Aaron and Nikolas:**
   - The default preset is now `deep` (`server/src/config.ts`, `.env.example`); the plan asked for concise tours.
+    (Superseded on the richer-visuals branch: the default is `standard` again.)
   - After two failed corrections, one beat with an invalid scene, worked example or visual grounding now fails the
     whole tour (`server/src/harness/generator.ts`, around line 402); before, the beat fell back and the tour still
     played. The first runs in [VISUAL-EVALUATION.md](VISUAL-EVALUATION.md) failed on two of three papers before fixes.
+    (Superseded on the richer-visuals branch: the degrade ladder drops the failing part and the tour plays.)
   - Tesseract and OpenCV are new runtime dependencies; local OCR is one of the open hackathon-rule questions.
 
 ## Composable live explanations (2026-10-28)

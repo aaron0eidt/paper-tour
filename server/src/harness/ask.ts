@@ -55,8 +55,6 @@ const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 
 // A checked multi-frame visual answer can need one correction. Keep a bounded
 // request deadline without aborting ordinary scene authoring before it returns.
 const ASK_TIMEOUT_MS = 180_000;
-/** The provider's lowest reasoning setting; MuseClient forwards the word as it is. */
-const MINIMAL = 'minimal' as unknown as Effort;
 /** Questions that are worked out: a calculation, a derivation, a proof, a worked example. They keep a little reasoning. */
 const WORKED_OUT =
   /\b(?:calculat\w*|comput\w*|deriv\w*|prove\w*|proof|solv\w*|solution|work(?:ed|ing)?[ -](?:out|through)|step[- ]by[- ]step|numerical\w*|examples?|berechne\w*|herleit\w*|beweis\w*|löse\w*|loese\w*|beispiel\w*)\b/iu;
@@ -68,7 +66,7 @@ const WORKED_OUT =
  * out and keeps low. The retry after an unusable answer always thinks more.
  */
 export function askEffort(request: AskRequest, doc: Doc): Effort {
-  return doc.exercises?.length || WORKED_OUT.test(request.question) ? 'low' : MINIMAL;
+  return doc.exercises?.length || WORKED_OUT.test(request.question) ? 'low' : 'minimal';
 }
 
 /**
