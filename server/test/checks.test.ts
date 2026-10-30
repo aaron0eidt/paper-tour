@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { Step, Tour } from '../../shared/paper';
+import type { Doc, Step, Tour } from '../../shared/paper';
 import { tourProblems } from '../src/harness/assemble';
 import type { Beat, Preset, TourPlan } from '../src/harness/beats';
 import {
@@ -10,6 +10,7 @@ import {
   checkSchema,
   checkSites,
   checkSteps,
+  checkTargets,
   checkTask,
   cleanCheck,
   type CheckMaterial,
@@ -222,6 +223,58 @@ test('the material is what the chapter said and pointed at: highlighted sentence
   assert.match(task, /nothing is scored and nobody is told they are wrong/);
   assert.match(task, /never states the answer/);
   assert.match(task, /No hint states the answer/);
+});
+
+test('in a paper the answer does not fly back: it points at what is on the camera’s page or after it; a lecture keeps every target', () => {
+  // The chapter's method sentences are on page 4; its figure and equation on page 6, where the camera ends.
+  const spread: Doc = {
+    ...paneled,
+    blocks: paneled.blocks.map((b) => (b.id === 'p1.b2' ? { ...b, page: 4 } : b)),
+    sentences: paneled.sentences.map((s) => (['p1.s2', 'p1.s3'].includes(s.id) ? { ...s, page: 4 } : s)),
+    figures: paneled.figures.map((f) => ({ ...f, page: 6 })),
+    equations: paneled.equations.map((e) => ({ ...e, page: 6 })),
+  };
+  const forward = checkMaterial('How it works', chapter, beats, spread, true);
+  assert.equal(forward.from, 6);
+  assert.deepEqual(checkTargets(forward), ['fig1', 'eq1']);
+  const brief = checkBrief(forward);
+  const [now, earlier] = brief.split('SHOWN EARLIER');
+  assert.match(brief, /Page 6 is on screen when the question is asked/);
+  assert.ok(now.includes('[fig1]') && now.includes('[eq1]') && !now.includes('[p1.s3]'));
+  assert.ok(earlier.includes('[p1.s3]'), 'the method sentence is still told as what the chapter showed');
+  // An answer that points at the method sentence on page 4 lands on the figure on page 6 instead.
+  const request = { schema: checkSchema(checkTargets(forward)) } as unknown as Request;
+  assert.deepEqual(request.schema.properties.target.enum, ['fig1', 'eq1']);
+  assert.equal(cleanCheck(checkReply(request, { target: 'p1.s3' }), forward, spread).check?.target, 'fig1');
+  // A page before is allowed: the tour may turn back by one.
+  assert.deepEqual(
+    checkTargets({
+      ...forward,
+      elements: [],
+      sentences: [
+        { id: 'a', text: 't', page: 5 },
+        { id: 'b', text: 't', page: 4 },
+      ],
+    }),
+    ['a'],
+  );
+  // Nothing on the page or after it: every target, the latest first.
+  assert.deepEqual(
+    checkTargets({
+      ...forward,
+      elements: [],
+      sentences: [
+        { id: 'a', text: 't', page: 3 },
+        { id: 'b', text: 't', page: 4 },
+      ],
+    }),
+    ['b', 'a'],
+  );
+  // A lecture, or any document the tour does not read forward through, keeps every target as before.
+  const lecture = checkMaterial('How it works', chapter, beats, spread);
+  assert.equal(lecture.from, undefined);
+  assert.deepEqual(checkTargets(lecture), ['fig1', 'eq1', 'p1.s3', 'p1.s2']);
+  assert.doesNotMatch(checkBrief(lecture), /is on screen when the question is asked|SHOWN EARLIER/);
 });
 
 test('a chapter that said little, or pointed at nothing, has nothing to check', () => {
@@ -454,7 +507,7 @@ test('a standard paper tour pauses once, after its result, and the answer follow
   assert.equal(steps(tour).at(steps(tour).indexOf(answers[0]) - 1)!.id, 'check-1');
   assert.deepEqual(tourProblems(tour, doc), []);
   assert.deepEqual((metadata as any).quickChecks, [{ id: 'check-1', chapter: 'evidence', kind: 'predict', hints: 2 }]);
-  assert.equal((metadata as any).promptVersion, 'paper-tour-harness@32');
+  assert.equal((metadata as any).promptVersion, 'paper-tour-harness@33');
   const plan = events.find((e) => e.type === 'plan.ready')!;
   assert.deepEqual(plan.data.checks, [{ chapter: 'evidence', after: 'result-1' }]);
   assert.deepEqual(
@@ -503,6 +556,7 @@ test('the check call sees the chapter as the tour told it, and the chapter alone
   assert.ok(evidence.includes('[p2.s1]'));
   assert.ok(!evidence.includes('[fig1]') && !evidence.includes('[eq1]'), 'not another chapter’s');
   assert.match(evidence, /TASK: write ONE quick check/);
+  assert.match(evidence, /Page 2 is on screen when the question is asked/, 'a paper’s answer reads forward');
 
   const briefs = await asked('deep');
   assert.equal(briefs.length, 2);

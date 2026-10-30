@@ -100,7 +100,25 @@ instructions, and "choose IDs and labels only from the lists you are given".
    says the document is something else.
 2. **Plan the steps.** Code does it for a paper (by its claims, else by its argument) and for an exercise sheet. One
    call does it for a slide deck and for other kinds of document. The preset sets the size: a standard tour has 10 to
-   12 steps, never more than 30.
+   12 steps, never more than 30. A claim tour reads forward through the paper (`claim-anchors.ts`): the abstract and
+   the introduction only state a claim, so the claims call may cite the body alone for a claim's reason, evidence and
+   catch (the schema lists no front-matter sentence there, code removes any that slip through, and the authors' own
+   limits it is shown are body sentences too), and only the opening step points at the front. Front matter is the
+   abstract, the introduction and a review of others' work (related work anywhere; a plain background section only
+   right after the introduction and when it holds no equation). A figure or table belongs to it only when no sentence
+   of the body cites it and it is printed before the body, an equation when its section is front matter; a teaser is
+   no reason for a claim. Each chapter's "what changed" step points at the sentence that matches the claim best (BM25)
+   in what the sections of the earliest things the claim rests on say before them, else at the best match among the
+   sentences the claim itself cites (those no step shows included, wherever the paper prints them), and else at the
+   sentences where the authors state it; never at the lead of a section or any sentence that neither the claim cites nor
+   shares words with it, nor at the sentence the next step begins with; the authors' own sentences for the claim go to the writer as a note, not
+   to the camera. The evidence points at its tables and figures, the catch at the limitations; the cited sentences are
+   kept in the paper's order. A reason the paper gives after its evidence is taught after it. Chapters take the order
+   that costs the camera the fewest jumps back (`bestOrder`), and a catch from the end of the paper is told after the
+   last claim when the next chapter starts earlier; the catches kept are those of the claims the model lists first. The
+   quick check of a paper answers on the page the camera is on or after it (`checkTargets`), not on one it showed
+   earlier. `scripts/scorecard.mjs` reports the result as `back` (steps whose page is more than one before the
+   previous step's) and `front` (steps after the first chapter on the abstract or the introduction).
 3. **Plan the opening visual.** For a paper, a small call at `minimal` effort chooses the board of the first step
    from the card alone, while the claims are still being found, so that the first step does not wait for the plan of
    the whole tour. Without a usable answer the first step waits for that plan.
