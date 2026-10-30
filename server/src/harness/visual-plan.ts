@@ -25,6 +25,8 @@ export interface StepVisual {
   table?: string;
   /** The step is asked for its narration alone, with no board and no worked example, even where it must have one (a slow step). */
   bare?: boolean;
+  /** Adaptive profiles choose representations by learning value, without legacy per-kind quotas. */
+  flexible?: boolean;
 }
 /** The plan by beat ID. Every planned beat has an entry; a beat without one (an exercise part) is not planned. */
 export type VisualPlan = Map<string, StepVisual>;
@@ -50,6 +52,7 @@ export const plannableBeats = (beats: Beat[]) =>
 export interface PlanOptions {
   sheet?: boolean;
   settled?: boolean;
+  adaptive?: boolean;
 }
 /** The kinds an exercise sheet's plan offers: a formula is what the solution lines already are. */
 export const sheetKinds = () => BOARD_KINDS.filter((kind) => kind !== 'formula' && kind !== 'timeline');
@@ -69,6 +72,7 @@ export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolea
   const detail = beat.kind === 'formula' && !!beat.detail;
   if (!visual) return { offered: true, required: detail };
   if (visual.bare) return { offered: false, required: false };
+  if (visual.flexible) return { offered: visual.visual !== 'none' || detail, required: detail };
   if (RELATIONAL_KINDS.includes(visual.visual)) return { offered: false, required: false };
   return { offered: visual.visual !== 'none' || detail, required: detail };
 }
@@ -99,6 +103,10 @@ export function allocateFrames(plan: VisualPlan, beats: Beat[], settled: Readonl
   const out: VisualPlan = new Map(plan);
   for (const beat of carrying) {
     const entry = plan.get(beat.id)!;
+    if (entry.flexible) {
+      out.set(beat.id, { ...entry, frames: [...LEGACY_BOARD_KINDS] });
+      continue;
+    }
     const frames: BoardKind[] = entry.visual === 'none' ? [] : [entry.visual];
     if (entry.visual !== 'formula' && room('formula') > 0) {
       frames.push('formula');
@@ -221,7 +229,7 @@ ${kinds}
 
 const kindsList = () => KINDS_ORDER.map((kind) => `   - ${kind}: ${KINDS_HELP[kind]}`).join('\n');
 
-export function visualPlanTask(language: string, { sheet, settled }: PlanOptions = {}): string {
+export function visualPlanTask(language: string, { sheet, settled, adaptive }: PlanOptions = {}): string {
   if (sheet) return sheetPlanTask(language);
   const kinds = kindsList();
   return `TASK: design the side-board visuals of this tour, which is narrated in ${JSON.stringify(language)}.
@@ -231,10 +239,18 @@ Fewer, stronger visuals beat many weak ones; none is right when the page (a figu
 point is simple.
 1. The kinds and what they are for:
 ${kinds}
-2. About half the steps get a visual. Never two visuals of the same data or idea. Diversity comes first: use as
+2. ${
+    adaptive
+      ? `Choose each representation for the learning objective and misconception in the brief. There is no per-kind
+   quota or required share of side boards. Repeat a useful kind for a genuinely different relationship, input or
+   computation; never repeat the same picture as decoration. Prefer source annotations when the page already shows
+   the mechanism clearly. A spoken numerical example must visibly change its inputs, intermediate values and output.
+   Use a new side visual when it reveals a relationship the original page cannot.`
+      : `About half the steps get a visual. Never two visuals of the same data or idea. Diversity comes first: use as
    many different kinds as fit, each kind once (formula and plot at most twice), and with five or more visuals at
    least four different kinds. Prefer heatmap, scatter, shapes, plot, timeline and distribution where they fit, since
-   they show relationships rather than single numbers. A figure step usually teaches on the figure itself.
+   they show relationships rather than single numbers. A figure step usually teaches on the figure itself.`
+  }
 3. For each visual, "idea" says in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks.
    "data" says exactly which numbers, symbols or labels it uses (at most ${DATA_WORDS} words): document values copied
    as printed, anything else marked illustrative. A step that reports results (a result or a table) uses only the
@@ -242,12 +258,11 @@ ${kinds}
    results step on a table with ready boards (listed under TABLES) draws one, naming its columns. Labels are real
    items (words of an example sentence, settings, methods), never "item 1".
 4. A step on a worked numerical case names the kind that shows its mechanism, and its example frames use that kind (bars
-   only for a few comparable quantities of one unit). Frames count toward each kind's limit.
+   only for a few comparable quantities of one unit). ${adaptive ? 'Choose the frames that demonstrate the actual computation.' : "Frames count toward each kind's limit."}
 5. Answer with one entry per step, in tour order. For none, leave "idea" and "data" empty.${
     settled
       ? `
-6. A step marked "already planned" keeps its visual: leave it out of your answer, and count its kind toward every limit
-   above, so that no other step repeats its picture.`
+6. A step marked "already planned" keeps its visual: leave it out of your answer. ${adaptive ? 'Later steps must add new understanding instead of repeating its picture.' : 'Count its kind toward every limit above, so that no other step repeats its picture.'}`
       : ''
   }`;
 }
@@ -318,6 +333,7 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc, settle
     if (ahead)
       lines.push(`  already planned (leave it out of your answer; it counts toward the limits): ${visualLine(ahead)}`);
     lines.push(`  the point: ${beat.point}`);
+    if (beat.notes?.length) lines.push(...beat.notes.map((note) => `  ${note}`));
     if (figure) lines.push(`  on ${figure.kind} ${figure.number}, page ${figure.page}: ${trimmed(figure.caption)}`);
     if (listed(figure)) lines.push('  its rows and columns are listed under TABLES below');
     if (equation)
@@ -385,7 +401,7 @@ export interface PlanAdjustment {
 export function cleanVisualPlan(
   value: unknown,
   beats: Beat[],
-  { sheet }: PlanOptions = {},
+  { sheet, adaptive }: PlanOptions = {},
   settled: VisualPlan = new Map(),
 ): { plan: VisualPlan | null; problems: string[]; adjusted: PlanAdjustment[] } {
   const known = new Set(beats.map((beat) => beat.id));
@@ -437,22 +453,22 @@ export function cleanVisualPlan(
     const entry = entries.get(beat.id) ?? { visual: 'none' as const, idea: '', data: '' };
     const none = { visual: 'none' as const, idea: '', data: '' };
     const task = beat.unit?.task.id;
-    if (settled.has(beat.id)) plan.set(beat.id, entry);
-    else if (entry.visual === 'none') plan.set(beat.id, entry);
+    if (settled.has(beat.id)) plan.set(beat.id, adaptive ? { ...entry, flexible: true } : entry);
+    else if (entry.visual === 'none') plan.set(beat.id, adaptive ? { ...entry, flexible: true } : entry);
     else if (sheet && entry.visual === 'formula') {
       plan.set(beat.id, none);
       adjusted.push({ beat: beat.id, visual: 'formula', reason: 'the solution lines are formula boards already' });
     } else if (task !== undefined && tasks.has(task)) {
       plan.set(beat.id, none);
       adjusted.push({ beat: beat.id, visual: entry.visual, reason: 'at most one visual per task' });
-    } else if ((used.get(entry.visual) ?? 0) >= kindLimit(entry.visual)) {
+    } else if (!adaptive && (used.get(entry.visual) ?? 0) >= kindLimit(entry.visual)) {
       plan.set(beat.id, none);
       adjusted.push({
         beat: beat.id,
         visual: entry.visual,
         reason: `at most ${kindLimit(entry.visual)} ${entry.visual} board${kindLimit(entry.visual) === 1 ? '' : 's'}`,
       });
-    } else if (boards >= room) {
+    } else if (!adaptive && boards >= room) {
       plan.set(beat.id, none);
       adjusted.push({
         beat: beat.id,
@@ -460,7 +476,7 @@ export function cleanVisualPlan(
         reason: `at most ${Math.round(BOARD_SHARE * 100)}% of the steps get a board`,
       });
     } else {
-      plan.set(beat.id, entry);
+      plan.set(beat.id, adaptive ? { ...entry, flexible: true } : entry);
       used.set(entry.visual, (used.get(entry.visual) ?? 0) + 1);
       if (task !== undefined) tasks.add(task);
       boards++;
