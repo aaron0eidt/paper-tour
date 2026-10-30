@@ -173,7 +173,10 @@ cd player && npm install && npm run dev
 
 Then open http://localhost:5174/?paper=attention. The paper is not in the repo, because its arXiv license does not
 allow re-hosting, so the first line downloads it. `validate.py` checks that the download is the exact file the tour was
-written for. `demo/attention/tour.json` is a hand-written tour of 38 steps, so the reader works without any key.
+written for. `demo/attention/tour.json` is a tour the pipeline wrote for this paper in one real run (`npm run
+demo:prepare -- attention --regenerate`), not edited, so the reader works without any key. To ask its suggested
+questions without a key as well, run `npm run demo:offline` in a second terminal: it answers them from
+`demo/attention/answers.json`, saved by the same run.
 
 **Write a tour for your own PDF.** This makes real Meta API calls, about $0.30 to $0.70 per tour at list price. Install
 Tesseract first (`brew install tesseract` on macOS, `apt-get install tesseract-ocr` on Debian or Ubuntu); figure labels
@@ -224,8 +227,9 @@ Tools in `ingest/`:
 - `outline.py <folder>` prints sections, figures and every sentence with its ID. Use it when writing a tour by hand.
 - `check_tour.py <folder>/tour.json <out-dir>` renders every step's targets the way the player frames them, one PNG per
   camera move, and prints the word each timed action fires on.
-- `demo/attention/build_tour.py` is the source of the hand-written demo tour; it turns anchor words into `at_word`
-  indexes.
+- `demo/attention/build_tour.py` writes the hand-written tour of the first scaffold, which the tests keep as a
+  reference for figure direction (`server/test/fixtures/attention-handcrafted.tour.json`); it turns anchor words into
+  `at_word` indexes.
 
 Player keys: `Space` or `K` play and pause, `←` and `→` previous and next step, `Shift` with an arrow previous and
 next sentence, `[` and `]` previous and next chapter, `Home` and `End` first and last step, `R` replay the sentence,

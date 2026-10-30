@@ -1,0 +1,320 @@
+{
+  "schema": "paper-tour/answers@0.1",
+  "paper": "attention",
+  "doc_sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+  "title": "Attention Replaces Recurrence for Translation",
+  "saved_at": "2026-10-30T17:45:40.149Z",
+  "answers": [
+    {
+      "question": "Why scale dot products by square-root dimension?",
+      "step_id": "takeaway-1",
+      "response_language": null,
+      "saved_at": "2026-10-30T17:45:40.149Z",
+      "seconds": 5.1,
+      "answer": {
+        "answerable": "yes",
+        "steps": [
+          {
+            "id": "ask-094c2d1a-1",
+            "say": "Large dot products push softmax into flat regions with extremely small gradients. So the authors scale the dot products by square root of dimension to counteract that effect.",
+            "actions": [
+              {
+                "type": "focus",
+                "target": "p4.s15"
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p4.s15"
+                ],
+                "color": "yellow",
+                "at_word": 1
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p4.s16"
+                ],
+                "color": "yellow",
+                "at_word": 15
+              }
+            ]
+          },
+          {
+            "id": "ask-094c2d1a-2",
+            "say": "As background, independent components with mean zero and variance one give a dot product with mean zero and variance dk. So the dot product grows with dimension. The authors divide by square root of dimension to bring variance back to one. That keeps softmax with healthy gradients.",
+            "actions": [
+              {
+                "type": "focus",
+                "target": "p4.s22"
+              },
+              {
+                "type": "board",
+                "item": {
+                  "kind": "formula",
+                  "title": "Scaled dot-product attention",
+                  "latex": "Attention(Q,K,V)=softmax(\\frac{QK^T}{\\sqrt{d_k}})V",
+                  "terms": [
+                    {
+                      "latex": "QK^T",
+                      "label": "similarity"
+                    },
+                    {
+                      "latex": "\\frac{QK^T}{\\sqrt{d_k}}",
+                      "label": "scaling"
+                    },
+                    {
+                      "latex": "softmax(\\frac{QK^T}{\\sqrt{d_k}})",
+                      "label": "weights"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "board_focus",
+                "part": 0,
+                "at_word": 22
+              },
+              {
+                "type": "board_focus",
+                "part": 1,
+                "at_word": 29
+              },
+              {
+                "type": "board_focus",
+                "part": 2,
+                "at_word": 42
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p4.s22"
+                ],
+                "color": "yellow",
+                "at_word": 12
+              }
+            ]
+          }
+        ],
+        "followups": [
+          "Why do large dot products hurt gradients?",
+          "How does variance grow with dimension?"
+        ]
+      }
+    },
+    {
+      "question": "Why mask future positions in decoder?",
+      "step_id": "takeaway-1",
+      "response_language": null,
+      "saved_at": "2026-10-30T17:45:40.149Z",
+      "seconds": 5.2,
+      "answer": {
+        "answerable": "yes",
+        "steps": [
+          {
+            "id": "ask-fa9d1b55-1",
+            "say": "The decoder masks future positions to preserve the auto-regressive property. That way the prediction for position i can depend only on the known outputs at positions less than i.",
+            "actions": [
+              {
+                "type": "focus",
+                "target": "p5.s18"
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p5.s18"
+                ],
+                "color": "yellow",
+                "at_word": 5
+              },
+              {
+                "type": "focus",
+                "target": "p3.s14",
+                "at_word": 19
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p3.s14"
+                ],
+                "color": "yellow",
+                "at_word": 19
+              }
+            ]
+          },
+          {
+            "id": "ask-fa9d1b55-2",
+            "say": "The authors modify decoder self-attention to prevent positions from attending to subsequent positions. As background, training is parallel, so without this the model could peek ahead. They implement this inside scaled dot-product attention by masking out illegal connections.",
+            "actions": [
+              {
+                "type": "focus",
+                "target": "p3.s13"
+              },
+              {
+                "type": "board",
+                "item": {
+                  "kind": "timeline",
+                  "title": "Illustrative left-to-right generation",
+                  "unit": "step",
+                  "source": "illustrative",
+                  "events": [
+                    {
+                      "label": "predict token 1",
+                      "at": 1,
+                      "position": 1
+                    },
+                    {
+                      "label": "predict token 2",
+                      "at": 2,
+                      "position": 2
+                    },
+                    {
+                      "label": "predict token 3",
+                      "at": 3,
+                      "position": 3
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p3.s13"
+                ],
+                "color": "yellow",
+                "at_word": 6
+              },
+              {
+                "type": "focus",
+                "target": "p5.s19",
+                "at_word": 34
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p5.s19"
+                ],
+                "color": "yellow",
+                "at_word": 34
+              }
+            ]
+          }
+        ],
+        "followups": [
+          "How is the mask implemented in softmax?",
+          "How does encoder self-attention differ?"
+        ]
+      }
+    },
+    {
+      "question": "Why do multiple heads beat one head?",
+      "step_id": "takeaway-1",
+      "response_language": null,
+      "saved_at": "2026-10-30T17:45:40.149Z",
+      "seconds": 7.9,
+      "answer": {
+        "answerable": "yes",
+        "steps": [
+          {
+            "id": "ask-ae4ad4a1-1",
+            "say": "Multiple heads beat one head because they attend jointly to different subspaces, while a single head averages them. As background, averaging blurs distinct relations. The authors report single-head attention is 0.9 BLEU worse than the best setting.",
+            "actions": [
+              {
+                "type": "focus",
+                "target": "p5.s4"
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p5.s4"
+                ],
+                "color": "yellow"
+              },
+              {
+                "type": "focus",
+                "target": "p9.s9",
+                "at_word": 30
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p9.s9"
+                ],
+                "color": "yellow",
+                "at_word": 30
+              }
+            ]
+          },
+          {
+            "id": "ask-ae4ad4a1-2",
+            "say": "The gain comes without extra cost. Each of eight heads works in a smaller dimension, so the total computational cost is similar to full single-head attention. The heads clearly learned to perform different tasks, for example different syntactic and semantic relations in the same layer.",
+            "actions": [
+              {
+                "type": "focus",
+                "target": "p5.s8"
+              },
+              {
+                "type": "board",
+                "item": {
+                  "kind": "shapes",
+                  "title": "Head projection keeps cost low",
+                  "terms": [
+                    {
+                      "kind": "matrix",
+                      "name": "X",
+                      "rows": "n",
+                      "cols": "dmodel"
+                    },
+                    {
+                      "kind": "op",
+                      "op": "times"
+                    },
+                    {
+                      "kind": "matrix",
+                      "name": "W^Q_i",
+                      "rows": "dmodel",
+                      "cols": "dk"
+                    },
+                    {
+                      "kind": "op",
+                      "op": "equals"
+                    },
+                    {
+                      "kind": "matrix",
+                      "name": "head_i",
+                      "rows": "n",
+                      "cols": "dk"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "highlight",
+                "targets": [
+                  "p5.s8"
+                ],
+                "color": "yellow",
+                "at_word": 17
+              },
+              {
+                "type": "zoom",
+                "target": "fig5",
+                "at_word": 32
+              },
+              {
+                "type": "box",
+                "target": "fig5",
+                "color": "pink",
+                "at_word": 32
+              }
+            ]
+          }
+        ],
+        "followups": [
+          "How many heads did they use?",
+          "What happens with too many heads?"
+        ]
+      }
+    }
+  ]
+}
