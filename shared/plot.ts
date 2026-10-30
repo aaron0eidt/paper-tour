@@ -485,11 +485,13 @@ export function plotSegments(tree: Expr, plot: PlotItem, a = 1, samples = 160): 
   return segments;
 }
 
-const axisSchema = (limit: number) => ({
+// A board's axes carry no limits in the schema the model is sent: the provider fails a schema with a limit as large as a
+// log axis needs (1e30) with a 5xx, every time. plotProblems checks the ranges in code instead (range above).
+const axisSchema = (limit?: number) => ({
   type: 'array',
   minItems: 2,
   maxItems: 2,
-  items: { type: 'number', minimum: -limit, maximum: limit },
+  items: limit === undefined ? { type: 'number' } : { type: 'number', minimum: -limit, maximum: limit },
 });
 /** The plot board: curves with log axes, marks the code finds, and the document's measured points. */
 export const PLOT_BOARD_SCHEMA = {
@@ -499,8 +501,8 @@ export const PLOT_BOARD_SCHEMA = {
   properties: {
     kind: { const: 'plot' },
     title: { type: 'string', maxLength: 80 },
-    x: axisSchema(1e30),
-    y: axisSchema(1e30),
+    x: axisSchema(),
+    y: axisSchema(),
     x_label: { type: 'string', maxLength: 80 },
     y_label: { type: 'string', maxLength: 80 },
     x_scale: {

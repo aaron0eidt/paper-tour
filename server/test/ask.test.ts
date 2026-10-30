@@ -1597,6 +1597,22 @@ test('the answer schema offers every board kind within the provider’s limits',
         : ((node as { type?: string }).type === 'object' || (node as { type?: string }).type === 'array' ? 1 : 0) +
           Math.max(0, ...Object.values(node).map(levels));
   assert.ok(levels(schema) <= 10, `${levels(schema)} levels`);
+  // A limit as large as a log axis needs (1e30) makes the provider fail every call with this schema with a 5xx.
+  const limits: number[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) node.forEach(walk);
+    else if (node && typeof node === 'object')
+      for (const [key, value] of Object.entries(node))
+        if (['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'].includes(key) && typeof value === 'number')
+          limits.push(value);
+        else walk(value);
+  };
+  walk(schema);
+  assert.deepEqual(
+    limits.filter((n) => Math.abs(n) > 1e6),
+    [],
+    'no number limit past a million',
+  );
 });
 
 test('a question picks its first effort: no reasoning budget for a lookup, a little for a calculation or an exercise', () => {

@@ -310,8 +310,9 @@ test('a log axis may span powers of ten far beyond a linear one: counts of opera
   const [segment] = plotSegments(parse('100/(x/10^18)^0.2'), scaling() as PlotItem, 1, 60);
   const ratios = segment.slice(1).map(([x], i) => x / segment[i][0]);
   near(Math.max(...ratios), Math.min(...ratios), 1e-9);
-  // The contracts agree: the board's schema and the canonical tour schema take it; a plot inside a scene keeps its linear limits.
-  assert.equal(PLOT_BOARD_SCHEMA.properties.x.items.maximum, 1e30);
+  // The contracts agree: the board's schema leaves the range to the code (the provider fails a schema with a limit of
+  // 1e30) and the canonical tour schema takes it; a plot inside a scene keeps its linear limits.
+  assert.equal(PLOT_BOARD_SCHEMA.properties.x.items.maximum, undefined);
   assert.equal(PLOT_SCHEMA.properties.x.items.maximum, 1e6);
   const canonical = JSON.parse(readFileSync(new URL('../../schema/tour.schema.json', import.meta.url), 'utf8'));
   const board = canonical.$defs.boardItem.oneOf.find((item: any) => item.properties.kind?.const === 'plot');
