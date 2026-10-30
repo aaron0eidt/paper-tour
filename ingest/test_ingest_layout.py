@@ -147,5 +147,119 @@ class LayoutTests(unittest.TestCase):
         self.assertIn("RESULTS ON THE BENCHMARK", figures["tabI"]["caption"])
 
 
+def with_script(page, x, y, parts, size=10, small=7, raise_by=3.6, font="tiro"):
+    """One line drawn piece by piece: a part is a string at body size, or ("^", s) small and raised, ("_", s) lowered."""
+    for part in parts:
+        if isinstance(part, str):
+            page.insert_text((x, y), part, fontsize=size, fontname=font)
+            x += pymupdf.get_text_length(part, fontname=font, fontsize=size)
+        else:
+            kind, s = part
+            page.insert_text((x, y - raise_by if kind == "^" else y + 2), s, fontsize=small, fontname=font)
+            x += pymupdf.get_text_length(s, fontname=font, fontsize=small)
+    return y + 12
+
+
+class PowerOfTenTests(unittest.TestCase):
+    """A power of ten printed with a raised exponent keeps its exponent in the text ("10^19", not "1019"), and nothing
+    else about the analysis changes: the same blocks, sentences and IDs as with the exponent at full size."""
+
+    def read(self, parts):
+        """The text of the page's analysed blocks and the structure of its sentences, for one line of `parts`."""
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        y = column_text(page, 60, 60, 480, 4)
+        with_script(page, 60, y, parts)
+        column_text(page, 60, y + 12, 480, 3)
+        pdf = pymupdf.open("pdf", doc.tobytes())
+        with mock.patch.object(ingest, "warn", lambda message: None):
+            pages, *_ = ingest.analyse(pdf)
+        blocks = pages[0].ordered
+        return [b.text for b in blocks], [(s["id"], s["block"]) for s in pages[0].sentences]
+
+    def line(self, parts):
+        texts, _ = self.read(parts)
+        return next(t for t in texts if "FLOPs" in t)
+
+    def test_a_raised_exponent_is_marked(self):
+        text = self.line(["Training took 2.3 \u00d7 10", ("^", "19"), " FLOPs in total."])
+        self.assertIn("2.3 \u00d7 10^19 FLOPs", text)
+        negative = self.line(["The step was 1.5 \u00d7 10", ("^", "-9"), " FLOPs wide."])
+        self.assertIn("1.5 \u00d7 10^-9 FLOPs", negative)
+
+    def test_marking_changes_no_structure(self):
+        raised = self.read(["Training took 2.3 \u00d7 10", ("^", "19"), " FLOPs in total."])
+        flat = self.read(["Training took 2.3 \u00d7 1019 FLOPs in total."])
+        self.assertEqual(raised[1], flat[1])
+        self.assertEqual(len(raised[0]), len(flat[0]))
+
+    def test_other_scripts_are_not_exponents(self):
+        for parts, kept in (
+            (["The cost of 100", ("^", "2"), " FLOPs grows."], "1002 FLOPs"),    # 100 squared, not a power of ten
+            (["The 2", ("^", "10"), " FLOPs value."], "210 FLOPs"),              # a digit before the 10
+            (["Let x10", ("^", "3"), " be the FLOPs value."], "x103 be"),        # a name, not a number
+            (["Then d", ("_", "10"), " has FLOPs."], "d10 has"),                 # a subscript stays flat
+            (["Then 10", ("_", "3"), " FLOPs fall."], "103 FLOPs"),              # lowered, not raised
+            (["Done within 10", ("^", "2"), " FLOPs days."], "102 FLOPs"),       # a footnote mark, no multiplication
+            (["As Artikel 10", ("^", "2"), " FLOPs says."], "102 FLOPs"),
+            (["Rate 10", ("^", "-9"), " FLOPs ok."], "10-9 FLOPs"),              # a bare 10 stays flat, too
+        ):
+            with self.subTest(kept=kept):
+                text = self.line(parts)
+                self.assertNotIn("^", text)
+                self.assertIn(kept, text)
+
+    def test_display_equations_keep_the_exponent_too(self):
+        """An equation's text is board evidence: its power of ten is marked, numbered or not, and its ID stays."""
+        def equations(raised):
+            """One display without a number and one numbered 4, the exponents raised or at full size."""
+            sup = (lambda s: ("^", s)) if raised else (lambda s: s)
+            doc = pymupdf.open()
+            page = doc.new_page(width=612, height=792)
+            y = column_text(page, 72, 80, 468, 3)
+            with_script(page, 250, y + 14, ["c = 3 \u00d7 10", sup("8")], font="symb")
+            y = column_text(page, 72, y + 40, 468, 3)
+            with_script(page, 250, y + 14, ["h = 6.6 \u00d7 10", sup("-34")], font="symb")
+            page.insert_text((505, y + 14), "(4)", fontsize=10, fontname="tiro")
+            column_text(page, 72, y + 40, 468, 3)
+            pdf = pymupdf.open("pdf", doc.tobytes())
+            with mock.patch.object(ingest, "warn", lambda message: None):
+                return ingest.analyse(pdf)[3]
+
+        raised, flat = equations(True), equations(False)
+        self.assertEqual([e["id"] for e in raised], ["equ1", "eq4"], raised)
+        self.assertEqual([e["text"] for e in raised], ["c = 3 \u00d7 10^8", "h = 6.6 \u00d7 10^-34"])
+        self.assertEqual([(e["id"], e["block"]) for e in flat], [(e["id"], e["block"]) for e in raised])
+        self.assertEqual([e["text"] for e in flat], ["c = 3 \u00d7 108", "h = 6.6 \u00d7 10-34"])
+
+    def test_the_exponent_run_is_read_char_by_char(self):
+        """marked_powers on chars as MuPDF gives them: (c, bbox, baseline, size, font, flags), a script 3.6pt up at 7pt."""
+        def word(text, scripts):
+            return [(c, (0, 0, 1, 1), 100 - (3.6 if i in scripts else 0), 7 if i in scripts else 10, "f", 0)
+                    for i, c in enumerate(text)]
+
+        self.assertEqual(ingest.marked_powers(word("10\u22129", {2, 3}), "2.3 \u00d7 "), "10^\u22129")
+        self.assertEqual(ingest.marked_powers(word("\u00d710+12", {3, 4, 5}), "5 "), "\u00d710^+12")
+        self.assertEqual(ingest.marked_powers(word("2.3\u00d71019", {6, 7})), "2.3\u00d710^19")
+        self.assertEqual(ingest.marked_powers(word("2.3x1019", {6, 7})), "2.3x10^19")
+        for text, scripts, before in (
+            ("1019", set(), "2.3 \u00d7 "),                # full size: the integer 1019
+            ("10\u22129", {2}, "2.3 \u00d7 "),             # a lone sign is no exponent
+            ("101234", {2, 3, 4, 5}, "2.3 \u00d7 "),       # four digits are no exponent of a short power
+            ("1011x", {2, 3, 4}, "2.3 \u00d7 "),           # more script after the digits
+            ("102", {2}, "within "),                     # a footnote mark after a bare 10
+            ("102", {2}, "Artikel "),
+            ("102", {2}, ""),
+            ("102", {2}, "\u03b5 = "),                     # no mantissa, no multiplication
+            ("102", {2}, "a2\u00d7 "),                    # a name, not a mantissa
+            ("102", {2}, "(a+b) \u00d7 "),
+        ):
+            with self.subTest(text=text, before=before):
+                self.assertNotIn("^", ingest.marked_powers(word(text, scripts), before))
+        flat = [("1", (0, 0, 1, 1), 100, 10, "f", 0), ("0", (0, 0, 1, 1), 100, 10, "f", 0),
+                ("9", (0, 0, 1, 1), 100, 7, "f", 0)]                   # small but on the baseline: a subscript
+        self.assertEqual(ingest.marked_powers(flat), "109")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -769,8 +769,8 @@
               "maxItems": 2,
               "items": {
                 "type": "number",
-                "minimum": -1000000,
-                "maximum": 1000000
+                "minimum": -1e30,
+                "maximum": 1e30
               }
             },
             "y": {
@@ -779,8 +779,8 @@
               "maxItems": 2,
               "items": {
                 "type": "number",
-                "minimum": -1000000,
-                "maximum": 1000000
+                "minimum": -1e30,
+                "maximum": 1e30
               }
             },
             "x_label": {

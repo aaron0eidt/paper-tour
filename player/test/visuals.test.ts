@@ -6,6 +6,7 @@ import katex from 'katex';
 import { canonicalDistribution } from '../../shared/distribution';
 import type { DistributionItem } from '../../shared/distribution';
 import type { PlotItem } from '../../shared/plot';
+import { canonicalScatter } from '../../shared/scatter';
 import type { ScatterItem } from '../../shared/scatter';
 import { canonicalTimeline } from '../../shared/timeline';
 import type { ShapesItem } from '../../shared/shapes';
@@ -227,6 +228,76 @@ test('a value sits at 0 at the start of its axis and 1 at the end, in order, on 
       1e-9,
     'decades equal',
   );
+});
+
+test('a linear axis past a thousand trillion or under a thousandth labels powers of ten, as a whole', () => {
+  const labels = (values: number[]) => scatterAxis(values, false, 300, 62).ticks.map((t) => t.label);
+  const powers = (list: string[]) => list.every((label) => label === '0' || /^(?:[\d.]+×)?10⁻?[⁰¹²³⁴⁵⁶⁷⁸⁹]+$/.test(label));
+  for (const values of [[9.6e18, 2.3e19, 4e19], [0, 2e19], [1.2e15, 2e15], [5e-5, 8e-4], [0, 8e-4], [-4e-4, 6e-4]])
+    ok(powers(labels(values)), `${values}: ${labels(values).join(' | ')}`);
+  eq(labels([0, 2e19]).at(-1), '2×10¹⁹');
+  eq(labels([0, 2e19]).at(0), '0', 'zero stays 0');
+  ok(labels([-3e18, 2e18]).some((label) => label === '−10¹⁸' || label.startsWith('−')), labels([-3e18, 2e18]).join(' | '));
+  // One style per axis: the largest tick decides, so a mix like "0.0000 | 5×10⁻⁴ | 0.0010" never appears.
+  for (const values of [[0, 0.0012], [0, 0.0015], [0, 1e-3], [0, 0.5], [0, 5e14], [0, 9e14], [100, 5e5]])
+    ok(!labels(values).some((label) => label.includes('10') && /[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(label)), `${values}: ${labels(values).join(' | ')}`);
+  eq(labels([0, 0.0012]), ['0.0000', '0.0005', '0.0010'], 'unchanged from before powers of ten');
+  eq(labels([0, 5e14]), ['0', '200T', '400T'], 'a value the units spell out keeps its unit');
+  // Neighbouring ticks never share a label, however narrow the axis is relative to its values.
+  for (const values of [[1e15, 1.0001e15], [2.5e19, 2.5001e19], [1e-5, 1.00004e-5]]) {
+    const list = labels(values);
+    ok(list.length >= 2 && new Set(list).size === list.length, `${values}: ${list.join(' | ')}`);
+  }
+  // tickLabel itself is the plain label: the powers of ten are chosen for an axis, not a value.
+  eq(tickLabel(0.002, 0.001), '0.002');
+  eq(tickLabel(5e14, 1e14), '500T');
+});
+
+test('a scatter of a document\'s costs in FLOPs is drawn on a log axis with powers of ten for labels', () => {
+  const flops: ScatterItem = canonicalScatter({
+    kind: 'scatter',
+    x_label: 'Training cost (FLOPs)',
+    y_label: 'BLEU EN-DE',
+    better: 'up-left',
+    source: 'document',
+    points: [
+      { label: 'ConvS2S', x: 9.6e18, y: 25.16 },
+      { label: 'MoE', x: 2e19, y: 26.03 },
+      { label: 'GNMT + RL', x: 2.3e19, y: 24.6 },
+      { label: 'Transformer (base)', x: 3.3e18, y: 27.3 },
+      { label: 'ConvS2S Ensemble', x: 7.7e19, y: 26.36 },
+    ],
+  });
+  eq(flops.x_log, true, 'the axis is chosen in code, not left to the model');
+  eq(flops.y_log, undefined, 'BLEU stays linear');
+  const g = scatterGeometry(flops, { width: 438, height: 400 }, fonts);
+  ok(g.xTicks.length >= 2 && g.xTicks.every((t) => t.label.includes('10') && /[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(t.label)), g.xTicks.map((t) => t.label).join(' '));
+  ok(g.points.every((p) => p.x >= g.plot.left && p.x <= g.plot.right), 'points inside the plot');
+  const order = [...flops.points].map((p, i) => [p.x, g.points[i].x]).sort((a, b) => a[0] - b[0]);
+  ok(order.every((v, i) => i === 0 || v[1] > order[i - 1][1]), 'larger cost sits further right');
+  const readout = scatterReadout(g, 0, flops, fonts.tick);
+  eq(readout.x.text, '9.6×10¹⁸', 'the badge of the focused point reads as printed');
+});
+
+test('values within a decade stay on a linear axis, which prints powers of ten rather than a log axis of one tick', () => {
+  const narrow = (xs: number[]) =>
+    canonicalScatter({
+      kind: 'scatter',
+      x_label: 'x',
+      y_label: 'y',
+      source: 'document',
+      points: xs.map((x, i) => ({ label: `p${i}`, x, y: 10 + i })),
+    });
+  for (const xs of [[1e20, 1.2e20, 1.5e20], [3e-4, 5e-4, 8e-4], [9.6e18, 2.3e19, 3.3e19]]) {
+    const item = narrow(xs);
+    eq(item.x_log, undefined, xs.join(', '));
+    for (const width of [343, 438]) {
+      const g = scatterGeometry(item, { width, height: 400 }, fonts);
+      ok(g.xTicks.length >= 2 && g.xTicks.every((t) => /^(?:[\d.]+×)?10⁻?[⁰¹²³⁴⁵⁶⁷⁸⁹]+$/.test(t.label)), `${xs} at ${width}: ${g.xTicks.map((t) => t.label).join(' ')}`);
+      ok(new Set(g.xTicks.map((t) => t.label)).size === g.xTicks.length, 'distinct labels');
+    }
+  }
+  eq(narrow([1e19, 1e20]).x_log, true, 'a decade or more of such values is a log axis');
 });
 
 test('badge values print exactly, or as a few digits of a power of ten when huge or tiny', () => {
@@ -479,6 +550,9 @@ test('a scatter reads as a sentence for screen readers', () => {
     text,
   );
   ok(text.includes('better is up and left'), text);
+  const flops = { ...tradeoff, points: [{ label: 'Big', x: 2.3e19, y: 28.4 }, { label: 'Base', x: 3.3e18, y: 27.3 }, { label: 'Tiny', x: 1e-5, y: 5 }] };
+  const huge = scatterDescription(flops);
+  ok(huge.includes('Big (2.3×10¹⁹, 28.4)') && huge.includes('Base (3.3×10¹⁸, 27.3)') && huge.includes('Tiny (1×10⁻⁵, 5)'), huge);
 });
 
 // ------------------------------------------------------------------- shapes
@@ -1040,6 +1114,19 @@ test('a log axis ticks on decades, a linear one that spans zero draws its zero l
   eq(p.marks.length, 1);
   const bare = plotGeometry({ ...parabola, marks: undefined }, { width: 438, height: 400 }, 1, plotFonts);
   eq(bare.marks, []);
+});
+
+test('a log axis over powers of ten of a plot is labelled like the scatter\'s', () => {
+  const scaling: PlotItem = {
+    kind: 'plot',
+    x: [1e18, 1e24],
+    y: [1, 100],
+    x_scale: 'log',
+    curves: [{ expression: '100/(x/10^18)^0.2', label: 'loss' }],
+  };
+  const g = plotGeometry(scaling, { width: 438, height: 400 }, 1, plotFonts);
+  ok(g.xTicks.length >= 2 && g.xTicks.every((t) => /^10[¹²][⁰¹²³⁴⁵⁶⁷⁸⁹]$/.test(t.label)), g.xTicks.map((t) => t.label).join(' '));
+  ok(g.xTicks.every((t) => t.at >= g.plot.left - 1e-6 && t.at <= g.plot.right + 1e-6), 'ticks inside the range');
 });
 
 test('a sweep moves the marks with the parameter, and one that has gone is not drawn', () => {

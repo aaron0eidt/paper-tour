@@ -1,6 +1,7 @@
 // The scatter board: nice axes, where the labels go, the better corner and the build timeline. Pure, so it can be
 // tested; rendering is in components/ScatterBoard.tsx.
 
+import { powerOfTen } from '../../shared/plot';
 import { scatterSeries } from '../../shared/scatter';
 import type { ScatterItem } from '../../shared/scatter';
 import { decimalsOf, formatValue, wrapLabel } from './board';
@@ -44,7 +45,9 @@ const UNITS: [number, string][] = [
   [1e6, 'M'],
   [1e3, 'k'],
 ];
-const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+// Past these, an axis is labelled in powers of ten: a count of operations or a gradient is no row of digits.
+const SCIENTIFIC_FROM = 1e15;
+const SCIENTIFIC_BELOW = 1e-3;
 
 /** Where a value lies along the axis: 0 at its start, 1 at its end. */
 export function axisFraction(axis: ScatterAxis, value: number): number {
@@ -60,6 +63,14 @@ function niceStep(raw: number): number {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * 10 ** exp;
 }
 
+/** A number as a power of ten ("2.5×10¹⁹"); `step` sets the decimals, so that ticks a step apart never read alike. */
+function scientificLabel(value: number, step: number): string {
+  if (value === 0) return '0';
+  const places = Math.min(15, Math.max(0, Math.floor(log10(Math.abs(value)) + 1e-9) - Math.floor(log10(step) + 1e-9)));
+  const [lead, exp] = Math.abs(value).toExponential(places).split('e');
+  return `${value < 0 ? MINUS : ''}${Number(lead) === 1 ? '' : `${Number(lead)}×`}${powerOfTen(Number(exp))}`;
+}
+
 /** A number on an axis: grouped digits, or k, M, B and T from ten thousand up; `step` sets the decimals. */
 export function tickLabel(value: number, step: number): string {
   const abs = Math.abs(value);
@@ -73,14 +84,11 @@ export function tickLabel(value: number, step: number): string {
   return `${value < 0 ? MINUS : ''}${text}${unit?.[1] ?? ''}`;
 }
 
-const power = (exp: number) =>
-  `10${exp < 0 ? '⁻' : ''}${[...String(Math.abs(exp))].map((digit) => SUPERSCRIPT[Number(digit)]).join('')}`;
-
 /** A value on a log axis: 0.01, 1, 10, 1k, 20M; powers of ten below a thousandth or past a trillion as 10 to the n. */
 export function logTickLabel(value: number): string {
   const exp = Math.floor(log10(value) + 1e-9);
   const lead = Math.round(value / 10 ** exp);
-  if (exp < -3 || exp >= 15) return lead === 1 ? power(exp) : `${lead}×${power(exp)}`;
+  if (exp < -3 || exp >= 15) return lead === 1 ? powerOfTen(exp) : `${lead}×${powerOfTen(exp)}`;
   if (exp < 3) {
     const places = Math.max(0, -exp);
     return value.toLocaleString('en-US', { minimumFractionDigits: places, maximumFractionDigits: places });
@@ -104,12 +112,13 @@ function linearTicks(lo: number, hi: number, room: number): AxisTick[] {
   for (let i = 0; i < 4 && count(step) < 3 && count(finerStep(step)) <= Math.max(3, room + 1); i++)
     step = finerStep(step);
   const places = Math.max(0, -Math.floor(log10(step) + 1e-9));
-  const ticks: AxisTick[] = [];
-  for (let i = Math.ceil(lo / step - 1e-9); i * step <= hi + step * 1e-9; i++) {
-    const value = Number((i * step).toFixed(places));
-    ticks.push({ value, label: tickLabel(value, step) });
-  }
-  return ticks;
+  const values: number[] = [];
+  for (let i = Math.ceil(lo / step - 1e-9); i * step <= hi + step * 1e-9; i++)
+    values.push(Number((i * step).toFixed(places)));
+  // One style for the whole axis: its largest tick decides, so that "0.0005" is never beside "5×10⁻⁴".
+  const top = Math.max(0, ...values.map(Math.abs));
+  const scientific = top >= SCIENTIFIC_FROM || (top > 0 && top < SCIENTIFIC_BELOW);
+  return values.map((value) => ({ value, label: scientific ? scientificLabel(value, step) : tickLabel(value, step) }));
 }
 
 // A log axis labels every multiple of its decades, then 1, 2 and 5, then only the decades, as the room allows.
@@ -539,7 +548,7 @@ export function valueText(v: number): string {
   if (v === 0 || (abs >= 1e-3 && abs < 1e9)) return formatValue(v, decimalsOf(v));
   const exp = Math.floor(log10(abs) + 1e-9);
   const digits = Number((abs / 10 ** exp).toPrecision(3));
-  return `${v < 0 ? MINUS : ''}${digits}\u00d7${power(exp)}`;
+  return `${v < 0 ? MINUS : ''}${digits}\u00d7${powerOfTen(exp)}`;
 }
 const badgeWidth = (v: number, measure: Measure) => Math.ceil(measure(valueText(v)) * 1.1) + 12;
 
@@ -608,7 +617,10 @@ export const scatterDuration = (count: number) =>
 
 /** A description of the plot for screen readers. */
 export function scatterDescription(item: ScatterItem): string {
-  const points = item.points.map((p) => `${p.label} (${p.x}, ${p.y})`).join('; ');
+  // Counts of operations are read as powers of ten, like the board's badges, not as twenty digits.
+  const say = (v: number) =>
+    Math.abs(v) >= SCIENTIFIC_FROM || (v !== 0 && Math.abs(v) < SCIENTIFIC_BELOW) ? valueText(v) : String(v);
+  const points = item.points.map((p) => `${p.label} (${say(p.x)}, ${say(p.y)})`).join('; ');
   const better = item.better ? `; better is ${item.better.replace('-', ' and ')}` : '';
   return `${item.title ?? 'Scatter plot'}: ${item.y_label} against ${item.x_label}: ${points}${better}`;
 }

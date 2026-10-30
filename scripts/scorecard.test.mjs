@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { boardOrigin, boardSignature, render, scoreTour, summarize } from './scorecard.mjs';
+import { boardOrigin, boardSignature, render, scientificNumbers, scoreTour, summarize } from './scorecard.mjs';
 
 // The scorecard reads a tour folder and counts what is in it; run with: node --test scripts/scorecard.test.mjs
 
@@ -176,6 +176,56 @@ test('does not trust a doc.json of another version of the document', () => {
     assert.equal(score.inText, null);
   } finally {
     done();
+  }
+});
+
+test('numbers in scientific notation count as printed in the text, as the grounding reads them', () => {
+  const scatter = (xs) => ({
+    kind: 'scatter',
+    x_label: 'Training cost (FLOPs)',
+    y_label: 'BLEU',
+    source: 'document',
+    points: xs.map((x, i) => ({ label: `p${i}`, x, y: 28.4 })),
+  });
+  const text =
+    'Cost 2.3 \u00b7 1019 FLOPs (flattened), 9.6 \u00d7 10^18, 3.3\u00d710\u00b9\u2078 and 1.5e20 gave 28.4 BLEU.';
+  const costs = {
+    ...tour,
+    chapters: [
+      {
+        id: 'a',
+        title: 'A',
+        steps: [
+          step('s1', 'one two', [
+            { type: 'board', item: scatter([2.3e19, 9.6e18, 3.3e18, 1.5e20]) },
+            { type: 'board', item: scatter([2.4e19, 9.6e18]) },
+            { type: 'board', item: scatter([2.3e18, 9.6e18]) },
+          ]),
+        ],
+      },
+    ],
+  };
+  const { dir, docs, done } = folders({
+    tour: costs,
+    doc: { ...doc, blocks: [{ ...doc.blocks[0], text }] },
+  });
+  try {
+    const score = scoreTour(dir, { docs });
+    assert.equal(score.document, 3);
+    assert.equal(score.inText, 1, 'only the board whose costs are all printed; 2.4e19 and 2.3e18 are not');
+  } finally {
+    done();
+  }
+});
+
+test('reads the table of notations as the grounding does (shared/notation-cases.json, also checked by the server)', () => {
+  const cases = JSON.parse(readFileSync(new URL('../shared/notation-cases.json', import.meta.url), 'utf8'));
+  for (const { text, values } of cases) {
+    const read = scientificNumbers(text).map(Math.abs);
+    // Signs differ across PDFs, so the scorecard compares magnitudes: the same numbers, none more.
+    assert.equal(read.length, values.length, `${text}: ${read}`);
+    for (const value of values)
+      assert.ok(read.some((n) => Math.abs(n - Math.abs(value)) <= 1e-9 * Math.abs(value)), `${text} holds ${value}: ${read}`);
   }
 });
 

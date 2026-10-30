@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { Doc } from '../../shared/paper';
+import { canonicalScatter, needsLogAxis } from '../../shared/scatter';
+import { tableLines } from '../../shared/tableTargets';
 import { findAnchor } from '../src/harness/assemble';
-import { boardPart, boardParts, boardPartIds, checkBoard, type BoardKind } from '../src/harness/board';
+import { boardPart, boardParts, boardPartIds, checkBoard, numbersIn, type BoardKind } from '../src/harness/board';
 import { BOARD_EXAMPLES, SHARED_RULES, directTask } from '../src/harness/prompts';
 import { groundedProblems } from '../src/harness/visual-rules';
 import { SOURCE_VISUAL_POLICY } from '../src/muse/visual-policy';
+import { printedNumbers } from '../src/harness/tables';
 
 // The server side of the heatmap, scatter and shapes boards: grounding in the evidence and the prompts that teach them.
 
@@ -155,6 +161,107 @@ test('illustrative scatter points need no evidence, but all points on one value 
     ],
   });
   has(checkBoard('scatter', flat, '').problems, /every point has the same y/);
+});
+
+// The cost column of a results table as older analyses (and a table without a grid) print it: the exponent flattened.
+const FLATTENED_COSTS = [
+  'ConvS2S [9] 25.16 40.46 9.6 · 1018 1.5 · 1020',
+  'MoE [32] 26.03 40.56 2.0 · 1019 1.2 · 1020',
+  'GNMT + RL [38] 24.6 39.92 2.3 · 1019 1.4 · 1020',
+  'Transformer (base model) 27.3 38.1 3.3 · 1018',
+  'Transformer (big) 28.4 41.8 2.3 · 1019',
+].join('\n');
+const costs = (change: Record<string, unknown> = {}) =>
+  scatter({
+    x_label: 'Training cost (FLOPs)',
+    y_label: 'BLEU EN-DE',
+    points: [
+      { label: 'ConvS2S', x: 9.6e18, y: 25.16 },
+      { label: 'MoE', x: 2e19, y: 26.03 },
+      { label: 'GNMT + RL', x: 2.3e19, y: 24.6 },
+      { label: 'Transformer (base)', x: 3.3e18, y: 27.3 },
+      { label: 'GNMT + RL (EN-FR)', x: 1.4e20, y: 39.92 }, // 40 times the cheapest: a log axis
+    ],
+    ...change,
+  });
+
+test('a scatter of costs is grounded in a table text whose exponents were flattened, and the log axis is chosen in code', () => {
+  const { item, problems } = checkBoard('scatter', costs(), FLATTENED_COSTS);
+  assert.deepEqual(problems, []);
+  assert.equal(item?.kind === 'scatter' && item.x_log, true);
+  assert.equal(item?.kind === 'scatter' && item.y_log, undefined);
+  assert.deepEqual(groundedProblems(item!, { results: true }), []);
+});
+
+test('a cost that the flattened table text does not print is still refused, as is a changed exponent', () => {
+  for (const wrong of [2.4e19, 2.3e18, 2.3e20, 2343.7]) {
+    const points = costs().points.map((p: { x: number }, i: number) => (i === 2 ? { ...p, x: wrong } : p));
+    const { item, problems } = checkBoard('scatter', costs({ points }), FLATTENED_COSTS);
+    assert.equal(item, null, String(wrong));
+    has(problems, /"GNMT \+ RL" x = /);
+  }
+  // An ordinary number is as strict as before: a flattened table text prints no 23 or 2.3e19 of anything else.
+  const { problems } = checkBoard('scatter', costs(), 'Transformer (big) 28.4 41.8 2.3 · 105');
+  has(problems, /not printed in the evidence/);
+});
+
+test('the exponents a newer ingest marks ground the same costs as the flattened text of an older one', () => {
+  const marked = FLATTENED_COSTS.replace(/ 10(\d\d)\b/g, ' 10^$1');
+  assert.ok(marked.includes('2.3 · 10^19 1.4 · 10^20'));
+  for (const evidence of [FLATTENED_COSTS, marked])
+    assert.deepEqual(checkBoard('scatter', costs(), evidence).problems, []);
+  const large = (text: string) => numbersIn(text).filter((n) => n >= 1e18);
+  assert.deepEqual(large(marked), large(FLATTENED_COSTS));
+});
+
+// demo/attention-short/doc.json is a link to demo/attention/doc.json, where the file lives; neither is committed.
+const realDoc = ['attention-short', 'attention']
+  .map((folder) => resolve(import.meta.dirname, `../../demo/${folder}/doc.json`))
+  .find((path) => existsSync(path));
+
+test(
+  'the real paper: costs of its results table ground a scatter from the flattened text of the page',
+  { skip: !realDoc },
+  () => {
+    const doc = JSON.parse(readFileSync(realDoc!, 'utf8')) as Doc;
+    const table = doc.figures.find((f) => f.id === 'tab2')!;
+    // What a table without a grid gives the model: the extracted lines, "2.3 · 1019" among them.
+    const flattened = tableLines(doc, { ...table, grid: undefined });
+    assert.ok(flattened.some((line) => /2\.3 · 10(?:\^)?19/.test(line)));
+    const { item, problems } = checkBoard('scatter', costs(), flattened.join('\n'));
+    assert.deepEqual(problems, []);
+    assert.equal(item?.kind === 'scatter' && item.x_log, true);
+    const printed = printedNumbers(doc, { ...table, grid: undefined });
+    for (const cost of [9.6e18, 2e19, 2.3e19, 3.3e18, 1.1e21]) assert.ok(printed.includes(cost), String(cost));
+  },
+);
+
+test('a log axis is chosen in code where a linear one cannot show the values, and only there', () => {
+  for (const [values, log] of [
+    [[1, 999], false],
+    [[1, 1000], true],
+    [[8, 14, 31, 78], false],
+    [[5e14, 9e14], false],
+    [[1e15, 2e15], false], // past what k, M, B and T spell out, but not a decade
+    [[9.6e18, 2.3e19, 3.3e19], false], // within a decade: linear, with powers of ten for labels
+    [[1e20, 1.2e20, 1.5e20], false],
+    [[3.3e18, 1.5e20], true],
+    [[1e15, 1e16], true],
+    [[0.001, 0.002], false],
+    [[0.0002, 0.0005], false], // a thousandth is the last plain decimal, a decade is the least a log axis needs
+    [[0.0002, 0.002], true],
+    [[-1, 1e18], false], // a log axis needs values above zero
+    [[0, 1e18], false],
+    [[], false],
+  ] as [number[], boolean][])
+    assert.equal(needsLogAxis(values), log, values.join(', '));
+  const point = (x: number, y: number) => ({ label: `p${x}`, x, y });
+  const item = canonicalScatter(
+    scatter({ points: [point(1e19, 3), point(2e20, 4), point(3e19, 5)], y_log: false, source: 'document' }),
+  );
+  assert.equal(item.x_log, true);
+  assert.equal(item.y_log, undefined);
+  assert.equal(canonicalScatter(scatter({ x_log: true })).x_log, true, 'a log axis the model asks for stays');
 });
 
 test('a scatter without points means no board', () => {

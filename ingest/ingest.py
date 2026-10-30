@@ -203,12 +203,49 @@ def rounded(r):
 
 # ---------------------------------------------------------------------------- text model
 
-class Word:
-    __slots__ = ("text", "bbox", "size", "sizes", "bold", "italic", "math", "letters_math", "baseline", "nchars")
+POWER_SCRIPT = 0.85      # a char below this share of the "10" it follows is a script (table_grid.SCRIPT)
+POWER_RAISED = 0.15      # and sits at least this share of the size above its baseline
 
-    def __init__(self, chars, fonts):
-        # chars: (c, bbox, baseline, size, font, flags)
+
+# "2.3 ×", "1,5·", "2.3x" at the end of what came before: a number, then a multiplication sign
+MULTIPLIED = re.compile(r"(?<![\w.,])\d[\d.,]*\s*[×·⋅∙*xX]\s*$")
+
+
+def marked_powers(chars, before=""):
+    """The text of a word with the exponent of each power of ten marked, "10^19" and "10^−9": MuPDF keeps the raised
+    digits in the word, which then reads "1019" or "10−9", a number nobody printed. Only digits (with a sign) set
+    small and raised after a full-size "10" are an exponent, and only when that 10 is multiplied with a mantissa
+    ("2.3 × 10²", "2.3x10²"; `before` is the text the line had before this word), as a footnote
+    mark after a bare number ("within 10² days", "Artikel 10²") is no power of ten. Other scripts stay as they are."""
+    out, i, n = [], 0, len(chars)
+    while i < n:
+        c = chars[i]
+        out.append(c[0])
+        i += 1
+        if not (c[0] == "1" and i < n and chars[i][0] == "0" and abs(chars[i][3] - c[3]) < 0.6
+                and MULTIPLIED.search(before + "".join(out[:-1]))):
+            continue
+        script = lambda x: x[3] <= POWER_SCRIPT * c[3] and x[2] < c[2] - POWER_RAISED * c[3]
+        start = i + 1
+        digits = start + (start < n and chars[start][0] in "−-–+" and script(chars[start]))
+        end = digits
+        while end < n and chars[end][0] in "0123456789" and script(chars[end]):
+            end += 1
+        if not 1 <= end - digits <= 3 or (end < n and chars[end][3] <= POWER_SCRIPT * c[3]):
+            continue
+        out.append("0^" + "".join(x[0] for x in chars[start:end]))
+        i = end
+    return "".join(out)
+
+
+class Word:
+    __slots__ = ("text", "shown", "bbox", "size", "sizes", "bold", "italic", "math", "letters_math", "baseline",
+                 "nchars")
+
+    def __init__(self, chars, fonts, before=""):
+        # chars: (c, bbox, baseline, size, font, flags); before: the text of the line up to this word
         self.text = "".join(c[0] for c in chars)
+        self.shown = marked_powers(chars, before)     # what the document's text says; layout keeps reading .text
         boxes = [c[1] for c in chars if c[1][2] > c[1][0] and c[1][3] > c[1][1]]
         self.bbox = union_all(boxes or [c[1] for c in chars])
         self.sizes = Counter(round(c[3], 1) for c in chars)
@@ -259,6 +296,10 @@ class Row:
     def text(self):
         return " ".join(w.text for w in self.words)
 
+    @property
+    def shown(self):
+        return " ".join(w.shown for w in self.words)
+
 
 class Block:
     def __init__(self, page, rows, type="paragraph"):
@@ -284,6 +325,11 @@ class Block:
     @property
     def raw_text(self):
         return " ".join(r.text for r in self.rows)
+
+    @property
+    def shown_text(self):
+        """raw_text with the exponents of powers of ten marked (Word.shown), for text a reader is shown."""
+        return " ".join(r.shown for r in self.rows)
 
     def _weighted(self, attr):
         n = sum(r.nchars for r in self.rows)
@@ -392,11 +438,13 @@ def read_lines(pdf_page):
 
 
 def make_words(chars, horizontal, fonts):
-    words, cur = [], []
+    words, cur, before = [], [], ""
 
     def flush():
+        nonlocal before
         if cur:
-            words.append(Word(cur, fonts))
+            words.append(Word(cur, fonts, before))
+            before = (before + words[-1].text + " ")[-24:]
             cur.clear()
 
     spaced = False
@@ -1707,10 +1755,10 @@ def block_tokens(block, vocab):
                     and tokens[-1].text[-1] in "-‐­" and tokens[-1].text[-2].isalpha()
                     and tokens[-1].frags[-1][0] == ri - 1):
                 t = tokens[-1]
-                t.text = join_hyphenated(t.text, w.text, vocab)
+                t.text = join_hyphenated(t.text, w.shown, vocab)
                 t.frags.append((ri, w.bbox))
                 continue
-            tokens.append(Token(w.text, ri, w.bbox, w.letters_math))
+            tokens.append(Token(w.shown, ri, w.bbox, w.letters_math))
     return tokens
 
 
@@ -1897,7 +1945,7 @@ def equation_records(pages):
                         if min(tags, key=lambda t: abs(t[0].baseline - r.baseline))[0] is w] if len(tags) > 1 else content
                 words = [x for r in (mine or content) for x in r.words if x is not w]
                 bbox = union_all(x.bbox for x in words) if words else w.bbox
-                text = " ".join(x.text for x in words)
+                text = " ".join(x.shown for x in words)
                 out.append({"id": eid, "number": number, "page": page.n, "bbox": rounded(bbox),
                             "block": b.id, "text": text})
     return out
@@ -1990,9 +2038,10 @@ def unnumbered_equation_records(pages, numbered, figures, body):
                 continue
             group.sort(key=page.ordered.index)
             text = " ".join(b.raw_text for b in group)
-            if looks_like_equation(text, len(rows)):
+            if looks_like_equation(text, len(rows)):      # judged on the raw text, so no marking adds or drops one
                 out.append({"id": None, "number": None, "page": page.n,
-                            "bbox": rounded(union_all(b.bbox for b in group)), "block": group[0].id, "text": text})
+                            "bbox": rounded(union_all(b.bbox for b in group)), "block": group[0].id,
+                            "text": " ".join(b.shown_text for b in group)})
     return out
 
 

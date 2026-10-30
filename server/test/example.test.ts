@@ -139,6 +139,31 @@ test('visible invented values, false equalities and undeclared calculation opera
   assert.match(checkedCalculation('x+2', 4)!, /undeclared/);
 });
 
+test('a frame that prints a power of ten shows the value it declares, in any notation', () => {
+  const declared = {
+    ...numericalExample(),
+    inputs: [{ label: 'Input', value: 2000 }],
+    calculations: [{ expression: '2000+2000', result: 4000 }],
+  };
+  const frames = (input: string, output: string) => ({
+    ...declared,
+    frames: [
+      { anchor: 'the input is', flow: flow([`Input ${input}`, 'Addition', 'Result']) },
+      { anchor: 'Adding the input twice', flow: flow([`Output ${output}`, 'Check', 'Result']) },
+    ],
+  });
+  for (const [input, output] of [
+    ['2·10³', '4·10³'],
+    ['2 × 10^3', '4 × 10^{3}'],
+    [String.raw`2 \times 10^{3}`, String.raw`4 \cdot 10^3`],
+    ['2e3', '4e3'],
+  ])
+    assert.deepEqual(checkExample(frames(input, output), exampleSay).problems, [], input);
+  // A different power is a different value, and a power of ten is not its base: 10^3 is 1000.
+  assert.match(checkExample(frames('2·10³', '4·10⁴'), exampleSay).problems.join(' '), /undeclared value 40000/);
+  assert.match(checkExample(frames('2·10³', '10^3'), exampleSay).problems.join(' '), /undeclared value 1000/);
+});
+
 test('rounded values and neutral constants work without accepting incorrect arithmetic', () => {
   assert.equal(checkedCalculation('softmax(4,0)', 0.98), null);
   assert.equal(checkedCalculation('softmax(4,0)*10', 9.8), null);

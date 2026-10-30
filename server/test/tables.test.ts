@@ -360,6 +360,53 @@ test('bars of one column: at most six rows, the last and the best kept, labels w
   );
 });
 
+/** A cell as the ingest reads it when the exponent was a superscript: its text keeps "10^19", its value is the number. */
+const power = (mantissa: string, exponent: number) => ({
+  text: `${mantissa} × 10^${exponent}`,
+  value: Number(`${mantissa}e${exponent}`),
+});
+
+test('a table of costs in FLOPs: the numbers its cells print include the powers of ten, and its scatter has the axis they need', () => {
+  const costs = (...rows: [string, string, number][]) =>
+    grid(
+      [num('BLEU', { better: 'up' }), num('Training Cost (FLOPs)', { better: 'down' })],
+      rows.map(([label, bleu, exponent], i) => ({
+        label,
+        cells: [parsed(bleu), power(['9.6', '2.0', '2.3', '3.3', '1.4'][i], exponent)],
+      })),
+    );
+  const narrow = costs(
+    ['ConvS2S [9]', '25.16', 18],
+    ['MoE [32]', '26.03', 19],
+    ['GNMT + RL [38]', '24.6', 19],
+    ['Transformer (big)', '28.4', 19],
+  );
+  assert.deepEqual(
+    gridNumbers(narrow).filter((n) => n > 1e6),
+    [9.6e18, 2e19, 2.3e19, 3.3e19],
+  );
+  // Only 3.4 times apart: a linear axis shows them, labelled in powers of ten rather than a log axis of one decade.
+  const item = scatterView(narrow, 0, 1)!;
+  assert.equal(item.x_log, undefined);
+  assert.equal(item.y_log, undefined);
+  assert.deepEqual(
+    item.points.map((p) => p.x),
+    [9.6e18, 2e19, 2.3e19, 3.3e19],
+  );
+  assert.ok(tableViews(table(narrow)).some((view) => view.kind === 'scatter'));
+  // Ten times apart or more, and past what tick labels spell out, it is a log axis.
+  const wide = costs(
+    ['ConvS2S [9]', '25.16', 18],
+    ['MoE [32]', '26.03', 19],
+    ['GNMT + RL [38]', '24.6', 19],
+    ['Transformer (big)', '28.4', 19],
+    ['Transformer (base)', '27.3', 20],
+  );
+  assert.equal(scatterView(wide, 0, 1)!.x_log, true);
+  // Bars refuse such numbers however close they are: a label of twenty digits is no bar.
+  assert.equal(barsView(narrow, 1), null);
+});
+
 test('bars need numbers a bar chart can show: not 200 times apart, not billions, not all the same', () => {
   const column = (...values: string[]) =>
     grid(
@@ -369,6 +416,9 @@ test('bars need numbers a bar chart can show: not 200 times apart, not billions,
   assert.ok(barsView(column('10', '20', '30'), 0));
   assert.equal(barsView(column('1', '500'), 0), null);
   assert.equal(barsView(column('2.3e19', '3.3e18'), 0), null);
+  assert.equal(barsView(column('2.3e19', '2.9e19'), 0), null, 'close together, but past a billion');
+  assert.ok(barsView(column('5e8', '9e8'), 0), 'under a billion is fine');
+  assert.equal(barsView(column('1e9', '1.2e9'), 0), null, 'a billion and over is not');
   assert.equal(barsView(column('7', '7', '7'), 0), null);
   assert.equal(barsView(column('5'), 0), null);
   assert.equal(barsView(grid([text('t')], [row('a', 'x'), row('b', 'y')]), 0), null);
