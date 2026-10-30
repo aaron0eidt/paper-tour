@@ -43,6 +43,20 @@ export function countSteps(tour: Tour): number {
   return tour.chapters.reduce((n, chapter) => n + chapter.steps.length, 0);
 }
 
+/** What plays, for growsInPlace: a saved tour by its id, or a tour still being written by its generation. */
+export function tourSourceKey(savedId: string | null | undefined, saved: boolean, generationId: string | null | undefined): string {
+  return saved ? `tour:${savedId ?? 'local'}` : `generation:${generationId ?? 'local'}`;
+}
+
+/**
+ * Whether the tour that arrives grows the one that plays (TourEngine.extend) instead of replacing it: the same source
+ * again, or a tour being written arriving as the tour it was saved as. A saved tour the learner picked always replaces
+ * what plays. Step IDs cannot decide it: claim-based tours of one document share IDs such as idea-1 and method-1.
+ */
+export function growsInPlace(held: { key: string; partial: boolean } | null, key: string, picked: boolean): boolean {
+  return !!held && !picked && (held.key === key || (held.partial && key.startsWith('tour:')));
+}
+
 /** The request for a generation's partial tour; a client that holds one of it asks only for what is new. */
 export function partialPath(documentId: string, generationId: string, held: HeldPartial | null): string {
   const base = `/api/documents/${encodeURIComponent(documentId)}/generations/${encodeURIComponent(generationId)}/partial`;

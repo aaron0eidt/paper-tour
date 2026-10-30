@@ -7,7 +7,7 @@ import { flattenTour } from '../src/engine';
 import { followPartial } from '../src/library/followPartial';
 import type { PartialFollow, PartialSource } from '../src/library/followPartial';
 import { ApiRequestError } from '../src/library/client';
-import { acceptPartial, countSteps, currentStatus, growthOf, partialPath, playablePartial, stoppedCopy, withPlayableSteps, writingLabel } from '../src/partialTour';
+import { acceptPartial, countSteps, currentStatus, growsInPlace, growthOf, partialPath, playablePartial, stoppedCopy, tourSourceKey, withPlayableSteps, writingLabel } from '../src/partialTour';
 import type { HeldPartial } from '../src/partialTour';
 import { buildClock, wordAt } from '../src/tourClock';
 import type { Doc, Tour } from '../src/types';
@@ -318,6 +318,24 @@ await test('the demo reads its plan from the address', () => {
   });
   eq(readGrowthPlan(new URLSearchParams('grow=3&growRestart=5:new'))?.restart, { at: 5, renamed: true });
   eq(readGrowthPlan(new URLSearchParams('grow=nope&growStop=6'))?.stop, { after: 6, status: 'failed' });
+});
+
+await test('only the same tour grows in place: a saved tour picked instead replaces it, whatever its step IDs', () => {
+  const saved = { key: tourSourceKey('v2', true, 'g0'), partial: false };
+  const writing = { key: tourSourceKey(null, false, 'g1'), partial: true };
+  eq(
+    [
+      growsInPlace(null, 'tour:v2', false),
+      growsInPlace(saved, 'tour:v2', false), // the same saved tour prepared again
+      growsInPlace(saved, 'tour:v3', false), // another saved tour, even one with the same step IDs
+      growsInPlace(writing, 'generation:g1', false), // more of the tour being written
+      growsInPlace(writing, 'tour:v3', false), // the tour being written, now saved
+      growsInPlace(writing, 'tour:v2', true), // a saved tour the learner picked while one is written
+      growsInPlace(writing, 'generation:g2', false), // written again by another generation
+    ],
+    [false, true, false, true, true, false, false],
+  );
+  eq([saved.key, writing.key, tourSourceKey(undefined, true, undefined)], ['tour:v2', 'generation:g1', 'tour:local']);
 });
 
 console.log(results.join('\n'));
