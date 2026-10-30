@@ -54,6 +54,7 @@ export function teachingPlanSchema(doc: Doc, strict = true) {
     required: [
       'id',
       'title',
+      'summary',
       'role',
       'evidence',
       'prerequisites',
@@ -71,6 +72,11 @@ export function teachingPlanSchema(doc: Doc, strict = true) {
     properties: {
       id: text(64),
       title: text(120),
+      summary: {
+        ...text(700),
+        description:
+          'A concise source-grounded explanation addressed to the reader. Declarative sentences, never author instructions or a learning objective.',
+      },
       role: { type: 'string', enum: CONCEPT_ROLES },
       evidence: { type: 'array', minItems: 1, maxItems: 6, items: source },
       prerequisites: { type: 'array', maxItems: 12, items: text(64) },
@@ -131,6 +137,7 @@ export function teachingPlanTask(preferences: TeachingPreferences, language: str
     'Importance explains why understanding this concept is needed for the paper’s main question; difficulty estimates this audience’s required prior knowledge or multi-step reasoning. They are different decisions.',
     'State the audience assumption and confidence honestly. A likely misconception is a teaching hypothesis, not an observed fact about the learner.',
     'The objective says what the reader should be able to explain. A new visual must name the relationship or change it reveals and why source annotation alone is insufficient. Use none when no visual adds understanding.',
+    'Keep summary separate from objective: summary is 2–3 neutral, source-grounded spoken sentences explaining the concept and its consequence. Never write author commands such as Explain/Interpret/Show in summary. The objective is only planning guidance.',
     'A worked example is useful when computed from the paper’s formula and explicitly distinguished from measured data. Never invent measured results.',
     'Account for every actual section in sections: teach, background or omit with a reason. Keep the paper’s own headings; do not invent a Methods section.',
     `Additional profile instructions: ${preferences.instructions || 'Use a neutral, source-faithful explanation.'}`,
@@ -356,7 +363,7 @@ export function teachingTourPlan(
                 ? 'limitation'
                 : 'method',
           arc,
-          point: concept.objective,
+          point: concept.summary,
           evidence: concept.evidence.filter((id) => doc.sentences.some((s) => s.id === id)),
           ...(target ? { target } : {}),
           notes: teachingNotes(concept),
@@ -422,7 +429,7 @@ export function teachingTourPlan(
       id: `teach-${concept.id}`,
       kind,
       arc,
-      point: concept.objective,
+      point: concept.summary,
       evidence: concept.evidence.filter((id) => doc.sentences.some((s) => s.id === id)),
       ...(target ? { target } : {}),
       role: concept.importanceReason,

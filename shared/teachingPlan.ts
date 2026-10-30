@@ -12,6 +12,8 @@ export interface TeachingPreferences {
 export interface TeachingConcept {
   id: string;
   title: string;
+  /** A source-grounded explanation addressed to the reader, distinct from instructions for the author. */
+  summary: string;
   role: ConceptRole;
   evidence: string[];
   prerequisites: string[];

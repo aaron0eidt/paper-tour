@@ -24,6 +24,8 @@ const prefs: TeachingPreferences = { structure: 'concepts', depth: 'standard', a
 const concept = (id: string, over: Partial<TeachingConcept> = {}): TeachingConcept => ({
   id,
   title: id,
+  summary:
+    'A controller opens the nearest valve when the measured moisture drops below the threshold. The decision follows measured need instead of a fixed schedule.',
   role: 'mechanism',
   evidence: ['p1.s3'],
   prerequisites: [],
@@ -106,6 +108,9 @@ test('paper-order tours use actual source locations and headings, including late
     ['Introduction', 'Results', 'What to remember'],
   );
   assert.match(result.beats[2].notes!.join(' '), /LEARNING OBJECTIVE/);
+  assert.equal(result.beats[2].point, plan().concepts[0].summary);
+  assert.notEqual(result.beats[2].point, plan().concepts[0].objective,
+    'a learner-facing summary is distinct from authoring instructions, even if the writer is unavailable');
 });
 
 test('the current style keeps its grammar and gains important concepts absent from repeated opening claims', () => {
