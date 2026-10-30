@@ -408,9 +408,10 @@ test('a repair after a first try that gave nothing usable is held to the step’
   const slow = (name: string, effort: string) =>
     name === 'beat_direction' ? 2000 : PACE.callMs(name, effort as never);
   const events: Seen[] = [];
-  const { tour } = await run(hangs, events, { ...PACE, callMs: slow, stepMs: 0, repairMs: 60 });
+  // The limit starts before the request is built and sent, so a busy machine eats into what the hung request sees.
+  const { tour } = await run(hangs, events, { ...PACE, callMs: slow, stepMs: 0, repairMs: 300 });
   assert.ok(
-    waited >= 50 && waited < 1000,
+    waited >= 150 && waited < 1000,
     `the repair was given up on after the least time a repair gets, not ${waited} ms`,
   );
   assert.equal(asked, 3, 'a try, the repair that hung, and another');
