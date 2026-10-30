@@ -1,6 +1,8 @@
 import { TourProfileStore } from './tour-profiles';
 import { sameTourProfile } from '../../shared/tourProfiles';
 import type { TourProfileCatalog, TourProfileDraft, TourProfile } from '../../shared/tourProfiles';
+import { ConversationStore } from './conversations';
+import type { Conversation, ConversationSummary, CreateConversation } from '../../shared/conversations';
 import { transcribe } from './muse/transcribe';
 import { voiceHints, type VoiceHints } from './muse/voice-hints';
 import { AnswerCache, answerKey } from './ask-cache';
@@ -38,6 +40,8 @@ import type { MuseConfig } from './config';
 import type { SettingsService } from './settings';
 import {
   answerQuestion,
+  currentSink,
+  withSink,
   askError,
   askModel,
   findStep,
@@ -74,6 +78,10 @@ export interface Library {
     expectedRevision: number,
     draft: TourProfileDraft,
   ): Promise<TourProfile>;
+  conversations?(owner: string, documentId: string): Promise<ConversationSummary[]>;
+  conversation?(owner: string, documentId: string, id: string): Promise<Conversation>;
+  createConversation?(owner: string, documentId: string, input: CreateConversation): Promise<Conversation>;
+  renameConversation?(owner: string, documentId: string, id: string, title: string): Promise<Conversation>;
   transcribe?(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   demoTranscribe?(paper: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   agentRun?(owner: string, id: string, runId: string): Promise<AgentRun>;
@@ -153,6 +161,21 @@ export class DocumentService implements Library {
   }
   reviseTourProfile(owner: string, id: string, expectedRevision: number, draft: TourProfileDraft) {
     return new TourProfileStore(this.db).revise(owner, id, expectedRevision, draft);
+  }
+  private get conversationStore() {
+    return new ConversationStore(this.db);
+  }
+  conversations(owner: string, documentId: string) {
+    return this.conversationStore.list(owner, documentId);
+  }
+  conversation(owner: string, documentId: string, id: string) {
+    return this.conversationStore.get(owner, documentId, id);
+  }
+  createConversation(owner: string, documentId: string, input: CreateConversation) {
+    return this.conversationStore.create(owner, documentId, input);
+  }
+  renameConversation(owner: string, documentId: string, id: string, title: string) {
+    return this.conversationStore.rename(owner, documentId, id, title);
   }
   async models(owner?: string): Promise<ModelCatalog> {
     if (this.settings && owner) return this.settings.models(owner);
@@ -704,6 +727,19 @@ export class DocumentService implements Library {
     const settings = this.askSettings();
     const asked = askedRequest(request);
     const document = await this.owned(owner, id);
+    const conversation = asked.conversationId
+      ? await this.conversationStore.get(owner, id, asked.conversationId)
+      : null;
+    if (conversation) {
+      if (asked.analysisId && asked.analysisId !== conversation.context.analysisId)
+        throw new HttpError(
+          409,
+          'conversation_analysis_mismatch',
+          'Open this conversation with its original document analysis, or start a new conversation.',
+        );
+      asked.analysisId = conversation.context.analysisId;
+      asked.history = []; // Filled atomically from completed server-owned turns below.
+    }
     let analysisId: string | null = asked.analysisId ?? document.current_analysis_id;
     let tour: Tour | undefined;
     if (request.tourId) {
@@ -732,24 +768,53 @@ export class DocumentService implements Library {
     const doc = analysis.doc as Doc;
     validateAskedSelection(asked, doc);
     const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
-    return this.answer(owner, {
-      documentId: id,
-      analysisId: analysis.id,
-      doc,
-      tour,
-      request: asked,
-      model,
-      muse: async () => (await settings.resolveMuse(owner, model)).config,
-      image: () =>
-        asked.selection
-          ? Promise.resolve(undefined)
-          : figureImage(this.db.pool, this.storage, analysis.id, doc, asked.figureId),
-      images: () =>
-        asked.selection
-          ? selectionImages(this.storage, document.upload_path, doc, asked.selection, signal)
-          : Promise.resolve([]),
-      signal,
-    });
+    const run = () =>
+      this.answer(owner, {
+        documentId: id,
+        analysisId: analysis.id,
+        doc,
+        tour,
+        request: asked,
+        model,
+        muse: async () => (await settings.resolveMuse(owner, model)).config,
+        image: () =>
+          asked.selection
+            ? Promise.resolve(undefined)
+            : figureImage(this.db.pool, this.storage, analysis.id, doc, asked.figureId),
+        images: () =>
+          asked.selection
+            ? selectionImages(this.storage, document.upload_path, doc, asked.selection, signal)
+            : Promise.resolve([]),
+        signal,
+      });
+    if (!conversation) return run();
+    const { messageId, history } = await this.conversationStore.begin(owner, id, conversation.id, asked);
+    asked.history = history;
+    const parentSink = currentSink();
+    let partial: AskAnswer | null = null;
+    try {
+      const answer = await withSink((answerable, step, language) => {
+        partial ??= { answerable, language, steps: [], followups: [], conversationId: conversation.id, messageId };
+        partial.steps.push(structuredClone(step));
+        parentSink?.(answerable, step, language);
+      }, run);
+      signal?.throwIfAborted();
+      const saved = { ...answer, conversationId: conversation.id, messageId };
+      await this.conversationStore.finish(owner, id, conversation.id, messageId, 'completed', saved);
+      return saved;
+    } catch (error) {
+      const cancelled = signal?.aborted === true;
+      await this.conversationStore.finish(
+        owner,
+        id,
+        conversation.id,
+        messageId,
+        cancelled ? 'cancelled' : 'failed',
+        partial,
+        cancelled ? 'Answer stopped.' : 'The answer could not be completed. You can ask again.',
+      );
+      throw error;
+    }
   }
   /**
    * A question about a demo paper (demo/<paper>/) without an account, on the server's own Meta key and model. Only

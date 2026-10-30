@@ -49,6 +49,7 @@ import type { OverlayEntry } from './engine';
 import { positionFromView, viewFromPosition } from './readerState';
 import { AskPanel } from './ask/AskPanel';
 import type { AskContext } from './ask/AskPanel';
+import type { ConversationContext } from '../../shared/conversations';
 import { answerTour, openQuestions, visualShown } from './ask/answer';
 import type { AskAnswer, AskSource } from './ask/api';
 import { prefetchWanted } from './ask/prefetch';
@@ -593,6 +594,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       figureId: !regionSelection && ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
       selection: regionSnap.region ?? undefined,
       analysisId: loadedAnalysisId,
+      page: currentPageRef.current,
+      activeVisual: (now.current.answer ?? main)?.getState().board.item ?? undefined,
     };
   }, [camera, regionSelection, regionSnap.region, loadedAnalysisId]);
 
@@ -665,7 +668,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const onAnswer = useCallback((reply: AskAnswer, question: string) => playAnswer(reply, question, false), [playAnswer]);
 
   // Back to the tour: the answer goes, and the tour returns as it was: its marks and board (it only paused), the
-  // camera on what it showed, and playing again if it was.
+  // camera on what it showed. Playback resumes only through an explicit play action.
   const backToTour = useCallback(() => {
     const { engine: main, away: was, frame: show } = now.current;
     dropAnswer();
@@ -673,8 +676,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     now.current.away = null;
     setAway(null);
     if (!was) return;
-    if (was.playing && main) main.play();
-    else if (was.framed) show(was.framed.cmd, false);
+    main?.pause();
+    if (was.framed) show(was.framed.cmd, false);
     else {
       framed.current = null;
       camera.animateTo(was.view);
@@ -1163,6 +1166,33 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const endOpen = recapVisible({ ...cardState, dismissed: endGone });
   // A step that asks the learner to try first: its card shows while the tour waits.
   const coachStep = state.awaiting ? active?.steps[state.index] : undefined;
+  const restoreConversationContext = useCallback(
+    (context: ConversationContext) => {
+      if (context.analysisId && context.analysisId !== loadedAnalysisId)
+        throw new ApiRequestError(
+          'This conversation uses another document analysis. Open its original saved tour before replaying the explanation.',
+          409,
+          'conversation_analysis_mismatch',
+        );
+      setAside();
+      setRegionSelection(context.selection ?? null);
+      setSelection([]);
+      const page = context.page ?? context.selection?.page;
+      if (page && layout) {
+        framed.current = null;
+        camera.jumpTo(
+          viewFromPosition(
+            layout,
+            camera.viewport,
+            { page: clampSlide(page, layout.pages.length), pageOffset: 0, zoom: null, tourId: null, stepId: null },
+            camera.insets,
+          ),
+        );
+      }
+    },
+    [loadedAnalysisId, setAside, layout, camera],
+  );
+
   const onAsked = useCallback(
     (question: string) => {
       if (question) setAsked((list) => [...list, question]);
@@ -1611,6 +1641,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     source={askSource}
                     tourId={documentId ? selectedTourId : null}
                     context={askContext}
+                    onRestoreContext={restoreConversationContext}
                     suggestions={prepared?.tour.suggested_questions}
                     ended={mainState.status === 'ended' && !endOpen}
                     request={askRequest}

@@ -1,6 +1,8 @@
 // Asking in the reader: an answer becomes a tour of its own for a second engine, the tour waits paused underneath and
 // comes back exactly as it was. Bundled for Node with esbuild like the other player tests (no test framework).
 
+import { latestAnswer, threadContext, conversationLabel } from '../src/ask/conversations';
+import type { Conversation } from '../../shared/conversations';
 import { answerTour, openQuestions, visualShown, waitingLabel } from '../src/ask/answer';
 import { UNCLEAR, unclearOffered, unclearQuestion } from '../src/ask/unclear';
 import type { UnclearState } from '../src/ask/unclear';
@@ -313,6 +315,51 @@ test('"Not clear?" shows on a step of a tour under way, not before, after, while
   eq(unclearOffered({ ...base, awaiting: true, status: 'paused' }), false, 'a checkpoint has its own hints');
   eq(unclearOffered({ ...base, aside: true }), false, 'a question, an answer or a region is on');
   eq(unclearOffered({ ...base, asking: false }), false, 'nothing to ask about');
+});
+
+test('saved conversations restore original questions and complete answer steps without changing the tour', () => {
+  const answer: AskAnswer = {
+    answerable: 'yes',
+    steps: [{ id: 'a1', say: 'A saved explanation.', actions: [] }],
+    followups: ['Why?'],
+  };
+  const conversation: Conversation = {
+    id: 'thread',
+    documentId: 'document',
+    title: 'Question',
+    context: { analysisId: 'original', page: 1 },
+    createdAt: '',
+    updatedAt: '',
+    messageCount: 1,
+    messages: [
+      {
+        id: 'turn',
+        question: 'My original question',
+        context: { analysisId: 'original', page: 2, selection: { page: 2, rect: [0.1, 0.2, 0.5, 0.6] } },
+        answer,
+        status: 'completed',
+        createdAt: '',
+        completedAt: '',
+        error: null,
+      },
+    ],
+  };
+  const saved = JSON.stringify(conversation);
+  eq(latestAnswer(conversation)?.question, 'My original question');
+  eq(latestAnswer(conversation)?.answer?.steps, answer.steps);
+  eq(
+    threadContext({ analysisId: 'new-analysis', page: 5, figureId: 'wrong-figure' }, conversation),
+    conversation.messages[0].context,
+    'a new analysis cannot silently replace the saved source',
+  );
+  eq(
+    threadContext({ analysisId: 'original', page: 3 }, conversation),
+    { analysisId: 'original', page: 3 },
+    'fresh context within the original analysis',
+  );
+  eq(JSON.stringify(conversation), saved, 'opening and replaying do not mutate the saved session');
+  eq(conversationLabel(conversation.messages[0].context), 'Page 2 · Selected region');
+  eq(latestAnswer({ ...conversation, messages: [] }), null, 'a new conversation does not invent a previous answer');
 });
 
 console.log(results.join('\n'));

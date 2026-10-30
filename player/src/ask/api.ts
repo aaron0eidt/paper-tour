@@ -3,7 +3,7 @@
 
 import { apiRequest, ApiRequestError, getAccessToken } from '../library/client';
 import { responseLanguage } from '../../../shared/languages';
-import type { Step } from '../types';
+import type { BoardItem, Step } from '../types';
 import type { RegionSelection } from './regionSelection';
 
 /** One earlier exchange; follow-up questions build on it. */
@@ -14,6 +14,11 @@ export interface AskTurn {
 
 export interface AskRequest {
   question: string;
+  conversationId?: string;
+  page?: number;
+  activeVisual?: BoardItem;
+  visualId?: string;
+  visualRevision?: number;
   responseLanguage?: string;
   tourId?: string;
   analysisId?: string;
@@ -28,6 +33,8 @@ export interface AskRequest {
 export type Answerable = 'yes' | 'partly' | 'no';
 
 export interface AskAnswer {
+  conversationId?: string;
+  messageId?: string;
   answerable: Answerable;
   language?: string;
   steps: Step[];
@@ -61,6 +68,11 @@ export async function askQuestion(
 ): Promise<AskAnswer> {
   const body: AskRequest = { question: request.question.trim() };
   if (responseLanguage(request.responseLanguage)) body.responseLanguage = request.responseLanguage;
+  if (request.conversationId) body.conversationId = request.conversationId;
+  if (request.page) body.page = request.page;
+  if (request.activeVisual) body.activeVisual = request.activeVisual;
+  if (request.visualId) body.visualId = request.visualId;
+  if (request.visualRevision) body.visualRevision = request.visualRevision;
   if (request.tourId) body.tourId = request.tourId;
   if (request.analysisId) body.analysisId = request.analysisId;
   if (request.stepId) body.stepId = request.stepId;

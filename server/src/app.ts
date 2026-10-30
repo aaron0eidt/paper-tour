@@ -13,6 +13,7 @@ import { resolve } from 'node:path';
 import { HttpError } from './errors';
 import type { Library } from './service';
 import type { ReaderState } from '../../shared/contracts';
+import type { CreateConversation } from '../../shared/conversations';
 import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
 import { DEMO_PAPER, answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
@@ -41,6 +42,11 @@ const askBody = objectBody(
     question: { type: 'string', minLength: 1 },
     tourId: uuid,
     analysisId: uuid,
+    conversationId: uuid,
+    page: { type: 'integer', minimum: 1 },
+    activeVisual: { type: 'object' },
+    visualId: text(200),
+    visualRevision: { type: 'integer', minimum: 1 },
     selection: objectBody(
       {
         page: { type: 'integer', minimum: 1 },
@@ -59,6 +65,16 @@ const askBody = objectBody(
   },
   ['question'],
 );
+const conversationParams = objectBody({ id: uuid, conversationId: uuid }, ['id', 'conversationId']);
+const conversationContextBody = {
+  ...askBody,
+  required: [],
+  properties: Object.fromEntries(
+    Object.entries(askBody.properties).filter(
+      ([key]) => !['question', 'history', 'conversationId', 'responseLanguage'].includes(key),
+    ),
+  ),
+};
 /** A loose box on a page, in PDF points; snap.ts checks it against the page. */
 const snapBody = (properties: Record<string, unknown> = {}) =>
   objectBody(
@@ -592,6 +608,63 @@ export async function createApp(options: Options) {
           },
         },
         async (req) => service.figure(owner(req), req.params.id, req.query.analysisId, req.params.elementId),
+      );
+      api.get<{ Params: { id: string } }>(
+        '/documents/:id/conversations',
+        { schema: { params: documentParams } },
+        async (req) => {
+          if (!service.conversations)
+            throw new HttpError(
+              503,
+              'conversations_unavailable',
+              'Saved conversations are not available on this server.',
+            );
+          return { conversations: await service.conversations(owner(req), req.params.id) };
+        },
+      );
+      api.post<{ Params: { id: string }; Body: CreateConversation }>(
+        '/documents/:id/conversations',
+        {
+          schema: {
+            params: documentParams,
+            body: objectBody({ title: text(160), context: conversationContextBody }, []),
+          },
+        },
+        async (req, reply) => {
+          if (!service.createConversation)
+            throw new HttpError(
+              503,
+              'conversations_unavailable',
+              'Saved conversations are not available on this server.',
+            );
+          return reply.code(201).send(await service.createConversation(owner(req), req.params.id, req.body));
+        },
+      );
+      api.get<{ Params: { id: string; conversationId: string } }>(
+        '/documents/:id/conversations/:conversationId',
+        { schema: { params: conversationParams } },
+        async (req) => {
+          if (!service.conversation)
+            throw new HttpError(
+              503,
+              'conversations_unavailable',
+              'Saved conversations are not available on this server.',
+            );
+          return service.conversation(owner(req), req.params.id, req.params.conversationId);
+        },
+      );
+      api.patch<{ Params: { id: string; conversationId: string }; Body: { title: string } }>(
+        '/documents/:id/conversations/:conversationId',
+        { schema: { params: conversationParams, body: objectBody({ title: text(160) }, ['title']) } },
+        async (req) => {
+          if (!service.renameConversation)
+            throw new HttpError(
+              503,
+              'conversations_unavailable',
+              'Saved conversations are not available on this server.',
+            );
+          return service.renameConversation(owner(req), req.params.id, req.params.conversationId, req.body.title);
+        },
       );
       api.post<{ Params: { id: string }; Body: AskRequest }>(
         '/documents/:id/ask',
