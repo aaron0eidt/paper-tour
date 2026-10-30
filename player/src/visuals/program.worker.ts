@@ -1,12 +1,15 @@
-import { getQuickJS } from 'quickjs-emscripten';
+import { newQuickJSWASMModule, newVariant, RELEASE_SYNC } from 'quickjs-emscripten';
+import wasmLocation from '@jitl/quickjs-wasmfile-release-sync/wasm?url';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { renderProgramFrame, type ProgramRuntimeAdapter } from '../../../shared/programRuntime';
 import type { ProgramItem } from '../../../shared/program';
 
 // A dedicated worker is also terminable by the UI; even engine initialization cannot block it.
+// An explicit Vite asset URL works in both dev workers and hashed production chunks.
+const quickJS = newQuickJSWASMModule(newVariant(RELEASE_SYNC, { wasmLocation }));
 const adapter: ProgramRuntimeAdapter = {
   async evaluate(script, milliseconds) {
-    const module = await getQuickJS();
+    const module = await quickJS;
     const runtime = module.newRuntime();
     runtime.setMemoryLimit(16 * 1024 * 1024);
     runtime.setMaxStackSize(256 * 1024);

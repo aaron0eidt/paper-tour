@@ -6,7 +6,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@33';
+export const HARNESS_VERSION = 'paper-tour-harness@34';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.

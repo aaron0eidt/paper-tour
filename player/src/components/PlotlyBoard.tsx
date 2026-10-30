@@ -6,20 +6,28 @@ export function PlotlyBoard({ item }: { item: PlotlyItem }) {
   const element = useRef<HTMLDivElement>(null),
     [parameter, setParameter] = useState(item.parameter?.value ?? 1),
     [error, setError] = useState('');
+  const rendered = useRef<(typeof import('plotly.js-dist-min'))['default']>();
+  useEffect(() => {
+    const node = element.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() => {
+      if (rendered.current) rendered.current.Plots.resize(node);
+    });
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      rendered.current?.purge(node);
+    };
+  }, []);
   useEffect(() => setParameter(item.parameter?.value ?? 1), [item]);
   useEffect(() => {
     const node = element.current;
     if (!node) return;
-    let cancelled = false,
-      plot: (typeof import('plotly.js-dist-min'))['default'] | undefined;
-    const observer = new ResizeObserver(() => {
-      if (plot) plot.Plots.resize(node);
-    });
-    observer.observe(node);
+    let cancelled = false;
     import('plotly.js-dist-min')
       .then(async ({ default: Plotly }) => {
         if (cancelled) return;
-        plot = Plotly;
+        rendered.current = Plotly;
         const figure = plotlyFigure(item, parameter);
         await Plotly.react(
           node,
@@ -43,8 +51,6 @@ export function PlotlyBoard({ item }: { item: PlotlyItem }) {
       });
     return () => {
       cancelled = true;
-      observer.disconnect();
-      if (plot) plot.purge(node);
     };
   }, [item, parameter]);
   const change = (value: number) => {

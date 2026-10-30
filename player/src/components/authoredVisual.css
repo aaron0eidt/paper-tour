@@ -19,9 +19,9 @@
   display: grid;
   gap: 0.8rem;
   padding: 1rem;
-  border: 1px solid var(--border, #303746);
+  border: 1px solid var(--board-rule, #303746);
   border-radius: 12px;
-  background: var(--panel, #171c25);
+  background: var(--board-raised, #171c25);
 }
 .visual-parameters label {
   display: grid;
