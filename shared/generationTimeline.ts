@@ -25,6 +25,7 @@ export const modelActivityNames: Record<string, string> = {
   paper_card: 'Understand the document',
   claims: 'Find the main claims',
   tour_plan: 'Plan the tour',
+  teaching_plan: 'Choose what to explain and visualize',
   opening_visual: 'Plan the first visual',
   visual_plan: 'Design the side visuals',
   beat_direction: 'Write narration and visual cues',

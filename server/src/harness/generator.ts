@@ -1,4 +1,12 @@
 import { claimsNumericExample } from './example';
+import type { TeachingPlan } from '../../../shared/teachingPlan';
+import {
+  cleanTeachingPlan,
+  teachingEvidence,
+  teachingPlanSchema,
+  teachingPlanTask,
+  teachingTourPlan,
+} from './teaching-plan';
 import { lossSentence } from '../../../shared/coverage';
 import { splitWords, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
@@ -330,7 +338,8 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       return found;
     };
-    const claimsContext = guessType(doc) === 'research_paper' ? claimContext(doc) : null;
+    const conceptLed = !input.profile || input.profile.structure === 'concepts';
+    const claimsContext = conceptLed && guessType(doc) === 'research_paper' ? claimContext(doc) : null;
     const early = claimsContext ? findClaims(claimsContext, AbortSignal.any([signal, speculation.signal])) : null;
     // A call nobody waits for must not fail the process; whoever uses its claims sees the error.
     early?.catch(() => {});
@@ -376,6 +385,45 @@ export class HarnessTourGenerator implements TourGenerator {
     const type: DocType = deck ? 'lecture' : card!.doc_type;
     const paper = !sheet && !deck && type === 'research_paper';
     if (!paper) speculation.abort();
+    // Interpret importance and reader-relative difficulty independently of the opening-claim extractor.
+    // This call overlaps claim planning; its verified objectives guide both the writer and visual planner.
+    const prepareTeaching = async (): Promise<TeachingPlan | null> => {
+      if (!paper || !input.profile) return null;
+      if (!teachingEvidence(doc).length)
+        throw new ProcessingError(
+          'missing_teaching_sources',
+          'This paper has no citable text, equations or figures. Check PDF extraction before generating a tour.',
+        );
+      const task: MuseMessage[] = [...prefix, { role: 'user', content: teachingPlanTask(input.profile, language) }];
+      let problems: string[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const completion = await call(
+            task,
+            'teaching_plan',
+            teachingPlanSchema(doc, true, input.profile),
+            12_000,
+            attempt ? 'medium' : 'low',
+            signal,
+          );
+          const checked = cleanTeachingPlan(completion.value, doc);
+          if (checked.plan) return checked.plan;
+          problems = checked.problems;
+          await input.onEvent?.('validation.failed', { stage: 'teaching_plan', attempt: attempt + 1, problems });
+          task.push(...repairTurn(completion.value, problems));
+        } catch (error) {
+          signal.throwIfAborted();
+          if (!recoverable(error)) throw error;
+          problems = [error instanceof Error ? error.message : 'The teaching plan could not be read.'];
+        }
+      }
+      throw new ProcessingError(
+        'invalid_teaching_plan',
+        `The teaching plan could not be validated. ${problems.join(' ')}`,
+      );
+    };
+    const preparingTeaching = prepareTeaching();
+    preparingTeaching.catch(() => {});
     /**
      * The visual of a paper's opening step, planned alone from the card while the claims are still being found, so that
      * the step the learner waits for does not wait for the plan of the whole tour (visual-plan.ts, openingPlanTask).
@@ -429,7 +477,7 @@ export class HarnessTourGenerator implements TourGenerator {
       return chosen;
     };
     const thesis: Beat | null =
-      paper && thesisBeat(card!).evidence.length ? { id: 'problem-1', ...thesisBeat(card!) } : null;
+      paper && conceptLed && thesisBeat(card!).evidence.length ? { id: 'problem-1', ...thesisBeat(card!) } : null;
     const opening = thesis ? planOpening(thesis).catch(() => null) : null;
     let plan: TourPlan;
     let planSource = 'code';
@@ -481,7 +529,7 @@ export class HarnessTourGenerator implements TourGenerator {
     } else if (type === 'research_paper') {
       // The paper's claims: what the authors state in at least two of the abstract, the introduction and the
       // conclusion, with the evidence for each. Without usable claims the tour follows the paper's argument instead.
-      const context = claimsContext ?? claimContext(doc);
+      const context = conceptLed ? (claimsContext ?? claimContext(doc)) : null;
       if (context) claims = await (early ?? findClaims(context, signal));
       const byClaims = claims ? claimPlan(claims, card!, doc, this.preset) : null;
       // A claim plan too thin to teach (no evidence to point at) is no plan.
@@ -522,6 +570,17 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       planSource = arcs ? 'model' : 'fallback';
       plan = arcTourPlan(arcs ?? fallbackArcPlan(card!, arcType), arcType, card!, doc, this.preset, language);
+    }
+    const teachingPlan = await preparingTeaching;
+    if (teachingPlan && input.profile) {
+      plan = teachingTourPlan(teachingPlan, doc, input.profile, card!, plan);
+      planSource = `adaptive-${input.profile.structure}`;
+      await input.onEvent?.('teaching.ready', {
+        question: teachingPlan.question,
+        audienceAssumption: teachingPlan.audienceAssumption,
+        concepts: teachingPlan.concepts,
+        sections: teachingPlan.sections,
+      });
     }
     const { beats } = plan;
     if (!beats.length) throw new ProcessingError('invalid_tour', 'This document has no text a tour could explain.');
@@ -570,7 +629,11 @@ export class HarnessTourGenerator implements TourGenerator {
       if (!plannable.length) return;
       const decided = ahead ? await ahead : null;
       const settled: VisualPlan = decided ? new Map([[thesis!.id, decided]]) : new Map();
-      const options = { sheet: sheetTour, ...(settled.size ? { settled: true } : {}) };
+      const options = {
+        sheet: sheetTour,
+        ...(input.profile ? { adaptive: true } : {}),
+        ...(settled.size ? { settled: true } : {}),
+      };
       const rest = plannable.filter((beat) => !settled.has(beat.id));
       const task: MuseMessage[] = [
         ...prefix,
@@ -1390,6 +1453,7 @@ export class HarnessTourGenerator implements TourGenerator {
         promptVersion: HARNESS_VERSION,
         preset: this.preset,
         profile: input.profile ?? null,
+        ...(teachingPlan ? { teachingPlan } : {}),
         docType: plan.type,
         cardSource,
         planSource,

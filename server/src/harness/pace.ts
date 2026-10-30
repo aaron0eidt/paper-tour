@@ -30,6 +30,7 @@ const SECONDS: Record<string, number> = {
   paper_card: 40,
   claims: 60,
   tour_plan: 45,
+  teaching_plan: 90,
   deck_plan: 45,
   visual_plan: 50,
   opening_visual: 20,
