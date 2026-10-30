@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { tourDirection } from '../../../shared/tourDirection';
+import { tourProfileGuidance } from '../../../shared/tourProfiles';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { QueryResultRow } from 'pg';
 import type { Config } from '../config';
@@ -50,7 +51,7 @@ export class PaperAgent {
     const {
       rows: [run],
     } = await this.db.query(
-      `select r.*,g.document_id,g.analysis_id,g.model,g.status as generation_status,d.owner_id,d.upload_path,d.tour_allow_training,a.doc
+      `select r.*,g.document_id,g.analysis_id,g.model,g.profile,g.status as generation_status,d.owner_id,d.upload_path,d.tour_allow_training,a.doc
       from agent_runs r join tour_generations g on g.id=r.generation_id join documents d on d.id=g.document_id join analyses a on a.id=g.analysis_id
       where r.id=$1 and d.deleted_at is null`,
       [id],
@@ -117,7 +118,7 @@ export class PaperAgent {
         content: [
           {
             type: 'input_text',
-            text: `TOUR TASK. Use the paper context already loaded. ${rules}\nSource IDs for view_visuals: ${JSON.stringify(paperManifest(run.doc))}.\n${checkpoint ? 'Resume from this verified checkpoint. Images from an earlier context section must be requested again if needed.' : 'Previously verified observations and any saved work:'}\n${JSON.stringify(replay ? { title: run.state.title, plan: run.state.plan, savedChapters: Object.keys(run.state.chapters), observedSources: Object.keys(run.state.observations) } : { ...run.state, loopWatch: undefined })}\nPrioritize missing observations and chapters. Do not request visual sources already delivered in this context just to repair tool arguments. Batch independent source reads. Once an observation is saved, use it to write the tour rather than reading the same source again.`,
+            text: `TOUR TASK. Use the paper context already loaded. ${rules}\n${tourProfileGuidance(run.profile)}\nSource IDs for view_visuals: ${JSON.stringify(paperManifest(run.doc))}.\n${checkpoint ? 'Resume from this verified checkpoint. Images from an earlier context section must be requested again if needed.' : 'Previously verified observations and any saved work:'}\n${JSON.stringify(replay ? { title: run.state.title, plan: run.state.plan, savedChapters: Object.keys(run.state.chapters), observedSources: Object.keys(run.state.observations) } : { ...run.state, loopWatch: undefined })}\nPrioritize missing observations and chapters. Do not request visual sources already delivered in this context just to repair tool arguments. Batch independent source reads. Once an observation is saved, use it to write the tour rather than reading the same source again.`,
           },
         ],
       },
@@ -884,6 +885,7 @@ export class PaperAgent {
             tour.id,
             JSON.stringify({
               engine: 'agent',
+              profile: run.profile ?? null,
               model: run.model,
               agentVersion: AGENT_VERSION,
               usage: { outputTokens: Number(current.output_tokens), turns: current.turns },

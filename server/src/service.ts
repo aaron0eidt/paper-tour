@@ -1,3 +1,6 @@
+import { TourProfileStore } from './tour-profiles';
+import { sameTourProfile } from '../../shared/tourProfiles';
+import type { TourProfileCatalog, TourProfileDraft, TourProfile } from '../../shared/tourProfiles';
 import { transcribe } from './muse/transcribe';
 import { voiceHints, type VoiceHints } from './muse/voice-hints';
 import { AnswerCache, answerKey } from './ask-cache';
@@ -63,6 +66,14 @@ type Row = QueryResultRow;
 const iso = (date: Date | string) => new Date(date).toISOString();
 const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
 export interface Library {
+  tourProfiles?(owner: string): Promise<TourProfileCatalog>;
+  createTourProfile?(owner: string, draft: TourProfileDraft): Promise<TourProfile>;
+  reviseTourProfile?(
+    owner: string,
+    id: string,
+    expectedRevision: number,
+    draft: TourProfileDraft,
+  ): Promise<TourProfile>;
   transcribe?(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   demoTranscribe?(paper: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   agentRun?(owner: string, id: string, runId: string): Promise<AgentRun>;
@@ -134,6 +145,15 @@ export class DocumentService implements Library {
     readonly settings?: SettingsService,
     readonly agentEnabled = false,
   ) {}
+  tourProfiles(owner: string) {
+    return new TourProfileStore(this.db).list(owner);
+  }
+  createTourProfile(owner: string, draft: TourProfileDraft) {
+    return new TourProfileStore(this.db).create(owner, draft);
+  }
+  reviseTourProfile(owner: string, id: string, expectedRevision: number, draft: TourProfileDraft) {
+    return new TourProfileStore(this.db).revise(owner, id, expectedRevision, draft);
+  }
   async models(owner?: string): Promise<ModelCatalog> {
     if (this.settings && owner) return this.settings.models(owner);
     if (!this.catalog) throw new HttpError(503, 'model_catalog_unavailable', 'The model catalog is unavailable.');
@@ -374,6 +394,13 @@ export class DocumentService implements Library {
     return this.db.transaction(async (tx) => {
       const document = await this.owned(owner, id, tx, true);
       const model = (selection.model ?? defaultModel ?? document.tour_model ?? this.tourModel).trim();
+      let profile = await new TourProfileStore(this.db).resolve(owner, selection, tx);
+      const profileRequested = [
+        selection.profileId,
+        selection.profileRevision,
+        selection.depth,
+        selection.audience,
+      ].some((value) => value !== undefined);
       const allowTraining = selection.allowTraining === true;
       const {
         rows: [analysis],
@@ -388,25 +415,35 @@ export class DocumentService implements Library {
         'select * from tour_generations where analysis_id=$1 order by created_at desc,id desc limit 1 for update',
         [analysis.id],
       );
+      if (!profileRequested && latest?.profile) profile = latest.profile;
       if (
         latest &&
         (['queued', 'generating', 'paused'].includes(latest.status) ||
           (latest.engine === 'agent' && latest.status === 'needs_configuration'))
       ) {
-        if (latest.model !== model)
+        if (latest.model !== model || (profileRequested && !sameTourProfile(latest.profile, profile)))
           throw new HttpError(
             409,
             'generation_in_progress',
-            'A tour is already being created with another model. Wait for it to finish before changing models.',
+            'A tour is already being created with another model or profile. Wait for it to finish before changing the selection.',
           );
         // An active request is a read of the existing job, never a change to model or consent.
         return { generation: generationSummary(latest) };
       }
-      if (latest?.status === 'ready' && latest.model === model && !regenerate)
+      if (
+        latest?.status === 'ready' &&
+        latest.model === model &&
+        !regenerate &&
+        (!profileRequested || sameTourProfile(latest.profile, profile))
+      )
         return { generation: generationSummary(latest) };
       const validated = await this.selectedModel(owner, model, allowTraining);
-      if (latest?.status === 'ready' && latest.model !== validated && !regenerate)
-        throw new HttpError(409, 'regeneration_required', 'Create a new tour to use a different model.');
+      if (
+        latest?.status === 'ready' &&
+        !regenerate &&
+        (latest.model !== validated || !sameTourProfile(latest.profile, profile))
+      )
+        throw new HttpError(409, 'regeneration_required', 'Create a new tour to use a different model or profile.');
       const generation = await ensureTourGeneration(
         tx,
         this.enqueue,
@@ -416,6 +453,7 @@ export class DocumentService implements Library {
         true,
         regenerate,
         this.agentEnabled ? 'agent' : 'legacy',
+        profile,
       );
       await tx.query('update documents set tour_model=$2,tour_allow_training=$3 where id=$1', [
         id,
@@ -483,7 +521,7 @@ export class DocumentService implements Library {
       id,
     ]);
     const { rows: tours } = await this.db.query(
-      'select t.id,t.title,t.analysis_id,t.script,g.model from tours t left join tour_generations g on g.id=t.generation_id where t.document_id=$1 order by t.created_at desc,t.id desc',
+      'select t.id,t.title,t.analysis_id,t.script,g.model,g.profile from tours t left join tour_generations g on g.id=t.generation_id where t.document_id=$1 order by t.created_at desc,t.id desc',
       [id],
     );
     const {
@@ -532,6 +570,7 @@ export class DocumentService implements Library {
         title: t.title,
         analysisId: t.analysis_id,
         model: t.model ?? null,
+        profile: t.profile ?? null,
       })),
       selectedTour:
         selected && analysis
@@ -541,6 +580,7 @@ export class DocumentService implements Library {
               doc: analysis.doc as Doc,
               tour: selected.script as Tour,
               model: selected.model ?? null,
+              profile: selected.profile ?? null,
             }
           : null,
       assets,
@@ -868,13 +908,15 @@ export class DocumentService implements Library {
       );
       return answer;
     } catch (error) {
-      console.warn(JSON.stringify({
-        event: 'question_failed',
-        ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
-        code: error instanceof ProcessingError || error instanceof HttpError ? error.code : 'unknown',
-        durationMs: Date.now() - started,
-        cancelled: input.signal?.aborted === true,
-      }));
+      console.warn(
+        JSON.stringify({
+          event: 'question_failed',
+          ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
+          code: error instanceof ProcessingError || error instanceof HttpError ? error.code : 'unknown',
+          durationMs: Date.now() - started,
+          cancelled: input.signal?.aborted === true,
+        }),
+      );
       throw askError(error, input.demo);
     } finally {
       const left = (this.asking.get(key) ?? 1) - 1;

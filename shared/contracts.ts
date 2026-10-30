@@ -1,3 +1,4 @@
+import type { TourProfileSnapshot, TourProfileSelection } from './tourProfiles';
 import type { Doc, Tour, BBox } from './paper';
 
 export type FileStatus = 'uploading' | 'uploaded' | 'invalid';
@@ -12,6 +13,7 @@ export type TourGenerationStatus =
   | 'cancelled';
 export type TourGenerationStage = 'preparing' | 'images' | 'writing' | 'validating';
 export interface TourGenerationSummary {
+  profile?: TourProfileSnapshot | null;
   agentRunId?: string | null;
   id: string;
   analysisId: string;
@@ -46,7 +48,7 @@ export interface TourPartialView {
   planned: number;
   tour: Tour | null;
 }
-export interface TourModelSelection {
+export interface TourModelSelection extends TourProfileSelection {
   model?: string;
   allowTraining?: boolean;
 }
@@ -80,6 +82,7 @@ export interface AnalysisSummary {
   error: string | null;
 }
 export interface TourSummary {
+  profile?: TourProfileSnapshot | null;
   id: string;
   title: string;
   analysisId: string;
@@ -100,7 +103,14 @@ export interface DocumentManifest {
   docAnalysisId: string | null;
   doc: Doc | null;
   tours: TourSummary[];
-  selectedTour: { id: string; analysisId: string; doc: Doc; tour: Tour; model?: string | null } | null;
+  selectedTour: {
+    id: string;
+    analysisId: string;
+    doc: Doc;
+    tour: Tour;
+    model?: string | null;
+    profile?: TourProfileSnapshot | null;
+  } | null;
   tourGeneration?: TourGenerationSummary | null;
   assets: Record<string, string>;
   readerState: ReaderState | null;

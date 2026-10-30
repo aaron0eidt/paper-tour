@@ -1,3 +1,5 @@
+import { BUILTIN_TOUR_PROFILES, profileSnapshot, sameTourProfile, validTourDepth } from '../../shared/tourProfiles';
+import type { TourProfileSnapshot } from '../../shared/tourProfiles';
 import { generationRecorder } from './activity';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -21,6 +23,7 @@ const execute = promisify(execFile);
 export function generationSummary(row: QueryResultRow): TourGenerationSummary {
   return {
     agentRunId: row.agent_run_id ?? null,
+    profile: row.profile ?? null,
     id: row.id,
     analysisId: row.analysis_id,
     status: row.status,
@@ -43,6 +46,9 @@ export async function ensureTourGeneration(
   retry = false,
   regenerate = false,
   engine: 'legacy' | 'agent' = 'legacy',
+  profile: TourProfileSnapshot = profileSnapshot(BUILTIN_TOUR_PROFILES[0], {
+    depth: validTourDepth(process.env.TOUR_PRESET) ? process.env.TOUR_PRESET : 'standard',
+  }),
 ): Promise<QueryResultRow> {
   const {
     rows: [existing],
@@ -55,20 +61,25 @@ export async function ensureTourGeneration(
   if (existing?.status === 'ready' && !regenerate) return existing;
   if (existing && ['failed', 'needs_configuration'].includes(existing.status) && !retry) return existing;
   let row: QueryResultRow;
-  if (existing && existing.status !== 'ready' && existing.engine !== 'agent') {
+  if (
+    existing &&
+    existing.status !== 'ready' &&
+    existing.engine !== 'agent' &&
+    sameTourProfile(existing.profile, profile)
+  ) {
     const {
       rows: [updated],
     } = await tx.query(
-      `update tour_generations set status='queued',stage='preparing',images_done=0,images_total=0,error=null,error_code=null,model=$2,metadata='{}',updated_at=now(),completed_at=null where id=$1 returning *`,
-      [existing.id, model],
+      `update tour_generations set status='queued',stage='preparing',images_done=0,images_total=0,error=null,error_code=null,model=$2,profile=$3,metadata='{}',updated_at=now(),completed_at=null where id=$1 returning *`,
+      [existing.id, model, profile],
     );
     row = updated;
   } else {
     const {
       rows: [created],
     } = await tx.query(
-      'insert into tour_generations(id,document_id,analysis_id,model) values($1,$2,$3,$4) returning *',
-      [randomUUID(), documentId, analysisId, model],
+      'insert into tour_generations(id,document_id,analysis_id,model,profile) values($1,$2,$3,$4,$5) returning *',
+      [randomUUID(), documentId, analysisId, model, profile],
     );
     row = created;
   }
@@ -382,11 +393,13 @@ export class TourWorker {
             analysisId,
             doc: input.doc,
             images,
+            profile: row.profile ?? undefined,
             onEvent,
           },
           onProgress,
           signal,
         );
+        generated.metadata = { ...generated.metadata, profile: row.profile ?? null };
         if (access)
           generated.metadata = {
             ...generated.metadata,
