@@ -46,7 +46,7 @@ export function teachingEvidence(doc: Doc, budget = 850): string[] {
   return [...prose.filter((s) => keep.has(s.id)).map((s) => s.id), ...visuals];
 }
 
-export function teachingPlanSchema(doc: Doc, strict = true) {
+export function teachingPlanSchema(doc: Doc, strict = true, preferences?: TeachingPreferences) {
   const source = strict ? { $ref: '#/$defs/source' } : { type: 'string' };
   const concept = {
     type: 'object',
@@ -108,7 +108,17 @@ export function teachingPlanSchema(doc: Doc, strict = true) {
     properties: {
       question: text(400),
       audienceAssumption: text(400),
-      concepts: { type: 'array', minItems: 1, maxItems: Math.floor((MAX_STEPS - 1) / 2), items: concept },
+      concepts: {
+        type: 'array',
+        minItems: 1,
+        maxItems:
+          preferences?.structure === 'overview' || preferences?.depth === 'quick'
+            ? 8
+            : preferences?.depth === 'standard'
+              ? 12
+              : Math.floor((MAX_STEPS - 1) / 2),
+        items: concept,
+      },
       sections: {
         type: 'array',
         maxItems: Math.max(1, doc.sections.length),
@@ -133,6 +143,9 @@ export function teachingPlanTask(preferences: TeachingPreferences, language: str
     'Read the full document, including methods, results and limitations. Repetition in abstract/introduction/conclusion is a signal, never a requirement.',
     'Separate the new contribution from prerequisite background, the mechanism that supports it, actual evidence and limitations.',
     'Choose a small set of teachable concepts, not one entry per paragraph: normally 4–8 for an overview, 6–12 for a standard tour, and 10–14 for a deep tour. Include only concepts needed to answer the main question.',
+    ...(preferences.depth === 'quick'
+      ? ['This is a brief tour: use 4–8 essential concepts total, with concise summaries and short reasons.']
+      : []),
     'For each concept give stable short IDs, source evidence and prerequisite concept IDs. The first evidence ID is the primary passage/figure/equation where this concept is taught; put secondary support afterwards. Dependencies must be acyclic.',
     'Importance explains why understanding this concept is needed for the paper’s main question; difficulty estimates this audience’s required prior knowledge or multi-step reasoning. They are different decisions.',
     'State the audience assumption and confidence honestly. A likely misconception is a teaching hypothesis, not an observed fact about the learner.',

@@ -109,8 +109,11 @@ test('paper-order tours use actual source locations and headings, including late
   );
   assert.match(result.beats[2].notes!.join(' '), /LEARNING OBJECTIVE/);
   assert.equal(result.beats[2].point, plan().concepts[0].summary);
-  assert.notEqual(result.beats[2].point, plan().concepts[0].objective,
-    'a learner-facing summary is distinct from authoring instructions, even if the writer is unavailable');
+  assert.notEqual(
+    result.beats[2].point,
+    plan().concepts[0].objective,
+    'a learner-facing summary is distinct from authoring instructions, even if the writer is unavailable',
+  );
 });
 
 test('the current style keeps its grammar and gains important concepts absent from repeated opening claims', () => {
@@ -140,6 +143,7 @@ test('a bounded evidence vocabulary samples every section instead of only the be
   assert.equal(ids.length, 4);
   const schema = teachingPlanSchema(doc);
   assert.ok('enum' in schema.$defs!.source && schema.$defs!.source.enum!.includes('p2.s3'));
+  assert.equal(teachingPlanSchema(doc, true, { ...prefs, depth: 'quick' }).properties.concepts.maxItems, 8);
 });
 
 test('adaptive visual planning preserves useful repeated representations and permits dynamic worked examples', () => {

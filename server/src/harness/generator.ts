@@ -398,7 +398,14 @@ export class HarnessTourGenerator implements TourGenerator {
       let problems: string[] = [];
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const completion = await call(task, 'teaching_plan', teachingPlanSchema(doc), 12_000, 'medium', signal);
+          const completion = await call(
+            task,
+            'teaching_plan',
+            teachingPlanSchema(doc, true, input.profile),
+            12_000,
+            attempt ? 'medium' : 'low',
+            signal,
+          );
           const checked = cleanTeachingPlan(completion.value, doc);
           if (checked.plan) return checked.plan;
           problems = checked.problems;
