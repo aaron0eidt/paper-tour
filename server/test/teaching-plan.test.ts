@@ -134,7 +134,7 @@ test('a bounded evidence vocabulary samples every section instead of only the be
   assert.ok(ids.some((id) => id.startsWith('p2.')));
   assert.equal(ids.length, 4);
   const schema = teachingPlanSchema(doc);
-  assert.ok(schema.$defs!.source.enum.includes('p2.s3'));
+  assert.ok('enum' in schema.$defs!.source && schema.$defs!.source.enum!.includes('p2.s3'));
 });
 
 test('adaptive visual planning preserves useful repeated representations and permits dynamic worked examples', () => {
@@ -169,6 +169,8 @@ test('profile generation actually uses the repaired teaching map and saves it wi
     settings,
     'standard',
     provider((request) => {
+      assert.notEqual(request.name, 'opening_visual', 'paper-order profiles do not pay for a discarded opening plan');
+      assert.notEqual(request.name, 'claims', 'paper-order profiles do not pay for a discarded claims plan');
       if (request.name === 'paper_card') return card;
       if (request.name === 'teaching_plan') {
         calls++;
@@ -201,6 +203,53 @@ test('profile generation actually uses the repaired teaching map and saves it wi
   );
   assert.ok(events.some((event) => event.type === 'teaching.ready'));
   assert.ok(events.some((event) => event.type === 'validation.failed' && event.data.stage === 'teaching_plan'));
+});
+
+test('an overview still teaches evidence when it is rated below the central contribution', () => {
+  const held = plan();
+  held.concepts[0].importance = 'medium';
+  assert.ok(
+    selectedTeachingConcepts(held, { ...prefs, structure: 'overview' }).some((concept) => concept.role === 'evidence'),
+  );
+  const result = teachingTourPlan(held, doc, prefs, card, paperPlan(card, doc, 'standard'));
+  assert.ok(result.beats.some((beat) => beat.notes?.some((note) => note.includes('BEFORE THE MAIN POINT'))));
+});
+
+test('paper order respects the ingested sequence of a two-column page rather than sorting by vertical position', () => {
+  const twoColumn = structuredClone(doc);
+  twoColumn.blocks[1].bbox = [0, 500, 280, 600];
+  twoColumn.blocks.splice(2, 0, {
+    id: 'right',
+    page: 1,
+    type: 'paragraph',
+    bbox: [300, 20, 580, 100],
+    text: 'Right column',
+    section: 'sec-1',
+    sentences: ['right.s1'],
+  });
+  twoColumn.sentences.push({
+    id: 'right.s1',
+    block: 'right',
+    page: 1,
+    text: 'Right column',
+    rects: [[300, 20, 580, 100]],
+  });
+  const held = plan();
+  held.concepts = [
+    concept('right', { evidence: ['right.s1'], role: 'evidence' }),
+    concept('left', { evidence: ['p1.s2'], role: 'contribution' }),
+  ];
+  const result = teachingTourPlan(
+    held,
+    twoColumn,
+    { ...prefs, structure: 'paper' },
+    card,
+    paperPlan(card, twoColumn, 'standard'),
+  );
+  assert.deepEqual(
+    result.beats.slice(0, 2).map((beat) => beat.id),
+    ['teach-left', 'teach-right'],
+  );
 });
 
 test('invalid teaching maps have bounded repair and cannot silently publish another plan', async () => {

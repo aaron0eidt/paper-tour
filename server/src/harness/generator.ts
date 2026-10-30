@@ -1,6 +1,12 @@
 import { claimsNumericExample } from './example';
 import type { TeachingPlan } from '../../../shared/teachingPlan';
-import { cleanTeachingPlan, teachingPlanSchema, teachingPlanTask, teachingTourPlan } from './teaching-plan';
+import {
+  cleanTeachingPlan,
+  teachingEvidence,
+  teachingPlanSchema,
+  teachingPlanTask,
+  teachingTourPlan,
+} from './teaching-plan';
 import { lossSentence } from '../../../shared/coverage';
 import { splitWords, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
@@ -332,7 +338,8 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       return found;
     };
-    const claimsContext = guessType(doc) === 'research_paper' ? claimContext(doc) : null;
+    const conceptLed = !input.profile || input.profile.structure === 'concepts';
+    const claimsContext = conceptLed && guessType(doc) === 'research_paper' ? claimContext(doc) : null;
     const early = claimsContext ? findClaims(claimsContext, AbortSignal.any([signal, speculation.signal])) : null;
     // A call nobody waits for must not fail the process; whoever uses its claims sees the error.
     early?.catch(() => {});
@@ -382,6 +389,11 @@ export class HarnessTourGenerator implements TourGenerator {
     // This call overlaps claim planning; its verified objectives guide both the writer and visual planner.
     const prepareTeaching = async (): Promise<TeachingPlan | null> => {
       if (!paper || !input.profile) return null;
+      if (!teachingEvidence(doc).length)
+        throw new ProcessingError(
+          'missing_teaching_sources',
+          'This paper has no citable text, equations or figures. Check PDF extraction before generating a tour.',
+        );
       const task: MuseMessage[] = [...prefix, { role: 'user', content: teachingPlanTask(input.profile, language) }];
       let problems: string[] = [];
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -458,7 +470,7 @@ export class HarnessTourGenerator implements TourGenerator {
       return chosen;
     };
     const thesis: Beat | null =
-      paper && thesisBeat(card!).evidence.length ? { id: 'problem-1', ...thesisBeat(card!) } : null;
+      paper && conceptLed && thesisBeat(card!).evidence.length ? { id: 'problem-1', ...thesisBeat(card!) } : null;
     const opening = thesis ? planOpening(thesis).catch(() => null) : null;
     let plan: TourPlan;
     let planSource = 'code';
@@ -510,7 +522,7 @@ export class HarnessTourGenerator implements TourGenerator {
     } else if (type === 'research_paper') {
       // The paper's claims: what the authors state in at least two of the abstract, the introduction and the
       // conclusion, with the evidence for each. Without usable claims the tour follows the paper's argument instead.
-      const context = claimsContext ?? claimContext(doc);
+      const context = conceptLed ? (claimsContext ?? claimContext(doc)) : null;
       if (context) claims = await (early ?? findClaims(context, signal));
       const byClaims = claims ? claimPlan(claims, card!, doc, this.preset) : null;
       // A claim plan too thin to teach (no evidence to point at) is no plan.

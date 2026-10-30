@@ -8,7 +8,7 @@ import {
   type TeachingPreferences,
 } from '../../../shared/teachingPlan';
 import { indexElements } from '../elements';
-import type { Beat, TourPlan } from './beats';
+import { MAX_STEPS, type Beat, type TourPlan } from './beats';
 import type { PaperCard } from './card';
 import { proseSentences } from './paper-block';
 
@@ -87,14 +87,22 @@ export function teachingPlanSchema(doc: Doc, strict = true) {
     },
   };
   return {
-    ...(strict ? { $defs: { source: { type: 'string', enum: teachingEvidence(doc) } } } : {}),
+    ...(strict
+      ? {
+          $defs: {
+            source: teachingEvidence(doc).length
+              ? { type: 'string', enum: teachingEvidence(doc) }
+              : { type: 'string', not: {} },
+          },
+        }
+      : {}),
     type: 'object',
     additionalProperties: false,
     required: ['question', 'audienceAssumption', 'concepts', 'sections'],
     properties: {
       question: text(400),
       audienceAssumption: text(400),
-      concepts: { type: 'array', minItems: 1, maxItems: 48, items: concept },
+      concepts: { type: 'array', minItems: 1, maxItems: Math.floor((MAX_STEPS - 1) / 2), items: concept },
       sections: {
         type: 'array',
         maxItems: Math.max(1, doc.sections.length),
@@ -118,8 +126,8 @@ export function teachingPlanTask(preferences: TeachingPreferences, language: str
     `Plan what this paper should teach in ${language}. Audience familiarity: ${preferences.audience}; scope: ${preferences.structure}; depth: ${preferences.depth}.`,
     'Read the full document, including methods, results and limitations. Repetition in abstract/introduction/conclusion is a signal, never a requirement.',
     'Separate the new contribution from prerequisite background, the mechanism that supports it, actual evidence and limitations.',
-    'Choose a small set of teachable concepts, not one entry per paragraph: normally 4–8 for an overview, 6–12 for a standard tour, and 10–18 for a deep tour. Include only concepts needed to answer the main question.',
-    'For each concept give stable short IDs, source evidence and prerequisite concept IDs. Dependencies must be acyclic.',
+    'Choose a small set of teachable concepts, not one entry per paragraph: normally 4–8 for an overview, 6–12 for a standard tour, and 10–14 for a deep tour. Include only concepts needed to answer the main question.',
+    'For each concept give stable short IDs, source evidence and prerequisite concept IDs. The first evidence ID is the primary passage/figure/equation where this concept is taught; put secondary support afterwards. Dependencies must be acyclic.',
     'Importance explains why understanding this concept is needed for the paper’s main question; difficulty estimates this audience’s required prior knowledge or multi-step reasoning. They are different decisions.',
     'State the audience assumption and confidence honestly. A likely misconception is a teaching hypothesis, not an observed fact about the learner.',
     'The objective says what the reader should be able to explain. A new visual must name the relationship or change it reveals and why source annotation alone is insufficient. Use none when no visual adds understanding.',
@@ -190,6 +198,14 @@ export function selectedTeachingConcepts(plan: TeachingPlan, preferences: Teachi
       .map((c) => c.id),
   );
   const byId = new Map(plan.concepts.map((c) => [c.id, c]));
+  // Even an overview must show what supports the claim, not merely repeat the claim itself.
+  for (const role of ['contribution', 'evidence'] as const) {
+    if ([...chosen].some((id) => byId.get(id)?.role === role)) continue;
+    const essential = [...plan.concepts]
+      .filter((concept) => concept.role === role)
+      .sort((a, b) => priority[b.importance] - priority[a.importance])[0];
+    if (essential) chosen.add(essential.id);
+  }
   function prerequisites(id: string) {
     for (const dependency of byId.get(id)?.prerequisites ?? []) {
       const concept = byId.get(dependency);
@@ -215,6 +231,7 @@ export function selectedTeachingConcepts(plan: TeachingPlan, preferences: Teachi
 
 export function teachingNotes(concept: TeachingConcept): string[] {
   return [
+    `CONCEPT: ${concept.title}. Sources: ${concept.evidence.join(', ')}.`,
     `LEARNING OBJECTIVE: ${concept.objective}`,
     `IMPORTANCE (${concept.importance}): ${concept.importanceReason}`,
     `ESTIMATED DIFFICULTY (${concept.difficulty}, confidence ${concept.confidence}): ${concept.difficultyReason}`,
@@ -233,11 +250,28 @@ export function teachingTourPlan(
   existing: TourPlan,
 ): TourPlan {
   const elements = new Map(indexElements(doc).map((e) => [e.id, e]));
-  const location = (concept: TeachingConcept) =>
-    concept.evidence
-      .map((id) => elements.get(id))
-      .filter((e) => e !== undefined)
-      .sort((a, b) => a.page - b.page || (a.bbox?.[1] ?? 0) - (b.bbox?.[1] ?? 0))[0];
+  const blocks = new Map(doc.blocks.map((block, rank) => [block.id, { block, rank }]));
+  const locate = (id: string) => {
+    const element = elements.get(id);
+    if (!element) return undefined;
+    const sentence = doc.sentences.find((s) => s.id === id);
+    const equation = doc.equations.find((e) => e.id === id);
+    const figure = doc.figures.find((f) => f.id === id);
+    const blockId = sentence?.block ?? equation?.block ?? figure?.caption_block ?? id;
+    const entry = blocks.get(blockId);
+    // Ingestion's block sequence preserves multi-column reading order. Geometry is only a last resort for an unlinked crop.
+    const near =
+      entry ??
+      [...blocks.values()]
+        .filter(({ block }) => block.page === element.page)
+        .sort(
+          (a, b) =>
+            Math.abs(a.block.bbox[1] - (element.bbox?.[1] ?? 0)) - Math.abs(b.block.bbox[1] - (element.bbox?.[1] ?? 0)),
+        )[0];
+    const fraction = sentence && near ? (near.block.sentences.indexOf(id) + 1) / (near.block.sentences.length + 1) : 0;
+    return { ...element, rank: near ? near.rank + fraction : Number.MAX_SAFE_INTEGER, sectionId: near?.block.section };
+  };
+  const location = (concept: TeachingConcept) => concept.evidence.map(locate).find((source) => source !== undefined);
   if (preferences.structure === 'concepts') {
     // Preserve the current narrative grammar. Add important body-only concepts that the earlier claim extractor missed.
     const selected = selectedTeachingConcepts(teaching, preferences);
@@ -246,7 +280,31 @@ export function teachingTourPlan(
         concept.evidence.some((id) => id === beat.target || beat.evidence.includes(id)),
       );
       const strongest = matches.sort((a, b) => priority[b.importance] - priority[a.importance])[0];
-      return strongest ? { ...beat, notes: [...(beat.notes ?? []), ...teachingNotes(strongest)] } : beat;
+      const prerequisites =
+        strongest && preferences.audience !== 'expert'
+          ? selected.filter((candidate) => strongest.prerequisites.includes(candidate.id))
+          : [];
+      return strongest
+        ? {
+            ...beat,
+            evidence: [
+              ...new Set([
+                ...beat.evidence,
+                ...prerequisites.flatMap((concept) =>
+                  concept.evidence.filter((id) => doc.sentences.some((s) => s.id === id)),
+                ),
+              ]),
+            ],
+            notes: [
+              ...(beat.notes ?? []),
+              ...prerequisites.map(
+                (concept) =>
+                  `BEFORE THE MAIN POINT, establish this prerequisite from ${concept.evidence.join(', ')}: ${concept.objective}`,
+              ),
+              ...teachingNotes(strongest),
+            ],
+          }
+        : { ...beat };
     });
     const chapters = [...existing.chapters];
     for (const concept of selected) {
@@ -267,6 +325,19 @@ export function teachingTourPlan(
       const target = concept.evidence.find(
         (id) => doc.equations.some((e) => e.id === id) || doc.figures.some((f) => f.id === id),
       );
+      if (mapped.length >= MAX_STEPS) {
+        const host =
+          mapped.find((beat) => beat.arc === arc && beat.kind !== 'takeaway') ??
+          mapped.find((beat) => beat.kind === 'method') ??
+          mapped.find((beat) => beat.kind !== 'takeaway');
+        if (host) {
+          host.notes = [...(host.notes ?? []), ...teachingNotes(concept)];
+          host.evidence = [
+            ...new Set([...host.evidence, ...concept.evidence.filter((id) => doc.sentences.some((s) => s.id === id))]),
+          ];
+          continue;
+        }
+      }
       mapped.splice(
         Math.max(
           0,
@@ -304,21 +375,17 @@ export function teachingTourPlan(
     selected = selected.sort((a, b) => {
       const x = location(a),
         y = location(b);
-      return (x?.page ?? 1) - (y?.page ?? 1) || (x?.bbox?.[1] ?? 0) - (y?.bbox?.[1] ?? 0);
+      return (x?.rank ?? Number.MAX_SAFE_INTEGER) - (y?.rank ?? Number.MAX_SAFE_INTEGER);
     });
   const chapters: TourPlan['chapters'] = [];
   const beats: Beat[] = [];
   for (const concept of selected) {
     const where = location(concept);
-    const section = doc.sections
-      .filter(
-        (s) =>
-          s.page < (where?.page ?? 1) ||
-          (s.page === where?.page && (elements.get(s.block)?.bbox?.[1] ?? 0) <= (where?.bbox?.[1] ?? 0)),
-      )
-      .sort(
-        (a, b) => b.page - a.page || (elements.get(b.block)?.bbox?.[1] ?? 0) - (elements.get(a.block)?.bbox?.[1] ?? 0),
-      )[0];
+    const section =
+      doc.sections.find((s) => s.id === where?.sectionId) ??
+      doc.sections
+        .filter((s) => (blocks.get(s.block)?.rank ?? Infinity) <= (where?.rank ?? -1))
+        .sort((a, b) => (blocks.get(b.block)?.rank ?? 0) - (blocks.get(a.block)?.rank ?? 0))[0];
     // A chapter is a contiguous sequence; repeated roles must not reorder dependencies at assembly time.
     const group = preferences.structure === 'paper' ? (section?.id ?? 'opening') : concept.role;
     const arc = chapters.at(-1)?.id.startsWith(`${group}:`) ? chapters.at(-1)!.id : `${group}:${chapters.length}`;
