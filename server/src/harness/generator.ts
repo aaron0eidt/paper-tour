@@ -1,4 +1,6 @@
 import { claimsNumericExample } from './example';
+import type { TeachingPlan } from '../../../shared/teachingPlan';
+import { cleanTeachingPlan, teachingPlanSchema, teachingPlanTask, teachingTourPlan } from './teaching-plan';
 import { lossSentence } from '../../../shared/coverage';
 import { splitWords, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
@@ -376,6 +378,33 @@ export class HarnessTourGenerator implements TourGenerator {
     const type: DocType = deck ? 'lecture' : card!.doc_type;
     const paper = !sheet && !deck && type === 'research_paper';
     if (!paper) speculation.abort();
+    // Interpret importance and reader-relative difficulty independently of the opening-claim extractor.
+    // This call overlaps claim planning; its verified objectives guide both the writer and visual planner.
+    const prepareTeaching = async (): Promise<TeachingPlan | null> => {
+      if (!paper || !input.profile) return null;
+      const task: MuseMessage[] = [...prefix, { role: 'user', content: teachingPlanTask(input.profile, language) }];
+      let problems: string[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const completion = await call(task, 'teaching_plan', teachingPlanSchema(doc), 12_000, 'medium', signal);
+          const checked = cleanTeachingPlan(completion.value, doc);
+          if (checked.plan) return checked.plan;
+          problems = checked.problems;
+          await input.onEvent?.('validation.failed', { stage: 'teaching_plan', attempt: attempt + 1, problems });
+          task.push(...repairTurn(completion.value, problems));
+        } catch (error) {
+          signal.throwIfAborted();
+          if (!recoverable(error)) throw error;
+          problems = [error instanceof Error ? error.message : 'The teaching plan could not be read.'];
+        }
+      }
+      throw new ProcessingError(
+        'invalid_teaching_plan',
+        `The teaching plan could not be validated. ${problems.join(' ')}`,
+      );
+    };
+    const preparingTeaching = prepareTeaching();
+    preparingTeaching.catch(() => {});
     /**
      * The visual of a paper's opening step, planned alone from the card while the claims are still being found, so that
      * the step the learner waits for does not wait for the plan of the whole tour (visual-plan.ts, openingPlanTask).
@@ -523,6 +552,17 @@ export class HarnessTourGenerator implements TourGenerator {
       planSource = arcs ? 'model' : 'fallback';
       plan = arcTourPlan(arcs ?? fallbackArcPlan(card!, arcType), arcType, card!, doc, this.preset, language);
     }
+    const teachingPlan = await preparingTeaching;
+    if (teachingPlan && input.profile) {
+      plan = teachingTourPlan(teachingPlan, doc, input.profile, card!, plan);
+      planSource = `adaptive-${input.profile.structure}`;
+      await input.onEvent?.('teaching.ready', {
+        question: teachingPlan.question,
+        audienceAssumption: teachingPlan.audienceAssumption,
+        concepts: teachingPlan.concepts,
+        sections: teachingPlan.sections,
+      });
+    }
     const { beats } = plan;
     if (!beats.length) throw new ProcessingError('invalid_tour', 'This document has no text a tour could explain.');
     // Quick checks close a few chapters of a paper or a lecture; each is written once the chapter's steps are.
@@ -570,7 +610,11 @@ export class HarnessTourGenerator implements TourGenerator {
       if (!plannable.length) return;
       const decided = ahead ? await ahead : null;
       const settled: VisualPlan = decided ? new Map([[thesis!.id, decided]]) : new Map();
-      const options = { sheet: sheetTour, ...(settled.size ? { settled: true } : {}) };
+      const options = {
+        sheet: sheetTour,
+        ...(input.profile ? { adaptive: true } : {}),
+        ...(settled.size ? { settled: true } : {}),
+      };
       const rest = plannable.filter((beat) => !settled.has(beat.id));
       const task: MuseMessage[] = [
         ...prefix,
@@ -1390,6 +1434,7 @@ export class HarnessTourGenerator implements TourGenerator {
         promptVersion: HARNESS_VERSION,
         preset: this.preset,
         profile: input.profile ?? null,
+        ...(teachingPlan ? { teachingPlan } : {}),
         docType: plan.type,
         cardSource,
         planSource,

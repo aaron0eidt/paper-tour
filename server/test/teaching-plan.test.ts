@@ -9,7 +9,9 @@ import {
   teachingTourPlan,
 } from '../src/harness/teaching-plan';
 import { paperPlan } from '../src/harness/beats';
-import { card, doc } from './plan-fixture';
+import { card, doc, direct, input, provider, planFor, settings, EXPLAIN, checkReply } from './plan-fixture';
+import { HarnessTourGenerator } from './harness-fixture';
+import { BUILTIN_TOUR_PROFILES, profileSnapshot } from '../../shared/tourProfiles';
 import {
   allocateFrames,
   cleanVisualPlan,
@@ -158,4 +160,67 @@ test('adaptive visual planning preserves useful repeated representations and per
   assert.match(visualPlanTask('en-US', { adaptive: true }), /no per-kind/);
   const taught = teachingTourPlan(plan(), doc, prefs, card, paperPlan(card, doc, 'standard'));
   assert.match(visualPlanBrief(card, taught.beats, doc), /LEARNING OBJECTIVE/);
+});
+
+test('profile generation actually uses the repaired teaching map and saves it with the published tour', async () => {
+  const events: { type: string; data: Record<string, any> }[] = [];
+  let calls = 0;
+  const generator = new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider((request) => {
+      if (request.name === 'paper_card') return card;
+      if (request.name === 'teaching_plan') {
+        calls++;
+        if (calls === 1) {
+          const invalid = plan();
+          invalid.sections.pop();
+          return raw(invalid);
+        }
+        assert.match(request.task, /section sec-2/);
+        return raw(plan());
+      }
+      if (request.name === 'visual_plan' || request.name === 'opening_visual') return planFor(request);
+      if (request.name === 'quick_check') return checkReply(request);
+      return direct(request, EXPLAIN);
+    }),
+  );
+  const result = await generator.generate({
+    ...input,
+    profile: profileSnapshot(BUILTIN_TOUR_PROFILES[2]),
+    onEvent: async (type, data) => {
+      events.push({ type, data });
+    },
+  });
+  assert.equal(calls, 2);
+  assert.equal((result.metadata as any).planSource, 'adaptive-paper');
+  assert.equal((result.metadata as any).teachingPlan.question, plan().question);
+  assert.deepEqual(
+    result.tour.chapters.slice(0, 2).map((chapter) => chapter.title),
+    ['Introduction', 'Results'],
+  );
+  assert.ok(events.some((event) => event.type === 'teaching.ready'));
+  assert.ok(events.some((event) => event.type === 'validation.failed' && event.data.stage === 'teaching_plan'));
+});
+
+test('invalid teaching maps have bounded repair and cannot silently publish another plan', async () => {
+  let calls = 0;
+  const generator = new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider((request) => {
+      if (request.name === 'paper_card') return card;
+      if (request.name === 'teaching_plan') {
+        calls++;
+        return {};
+      }
+      if (request.name === 'visual_plan' || request.name === 'opening_visual') return planFor(request);
+      return direct(request, EXPLAIN);
+    }),
+  );
+  await assert.rejects(
+    generator.generate({ ...input, profile: profileSnapshot(BUILTIN_TOUR_PROFILES[1]) }),
+    (error: any) => error.code === 'invalid_teaching_plan',
+  );
+  assert.equal(calls, 2);
 });
