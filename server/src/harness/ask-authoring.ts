@@ -111,6 +111,13 @@ export function askContext(
   shown: readonly ShownBoard[] = [],
 ) {
   const lines = [`QUESTION: ${request.question}`];
+  const { pointing } = retrieval;
+  if (pointing)
+    lines.push(
+      pointing.bare
+        ? `The question names no topic of its own: it asks about ${request.selection ? 'the selected region' : 'the figure or equation on screen'}. Explain that.`
+        : `The learner points at ${request.selection ? 'a region' : 'a figure or equation on screen'}: the question is about it unless the question names something else.`,
+    );
   if (request.selection) {
     const selected = selectedSourceIds(doc, request.selection);
     lines.push(
@@ -120,12 +127,15 @@ export function askContext(
       'The selection image identifier is context only, never a cue target. Use existing listed document IDs for highlights and camera movement.',
     );
   }
-  if (request.history?.length) {
+  const history = retrieval.history ?? request.history ?? [];
+  if (history.length) {
     lines.push('EARLIER IN THIS CONVERSATION (oldest first; the question may build on it):');
-    for (const turn of request.history) lines.push(`Q: ${turn.question}`, `A: ${clip(turn.answer, 700)}`);
+    for (const turn of history) lines.push(`Q: ${turn.question}`, `A: ${clip(turn.answer, 700)}`);
   }
-  if (step) lines.push(`THE TOUR WAS SAYING: ${step.say}`);
-  const seen = shownLine(shown);
+  const narration = retrieval.narration ?? step?.say;
+  if (narration) lines.push(`THE TOUR WAS SAYING: ${narration}`);
+  // The titles of boards the tour showed elsewhere would pull an answer about the selection towards their topics.
+  const seen = shownLine(pointing && !pointing.onStep ? shown.map(({ title, ...board }) => board) : shown);
   if (seen) lines.push(seen);
   if (retrieval.focus.length)
     lines.push(

@@ -175,6 +175,17 @@ equation.
 1. **Retrieve.** BM25 over sentences, captions, equations and section titles, plus the current step's evidence and its
    neighbours: the top 12 passages and any figure among them. A question about "this" or "here" adds the crop on
    screen, or the box the user drew.
+   *What the learner points at is the topic.* With a selected region or the figure or equation on screen, the search
+   uses that element's own text (the sentences and labels in the region, a figure's caption, the labels inside it and
+   the sentences that cite it, an equation with the sentences around it; the nearest sentences for a region with no
+   text). A question made only of generic words ("explain", "was heißt das?", `ask-generic.ts`) is about that and
+   nothing else, however it opens ("und warum?", "and what is this?"): no step narration, no earlier exchanges, in the
+   search or in the prompt. A question with a topic of its own leads, and the selection tips the ranking; the
+   narration counts in full when the step points at the same elements, otherwise only its sentences that share words
+   with the selection. Only a reference to the conversation itself ("you said …", "your last answer", "du hast
+   gesagt", "vorhin") brings all of it back; a bare "earlier" or "zuvor" does not, papers say those too. The prompt
+   gets the same parts, and names the boards the tour showed without their titles when the step is about something
+   else.
 2. **Answer** (Spark at `minimal` effort, `low` for a calculation or an exercise sheet, `medium` on the retry after an
    unusable answer): `plan`; `answerable` (yes, partly or
    no); one to three `steps`, each with `say` (at most 60 words) and cues restricted to the retrieved IDs; an optional

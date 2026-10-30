@@ -1048,7 +1048,8 @@ test('region questions prioritize intersecting real source IDs while preserving 
   let seen: Request | undefined;
   const result = await ask(
     {
-      question: 'Explain this region.',
+      // Saying so outright is what brings the history and the narration into a question about a selection.
+      question: 'What did you say about this region?',
       selection,
       stepId: 'method-1',
       history: [{ question: 'How are weights calculated?', answer: 'Using normalized scores.' }],

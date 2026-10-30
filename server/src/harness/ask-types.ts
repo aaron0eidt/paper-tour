@@ -12,8 +12,11 @@ export interface AskRequest {
   responseLanguage?: string;
   tourId?: string;
   analysisId?: string;
+  /** A region the learner selected: what the question is about. */
   selection?: RegionSelection;
+  /** The tour step they were on; its narration counts only where it is about what they point at (ask-retrieval.ts). */
   stepId?: string;
+  /** The figure or equation on screen: what the question is about when no region is selected. */
   figureId?: string;
   history?: AskTurn[];
 }
