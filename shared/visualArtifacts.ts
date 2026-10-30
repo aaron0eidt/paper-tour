@@ -5,6 +5,7 @@ export interface VisualArtifactRef {
 }
 export interface VisualArtifact extends VisualArtifactRef {
   documentId: string;
+  analysisId: string;
   conversationId?: string;
   tourId?: string;
   parent?: VisualArtifactRef;
@@ -12,6 +13,7 @@ export interface VisualArtifact extends VisualArtifactRef {
   createdAt: string;
 }
 export interface VisualArtifactInput {
+  analysisId: string;
   item: BoardItem;
   conversationId?: string;
   tourId?: string;

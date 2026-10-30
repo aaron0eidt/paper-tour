@@ -3,11 +3,13 @@ create table public.visual_artifacts (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,
   document_id uuid not null references public.documents(id) on delete cascade,
-  conversation_id uuid,
+  analysis_id uuid not null,
+  conversation_id uuid references public.document_conversations(id) on delete cascade,
   tour_id uuid references public.tours(id) on delete cascade,
   parent_id uuid,
   parent_revision integer,
   created_at timestamptz not null default now(),
+  foreign key(document_id,analysis_id) references public.analyses(document_id,id) on delete cascade,
   check ((parent_id is null) = (parent_revision is null)),
   check (conversation_id is null or tour_id is null)
 );

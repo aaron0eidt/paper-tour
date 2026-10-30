@@ -38,8 +38,8 @@ export function visualArtifactRoutes(
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['item'],
-          properties: { item: { type: 'object' }, conversationId: uuid, tourId: uuid, parent: ref },
+          required: ['item', 'analysisId'],
+          properties: { analysisId: uuid, item: { type: 'object' }, conversationId: uuid, tourId: uuid, parent: ref },
         },
       },
     },
