@@ -1,3 +1,4 @@
+import { boardSignature } from './assemble';
 import { indexElements } from '../elements';
 import { isAuthoredVisual } from '../visuals/inspect';
 import { reviewAuthoredWithModel } from '../visuals/model-author';
@@ -20,7 +21,7 @@ import { paperBlock } from './paper-block';
 import { SHARED_RULES } from './prompts';
 import { ANSWERABLE, type Answerable, type AskAnswer, type AskRequest, type StepSink } from './ask-types';
 import { evidenceText, findStep, retrieve } from './ask-retrieval';
-import { answerSchema, askContext, askInstructions } from './ask-authoring';
+import { answerSchema, askContext, askInstructions, checkedActiveVisual } from './ask-authoring';
 import { shownBoards } from './ask-boards';
 import {
   answerBoardProblems,
@@ -114,7 +115,8 @@ export interface AskInput {
  * start on it while the rest is written, and a repair afterwards keeps the steps already shown.
  */
 export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnswer; completions: Completion[] }> {
-  const { client, doc, request } = input;
+  const { client, doc } = input;
+  const request = { ...input.request, activeVisual: checkedActiveVisual(input.request) };
   const started = Date.now();
   if (request.selection) validateSelection(request.selection, doc);
   const step = findStep(input.tour, request.stepId);
@@ -131,7 +133,8 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
     'The say fields contain only explanations addressed to the learner.',
     'Never narrate schema, rendering instructions or authoring rules.',
   ];
-  const shown = shownBoards(input.tour, request.stepId);
+  const signature = request.activeVisual ? boardSignature(request.activeVisual) : null;
+  const shown = shownBoards(input.tour, request.stepId).filter((board) => !signature || board.signature !== signature);
   const task = `${askInstructions(language)}\n${authoringRules.join(' ')}\nKeep quotations in the original document language. Explain them in the answer language.\n\n${askContext(request, retrieval, doc, step, input.image, shown)}`;
   const messages: MuseMessage[] = [
     { role: 'developer', content: SHARED_RULES },

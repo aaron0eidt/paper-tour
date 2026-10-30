@@ -57,7 +57,10 @@ test('SVG is inert, valid, bounded and readable, including numeric-only labels',
   ])
     assert.ok(inspectProgramSvg(bad, programRuntime.parseSvg).problems.length, bad);
   assert.deepEqual(
-    inspectProgramSvg('<svg><text x="20" y="20">123</text></svg>', programRuntime.parseSvg).problems,
+    inspectProgramSvg(
+      '<svg width="600" height="420" viewBox="0 0 600 420"><text x="20" y="20">123</text></svg>',
+      programRuntime.parseSvg,
+    ).problems,
     [],
   );
   assert.ok(programProblems({ ...attention, parameters: [null] }).length);
@@ -138,4 +141,23 @@ test('document visual references are grounded deterministically before model rev
     sourceReferenceProblems({ ...measured, sourceRefs: [] }, ['table-results']).join(' '),
     /need actual sourceRefs/,
   );
+});
+
+test('hostile SVG dimensions are rejected before any raster allocation', () => {
+  for (const attrs of [
+    'width="1" height="1000000000" viewBox="0 0 1 1000000000"',
+    'width="600" height="420" viewBox="0 0 0 420"',
+    'width="NaN" height="420" viewBox="0 0 600 420"',
+    'width="600" height="420" viewBox="0 0 600 1000000000"',
+  ]) {
+    const inspection = inspectProgramSvg(
+      `<svg ${attrs}><text x="20" y="20">test</text></svg>`,
+      programRuntime.parseSvg,
+    );
+    assert.ok(
+      inspection.problems.some((problem) => problem.includes('dimensions')),
+      attrs,
+    );
+    assert.equal(inspection.canvas, undefined);
+  }
 });

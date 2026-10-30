@@ -1,4 +1,4 @@
-import { Resvg } from '@resvg/resvg-js';
+import { rasterProgram } from './raster';
 import type { ProgramItem } from '../../../shared/program';
 import { inspectProgramSvg } from '../../../shared/programRuntime';
 import { programRuntime, renderProgramFrame } from './program-runtime';
@@ -23,25 +23,21 @@ export async function reviewProgram(item: ProgramItem, signal?: AbortSignal): Pr
     try {
       const frame = await renderProgramFrame(item, t);
       const inspection = inspectProgramSvg(frame.svg, programRuntime.parseSvg);
-      const renderer = new Resvg(frame.svg, {
-        fitTo: { mode: 'width', value: 900 },
-        background: '#10131b',
-        font: { defaultFontFamily: 'Arial' },
-      });
-      const bounds = renderer.getBBox();
+      if (inspection.problems.length || !inspection.canvas) throw new Error(inspection.problems.join('; '));
+      const preview = await rasterProgram(frame.svg, signal);
+      const bounds = preview.bounds;
       if (!bounds || bounds.width < 2 || bounds.height < 2) problems.push(`Frame ${t}: nothing visible was drawn.`);
       if (
         bounds &&
         (bounds.x < -2 ||
           bounds.y < -2 ||
-          bounds.x + bounds.width > renderer.width + 2 ||
-          bounds.y + bounds.height > renderer.height + 2)
+          bounds.x + bounds.width > preview.width + 2 ||
+          bounds.y + bounds.height > preview.height + 2)
       )
         problems.push(`Frame ${t}: scene content crosses the canvas edge. Add margins or rescale geometry.`);
-      const png = renderer.render().asPng();
       frames.push({
         t,
-        image: `data:image/png;base64,${png.toString('base64')}`,
+        image: `data:image/png;base64,${preview.png}`,
         labels: inspection.labels,
         calculations: frame.calculations,
       });

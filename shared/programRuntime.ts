@@ -119,7 +119,12 @@ const ATTRS = new Set([
   'aria-label',
   'data-part',
 ]);
+export interface SceneCanvas {
+  width: number;
+  height: number;
+}
 export interface SvgInspection {
+  canvas?: SceneCanvas;
   elements: number;
   labels: string[];
   problems: string[];
@@ -131,7 +136,12 @@ export interface ProgramRuntimeAdapter {
 }
 export function inspectProgramSvg(source: string, parse: ProgramRuntimeAdapter['parseSvg']): SvgInspection {
   const result: SvgInspection = { elements: 0, labels: [], problems: [] };
-  if (!source || source.length > PROGRAM_LIMITS.svg || /<!DOCTYPE|<!ENTITY|<\?/i.test(source))
+  if (
+    typeof source !== 'string' ||
+    !source ||
+    source.length > PROGRAM_LIMITS.svg ||
+    /<!DOCTYPE|<!ENTITY|<\?/i.test(source)
+  )
     return { ...result, problems: ['Scene output must be a bounded SVG without declarations or entities.'] };
   let parsed: unknown;
   try {
@@ -173,7 +183,39 @@ export function inspectProgramSvg(source: string, parse: ProgramRuntimeAdapter['
   };
   if (!Array.isArray(parsed) || parsed.length !== 1 || !('svg' in parsed[0]))
     result.problems.push('Scene must have an SVG root.');
-  else walk(parsed);
+  else {
+    const attrs = (parsed[0][':@'] ?? {}) as Record<string, unknown>;
+    const box = String(attrs['@_viewBox'] ?? '')
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    const width = Number(attrs['@_width']),
+      height = Number(attrs['@_height']);
+    if (
+      box.length !== 4 ||
+      !box.every(Number.isFinite) ||
+      Math.abs(box[0]) > 10000 ||
+      Math.abs(box[1]) > 10000 ||
+      box[2] < 16 ||
+      box[3] < 16 ||
+      box[2] > 2000 ||
+      box[3] > 2000 ||
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width < 16 ||
+      height < 16 ||
+      width > 2000 ||
+      height > 2000 ||
+      width / height < 0.25 ||
+      width / height > 4 ||
+      Math.abs(width / height - box[2] / box[3]) > 0.01
+    ) {
+      result.problems.push(
+        'SVG needs finite width/height and a matching viewBox, dimensions 16–2000 and aspect ratio between 1:4 and 4:1.',
+      );
+    } else result.canvas = { width, height };
+    walk(parsed);
+  }
   if (result.elements > PROGRAM_LIMITS.elements) result.problems.push('Scene contains too many elements.');
   if (!result.labels.length) result.problems.push('A teaching scene needs readable labels or numeric annotations.');
   return { ...result, problems: [...new Set(result.problems)] };
@@ -205,4 +247,21 @@ export async function renderProgramFrame(
   const inspected = inspectProgramSvg(frame.svg, adapter.parseSvg);
   if (inspected.problems.length) throw new Error(inspected.problems.join('; '));
   return frame;
+}
+
+/** Bound both output axes/pixels before a rasterizer can allocate its surface. */
+export function programRasterSize(canvas: SceneCanvas): SceneCanvas {
+  const scale = 900 / Math.max(canvas.width, canvas.height);
+  const width = Math.ceil(canvas.width * scale),
+    height = Math.ceil(canvas.height * scale);
+  if (
+    ![width, height].every(Number.isFinite) ||
+    width < 1 ||
+    height < 1 ||
+    width > 900 ||
+    height > 900 ||
+    width * height > 810000
+  )
+    throw new Error('Scene exceeds the raster pixel budget.');
+  return { width, height };
 }
