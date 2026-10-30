@@ -111,7 +111,7 @@ import {
   restatedShare,
 } from './insight';
 import { documentLanguage } from './language';
-import { PACE, limited, type Pace } from './pace';
+import { PACE, limited, outlasting, type Pace } from './pace';
 import { HARNESS_VERSION, SHARED_RULES, cardTask, directTask } from './prompts';
 import { measuredFigureTargets } from './measured-visuals';
 import { pythonVerifier, type LineCheck, type MathVerifier } from './verify';
@@ -239,7 +239,11 @@ export class HarnessTourGenerator implements TourGenerator {
     const { doc } = input;
     const language = documentLanguage(doc, this.config.language);
     const { call: record, completions } = recordedCalls(this.client, input, this.model, HARNESS_VERSION);
-    /** A model call with the time limit of its name (pace.ts); a slower call fails with `muse_slow` and is tried again. */
+    /**
+     * A model call with the time limit of its name (pace.ts); a slower call fails with `muse_slow` and is tried again by
+     * its caller. A provider that could not take the call (a 5xx or a 429) is waited out here first (Pace.outages), each
+     * try with its own time limit, so that a burst of a few seconds costs a step nothing.
+     */
     const call = (
       messages: MuseMessage[],
       name: string,
@@ -249,7 +253,10 @@ export class HarnessTourGenerator implements TourGenerator {
       signal: AbortSignal,
       task?: { id: string; label: string },
       ms = this.pace.callMs(name, effort),
-    ) => limited(signal, ms, (within) => record(messages, name, schema, maxTokens, effort, within, task));
+    ) =>
+      outlasting(signal, this.pace.outages, () =>
+        limited(signal, ms, (within) => record(messages, name, schema, maxTokens, effort, within, task)),
+      );
     const progress = (stage: TourProgress['stage'], done: number, total: number) =>
       onProgress?.({ stage, imagesDone: done, imagesTotal: total });
     const prefix: MuseMessage[] = [

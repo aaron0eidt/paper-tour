@@ -19,6 +19,11 @@ export interface Pace {
   stepMs: number;
   /** The least time a repair call gets, however little is left of the step's time. */
   repairMs: number;
+  /**
+   * The waits before a call the provider could not take (a 5xx or a 429) is sent again, one per retry. Its outages come
+   * in bursts of several seconds, which the callers' own quick retries all fell into: 9 steps of 10 tours in one burst.
+   */
+  outages: readonly number[];
 }
 
 const SECONDS: Record<string, number> = {
@@ -40,7 +45,39 @@ export const PACE: Pace = {
     (name === 'beat_direction' ? (effort === 'medium' || effort === 'high' ? 45 : 30) : (SECONDS[name] ?? 60)) * 1000,
   stepMs: 40_000,
   repairMs: 15_000,
+  outages: [2_000, 4_000, 8_000],
 };
+
+/**
+ * Runs a model call, waiting out a provider that could not take it (a transient error: a 5xx or a 429) with the given
+ * waits, one per retry. Any other failure, and the last transient one, goes to the caller.
+ */
+export async function outlasting<T>(signal: AbortSignal, waits: readonly number[], run: () => Promise<T>): Promise<T> {
+  for (let retry = 0; ; retry++) {
+    try {
+      return await run();
+    } catch (error) {
+      const wait = waits[retry];
+      if (!(error instanceof ProcessingError) || !error.transient || wait === undefined || signal.aborted) throw error;
+      await waitOut(signal, wait);
+      signal.throwIfAborted();
+    }
+  }
+}
+
+/** Waits the given time, or less when the generation is cancelled meanwhile. */
+function waitOut(signal: AbortSignal, ms: number): Promise<void> {
+  return new Promise((done) => {
+    if (signal.aborted) return done();
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+    function finish() {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      done();
+    }
+  });
+}
 
 /**
  * Runs a model call with a time limit. A call that outlives it fails with `muse_slow`, a fault of the model like an
