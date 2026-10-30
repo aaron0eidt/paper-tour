@@ -50,15 +50,21 @@ export const PACE: Pace = {
 
 /**
  * Runs a model call, waiting out a provider that could not take it (a transient error: a 5xx or a 429) with the given
- * waits, one per retry. Any other failure, and the last transient one, goes to the caller.
+ * waits, one per retry, while `again` allows. Any other failure, and the last transient one, goes to the caller.
  */
-export async function outlasting<T>(signal: AbortSignal, waits: readonly number[], run: () => Promise<T>): Promise<T> {
+export async function outlasting<T>(
+  signal: AbortSignal,
+  waits: readonly number[],
+  run: () => Promise<T>,
+  again: () => boolean = () => true,
+): Promise<T> {
   for (let retry = 0; ; retry++) {
     try {
       return await run();
     } catch (error) {
       const wait = waits[retry];
-      if (!(error instanceof ProcessingError) || !error.transient || wait === undefined || signal.aborted) throw error;
+      if (!(error instanceof ProcessingError) || !error.transient || wait === undefined || signal.aborted || !again())
+        throw error;
       await waitOut(signal, wait);
       signal.throwIfAborted();
     }

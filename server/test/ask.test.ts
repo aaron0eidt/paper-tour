@@ -710,6 +710,17 @@ test('an answer that says it cannot answer is retried once at medium effort', as
   assert.equal(kept.answer.answerable, 'no');
 });
 
+test('a first call the provider could not take is asked once more: a short outage costs a moment, not the answer', async () => {
+  let calls = 0;
+  const { answer } = await ask({ question: 'Why scale the dot products?' }, () =>
+    ++calls === 1
+      ? new Response('busy', { status: 503 })
+      : { plan: 'p', answerable: 'yes', steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }], followups: [] },
+  );
+  assert.equal(answer.answerable, 'yes');
+  assert.equal(calls, 2, 'the outage, then the answer');
+});
+
 test('an unusable answer is retried once, then reported as a model failure', async () => {
   let calls = 0;
   await assert.rejects(

@@ -400,16 +400,17 @@ test('answers are kept per tour step, per document version, per document and per
 
 test('failed and unanswerable questions are asked again; a clicked question joins the prefetch of the same one', async (t) => {
   quiet(t);
-  const failing = library((_task, call) => (call === 1 ? new Response('busy', { status: 503 }) : modelAnswer()));
+  // The first call and the one retry after an outage both fail: the question fails, and is asked again next time.
+  const failing = library((_task, call) => (call <= 2 ? new Response('busy', { status: 503 }) : modelAnswer()));
   const question = { question: 'Why scale the dot products?' };
   await assert.rejects(
     failing.service.ask(OWNER, DOCUMENT, question),
     (e: { code?: string }) => e.code === 'model_unavailable',
   );
   const answered = await failing.service.ask(OWNER, DOCUMENT, question);
-  assert.equal(failing.state.calls, 2);
+  assert.equal(failing.state.calls, 3);
   assert.deepEqual(await failing.service.ask(OWNER, DOCUMENT, question), answered);
-  assert.equal(failing.state.calls, 2);
+  assert.equal(failing.state.calls, 3);
 
   // Medium effort gets the second try too, so the model is called twice per unanswerable question.
   const unanswerable = library(() => modelAnswer('no'));

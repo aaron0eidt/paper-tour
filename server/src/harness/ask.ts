@@ -8,6 +8,7 @@ import { isContributorModel } from '../muse/models';
 import { OFFICIAL_MODELS } from '../muse/pricing';
 import type { TourImage } from '../tour-generator';
 import { imageParts, type Effort } from './calls';
+import { outlasting } from './pace';
 import { REGION_NAMES } from './direct';
 import { answerNarrationProblems, readsSource } from './insight';
 import { documentLanguage } from './language';
@@ -77,6 +78,11 @@ export function askEffort(request: AskRequest, doc: Doc): Effort {
 const RETRY: { effort: Effort; maxTokens: number } = { effort: 'medium', maxTokens: 12_000 };
 const BOARD_RETRY: { effort: Effort; maxTokens: number } = { effort: 'low', maxTokens: 8_000 };
 const FIRST_TOKENS = 6_000;
+/**
+ * A provider that could not take the first call (a 5xx or a 429; its outages come in bursts of a few seconds) is asked
+ * once more after this wait, while nothing has been spoken: a learner waits a moment longer instead of seeing an error.
+ */
+const OUTAGES = [1_500];
 
 export interface AskInput {
   client: MuseClient;
@@ -224,15 +230,12 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
     const { effort, maxTokens } = attempt === 0 ? first : retry;
     let value: unknown;
     try {
-      const completion = await client.complete(
-        messages,
-        'ask_answer',
-        schema,
-        maxTokens,
+      const read = attempt === 0 ? reader() : undefined;
+      const completion = await outlasting(
         signal,
-        attempt === 0 ? reader() : undefined,
-        undefined,
-        effort,
+        attempt === 0 ? OUTAGES : [],
+        () => client.complete(messages, 'ask_answer', schema, maxTokens, signal, read, undefined, effort),
+        () => !shownSteps.length,
       );
       completions.push(completion);
       value = completion.value;
