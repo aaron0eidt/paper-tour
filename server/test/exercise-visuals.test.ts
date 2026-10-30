@@ -353,6 +353,26 @@ test('a board of the setting passes; one that shows the answer, invents numbers 
   assert.doesNotMatch(evidence, /P = 0\.5/);
 });
 
+test('a board about neither the narration of the method nor the task is sent back; one that sets the task up is not', () => {
+  const u = unit('ex1.a');
+  const s = solved();
+  const clean = (value: unknown) => cleanUnitVisual(value, 'heatmap', u, sheet, s, planned);
+  const tea = clean(draw(grid({ title: 'Cooling curve of tea', rows: ['kettle', 'teapot'], cols: ['hot', 'cold'] })));
+  assert.equal(tea.visual, null);
+  assert.match(
+    tea.problems.join(' '),
+    /^heatmap: the narration never speaks of what this board shows \("Cooling curve of tea"/,
+  );
+  // The setting of the task is drawn with the task's words, which the method's narration need not repeat.
+  const method = {
+    ...s,
+    method: { ...s.method, say: 'Weigh the two groups by how often each occurs, then compare their shares.' },
+  };
+  const setting = cleanUnitVisual(draw(grid()), 'heatmap', u, sheet, method, planned);
+  assert.deepEqual(setting.problems, []);
+  assert.equal(setting.visual!.item.kind, 'heatmap');
+});
+
 test('a visual for a bars, scatter or shapes board is held to the rules of a tour step', () => {
   const u = unit('ex1.a');
   const s = solved();

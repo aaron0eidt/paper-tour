@@ -132,6 +132,20 @@ export const card = {
 export const EXPLAIN =
   'A fixed dose gives wet corners the same water as dry ones, so the cost appears twice: in the pump bill and in roots standing in soggy ground. Letting a measurement set the dose is what makes the amount follow the need.';
 
+/**
+ * A sentence that names what the boards of an answer show. The narration of a step is about its board
+ * (board-agreement.ts), so a scripted step that draws one says its title and labels.
+ */
+export function about(boards: object): string {
+  const shown = Object.values(boards).flatMap((board: any) =>
+    [
+      board?.title,
+      ...[...(board?.bars ?? []), ...(board?.nodes ?? []), ...(board?.terms ?? [])].map((x) => x.label),
+    ].filter(Boolean),
+  );
+  return shown.length ? `The board shows ${shown.join(', ')}.` : '';
+}
+
 export function reply(value: unknown, status = 200) {
   return new Response(
     JSON.stringify({

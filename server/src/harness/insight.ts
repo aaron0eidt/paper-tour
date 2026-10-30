@@ -164,7 +164,7 @@ export function repeatsPrinted(label: string, printed: string): boolean {
 }
 
 /** Function words of the document languages (see language.ts), which every text uses and which say nothing. */
-const STOP_WORDS = new Set(
+export const STOP_WORDS = new Set(
   `a about above after again all also am an and any are as at be because been before being below between both but by
   can could did do does doing down during each few for from further had has have having he her here hers him his how i
   if in into is it its itself just me more most my no nor not now of off on once only or other our out over own same she
@@ -179,7 +179,7 @@ const STOP_WORDS = new Set(
   het de een en of zijn voor met op van naar niet ook deze dit worden`.split(/\s+/),
 );
 /** Light stemming: a plural or verb ending s goes, so "keys" and "key" match. */
-const stem = (word: string) =>
+export const stem = (word: string) =>
   word.length > 4 && word.endsWith('ies')
     ? `${word.slice(0, -3)}y`
     : word.length > 3 && word.endsWith('s') && !/(?:ss|us|is)$/.test(word)
