@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DocumentSummary } from '../../../shared/contracts';
 import { AuthForm, PaperMark } from './AuthForm';
 import { DocumentDialog } from './DocumentDialog';
@@ -11,6 +11,10 @@ import { useModelCatalog } from './useModelCatalog';
 import { useSettings } from './useSettings';
 import { ProfileSettings } from './ProfileSettings';
 import { canUseModel, modelDisplayName } from './modelChoices';
+import { LIBRARY_FILTERS, matchesLibraryFilter, selectLibraryPapers } from './libraryView';
+import type { LibraryView } from './libraryView';
+import { useLibraryView } from './useLibraryView';
+import { PaperActions } from './PaperActions';
 import '../library.css';
 
 interface Props {
@@ -80,6 +84,7 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
   return (
     <AuthenticatedLibrary
       key={auth.session.user.id}
+      accountId={auth.session.user.id}
       email={auth.session.user.email ?? 'Your account'}
       onOpenDocument={onOpenDocument}
       onOpenDemo={onOpenDemo}
@@ -87,18 +92,28 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
   );
 }
 
-function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { email: string }) {
+function AuthenticatedLibrary({ accountId, email, onOpenDocument, onOpenDemo }: Props & {
+  accountId: string;
+  email: string;
+}) {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // `open` is a document the notice offers to open: one just uploaded, whose tour can play before it is finished.
   const [notice, setNotice] = useState<{ text: string; open?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState('recent');
+  const [view, setView] = useLibraryView(accountId);
+  const { query, sort, filter } = view;
+  const setQuery = (query: string) => setView((current) => ({ ...current, query }));
+  const searchInput = useRef<HTMLInputElement>(null);
+  const listHeading = useRef<HTMLHeadingElement>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<{ document: DocumentSummary; mode: 'rename' | 'delete' } | null>(null);
+  const [dialog, setDialog] = useState<{
+    document: DocumentSummary;
+    mode: 'rename' | 'delete';
+    trigger: HTMLElement;
+  } | null>(null);
   const models = useModelCatalog();
   const profile = useSettings();
   const model = profile.data?.defaultModel ?? '';
@@ -154,18 +169,7 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
     };
   }, [refresh]);
 
-  const visible = useMemo(() => {
-    const search = query.trim().toLocaleLowerCase();
-    return documents
-      .filter((item) => `${item.title} ${item.originalFilename}`.toLocaleLowerCase().includes(search))
-      .sort((a, b) =>
-        sort === 'title'
-          ? a.title.localeCompare(b.title)
-          : sort === 'added'
-            ? Date.parse(b.createdAt) - Date.parse(a.createdAt)
-            : Date.parse(b.lastOpenedAt ?? b.createdAt) - Date.parse(a.lastOpenedAt ?? a.createdAt),
-      );
-  }, [documents, query, sort]);
+  const visible = useMemo(() => selectLibraryPapers(documents, view), [documents, view]);
 
   async function logout() {
     setSigningOut(true);
@@ -329,7 +333,9 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
               <path d="M11.5 11.5L16 16" stroke="currentColor" strokeWidth="1.5" />
             </svg>
             <input
+              ref={searchInput}
               type="search"
+              maxLength={300}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
@@ -342,7 +348,10 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
               <button
                 type="button"
                 className="library-search-clear"
-                onClick={() => setQuery('')}
+                onClick={() => {
+                  setQuery('');
+                  searchInput.current?.focus();
+                }}
                 aria-label="Clear search"
               >
                 ×
@@ -351,15 +360,33 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
           </label>
           <label className="library-sort">
             Sort by
-            <select value={sort} onChange={(event) => setSort(event.target.value)}>
+            <select
+              value={sort}
+              onChange={(event) => setView((current) => ({ ...current, sort: event.target.value as LibraryView['sort'] }))}
+            >
               <option value="recent">Recently opened</option>
               <option value="added">Date added</option>
               <option value="title">Title</option>
             </select>
           </label>
         </div>
+        <div className="library-filters" role="group" aria-label="Filter papers">
+          {LIBRARY_FILTERS.map((option) => (
+            <button
+              type="button"
+              key={option.id}
+              aria-pressed={filter === option.id}
+              onClick={() => setView((current) => ({ ...current, filter: option.id }))}
+            >
+              {option.label}
+              {!loading && <span>{documents.filter((paper) => matchesLibraryFilter(paper, option.id)).length}</span>}
+            </button>
+          ))}
+        </div>
         <div className="library-list-heading">
-          <h2>{query.trim() ? 'Search results' : 'Papers'}</h2>
+          <h2 ref={listHeading} tabIndex={-1}>
+            {query.trim() ? 'Search results' : 'Papers'}
+          </h2>
           <span aria-live="polite">
             {loading ? 'Loading…' : `${visible.length} ${visible.length === 1 ? 'paper' : 'papers'}`}
           </span>
@@ -381,10 +408,19 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
         )}
         {!loading && documents.length > 0 && !visible.length && (
           <div className="library-empty">
-            <h3>No papers match “{query}”.</h3>
-            <p>Try a different title or filename.</p>
-            <button type="button" className="library-text-button" onClick={() => setQuery('')}>
-              Clear search
+            <h3>{query.trim() ? `No papers match “${query.trim()}”.` : 'No papers in this view.'}</h3>
+            <p>
+              {query.trim() ? 'Try a different title, filename or filter.' : 'Choose another filter to see more of your library.'}
+            </p>
+            <button
+              type="button"
+              className="library-text-button"
+              onClick={() => {
+                setView((current) => ({ ...current, query: '', filter: 'all' }));
+                listHeading.current?.focus();
+              }}
+            >
+              Show all papers
             </button>
           </div>
         )}
@@ -395,8 +431,8 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
               document={item}
               busy={busyId === item.id}
               onOpen={() => onOpenDocument(item.id)}
-              onRename={() => setDialog({ document: item, mode: 'rename' })}
-              onDelete={() => setDialog({ document: item, mode: 'delete' })}
+              onRename={(trigger) => setDialog({ document: item, mode: 'rename', trigger })}
+              onDelete={(trigger) => setDialog({ document: item, mode: 'delete', trigger })}
               onRetry={() => void retryAnalysis(item)}
               onTourChanged={refreshDocuments}
             />
@@ -408,6 +444,8 @@ function AuthenticatedLibrary({ email, onOpenDocument, onOpenDemo }: Props & { e
           key={`${dialog.mode}:${dialog.document.id}`}
           document={dialog.document}
           mode={dialog.mode}
+          returnFocus={dialog.trigger}
+          fallbackFocus={listHeading.current}
           onClose={() => setDialog(null)}
           onChanged={refreshDocuments}
         />
@@ -428,8 +466,8 @@ function DocumentCard({
   document: DocumentSummary;
   busy: boolean;
   onOpen(): void;
-  onRename(): void;
-  onDelete(): void;
+  onRename(trigger: HTMLElement): void;
+  onDelete(trigger: HTMLElement): void;
   onRetry(): void;
   onTourChanged(): void;
 }) {
@@ -515,17 +553,7 @@ function DocumentCard({
               {busy ? 'Restarting…' : 'Retry analysis'}
             </button>
           )}
-          <details className="library-more">
-            <summary aria-label={`Actions for ${item.title}`}>•••</summary>
-            <div>
-              <button type="button" onClick={onRename}>
-                Rename
-              </button>
-              <button type="button" className="delete" onClick={onDelete}>
-                Delete
-              </button>
-            </div>
-          </details>
+          <PaperActions title={item.title} onRename={onRename} onDelete={onDelete} />
         </div>
       </div>
     </article>

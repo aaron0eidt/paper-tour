@@ -19,6 +19,16 @@ const contrast = (a: string, b: string) => {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 };
 
+test('secondary text and filenames stay readable in both interface themes', () => {
+  for (const [name, palette] of [['dark', dark], ['light', light]] as const)
+    for (const ink of ['text', 'muted', 'faint', 'text-secondary'])
+      for (const surface of ['bg', 'panel', 'panel-2'])
+        assert.ok(
+          contrast(palette[ink], palette[surface]) >= 4.5,
+          `${name}: ${ink} on ${surface}: ${contrast(palette[ink], palette[surface]).toFixed(2)}`,
+        );
+});
+
 test('light theme text and feedback remain readable on their semantic surfaces', () => {
   for (const [ink, surface] of [
     ['text', 'panel'],

@@ -256,6 +256,7 @@ export function UploadPanel({
       <input
         ref={input}
         type="file"
+        tabIndex={-1}
         accept="application/pdf,.pdf"
         className="library-file-input"
         aria-label="Choose a PDF"

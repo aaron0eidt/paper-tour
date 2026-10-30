@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { UserSettings } from '../../../shared/settings';
 import { PaperMark } from './AuthForm';
 import { apiRequest, signOut } from './client';
@@ -18,6 +18,8 @@ export function ProfileSettings({ email }: { email: string }) {
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const connectionHeading = useRef<HTMLHeadingElement>(null);
+  const modelHeading = useRef<HTMLHeadingElement>(null);
   const theme = useSyncExternalStore(subscribeTheme, getThemePreference);
   useEffect(() => {
     if (profile.data) setModel(profile.data.defaultModel);
@@ -130,7 +132,7 @@ export function ProfileSettings({ email }: { email: string }) {
               <>
                 <section className="profile-card" id="connection" aria-labelledby="connection-heading" aria-busy={busy}>
                   <div className="profile-card-heading">
-                    <h2 id="connection-heading">Meta connection</h2>
+                    <h2 id="connection-heading" ref={connectionHeading} tabIndex={-1}>Meta connection</h2>
                     <p>Choose the API access used to create tours and answer questions.</p>
                   </div>
                   <div className="profile-connection-state">
@@ -214,7 +216,10 @@ export function ProfileSettings({ email }: { email: string }) {
                       <button
                         className="library-text-button"
                         disabled={busy}
-                        onClick={() => setSource(data.credentialSource)}
+                        onClick={() => {
+                          setSource(data.credentialSource);
+                          connectionHeading.current?.focus();
+                        }}
                       >
                         Discard
                       </button>
@@ -289,7 +294,7 @@ export function ProfileSettings({ email }: { email: string }) {
                 </section>
                 <section className="profile-card" id="tour-model" aria-labelledby="model-heading">
                   <div className="profile-card-heading">
-                    <h2 id="model-heading">Default tour model</h2>
+                    <h2 id="model-heading" ref={modelHeading} tabIndex={-1}>Default tour model</h2>
                     <p>Used for new PDFs and new tour versions.</p>
                   </div>
                   <ModelPicker
@@ -297,6 +302,7 @@ export function ProfileSettings({ email }: { email: string }) {
                     model={model}
                     onModelChange={setModel}
                     disabled={busy || models.loading}
+                    loading={models.loading}
                     label="Tour model"
                   />
                   {models.error && (
@@ -317,7 +323,15 @@ export function ProfileSettings({ email }: { email: string }) {
                     >
                       {pending === 'model' ? 'Saving…' : 'Save model'}
                     </button>
-                    {model !== data.defaultModel && <span className="profile-help">Model change not saved</span>}
+                    {model !== data.defaultModel && <>
+                      <button className="library-button" disabled={busy} onClick={() => {
+                        setModel(data.defaultModel);
+                        modelHeading.current?.focus();
+                      }}>
+                        Discard model change
+                      </button>
+                      <span className="profile-help">Model change not saved</span>
+                    </>}
                   </div>
                 </section>
               </>

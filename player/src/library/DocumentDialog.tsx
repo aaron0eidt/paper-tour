@@ -4,37 +4,52 @@ import type { DocumentSummary } from '../../../shared/contracts';
 import { apiRequest } from './client';
 
 export function DocumentDialog({
-  document,
+  document: paper,
   mode,
+  returnFocus,
+  fallbackFocus,
   onClose,
   onChanged,
 }: {
   document: DocumentSummary;
   mode: 'rename' | 'delete';
+  returnFocus: HTMLElement;
+  fallbackFocus: HTMLElement | null;
   onClose(): void;
   onChanged(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [title, setTitle] = useState(document.title);
+  const [title, setTitle] = useState(paper.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    dialog.current?.showModal();
+    const element = dialog.current;
+    element?.showModal();
+    return () => { element?.close(); };
   }, []);
+
+  function close(changed = false) {
+    dialog.current?.close();
+    // A renamed card can disappear from the active search or move when sorted by title.
+    const target = changed ? fallbackFocus : returnFocus;
+    (target?.isConnected ? target : fallbackFocus)?.focus();
+    onClose();
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (busy || (mode === 'rename' && (!title.trim() || title.trim() === paper.title))) return;
     setBusy(true);
     setError(null);
     try {
       if (mode === 'rename')
-        await apiRequest(`/api/documents/${document.id}`, {
+        await apiRequest(`/api/documents/${paper.id}`, {
           method: 'PATCH',
           body: JSON.stringify({ title: title.trim() }),
         });
-      else await apiRequest(`/api/documents/${document.id}`, { method: 'DELETE' });
+      else await apiRequest(`/api/documents/${paper.id}`, { method: 'DELETE' });
       onChanged();
-      onClose();
+      close(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The document could not be updated. Try again.');
     } finally {
@@ -47,8 +62,8 @@ export function DocumentDialog({
       className="library-dialog"
       ref={dialog}
       onCancel={(event) => {
-        if (busy) event.preventDefault();
-        else onClose();
+        event.preventDefault();
+        if (!busy) close();
       }}
       aria-labelledby="document-dialog-title"
     >
@@ -62,12 +77,13 @@ export function DocumentDialog({
               value={title}
               maxLength={300}
               required
+              onFocus={(event) => event.target.select()}
               onChange={(event) => setTitle(event.target.value)}
               disabled={busy}
             />
           </label>
         ) : (
-          <p>“{document.title}” and its saved tours and reading progress will be removed from your library.</p>
+          <p>“{paper.title}” and its saved tours and reading progress will be removed from your library.</p>
         )}
         {error && (
           <p className="library-error" role="alert">
@@ -75,12 +91,18 @@ export function DocumentDialog({
           </p>
         )}
         <div className="library-dialog-actions">
-          <button className="library-button" type="button" disabled={busy} onClick={onClose}>
+          <button
+            className="library-button"
+            type="button"
+            autoFocus={mode === 'delete'}
+            disabled={busy}
+            onClick={() => close()}
+          >
             Cancel
           </button>
           <button
             className={`library-button ${mode === 'delete' ? 'danger' : 'primary'}`}
-            disabled={busy || (mode === 'rename' && !title.trim())}
+            disabled={busy || (mode === 'rename' && (!title.trim() || title.trim() === paper.title))}
           >
             {busy ? 'Please wait…' : mode === 'rename' ? 'Save title' : 'Delete paper'}
           </button>
