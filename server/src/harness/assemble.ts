@@ -109,7 +109,12 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
   // The board item appears with the step; a formula step also outlines its equation on the page.
   if (board) actions.push({ type: 'board', item: board });
   if (example) actions.push(...exampleActions(example));
-  if (beat.kind === 'formula' && beat.target) actions.push({ type: 'box', target: beat.target, color });
+  if (
+    beat.kind === 'formula' &&
+    beat.target &&
+    !direction?.cues.some((cue) => cue.action === 'box' && cue.target === beat.target)
+  )
+    actions.push({ type: 'box', target: beat.target, color });
   let highlights = 0,
     marks = 0,
     lastPart = -1;
@@ -219,8 +224,10 @@ const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
  */
 export function boardSignature(item: BoardItem): string | null {
   switch (item.kind) {
-    case 'program': return `program|${item.code}|${JSON.stringify(item.parameters)}|${JSON.stringify(item.data)}`;
-    case 'plotly': return `plotly|${item.figure}|${JSON.stringify(item.parameter)}|${JSON.stringify(item.functions)}`;
+    case 'program':
+      return `program|${item.code}|${JSON.stringify(item.parameters)}|${JSON.stringify(item.data)}`;
+    case 'plotly':
+      return `plotly|${item.figure}|${JSON.stringify(item.parameter)}|${JSON.stringify(item.functions)}`;
     case 'formula':
       return `formula|${squash(item.latex)}`;
     case 'bars':
