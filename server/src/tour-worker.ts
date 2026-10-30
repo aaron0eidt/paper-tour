@@ -345,11 +345,12 @@ export class TourWorker {
         return;
       }
       const controller = new AbortController();
-      const timeout = setTimeout(
+      // A profile's scope is independent of its individual provider-request timeout.
+      const timeout = row.profile ? undefined : setTimeout(
         () => controller.abort(new Error('Tour generation timed out.')),
         this.config.muse?.timeoutMs ?? 300_000,
       );
-      timeout.unref();
+      timeout?.unref();
       const abort = () => controller.abort(jobSignal?.reason);
       jobSignal?.addEventListener('abort', abort, { once: true });
       if (jobSignal?.aborted) abort();

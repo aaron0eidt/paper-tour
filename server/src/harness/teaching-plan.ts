@@ -8,45 +8,23 @@ import {
   type TeachingPreferences,
 } from '../../../shared/teachingPlan';
 import { indexElements } from '../elements';
-import { MAX_STEPS, type Beat, type TourPlan } from './beats';
+import type { Beat, TourPlan } from './beats';
 import type { PaperCard } from './card';
 import { proseSentences } from './paper-block';
+import { ENUM_ROOM } from './schema-budget';
 
 const ajv = new Ajv2020({ strict: false, allErrors: true });
 const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
+const explanation = { type: 'string', minLength: 1 };
 
-/** Spread a long paper's citable pool across its body, retaining equations and figures as first-class sources. */
-export function teachingEvidence(doc: Doc, budget = 850): string[] {
-  const visuals = [...doc.equations.map((e) => e.id), ...doc.figures.map((f) => f.id)].slice(0, Math.floor(budget / 4));
-  const prose = proseSentences(doc);
-  const remaining = budget - visuals.length;
-  if (prose.length <= remaining) return [...prose.map((s) => s.id), ...visuals];
-  const bySection = new Map<string, string[]>();
-  const blocks = new Map(doc.blocks.map((b) => [b.id, b]));
-  for (const sentence of prose) {
-    const section = blocks.get(sentence.block)?.section ?? `page-${sentence.page}`;
-    const bucket = bySection.get(section) ?? [];
-    bucket.push(sentence.id);
-    bySection.set(section, bucket);
-  }
-  const selected: string[] = [];
-  const buckets = [...bySection.values()];
-  for (let round = 0; selected.length < remaining; round++) {
-    let added = false;
-    for (const bucket of buckets) {
-      if (round >= bucket.length || selected.length >= remaining) continue;
-      // Alternate ends, then move inward: retain a late section's conclusion as well as its opening.
-      const at = round % 2 ? bucket.length - 1 - Math.floor(round / 2) : round / 2;
-      selected.push(bucket[at]);
-      added = true;
-    }
-    if (!added) break;
-  }
-  const keep = new Set(selected);
-  return [...prose.filter((s) => keep.has(s.id)).map((s) => s.id), ...visuals];
+/** All citable sources remain available; schema compression never removes paper content. */
+export function teachingEvidence(doc: Doc): string[] {
+  return [...proseSentences(doc).map((sentence) => sentence.id), ...doc.equations.map((equation) => equation.id), ...doc.figures.map((figure) => figure.id)];
 }
 
-export function teachingPlanSchema(doc: Doc, strict = true, preferences?: TeachingPreferences) {
+export function teachingPlanSchema(doc: Doc, strict = true) {
+  const sources = teachingEvidence(doc);
+  const enumerated = sources.length <= ENUM_ROOM && (sources.length <= 250 || sources.join('').length <= 15000);
   const source = strict ? { $ref: '#/$defs/source' } : { type: 'string' };
   const concept = {
     type: 'object',
@@ -73,31 +51,31 @@ export function teachingPlanSchema(doc: Doc, strict = true, preferences?: Teachi
       id: text(64),
       title: text(120),
       summary: {
-        ...text(700),
+        ...explanation,
         description:
           'A concise source-grounded explanation addressed to the reader. Declarative sentences, never author instructions or a learning objective.',
       },
       role: { type: 'string', enum: CONCEPT_ROLES },
-      evidence: { type: 'array', minItems: 1, maxItems: 6, items: source },
-      prerequisites: { type: 'array', maxItems: 12, items: text(64) },
+      evidence: { type: 'array', minItems: 1, items: source },
+      prerequisites: { type: 'array', items: text(64) },
       importance: { type: 'string', enum: TEACHING_LEVELS },
-      importanceReason: text(400),
+      importanceReason: explanation,
       difficulty: { type: 'string', enum: TEACHING_LEVELS },
-      difficultyReason: text(400),
+      difficultyReason: explanation,
       confidence: { type: 'string', enum: TEACHING_LEVELS },
-      objective: text(500),
-      misconception: { type: 'string', maxLength: 400 },
+      objective: explanation,
+      misconception: { type: 'string' },
       visual: { type: 'string', enum: ['source', 'new', 'none'] },
-      visualBenefit: { type: 'string', maxLength: 500 },
-      visibleChange: { type: 'string', maxLength: 500 },
+      visualBenefit: { type: 'string' },
+      visibleChange: { type: 'string' },
     },
   };
   return {
     ...(strict
       ? {
           $defs: {
-            source: teachingEvidence(doc).length
-              ? { type: 'string', enum: teachingEvidence(doc) }
+            source: sources.length
+              ? enumerated ? { type: 'string', enum: sources } : { type: 'string', description: 'An actual source ID from the full supplied document. Every ID is verified by the server.' }
               : { type: 'string', not: {} },
           },
         }
@@ -111,12 +89,6 @@ export function teachingPlanSchema(doc: Doc, strict = true, preferences?: Teachi
       concepts: {
         type: 'array',
         minItems: 1,
-        maxItems:
-          preferences?.structure === 'overview' || preferences?.depth === 'quick'
-            ? 8
-            : preferences?.depth === 'standard'
-              ? 12
-              : Math.floor((MAX_STEPS - 1) / 2),
         items: concept,
       },
       sections: {
@@ -142,19 +114,39 @@ export function teachingPlanTask(preferences: TeachingPreferences, language: str
     `Plan what this paper should teach in ${language}. Audience familiarity: ${preferences.audience}; scope: ${preferences.structure}; depth: ${preferences.depth}.`,
     'Read the full document, including methods, results and limitations. Repetition in abstract/introduction/conclusion is a signal, never a requirement.',
     'Separate the new contribution from prerequisite background, the mechanism that supports it, actual evidence and limitations.',
-    'Choose a small set of teachable concepts, not one entry per paragraph: normally 4–8 for an overview, 6–12 for a standard tour, and 10–14 for a deep tour. Include only concepts needed to answer the main question.',
-    ...(preferences.depth === 'quick'
-      ? ['This is a brief tour: use 4–8 essential concepts total, with concise summaries and short reasons.']
-      : []),
+    'Choose the number and granularity of concepts from this paper’s complexity, contribution, dependencies and the selected teaching profile. There is no target or maximum concept count. Preserve every concept the reader needs; split difficult mechanisms into distinct explanations rather than compressing or dropping them to fit a quota.',
+    'Understand the complete paper before beginning its narration. Do not replace careful initial understanding with a generic opening or optimize the content to start playback sooner. An overview changes emphasis, not factual accuracy or the prerequisites needed to understand a claim.',
     'For each concept give stable short IDs, source evidence and prerequisite concept IDs. The first evidence ID is the primary passage/figure/equation where this concept is taught; put secondary support afterwards. Dependencies must be acyclic.',
     'Importance explains why understanding this concept is needed for the paper’s main question; difficulty estimates this audience’s required prior knowledge or multi-step reasoning. They are different decisions.',
     'State the audience assumption and confidence honestly. A likely misconception is a teaching hypothesis, not an observed fact about the learner.',
     'The objective says what the reader should be able to explain. A new visual must name the relationship or change it reveals and why source annotation alone is insufficient. Use none when no visual adds understanding.',
-    'Keep summary separate from objective: summary is 2–3 neutral, source-grounded spoken sentences explaining the concept and its consequence. Never write author commands such as Explain/Interpret/Show in summary. The objective is only planning guidance.',
+    'Keep summary separate from objective: summary is neutral, source-grounded spoken text explaining the concept and its consequence at the length it needs. Never write author commands such as Explain/Interpret/Show in summary. The objective is only planning guidance.',
     'A worked example is useful when computed from the paper’s formula and explicitly distinguished from measured data. Never invent measured results.',
     'Account for every actual section in sections: teach, background or omit with a reason. Keep the paper’s own headings; do not invent a Methods section.',
     `Additional profile instructions: ${preferences.instructions || 'Use a neutral, source-faithful explanation.'}`,
   ].join('\n');
+}
+
+/** A section and all its parents count as covered when a concept actually cites material inside it. */
+export function taughtSections(doc: Doc, concepts: TeachingConcept[]): Set<string> {
+  const blocks = new Map(doc.blocks.map((block, rank) => [block.id, { block, rank }]));
+  const ancestors = new Map<string, string[]>(), stack: typeof doc.sections = [];
+  const sections = [...doc.sections].sort((a, b) => (blocks.get(a.block)?.rank ?? 0) - (blocks.get(b.block)?.rank ?? 0));
+  for (const section of sections) {
+    while (stack.length && stack.at(-1)!.level >= section.level) stack.pop();
+    stack.push(section); ancestors.set(section.id, stack.map((entry) => entry.id));
+  }
+  const covered = new Set<string>();
+  for (const id of concepts.flatMap((concept) => concept.evidence)) {
+    const sentence = doc.sentences.find((entry) => entry.id === id), equation = doc.equations.find((entry) => entry.id === id), figure = doc.figures.find((entry) => entry.id === id);
+    const page = sentence?.page ?? equation?.page ?? figure?.page;
+    const blockId = sentence?.block ?? equation?.block ?? figure?.caption_block;
+    const source = blocks.get(blockId ?? '') ?? [...blocks.values()].filter(({ block }) => block.page === page)
+      .sort((a, b) => Math.abs(a.block.bbox[1] - (equation?.bbox[1] ?? figure?.bbox[1] ?? 0)) - Math.abs(b.block.bbox[1] - (equation?.bbox[1] ?? figure?.bbox[1] ?? 0)))[0];
+    const section = source?.block.section ?? [...sections].reverse().find((entry) => (blocks.get(entry.block)?.rank ?? Infinity) <= (source?.rank ?? -1))?.id;
+    for (const ancestor of ancestors.get(section ?? '') ?? []) covered.add(ancestor);
+  }
+  return covered;
 }
 
 export function cleanTeachingPlan(value: unknown, doc: Doc): { plan: TeachingPlan | null; problems: string[] } {
@@ -196,6 +188,10 @@ export function cleanTeachingPlan(value: unknown, doc: Doc): { plan: TeachingPla
     if (!sections.has(section.sectionId)) problems.push(`Unknown section ${section.sectionId}.`);
   for (const section of sections)
     if (!covered.has(section)) problems.push(`Explain the treatment of section ${section}.`);
+  const taught = taughtSections(doc, held.concepts);
+  for (const section of held.sections)
+    if (section.treatment === 'teach' && !taught.has(section.sectionId))
+      problems.push(`Section ${section.sectionId} is marked teach but no concept cites its material. Add the actual concepts/evidence, or explain its different treatment.`);
   if (!held.concepts.some((c) => c.role === 'contribution')) problems.push('Include the paper’s main contribution.');
   if (!held.concepts.some((c) => c.role === 'evidence')) problems.push('Include the evidence for the contribution.');
   if (problems.length) return { plan: null, problems: problems.slice(0, 12) };
@@ -203,49 +199,19 @@ export function cleanTeachingPlan(value: unknown, doc: Doc): { plan: TeachingPla
 }
 
 const priority = { low: 0, medium: 1, high: 2 };
-export function selectedTeachingConcepts(plan: TeachingPlan, preferences: TeachingPreferences): TeachingConcept[] {
-  const chosen = new Set(
-    plan.concepts
-      .filter((c) =>
-        preferences.structure === 'overview'
-          ? c.importance === 'high' && c.role !== 'prerequisite'
-          : preferences.depth === 'quick'
-            ? c.importance !== 'low' && c.role !== 'prerequisite'
-            : preferences.audience === 'expert'
-              ? c.role !== 'prerequisite' || c.importance === 'high'
-              : true,
-      )
-      .map((c) => c.id),
-  );
-  const byId = new Map(plan.concepts.map((c) => [c.id, c]));
-  // Even an overview must show what supports the claim, not merely repeat the claim itself.
-  for (const role of ['contribution', 'evidence'] as const) {
-    if ([...chosen].some((id) => byId.get(id)?.role === role)) continue;
-    const essential = [...plan.concepts]
-      .filter((concept) => concept.role === role)
-      .sort((a, b) => priority[b.importance] - priority[a.importance])[0];
-    if (essential) chosen.add(essential.id);
-  }
-  function prerequisites(id: string) {
-    for (const dependency of byId.get(id)?.prerequisites ?? []) {
-      const concept = byId.get(dependency);
-      if (!concept || chosen.has(dependency)) continue;
-      if (preferences.audience === 'expert' && concept.role === 'prerequisite') continue;
-      chosen.add(dependency);
-      prerequisites(dependency);
-    }
-  }
-  for (const id of [...chosen]) prerequisites(id);
-  const result: TeachingConcept[] = [],
-    visited = new Set<string>();
+export function selectedTeachingConcepts(plan: TeachingPlan, _preferences?: TeachingPreferences): TeachingConcept[] {
+  // The model already planned the selected profile. Ordering must not silently delete its concepts or prerequisites.
+  const byId = new Map(plan.concepts.map((concept) => [concept.id, concept]));
+  const result: TeachingConcept[] = [], visited = new Set<string>();
   function append(id: string) {
-    if (visited.has(id) || !chosen.has(id)) return;
+    if (visited.has(id)) return;
     visited.add(id);
-    for (const prerequisite of byId.get(id)?.prerequisites ?? []) append(prerequisite);
-    if (byId.has(id)) result.push(byId.get(id)!);
+    const concept = byId.get(id);
+    if (!concept) return;
+    for (const prerequisite of concept.prerequisites) append(prerequisite);
+    result.push(concept);
   }
-  for (const concept of [...plan.concepts].sort((a, b) => priority[b.importance] - priority[a.importance]))
-    append(concept.id);
+  for (const concept of [...plan.concepts].sort((a, b) => priority[b.importance] - priority[a.importance])) append(concept.id);
   return result;
 }
 
@@ -292,104 +258,6 @@ export function teachingTourPlan(
     return { ...element, rank: near ? near.rank + fraction : Number.MAX_SAFE_INTEGER, sectionId: near?.block.section };
   };
   const location = (concept: TeachingConcept) => concept.evidence.map(locate).find((source) => source !== undefined);
-  if (preferences.structure === 'concepts') {
-    // Preserve the current narrative grammar. Add important body-only concepts that the earlier claim extractor missed.
-    const selected = selectedTeachingConcepts(teaching, preferences);
-    const mapped = existing.beats.map((beat) => {
-      const matches = teaching.concepts.filter((concept) =>
-        concept.evidence.some((id) => id === beat.target || beat.evidence.includes(id)),
-      );
-      const strongest = matches.sort((a, b) => priority[b.importance] - priority[a.importance])[0];
-      const prerequisites =
-        strongest && preferences.audience !== 'expert'
-          ? selected.filter((candidate) => strongest.prerequisites.includes(candidate.id))
-          : [];
-      return strongest
-        ? {
-            ...beat,
-            evidence: [
-              ...new Set([
-                ...beat.evidence,
-                ...prerequisites.flatMap((concept) =>
-                  concept.evidence.filter((id) => doc.sentences.some((s) => s.id === id)),
-                ),
-              ]),
-            ],
-            notes: [
-              ...(beat.notes ?? []),
-              ...prerequisites.map(
-                (concept) =>
-                  `BEFORE THE MAIN POINT, establish this prerequisite from ${concept.evidence.join(', ')}: ${concept.objective}`,
-              ),
-              ...teachingNotes(strongest),
-            ],
-          }
-        : { ...beat };
-    });
-    const chapters = [...existing.chapters];
-    for (const concept of selected) {
-      if (
-        concept.importance !== 'high' ||
-        mapped.some((beat) => concept.evidence.some((id) => id === beat.target || beat.evidence.includes(id)))
-      )
-        continue;
-      const arc = {
-        contribution: 'idea',
-        prerequisite: 'method',
-        mechanism: 'method',
-        evidence: 'evidence',
-        limitation: 'limits',
-      }[concept.role];
-      if (!chapters.some((chapter) => chapter.id === arc))
-        chapters.splice(Math.max(0, chapters.length - 1), 0, { id: arc, title: concept.title });
-      const target = concept.evidence.find(
-        (id) => doc.equations.some((e) => e.id === id) || doc.figures.some((f) => f.id === id),
-      );
-      if (mapped.length >= MAX_STEPS) {
-        const host =
-          mapped.find((beat) => beat.arc === arc && beat.kind !== 'takeaway') ??
-          mapped.find((beat) => beat.kind === 'method') ??
-          mapped.find((beat) => beat.kind !== 'takeaway');
-        if (host) {
-          host.notes = [...(host.notes ?? []), ...teachingNotes(concept)];
-          host.evidence = [
-            ...new Set([...host.evidence, ...concept.evidence.filter((id) => doc.sentences.some((s) => s.id === id))]),
-          ];
-          continue;
-        }
-      }
-      mapped.splice(
-        Math.max(
-          0,
-          mapped.findIndex((beat) => beat.kind === 'takeaway'),
-        ),
-        0,
-        {
-          id: `teach-${concept.id}`,
-          kind: target
-            ? doc.equations.some((e) => e.id === target)
-              ? 'formula'
-              : 'figure'
-            : concept.role === 'evidence'
-              ? 'result'
-              : concept.role === 'limitation'
-                ? 'limitation'
-                : 'method',
-          arc,
-          point: concept.summary,
-          evidence: concept.evidence.filter((id) => doc.sentences.some((s) => s.id === id)),
-          ...(target ? { target } : {}),
-          notes: teachingNotes(concept),
-        },
-      );
-    }
-    // Keep writer order identical to the chapter order used by the player and incremental publishing.
-    return {
-      ...existing,
-      chapters,
-      beats: chapters.flatMap((chapter) => mapped.filter((beat) => beat.arc === chapter.id)),
-    };
-  }
   let selected = selectedTeachingConcepts(teaching, preferences);
   if (preferences.structure === 'paper')
     selected = selected.sort((a, b) => {
@@ -416,16 +284,15 @@ export function teachingTourPlan(
           preferences.structure === 'paper'
             ? (section?.title ?? 'Opening')
             : {
-                contribution: 'The contribution',
-                prerequisite: 'What you need to know',
-                mechanism: 'How it works',
-                evidence: 'What the results show',
-                limitation: 'What remains open',
+                contribution: card.chapter_titles.idea,
+                prerequisite: card.chapter_titles.problem,
+                mechanism: card.chapter_titles.method,
+                evidence: card.chapter_titles.evidence,
+                limitation: card.chapter_titles.limits,
               }[concept.role],
       });
-    const target = concept.evidence.find(
-      (id) => doc.equations.some((e) => e.id === id) || doc.figures.some((f) => f.id === id),
-    );
+    const primary = concept.evidence[0];
+    const target = doc.equations.some((e) => e.id === primary) || doc.figures.some((f) => f.id === primary) ? primary : undefined;
     const equation = !!target && doc.equations.some((e) => e.id === target);
     const kind: Beat['kind'] = target
       ? equation
@@ -449,7 +316,7 @@ export function teachingTourPlan(
       notes: teachingNotes(concept),
       ...(concept.visual === 'none' ? {} : equation ? { board: 'formula' as const } : {}),
     });
-    if (preferences.depth === 'deep' && preferences.structure !== 'overview' && concept.difficulty === 'high' && target)
+    if (preferences.depth === 'deep' && preferences.structure !== 'overview' && concept.difficulty === 'high')
       beats.push({
         ...beats.at(-1)!,
         id: `teach-${concept.id}-worked`,

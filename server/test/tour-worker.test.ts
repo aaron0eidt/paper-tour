@@ -386,6 +386,29 @@ test(
           '0',
         );
       });
+      await t.test('profile jobs can outlast a provider request budget while legacy jobs and cancellation keep their bounds', async () => {
+        const short = { ...c, muse: { ...c.muse, timeoutMs: 5 } };
+        const slow = { ...generator, generate: async () => { await new Promise((resolve) => setTimeout(resolve, 35)); return { tour, metadata: {} }; } };
+        const patient = new TourWorker(db, storage, short, slow, async () => [image]);
+        const adaptive = await fixture();
+        const adaptiveTask = await generation(adaptive.analysisId);
+        assert(adaptiveTask.profile);
+        await patient.generate(adaptive.documentId, adaptive.analysisId, adaptiveTask.id);
+        assert.equal((await generation(adaptive.analysisId)).status, 'ready');
+        const legacy = await fixture();
+        const legacyTask = await generation(legacy.analysisId);
+        await db.query('update tour_generations set profile=null where id=$1', [legacyTask.id]);
+        await patient.generate(legacy.documentId, legacy.analysisId, legacyTask.id);
+        assert.equal((await generation(legacy.analysisId)).status, 'failed');
+        const cancelled = await fixture();
+        const cancelledTask = await generation(cancelled.analysisId);
+        const stop = new AbortController();
+        const timer = setTimeout(() => stop.abort(), 10);
+        try { await patient.generate(cancelled.documentId, cancelled.analysisId, cancelledTask.id, true, stop.signal); }
+        finally { clearTimeout(timer); }
+        assert.equal((await generation(cancelled.analysisId)).status, 'failed');
+        assert.equal((await db.query('select id from tours where generation_id=$1', [cancelledTask.id])).rowCount, 0);
+      });
       await t.test(
         'progressive tours: partials are kept for the running generation, never regress, and end with the finished tour',
         async () => {

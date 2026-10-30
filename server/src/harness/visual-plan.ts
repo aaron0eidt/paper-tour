@@ -79,9 +79,9 @@ export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolea
   return { offered: visual.visual !== 'none' || detail, required: detail };
 }
 
-/** The kinds a step's example frames may use: those the plan allotted them (allocateFrames), else every legacy kind. */
+/** Adaptive steps may use every native frame kind; legacy steps keep their allocated kinds. */
 export const exampleKinds = (visual?: StepVisual): readonly BoardKind[] =>
-  visual?.frames?.length ? visual.frames : LEGACY_BOARD_KINDS;
+  visual?.flexible ? LEGACY_BOARD_KINDS : visual?.frames?.length ? visual.frames : LEGACY_BOARD_KINDS;
 
 /**
  * Gives every step that may carry a worked example the kinds its frames may use, so that the frames count toward the
@@ -227,7 +227,7 @@ const SHEET_ORDER: BoardKind[] = [
 ];
 
 /** The task of the plan call for an exercise sheet: a visual only where the method gains from one. */
-function sheetPlanTask(language: string): string {
+function sheetPlanTask(language: string, adaptive = false): string {
   const kinds = SHEET_ORDER.map((kind) => `   - ${kind}: ${SHEET_KINDS_HELP[kind]}`).join('\n');
   return `TASK: design the side-board visuals of this exercise sheet's tour, which is narrated in ${JSON.stringify(language)}.
 Each step is one task or one part of a task. The tour solves it line by line on the board in formulas, and those lines
@@ -236,8 +236,14 @@ method, set up from what the task gives. None is right for plain algebra, a shor
 needs no picture.
 1. The kinds and what they are for:
 ${kinds}
-2. At most one visual per task (when a task has parts, at most one of its parts), and about half of the tasks. Diversity
-   comes first across the sheet: each kind once (plot at most twice), a different kind for a different method.
+2. ${
+    adaptive
+      ? `Choose a visual for each task or part whose method genuinely benefits from one. There is no per-kind quota,
+   per-task limit or required share of side boards. Repeat a useful representation when it demonstrates a different
+   operation, input or relationship; choose none when a picture adds no understanding.`
+      : `At most one visual per task (when a task has parts, at most one of its parts), and about half of the tasks. Diversity
+   comes first across the sheet: each kind once (plot at most twice), a different kind for a different method.`
+  }
 3. The visual shows the setting and the method from the task's own givens and never the result: the learner works the
    task out first, so never plan a picture of what the task asks for (the distribution to find, the zeros to
    compute), and a picture that only repeats the givens (their numbers as bars, their words in boxes) is worse than
@@ -250,7 +256,7 @@ ${kinds}
 const kindsList = () => KINDS_ORDER.map((kind) => `   - ${kind}: ${KINDS_HELP[kind]}`).join('\n');
 
 export function visualPlanTask(language: string, { sheet, settled, adaptive }: PlanOptions = {}): string {
-  if (sheet) return sheetPlanTask(language);
+  if (sheet) return sheetPlanTask(language, adaptive);
   const kinds = kindsList();
   return `TASK: design the side-board visuals of this tour, which is narrated in ${JSON.stringify(language)}.
 For each step decide whether a visual would make the step's point click, and which one. A visual must show what the
@@ -291,12 +297,15 @@ ${kinds}
  * The task of the call that plans the opening step alone (planOpening), which the learner waits for: it runs while the
  * tour's claims are still being found, sees the document card only, and its choice is kept by the plan of the other steps.
  */
-export function openingPlanTask(language: string): string {
+export function openingPlanTask(language: string, { adaptive }: PlanOptions = {}): string {
   return `TASK: decide the side-board visual of the OPENING step of this tour, which is narrated in ${JSON.stringify(language)}.
 The opening step says what the document does and the problem it answers, then names the claims the tour takes next. It is
-listed below as the first step. A second call plans the other steps right after this one and keeps your choice: about
-half of all the steps get a visual, each kind is used at most once in the whole tour (formula and plot at most twice),
-and diversity comes first. The learner is waiting for this step to start, so a visual here must be simple.
+listed below as the first step. A second call plans the other steps right after this one and keeps your choice.
+${
+  adaptive
+    ? 'Choose its representation for the learning objective. There is no per-kind quota or required share of side boards; the complexity should match the concept being explained.'
+    : 'About half of all the steps get a visual, each kind is used at most once in the whole tour (formula and plot at most twice), and diversity comes first. The learner is waiting for this step to start, so a visual here must be simple.'
+}
 1. The kinds and what they are for:
 ${kindsList()}
 2. Choose a visual only when it makes the opening point click in a way the page alone cannot. None is right when the page
@@ -351,7 +360,9 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc, settle
     lines.push(`[${beat.id}] ${beat.kind} step${beat.detail ? ' (a closer look at one detail)' : ''}`);
     const ahead = settled.get(beat.id);
     if (ahead)
-      lines.push(`  already planned (leave it out of your answer; it counts toward the limits): ${visualLine(ahead)}`);
+      lines.push(
+        `  already planned (leave it out of your answer${ahead.flexible ? '' : '; it counts toward the limits'}): ${visualLine(ahead)}`,
+      );
     lines.push(`  the point: ${beat.point}`);
     if (beat.notes?.length) lines.push(...beat.notes.map((note) => `  ${note}`));
     if (figure) lines.push(`  on ${figure.kind} ${figure.number}, page ${figure.page}: ${trimmed(figure.caption)}`);
@@ -478,7 +489,7 @@ export function cleanVisualPlan(
     else if (sheet && entry.visual === 'formula') {
       plan.set(beat.id, none);
       adjusted.push({ beat: beat.id, visual: 'formula', reason: 'the solution lines are formula boards already' });
-    } else if (task !== undefined && tasks.has(task)) {
+    } else if (!adaptive && task !== undefined && tasks.has(task)) {
       plan.set(beat.id, none);
       adjusted.push({ beat: beat.id, visual: entry.visual, reason: 'at most one visual per task' });
     } else if (!adaptive && (used.get(entry.visual) ?? 0) >= kindLimit(entry.visual)) {
@@ -544,17 +555,21 @@ export function tableSteps(beats: Beat[], doc: Doc): TableStep[] {
  * leave the results to the page). A step whose planned kind is one of its table's ready boards already counts, and
  * only learns its table. Otherwise the first such step takes the kind of the first ready board that the variety rules
  * leave room for: a free step before a step with another board, one not in detail before a detail; when every kind
- * its table offers is used up, the last step elsewhere with such a board gives it up. The plan stays within the limits
- * of each kind and the share of steps with a board, and every change is recorded. A step planned ahead of the rest
- * (`settled`) is already written and never gives its board up.
+ * its table offers is used up, a legacy plan may give up another board to fit its variety limits. Adaptive plans keep
+ * useful existing boards and choose the table representation without kind or share quotas. Every change is recorded;
+ * a step planned ahead of the rest (`settled`) is already written and never gives its board up.
  */
 export function withTableBoard(
   plan: VisualPlan,
   beats: Beat[],
   doc: Doc,
   settled: ReadonlySet<string> = new Set(),
+  options: PlanOptions = {},
 ): { plan: VisualPlan; adjusted: PlanAdjustment[] } {
-  const out: VisualPlan = new Map(plan);
+  const adaptive = options.adaptive ?? [...plan.values()].some((entry) => entry.flexible);
+  const out: VisualPlan = new Map(
+    [...plan].map(([id, entry]) => [id, adaptive ? { ...entry, flexible: true } : entry]),
+  );
   const adjusted: PlanAdjustment[] = [];
   const steps = tableSteps(beats, doc);
   if (!steps.length) return { plan: out, adjusted };
@@ -570,6 +585,7 @@ export function withTableBoard(
   const boards = beats.filter((beat) => entry(beat.id).visual !== 'none').length;
   const room = Math.max(1, Math.floor(beats.length * BOARD_SHARE));
   const order = steps
+    .filter(({ beat }) => !settled.has(beat.id))
     .map((step, i) => ({ step, i, rank: (entry(step.beat.id).visual === 'none' ? 0 : 2) + (step.beat.detail ? 1 : 0) }))
     .sort((a, b) => a.rank - b.rank || a.i - b.i)
     .map(({ step }) => step);
@@ -579,11 +595,11 @@ export function withTableBoard(
         const free = entry(beat.id).visual === 'none';
         const others = holders(view.kind).filter((id) => id !== beat.id);
         const giving =
-          takeover && others.length >= kindLimit(view.kind)
+          !adaptive && takeover && others.length >= kindLimit(view.kind)
             ? others.filter((id) => !results.has(id) && !settled.has(id)).at(-1)
             : undefined;
-        const fits = giving !== undefined || others.length < kindLimit(view.kind);
-        if (!fits || boards + (free ? 1 : 0) - (giving === undefined ? 0 : 1) > room) continue;
+        const fits = adaptive || giving !== undefined || others.length < kindLimit(view.kind);
+        if (!fits || (!adaptive && boards + (free ? 1 : 0) - (giving === undefined ? 0 : 1) > room)) continue;
         if (giving !== undefined) {
           out.set(giving, none);
           adjusted.push({
@@ -600,6 +616,7 @@ export function withTableBoard(
           ),
           data: words(`columns ${view.columns.join(', ')} of the table, values as printed.`, DATA_WORDS),
           table: table.id,
+          ...(adaptive ? { flexible: true } : {}),
         });
         adjusted.push({
           beat: beat.id,
@@ -633,7 +650,7 @@ export function visualPlanEvent(plan: VisualPlan, beats: Beat[]) {
  * already count. A step planned as a relationship (heatmap, scatter, plot, ...) or as none carries no example.
  */
 export function openingEntry(entry: StepVisual): StepVisual {
-  return entry.visual === 'none' || RELATIONAL_KINDS.includes(entry.visual)
+  return entry.flexible || entry.visual === 'none' || RELATIONAL_KINDS.includes(entry.visual)
     ? entry
     : { ...entry, frames: [entry.visual] };
 }
@@ -645,8 +662,9 @@ export function openingEntry(entry: StepVisual): StepVisual {
 export function cleanOpeningPlan(
   value: unknown,
   beat: Beat,
+  options: PlanOptions = {},
 ): { visual: StepVisual | null; problems: string[]; adjusted: PlanAdjustment[] } {
-  const checked = cleanVisualPlan(value, [beat]);
+  const checked = cleanVisualPlan(value, [beat], options);
   const entry = checked.plan?.get(beat.id);
   return { visual: entry ? openingEntry(entry) : null, problems: checked.problems, adjusted: checked.adjusted };
 }

@@ -5,12 +5,10 @@ import { isAuthoredVisual } from '../visuals/inspect';
 import { reviewAuthoredWithModel } from '../visuals/model-author';
 import type { TeachingPlan } from '../../../shared/teachingPlan';
 import {
-  cleanTeachingPlan,
   teachingEvidence,
-  teachingPlanSchema,
-  teachingPlanTask,
   teachingTourPlan,
 } from './teaching-plan';
+import { authorTeachingPlan } from './teaching-author';
 import { lossSentence } from '../../../shared/coverage';
 import { splitWords, type BoardItem, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
@@ -124,7 +122,7 @@ import {
   restatedShare,
 } from './insight';
 import { documentLanguage } from './language';
-import { PACE, limited, outlasting, type Pace } from './pace';
+import { PACE, generationPace, limited, outlasting, type Pace } from './pace';
 import { HARNESS_VERSION, SHARED_RULES, cardTask, directTask } from './prompts';
 import { measuredFigureTargets } from './measured-visuals';
 import { pythonVerifier, type LineCheck, type MathVerifier } from './verify';
@@ -251,10 +249,12 @@ export class HarnessTourGenerator implements TourGenerator {
       ).generate(input, onProgress, externalSignal);
     if (!this.configured)
       throw new ProcessingError('muse_not_configured', 'Tour creation needs a Muse API key on the server.');
+    const adaptive = Boolean(input.profile);
+    const pace = generationPace(this.pace, this.config.timeoutMs, adaptive);
     const siblings = new AbortController();
     const signal = AbortSignal.any([
       siblings.signal,
-      AbortSignal.timeout(this.config.timeoutMs),
+      ...(!adaptive ? [AbortSignal.timeout(this.config.timeoutMs)] : []),
       ...(externalSignal ? [externalSignal] : []),
     ]);
     checkImages(input);
@@ -274,9 +274,9 @@ export class HarnessTourGenerator implements TourGenerator {
       effort: Effort,
       signal: AbortSignal,
       task?: { id: string; label: string },
-      ms = this.pace.callMs(name, effort),
+      ms = pace.callMs(name, effort),
     ) =>
-      outlasting(signal, this.pace.outages, () =>
+      outlasting(signal, pace.outages, () =>
         limited(signal, ms, (within) => record(messages, name, schema, maxTokens, effort, within, task)),
       );
     const progress = (stage: TourProgress['stage'], done: number, total: number) =>
@@ -401,7 +401,7 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       return found;
     };
-    const conceptLed = !input.profile || input.profile.structure === 'concepts';
+    const conceptLed = !adaptive;
     const claimsContext = conceptLed && guessType(doc) === 'research_paper' ? claimContext(doc) : null;
     const early = claimsContext ? findClaims(claimsContext, AbortSignal.any([signal, speculation.signal])) : null;
     // A call nobody waits for must not fail the process; whoever uses its claims sees the error.
@@ -413,7 +413,14 @@ export class HarnessTourGenerator implements TourGenerator {
         try {
           // The first try reasons as little as the API allows: the card is read off the document, the schema holds every
           // ID to a listed one and the checks below hold the rest; a repair reasons more.
-          const completion = await call(messages, 'paper_card', schema, 12_000, attempt ? 'medium' : 'minimal', signal);
+          const completion = await call(
+            messages,
+            'paper_card',
+            schema,
+            12_000,
+            adaptive || attempt ? 'medium' : 'minimal',
+            signal,
+          );
           const problems = cardProblems(completion.value, looseSchema);
           if (!problems.length) card = cleanCard(completion.value as PaperCard, doc);
           else {
@@ -457,33 +464,18 @@ export class HarnessTourGenerator implements TourGenerator {
           'missing_teaching_sources',
           'This paper has no citable text, equations or figures. Check PDF extraction before generating a tour.',
         );
-      const task: MuseMessage[] = [...prefix, { role: 'user', content: teachingPlanTask(input.profile, language) }];
-      let problems: string[] = [];
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const completion = await call(
-            task,
-            'teaching_plan',
-            teachingPlanSchema(doc, true, input.profile),
-            12_000,
-            attempt ? 'medium' : 'low',
-            signal,
-          );
-          const checked = cleanTeachingPlan(completion.value, doc);
-          if (checked.plan) return checked.plan;
-          problems = checked.problems;
-          await input.onEvent?.('validation.failed', { stage: 'teaching_plan', attempt: attempt + 1, problems });
-          task.push(...repairTurn(completion.value, problems));
-        } catch (error) {
-          signal.throwIfAborted();
-          if (!recoverable(error)) throw error;
-          problems = [error instanceof Error ? error.message : 'The teaching plan could not be read.'];
-        }
-      }
-      throw new ProcessingError(
-        'invalid_teaching_plan',
-        `The teaching plan could not be validated. ${problems.join(' ')}`,
-      );
+      return authorTeachingPlan({
+        doc,
+        preferences: input.profile,
+        language,
+        prefix,
+        signal,
+        call: (messages, schema) => call(messages, 'teaching_plan', schema, 12_000, 'medium', signal),
+        retryable: recoverable,
+        onProblems: async (problems, attempt) => {
+          await input.onEvent?.('validation.failed', { stage: 'teaching_plan', attempt, problems });
+        },
+      });
     };
     const preparingTeaching = prepareTeaching();
     preparingTeaching.catch(() => {});
@@ -735,7 +727,7 @@ export class HarnessTourGenerator implements TourGenerator {
       if (visuals) {
         // A results step on a table with ready boards draws the table's own numbers when the plan left them out.
         const kept = new Set(settled.keys());
-        const withData = withTableBoard(visuals, plannable, doc, kept);
+        const withData = withTableBoard(visuals, plannable, doc, kept, { adaptive });
         visuals = withData.plan;
         adjusted = [...adjusted, ...withData.adjusted];
         // A sheet's overview and takeaway have no visual of their own.
@@ -824,13 +816,19 @@ export class HarnessTourGenerator implements TourGenerator {
           if (!recoverable(error)) throw error;
           fault = faultOf(error);
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
-          else if (fault === 'slow') {
+          else if (fault === 'slow' && !adaptive) {
             effort = lower(effort);
             if (attempt < 1) await input.onEvent?.('beat.lean', { beat: beat.id, effort, attempt: attempt + 1 });
           }
         }
       }
       if (!best) {
+        if (adaptive && (fault === 'slow' || fault === 'unavailable'))
+          throw new ProcessingError(
+            'muse_unavailable',
+            'The planned explanation could not be completed after the bounded request attempts.',
+            true,
+          );
         await progress('writing', ++directed, beats.length);
         await input.onEvent?.('beat.fallback', { beat: beat.id, code: fault });
         return { steps: unitFallback(unit, doc), solved: false, checks: [], omission: { code: fault } };
@@ -1017,14 +1015,14 @@ export class HarnessTourGenerator implements TourGenerator {
       let attempt = 0;
       for (
         ;
-        attempt < tries && !(direction && !rewriting && (!faulty(direction) || spent() >= this.pace.stepMs));
+        attempt < tries && !(direction && !rewriting && (!faulty(direction) || spent() >= pace.stepMs));
         attempt++
       ) {
         // Reasoning shares the provider's output budget. Complex scenes exhausted
         // 6k tokens in reasoning alone and returned incomplete JSON on every retry.
         const detailed = !gave.size && (beat.detail || attempt > 0);
         const effort = atMost(detailed ? 'medium' : 'low', ceiling);
-        const own = this.pace.callMs('beat_direction', effort);
+        const own = pace.callMs('beat_direction', effort);
         hollow = false;
         // A faulty board, example or pen mark is being corrected by this try.
         const correcting = !!direction && faulty(direction);
@@ -1040,7 +1038,7 @@ export class HarnessTourGenerator implements TourGenerator {
             effort,
             signal,
             { id: beat.id, label: beat.point },
-            repairing ? Math.min(own, Math.max(this.pace.repairMs, this.pace.stepMs - spent())) : own,
+            repairing ? Math.min(own, Math.max(pace.repairMs, pace.stepMs - spent())) : own,
           );
           const rawSay = (completion.value as { say?: unknown } | null)?.say;
           requireExample ||=
@@ -1155,7 +1153,7 @@ export class HarnessTourGenerator implements TourGenerator {
           fault = faultOf(error);
           if (correcting) correction = fault;
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
-          else if (fault === 'slow') {
+          else if (fault === 'slow' && !adaptive) {
             slow++;
             ceiling = lower(effort);
             if (!direction) {
@@ -1176,6 +1174,12 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       await progress('writing', ++directed, beats.length);
       if (!direction) {
+        if (adaptive && (fault === 'slow' || fault === 'unavailable'))
+          throw new ProcessingError(
+            'muse_unavailable',
+            'The planned explanation could not be completed after the bounded request attempts.',
+            true,
+          );
         // A step whose worked example was given up for the time, and whose narration alone is nothing without it, is left
         // out for that; any other, for what went wrong with its latest try.
         const omission: Omission =

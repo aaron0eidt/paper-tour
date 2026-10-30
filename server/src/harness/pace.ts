@@ -30,7 +30,6 @@ const SECONDS: Record<string, number> = {
   paper_card: 40,
   claims: 60,
   tour_plan: 45,
-  teaching_plan: 90,
   deck_plan: 45,
   visual_plan: 50,
   opening_visual: 20,
@@ -48,6 +47,12 @@ export const PACE: Pace = {
   repairMs: 15_000,
   outages: [2_000, 4_000, 8_000],
 };
+
+/** Profiles choose teaching scope, not a wall-clock budget for understanding or completing a valid explanation.
+ * The provider request still has its configured network timeout; cancellation, retries and sandbox bounds remain. */
+export function generationPace(base: Pace, requestTimeoutMs: number, adaptive: boolean): Pace {
+  return adaptive ? { ...base, callMs: () => requestTimeoutMs, stepMs: Infinity, repairMs: requestTimeoutMs } : base;
+}
 
 /**
  * Runs a model call, waiting out a provider that could not take it (a transient error: a 5xx or a 429) with the given
