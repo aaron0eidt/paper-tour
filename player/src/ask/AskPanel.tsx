@@ -117,6 +117,7 @@ export function AskPanel(props: AskPanelProps) {
   const [focused, setFocused] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const request = useRef<AbortController | null>(null);
+  const lastSent = useRef<AskRequest | null>(null);
   // An answer is playing while the rest of it is still written.
   const writing = useRef(false);
   // The reader's callbacks as of now, for an answer that arrives after it re-rendered.
@@ -239,7 +240,7 @@ export function AskPanel(props: AskPanelProps) {
   }, []);
 
   const ask = useCallback(
-    async (text: string) => {
+    async (text: string, retryOriginal = false) => {
       const question = text.replace(/\s+/g, ' ').trim();
       if (!question || busy || voiceBusy || latest.current.selecting) return;
       request.current?.abort();
@@ -249,7 +250,11 @@ export function AskPanel(props: AskPanelProps) {
       setDraft(question);
       setStreaming(true);
       // Where the learner is, read before the tour is set aside.
-      const sent = requestFor(question, latest.current.context?.() ?? {});
+      const sent = retryOriginal && lastSent.current?.question === question
+        ? structuredClone(lastSent.current)
+        : requestFor(question, latest.current.context?.() ?? {});
+      // A partial answer may move the camera or replace the visible board. A retry still refers to the original selection/visual.
+      lastSent.current = sent;
       const early = persistent ? null : keeper.take(source, sent);
       if (early) {
         // Answered ahead of time: the tour is set aside and the answer plays, with no wait to show.
@@ -450,7 +455,7 @@ export function AskPanel(props: AskPanelProps) {
         className="ask-action"
         key="retry"
         onMouseDown={keepFocus}
-        onClick={() => void ask(phase.question)}
+        onClick={() => void ask(phase.question, true)}
       >
         Try again
       </button>,

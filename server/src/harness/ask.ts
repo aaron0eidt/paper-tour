@@ -224,8 +224,10 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       }
     };
   };
-  const first = { effort: askEffort(request, doc), maxTokens: FIRST_TOKENS };
-  let retry = RETRY;
+  // Editing live code/figure JSON needs output room; more hidden reasoning is not the remedy for truncation.
+  const editingVisual = request.activeVisual && isAuthoredVisual(request.activeVisual);
+  const first = { effort: askEffort(request, doc), maxTokens: editingVisual ? 12_000 : FIRST_TOKENS };
+  let retry = editingVisual ? { effort: 'low' as Effort, maxTokens: 18_000 } : RETRY;
   /** Send the answer back for a correction; the steps the learner already has stay as they are. */
   const correct = (value: unknown, instruction: string) =>
     messages.push(

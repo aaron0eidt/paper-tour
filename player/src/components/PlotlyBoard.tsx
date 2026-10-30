@@ -42,7 +42,12 @@ export function PlotlyBoard({ item }: { item: PlotlyItem }) {
             margin: { l: 60, r: 25, t: 35, b: 60 },
             uirevision: item.title ?? 'live-plot',
           },
-          { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['sendDataToCloud'], showLink: false },
+          {
+            responsive: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ['sendDataToCloud', 'sendChartToCloud'],
+            showLink: false,
+          },
         );
         if (!cancelled) setError('');
       })
