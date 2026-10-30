@@ -303,8 +303,15 @@ export function AskPanel(props: AskPanelProps) {
         request.current = null;
         setStreaming(false);
         if (persistent) void sessions.refresh();
-        // Steps were already playing: the answer ends with them, rather than failing after the learner heard it begin.
-        if (begun) return finish(question, begun);
+        // Close the usable partial answer, while keeping the interruption visible and the question editable.
+        if (begun) {
+          finish(question, begun);
+          setDraft(question);
+          setPhase(isCancelled(error)
+            ? { kind: 'stopped', question }
+            : { kind: 'failed', question, message: askErrorMessage(error) });
+          return;
+        }
         // Stopped by the learner: back to the question, ready to edit or send again.
         if (isCancelled(error)) {
           setPhase({ kind: 'stopped', question });
