@@ -401,7 +401,7 @@ test('deep formula details correct their concrete sequence within two repairs; a
     detail.actions.filter((a) => a.type === 'board').map((a) => a.item.kind === 'formula' && a.item.latex),
     [false, '2+2=4'],
   );
-  assert.ok(!(corrected.metadata.omittedDetails as string[]).includes('formula-2'));
+  assert.ok(!(corrected.metadata.omittedDetails as { beat: string }[]).some((d) => d.beat === 'formula-2'));
   assert.deepEqual(corrected.metadata.degraded, []);
   assert.ok(!events.some((event) => event.type === 'beat.degraded'));
   attempts = 0;

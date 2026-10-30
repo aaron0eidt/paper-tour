@@ -707,8 +707,10 @@ test('a step whose narration is unusable takes the fallback beat, even when its 
   ).generate({ ...input, onEvent: record(events) });
   assert.ok(steps(tour).length > 3);
   assert.ok(!steps(tour).some((s) => s.id === 'formula-2'));
-  assert.ok((metadata.omittedDetails as string[]).includes('formula-2'));
-  assert.ok(events.some((e) => e.type === 'beat.omitted' && e.data.beat === 'formula-2'));
+  // Its narration never came out usable, and that is what the record says.
+  const omitted = (metadata.omittedDetails as { beat: string; code: string }[]).find((d) => d.beat === 'formula-2');
+  assert.equal(omitted?.code, 'invalid');
+  assert.ok(events.some((e) => e.type === 'beat.omitted' && e.data.beat === 'formula-2' && e.data.code === 'invalid'));
   assert.equal(events.find((e) => e.type === 'beat.completed' && e.data.beat === 'formula-2')!.data.outcome, 'omitted');
 });
 

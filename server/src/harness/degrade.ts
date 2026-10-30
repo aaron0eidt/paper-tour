@@ -1,9 +1,10 @@
-import type { Step, Tour } from '../../../shared/paper';
+import type { LeftOut, LossCause, Step, Tour } from '../../../shared/paper';
 import type { Direction } from './direct';
 
 // The degrade ladder (notes/ROADMAP.md, wave 1): a tour never fails because of one visual. A step whose board, worked
 // example or pen marks still fail after their corrections keeps its narration and its page cues and loses only what
-// failed; a step with no usable narration takes the fallback beat. Every loss is recorded, never silent.
+// failed; a step with no usable narration takes the fallback beat. A step whose model calls were too slow is asked for
+// less (generator.ts) before it loses anything. Every loss is recorded with its cause, never silent.
 
 /** What a step lost so that the tour could still play. */
 export type DroppedPart = 'board' | 'example' | 'marks';
@@ -11,6 +12,13 @@ export interface Degraded {
   dropped: DroppedPart[];
   /** Why, as the checks worded it for the repair turns. */
   problems: string[];
+  /** The cause of each dropped part that the learner is told of: it failed its checks, or the model took too long. A record without it was a failed check. */
+  causes?: Partial<Record<DroppedPart, LossCause>>;
+}
+/** Why a step has no narration of its own, and for a step that went whole, the part it could not do without. */
+export interface Omission {
+  code: LossCause;
+  because?: 'example';
 }
 
 /** At most this many problems are recorded per step, which is enough to see why. */
@@ -46,6 +54,47 @@ export function degradeDirection(direction: Direction): { direction: Direction; 
     direction: { ...direction, exampleProblems: [], visualProblems: [] },
     degraded: { dropped, problems: [...new Set(problems)].slice(0, MAX_PROBLEMS) },
   };
+}
+
+/** What one planned step came to, as the record of what the tour left out needs it. */
+export interface StepOutcome {
+  beat: string;
+  /** The step has steps of its own in the tour. */
+  present: boolean;
+  /** The step took the fallback beat, or an exercise part was not solved. */
+  fallback: boolean;
+  omission?: Omission;
+  degraded?: Degraded;
+  /** Boards the tour's last checks took out with their cues, and boards that repeated an earlier step's data. */
+  late?: boolean;
+  repeated?: boolean;
+}
+
+/** The most the tour records (schema/tour.schema.json); pen marks, which the learner is not told of, go first. */
+const MAX_LEFT_OUT = 60;
+
+/**
+ * What the tour left out of its plan, in tour order: steps that are not there (a detail without narration, or a step
+ * whose fallback only read the document aloud), steps explained by the card's words alone, and the worked examples,
+ * boards and pen marks the others lost, each with its cause (coverage.ts). A part is recorded once, with the first cause
+ * found.
+ */
+export function leftOutOf(steps: StepOutcome[]): LeftOut[] {
+  const out: LeftOut[] = [];
+  for (const step of steps) {
+    const add = (part: LeftOut['part'], cause: LossCause, because?: 'example') => {
+      if (!out.some((item) => item.step === step.beat && item.part === part))
+        out.push({ step: step.beat, part, cause, ...(because ? { because } : {}) });
+    };
+    if (!step.present) add('step', step.omission?.code ?? 'invalid', step.omission?.because);
+    else if (step.fallback) add('narration', step.omission?.code ?? 'invalid');
+    // A dropped part with no cause beside the others was not one the plan called for.
+    const { dropped = [], causes } = step.degraded ?? {};
+    for (const part of dropped) if (!causes || part in causes) add(part, causes?.[part] ?? 'checks');
+    if (step.late) add('board', 'checks');
+    if (step.repeated) add('board', 'repeats');
+  }
+  return (out.length > MAX_LEFT_OUT ? out.filter((item) => item.part !== 'marks') : out).slice(0, MAX_LEFT_OUT);
 }
 
 /** The steps with a board that a list of tour problems names, by step ID or by path into the tour, with their problems. */

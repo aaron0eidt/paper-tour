@@ -23,6 +23,8 @@ export interface StepVisual {
   frames?: BoardKind[];
   /** The table whose own numbers the step draws (a results step that rests on one), when code chose it (withTableBoard). */
   table?: string;
+  /** The step is asked for its narration alone, with no board and no worked example, even where it must have one (a slow step). */
+  bare?: boolean;
 }
 /** The plan by beat ID. Every planned beat has an entry; a beat without one (an exercise part) is not planned. */
 export type VisualPlan = Map<string, StepVisual>;
@@ -61,11 +63,12 @@ const MECHANISM_KINDS: readonly BoardKind[] = ['plot', 'scene', 'flow', 'bars'];
  * Whether a step may carry a worked example (example frames) and whether it must. Without a plan a step may always, and
  * a formula detail must. A planned relationship (heatmap, scatter, shapes, plot, timeline, distribution) is the visual
  * itself, with no example.
- * A step planned without a board has example frames only when it must have a worked example.
+ * A step planned without a board has example frames only when it must have a worked example. A bare step has neither.
  */
 export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolean; required: boolean } {
   const detail = beat.kind === 'formula' && !!beat.detail;
   if (!visual) return { offered: true, required: detail };
+  if (visual.bare) return { offered: false, required: false };
   if (RELATIONAL_KINDS.includes(visual.visual)) return { offered: false, required: false };
   return { offered: visual.visual !== 'none' || detail, required: detail };
 }

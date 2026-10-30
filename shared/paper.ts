@@ -12,6 +12,8 @@ import type { TimelineItem } from './timeline';
 export type { TimelineItem, TimelineEvent, TimelineSpan } from './timeline';
 import type { DistributionItem } from './distribution';
 export type { DistributionItem, DistributionSpec } from './distribution';
+import type { LeftOut } from './coverage';
+export type { LeftOut, LossCause, LostPart } from './coverage';
 // TypeScript mirror of schema/doc.schema.json and schema/tour.schema.json (version 0.1).
 // The schemas are the source of truth; keep these in sync with them.
 
@@ -380,6 +382,8 @@ export interface Tour {
   preset?: 'quick' | 'standard' | 'deep';
   /** Questions offered to the learner when the tour ends. */
   suggested_questions?: string[];
+  /** What the writer planned but left out, and why; absent when the tour is all of its plan (coverage.ts). */
+  left_out?: LeftOut[];
   /** The kind of document, so the reader can pick its mode; a lecture deck plays slide by slide. */
   doc_type?: 'research_paper' | 'exercise_sheet' | 'lecture' | 'contract' | 'letter' | 'other';
   chapters: Chapter[];

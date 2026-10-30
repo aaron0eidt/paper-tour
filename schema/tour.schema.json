@@ -59,6 +59,51 @@
       },
       "description": "Questions offered to the learner when the tour ends."
     },
+    "left_out": {
+      "type": "array",
+      "maxItems": 60,
+      "items": {
+        "type": "object",
+        "required": [
+          "step",
+          "part",
+          "cause"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "step": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the planned step."
+          },
+          "part": {
+            "enum": [
+              "step",
+              "narration",
+              "example",
+              "board",
+              "marks"
+            ],
+            "description": "What is missing: the whole step, its own explanation (a short summary stands in), its worked example, its side board or pen marks."
+          },
+          "cause": {
+            "enum": [
+              "slow",
+              "checks",
+              "invalid",
+              "repeats",
+              "unavailable"
+            ],
+            "description": "Why: the model took too long, what it wrote failed the checks, its answer could not be used, it would have repeated earlier content, or the model could not be reached."
+          },
+          "because": {
+            "const": "example",
+            "description": "A step that went whole because its worked example could not be written and it was nothing without it."
+          }
+        }
+      },
+      "description": "What the writer planned but left out of this tour, and why. Absent when nothing was left out; the reader says so when the tour starts and ends."
+    },
     "doc_type": {
       "enum": [
         "research_paper",

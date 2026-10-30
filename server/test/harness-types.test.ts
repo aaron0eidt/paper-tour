@@ -17,6 +17,7 @@ import {
   unitOverhead,
 } from '../src/harness/exercise';
 import { paperBlock, proseSentences, taskName } from '../src/harness/paper-block';
+import { PACE, type Pace } from '../src/harness/pace';
 import { pythonVerifier, readChecks, type LineCheck, type MathVerifier } from '../src/harness/verify';
 
 // Document types end to end with a scripted model (no network): what the card says the document is chooses the arc,
@@ -793,6 +794,64 @@ test('a solution line that does not check out gets one repair with the reason; s
   const board = answer.actions.find((a) => a.type === 'board');
   assert.equal(board?.type === 'board' && board.item.title, 'Result · ungeprüft');
   assert.equal(fixed.step('ex1.b-step-1').say, solution('ex1.b').steps[0].say);
+});
+
+test('a solution that outlives its time is asked again at less reasoning effort, and the part keeps it', async () => {
+  const events: { type: string; data: Record<string, any> }[] = [];
+  const pace: Pace = {
+    ...PACE,
+    callMs: (name, effort) => (name === 'exercise_solution' ? 150 : PACE.callMs(name, effort)),
+  };
+  const attempt = async (hangs: number) => {
+    const inner = provider(sheetModel, []);
+    let asked = 0;
+    const fetch = (async (url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (
+        body.response_format.json_schema.name === 'exercise_solution' &&
+        JSON.stringify(body.messages).includes('part b)') &&
+        asked++ < hangs
+      )
+        return new Promise<Response>((_, reject) =>
+          init!.signal!.addEventListener('abort', () => reject(new Error('aborted'))),
+        );
+      return inner(url as never, init);
+    }) as typeof globalThis.fetch;
+    events.length = 0;
+    const done = await new HarnessTourGenerator(settings, 'standard', fetch, verifier(), undefined, pace).generate({
+      ...input(sheet),
+      onEvent: async (type, data) => {
+        events.push({ type, data });
+      },
+    });
+    return { ...done, metadata: done.metadata as Record<string, any> };
+  };
+  const efforts = () =>
+    events
+      .filter(
+        (e) =>
+          e.type === 'model.started' && e.data.name === 'exercise_solution' && e.data.task?.id === 'exercise-ex1.b',
+      )
+      .map((e) => e.data.reasoningEffort);
+  const lean = () => events.filter((e) => e.type === 'beat.lean' && e.data.beat === 'exercise-ex1.b');
+
+  // One call too slow: the next is asked for at a rung less, and the part is solved.
+  const kept = await attempt(1);
+  assert.deepEqual(efforts(), ['high', 'medium']);
+  assert.deepEqual(
+    lean().map((e) => [e.data.effort, e.data.attempt]),
+    [['medium', 1]],
+  );
+  assert.ok(steps(kept.tour).some((s) => s.id === 'ex1.b-answer'));
+  assert.deepEqual(kept.metadata.exercises.find((x: any) => x.id === 'ex1.b').solved, true);
+  assert.equal(kept.tour.left_out, undefined);
+
+  // Both too slow: the part takes the fallback, and says it was the time; no lighter try is announced after the last.
+  const lost = await attempt(2);
+  assert.deepEqual(efforts(), ['high', 'medium']);
+  assert.equal(lean().length, 1);
+  assert.equal(events.find((e) => e.type === 'beat.fallback' && e.data.beat === 'exercise-ex1.b')!.data.code, 'slow');
+  assert.deepEqual(lost.tour.left_out, [{ step: 'exercise-ex1.b', part: 'narration', cause: 'slow' }]);
 });
 
 test('a part the model cannot teach still points at its task, and a tight preset names the parts left out', async () => {
