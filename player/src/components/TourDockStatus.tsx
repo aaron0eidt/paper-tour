@@ -2,22 +2,24 @@ import { useId, useState } from 'react';
 import { generationChecklist } from '../../../shared/generationChecklist';
 import { useDockActivity } from './useDockActivity';
 import type { TourGenerationSummary } from '../../../shared/contracts';
-import type { EngineState, FlatStep } from '../engine';
 import { isTourGenerationActive, tourGenerationCopy } from '../library/tourGeneration';
 import { AgentOrb } from './AgentStream';
 
 interface Props {
   documentId?: string;
   generation?: TourGenerationSummary | null;
-  state: EngineState;
-  steps: FlatStep[];
-  chapter?: string;
-  answering?: boolean;
+  /** The tour has steps to play. */
+  hasTour: boolean;
+  /** Steps of the tour that can be played already, and how many are planned, while it is still being written. */
+  steps?: { ready: number; planned: number } | null;
   onActivity?(): void;
 }
 
-/** Compact reader status, fed by the existing manifest and playback subscriptions. */
-export function TourDockStatus({ documentId, generation, state, steps, chapter, answering, onActivity }: Props) {
+/**
+ * The tour's preparation status, in the dock while it is made or needs attention. Once a tour is
+ * there the dock is only the ask bar: the control bar's timeline already says where the tour is.
+ */
+export function TourDockStatus({ documentId, generation, hasTour, steps, onActivity }: Props) {
   const [expanded, setExpanded] = useState(false);
   const checklistId = useId();
   const activity = useDockActivity(documentId, generation?.id, expanded);
@@ -26,12 +28,13 @@ export function TourDockStatus({ documentId, generation, state, steps, chapter, 
   const generationNeedsAttention =
     generation && ['paused', 'failed', 'needs_configuration'].includes(generation.status);
   const showingGeneration = generating || generationNeedsAttention;
-  if (!showingGeneration && !steps.length && !generation) return null;
+  if (!showingGeneration && (hasTour || !generation)) return null;
 
   let title = 'Tour ready';
   let detail = 'Open activity to see how it was made';
   let fraction: number | undefined;
   let count = '';
+  let countLabel = 'sources reviewed';
   if (showingGeneration && generation) {
     title = tourGenerationCopy(generation).title;
     detail =
@@ -47,36 +50,19 @@ export function TourDockStatus({ documentId, generation, state, steps, chapter, 
       fraction = done / generation.imagesTotal;
       count = `${done} / ${generation.imagesTotal}`;
       detail = 'Sources reviewed';
+    } else if (generation.stage === 'writing' && generating && steps && steps.planned > 0) {
+      // The first steps can be played already: say how far the rest is.
+      const planned = Math.max(steps.ready, steps.planned);
+      fraction = Math.min(1, steps.ready / planned);
+      count = `${steps.ready} / ${planned}`;
+      countLabel = 'steps ready to play';
+      detail = 'You can play the steps that are ready';
     } else if (generation.stage === 'writing' && generating) detail = 'Building explanations and visual steps';
     else if (generation.stage === 'validating' && generating) detail = 'Checking the tour before it is ready';
-  } else if (steps.length) {
-    const index = Math.min(steps.length - 1, Math.max(0, state.index));
-    const wordCount = steps[index].words.length;
-    const stepFraction =
-      state.status === 'ended' ? 1 : Math.max(0, Math.min(1, (state.word + 1) / Math.max(1, wordCount)));
-    fraction = state.status === 'ended' ? 1 : (index + stepFraction) / steps.length;
-    title =
-      state.status === 'ended'
-        ? answering
-          ? 'Answer complete'
-          : 'Tour complete'
-        : chapter || (answering ? 'Your answer' : 'Your guided tour');
-    detail =
-      state.status === 'playing'
-        ? answering
-          ? 'Explaining your answer'
-          : 'Guiding you through the document'
-        : state.status === 'ended'
-          ? 'Ask a question to explore further'
-          : state.word >= 0
-            ? 'Paused — continue whenever you’re ready'
-            : 'Ready when you are';
-    count = `${index + 1} / ${steps.length}`;
   } else if (generation?.status === 'cancelled') {
     title = 'Tour creation stopped';
     detail = 'Your document is ready to explore';
   }
-  const active = showingGeneration ? generating : state.status === 'playing';
   return (
     <div className={`ask-tour-status${generationNeedsAttention ? ' needs-attention' : ''}`}>
       <div className="ask-tour-summary">
@@ -89,7 +75,7 @@ export function TourDockStatus({ documentId, generation, state, steps, chapter, 
           title={expanded ? 'Hide tour checklist' : 'Show tour checklist'}
         >
           <span className="ask-tour-avatar">
-            <AgentOrb active={active} />
+            <AgentOrb active={generating} />
             {fraction !== undefined && (
               <svg className="ask-tour-ring" viewBox="0 0 40 40" aria-hidden="true">
                 <circle className="track" cx="20" cy="20" r="18" />
@@ -104,7 +90,7 @@ export function TourDockStatus({ documentId, generation, state, steps, chapter, 
           {count && (
             <span
               className="ask-tour-count"
-              aria-label={showingGeneration ? `${count} sources reviewed` : `Step ${count}`}
+              aria-label={showingGeneration ? `${count} ${countLabel}` : `Step ${count}`}
             >
               {count}
             </span>

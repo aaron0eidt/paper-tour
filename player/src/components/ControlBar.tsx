@@ -1,19 +1,36 @@
 import { useEffect, useRef } from 'react';
 import type { EngineState, FlatStep } from '../engine';
+import { formatTime } from '../tourClock';
+import type { TourClock } from '../tourClock';
+import { writingLabel } from '../partialTour';
+import type { Growth } from '../partialTour';
+import { Timeline, elapsedAt } from './Timeline';
 import { DEFAULT_SPEAKER } from '../types';
 import type { Voice } from '../types';
 import { isGoogleVoice, pickVoice, voiceId } from '../narration/voices';
-import { NextIcon, PauseIcon, PlayIcon, PrevIcon, VolumeIcon } from './icons';
+import { KEY_HELP } from '../keys';
+import { NotClear } from '../ask/NotClear';
+import type { NotClearProps } from '../ask/NotClear';
+import { KeyboardIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon, VolumeIcon } from './icons';
 import '../voiceSettings.css';
 
 interface Props {
   steps: FlatStep[];
+  /** Chapter titles, by chapter index. */
+  chapters: string[];
+  clock: TourClock;
   state: EngineState;
+  /** The tour is still being written (or stopped being written); null for a finished one. */
+  growth?: Growth | null;
   speed: number;
   muted: boolean;
   onToggle(): void;
   onPrev(): void;
   onNext(): void;
+  onSeek(index: number, word: number): void;
+  onSkip(direction: 1 | -1): void;
+  helpOpen: boolean;
+  onHelp(open: boolean): void;
   onSpeed(speed: number): void;
   onMute(muted: boolean): void;
   voices?: SpeechSynthesisVoice[];
@@ -21,16 +38,25 @@ interface Props {
   selectedVoiceId?: string;
   onVoiceChange?(id: string): void;
   voiceConfig?: Voice;
+  /** "Not clear?" beside the audio settings; none while there is no step to ask about. */
+  unclear?: NotClearProps | null;
 }
 
 export function ControlBar({
   steps,
+  chapters,
+  clock,
   state,
+  growth,
   speed,
   muted,
   onToggle,
   onPrev,
   onNext,
+  onSeek,
+  onSkip,
+  helpOpen,
+  onHelp,
   onSpeed,
   onMute,
   voices = [],
@@ -38,16 +64,19 @@ export function ControlBar({
   selectedVoiceId = '',
   onVoiceChange,
   voiceConfig,
+  unclear,
 }: Props) {
   const disabled = !steps.length;
   const current = steps[state.index];
   const playing = state.status === 'playing';
   const textRef = useRef<HTMLDivElement>(null);
   const audioPanel = useRef<HTMLDetailsElement>(null);
+  const helpPanel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       if (audioPanel.current?.open && !audioPanel.current.contains(event.target as Node))
         audioPanel.current.open = false;
+      if (helpOpen && !helpPanel.current?.contains(event.target as Node)) onHelp(false);
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && audioPanel.current?.open) {
@@ -61,7 +90,7 @@ export function ControlBar({
       document.removeEventListener('pointerdown', closeOutside);
       document.removeEventListener('keydown', escape);
     };
-  }, []);
+  }, [helpOpen, onHelp]);
   // A speed picked with the mouse or a finger hands focus back, so Space and the arrows control
   // the tour again; with the keyboard, focus stays for further arrow presses.
   const pickedByPointer = useRef(false);
@@ -84,16 +113,25 @@ export function ControlBar({
             ? 'Using your selected voice.'
             : 'Google voice preferred automatically.';
 
-  // Keep the word being spoken in view when the narration is longer than the box.
+  // Keep the word being spoken in view when the narration is longer than the box. The caption moves by whole lines, so
+  // no half line shows at its edges: the line being spoken sits second, with the next one already in view below it.
   useEffect(() => {
     const box = textRef.current;
     const word = box?.querySelector<HTMLElement>('.w.now');
-    if (!box || !word) return;
-    const top = word.offsetTop - box.offsetTop;
-    if (top < box.scrollTop || top + word.offsetHeight > box.scrollTop + box.clientHeight) {
-      box.scrollTo({ top: top - box.clientHeight / 3, behavior: 'smooth' });
+    // A tour that waits for its next step shows that line last, under as much of what was said as fits.
+    const waiting = box?.querySelector<HTMLElement>('.writing-status');
+    if (!box || !(waiting ?? word)) return;
+    const line = parseFloat(getComputedStyle(box).lineHeight) || 23;
+    const first = Math.round(box.scrollTop / line);
+    if (waiting) {
+      const rows = Math.max(1, Math.floor(box.clientHeight / line + 0.1));
+      const at = Math.round((waiting.offsetTop - box.offsetTop) / line);
+      if (at !== first + rows - 1) box.scrollTo({ top: Math.max(0, at - rows + 1) * line, behavior: 'smooth' });
+      return;
     }
-  }, [state.word, state.index]);
+    const spoken = Math.round((word!.offsetTop - box.offsetTop) / line);
+    if (spoken < first || spoken > first + 1) box.scrollTo({ top: Math.max(0, spoken - 1) * line, behavior: 'smooth' });
+  }, [state.word, state.index, state.waiting]);
 
   useEffect(() => {
     textRef.current?.scrollTo({ top: 0 });
@@ -101,6 +139,16 @@ export function ControlBar({
 
   return (
     <footer className="controls">
+      <Timeline
+        steps={steps}
+        chapters={chapters}
+        clock={clock}
+        state={state}
+        onSeek={onSeek}
+        onSkip={onSkip}
+        onStep={(direction) => (direction > 0 ? onNext() : onPrev())}
+        writingLabel={growth && growth.phase !== 'stopped' ? writingLabel(growth) : undefined}
+      />
       <div className="transport">
         <button
           className="icon-btn"
@@ -110,7 +158,13 @@ export function ControlBar({
         >
           <PrevIcon />
         </button>
-        <button className="play-btn" onClick={onToggle} disabled={disabled} aria-label={playing ? 'Pause' : 'Play'}>
+        <button
+          className="play-btn"
+          onClick={onToggle}
+          disabled={disabled}
+          aria-label={playing ? 'Pause' : state.awaiting ? 'Show solution' : 'Play'}
+          title={state.awaiting ? 'Show the solution' : undefined}
+        >
           {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
         <button
@@ -121,7 +175,20 @@ export function ControlBar({
         >
           <NextIcon />
         </button>
-        <span className="step-count">{disabled ? 'No tour' : `step ${state.index + 1} / ${steps.length}`}</span>
+        <span
+          className="step-count"
+          title={
+            clock.pending > 0
+              ? 'More of the tour is still being written'
+              : clock.measured || muted
+                ? undefined
+                : 'Estimated from the narration; a voice may be quicker or slower'
+          }
+        >
+          {disabled
+            ? 'No tour'
+            : `${formatTime(elapsedAt(clock, state, steps))} / ${clock.measured || muted ? '' : '~'}${formatTime(clock.total)}${clock.pending > 0 ? '+' : ''}`}
+        </span>
       </div>
 
       <div className="narration">
@@ -138,6 +205,13 @@ export function ControlBar({
                   {w}{' '}
                 </span>
               ))}
+              {/* Everything written has been played: say what the tour waits for, on the line after the last word. */}
+              {state.waiting && growth && growth.phase !== 'stopped' && (
+                <span className="writing-status" role="status">
+                  <i aria-hidden="true" />
+                  {writingLabel(growth)}…
+                </span>
+              )}
             </div>
           </>
         ) : (
@@ -146,6 +220,7 @@ export function ControlBar({
       </div>
 
       <div className="settings">
+        {unclear && <NotClear {...unclear} />}
         <details className="playback-options" ref={audioPanel}>
           <summary aria-label="Audio settings" title="Voice and playback speed">
             <svg
@@ -220,6 +295,34 @@ export function ControlBar({
             </label>
           </div>
         </details>
+        <div className="key-help-wrap" ref={helpPanel}>
+          <button
+            className={`icon-btn key-help-button${helpOpen ? ' open' : ''}`}
+            onClick={() => onHelp(!helpOpen)}
+            aria-expanded={helpOpen}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <KeyboardIcon />
+          </button>
+          {helpOpen && (
+            <div className="key-help" role="dialog" aria-label="Keyboard shortcuts">
+              <h3>Keyboard</h3>
+              <dl>
+                {KEY_HELP.map((row) => (
+                  <div key={row.does}>
+                    <dt>
+                      {row.keys.map((key) => (
+                        <kbd key={key}>{key}</kbd>
+                      ))}
+                    </dt>
+                    <dd>{row.does}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </div>
         <button
           className={`icon-btn${muted ? ' active' : ''}`}
           onClick={() => onMute(!muted)}

@@ -1,0 +1,133 @@
+/* "Not clear?": a quiet button beside the audio settings; its choices open above the control bar. */
+
+.not-clear {
+  position: relative;
+  font-size: 12px;
+}
+
+.not-clear-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.not-clear-button:hover,
+.not-clear-button.open {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.not-clear-button.open {
+  border-color: var(--border-accent);
+}
+
+.not-clear-button svg {
+  flex: none;
+}
+
+.not-clear :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.not-clear-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 16px);
+  z-index: 20;
+  width: min(308px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-floating);
+  animation: not-clear-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.not-clear-panel p {
+  margin: 0 2px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.not-clear-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.not-clear-option {
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.not-clear-option:hover {
+  border-color: rgba(126, 166, 255, 0.4);
+  background: rgba(126, 166, 255, 0.08);
+}
+
+.not-clear-option strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.not-clear-option small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+@keyframes not-clear-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* On a phone only the ring shows, like the audio settings beside it, and the choices open against the whole row of
+   settings, so they stay on the screen. */
+@media (max-width: 740px) {
+  .not-clear {
+    position: static;
+  }
+  .not-clear-button {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+  .not-clear-button span {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .not-clear-panel {
+    animation: none;
+  }
+}

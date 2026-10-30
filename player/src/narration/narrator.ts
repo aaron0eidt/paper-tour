@@ -10,6 +10,8 @@ export interface SpeakRequest {
   /** Speed multiplier from the UI and the URL; voice.rate is applied on top by the narrator. */
   rate: number;
   audio?: StepAudio;
+  /** Speak from this word on (a pause resumes at its sentence; a seek lands on one). Default 0. */
+  startWord?: number;
 }
 
 export interface SpeakCallbacks {
@@ -33,6 +35,23 @@ export interface NarrationHandle {
 export interface Narrator {
   readonly name: string;
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle;
+}
+
+/** A word that ends a sentence. */
+export const SENTENCE_END = /[.!?]["')\]]*$/;
+
+/** The first word of each sentence of a step's narration. */
+export function sentenceStarts(words: readonly string[]): number[] {
+  const starts = [0];
+  for (let i = 1; i < words.length; i++) if (SENTENCE_END.test(words[i - 1])) starts.push(i);
+  return words.length ? starts : [];
+}
+
+/** The first word of the sentence word `index` is in. */
+export function sentenceStart(words: readonly string[], index: number): number {
+  let i = Math.min(Math.max(0, Math.floor(index)), Math.max(0, words.length - 1));
+  while (i > 0 && !SENTENCE_END.test(words[i - 1])) i--;
+  return i;
 }
 
 export const WORDS_PER_MINUTE = 165;

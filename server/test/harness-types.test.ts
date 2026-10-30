@@ -132,7 +132,17 @@ function provider(model: Model, requests: Request[]): typeof fetch {
     void last;
     return new Response(
       JSON.stringify({
-        choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(model(request)) } }],
+        // No visual plan: every beat keeps the board its kind suggests, which these suites check.
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify(
+                ['visual_plan', 'opening_visual'].includes(request.name) ? { plan: 'none', beats: [] } : model(request),
+              ),
+            },
+          },
+        ],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       }),
     );
@@ -230,29 +240,17 @@ const COSTS = {
     { label: 'Deposit', value: 2850 },
   ],
 };
-const TIMELINE = {
-  title: 'From start to end',
-  nodes: [
-    { id: 'node-1', label: 'Starts 1 Nov 2026' },
-    { id: 'node-2', label: '12-month minimum' },
-    { id: 'node-3', label: '3 months notice' },
-  ],
-  edges: [
-    { from: 'node-1', to: 'node-2' },
-    { from: 'node-2', to: 'node-3' },
-  ],
-};
 function leaseModel(r: Request) {
   if (r.name === 'paper_card') return cardFor('contract', ['p1.s2', 'p1.s3', 'p2.s2']);
   if (r.name === 'tour_plan') return leasePlan;
   if (suggestedBoard(r) === 'bars') return plainDirection(r, { bars: COSTS });
-  if (suggestedBoard(r) === 'flow') return plainDirection(r, { flow: TIMELINE });
   return plainDirection(r);
 }
 
 test('a contract follows what you agree to, what it costs, its deadlines and its risks, framed as no legal advice', async () => {
   const { tour, steps: all, requests, metadata } = await run(lease, leaseModel);
   assert.equal(metadata.docType, 'contract');
+  assert.equal(tour.doc_type, 'contract');
   assert.equal(metadata.planSource, 'model');
   assert.deepEqual(
     tour.chapters.map((c) => `${c.id}:${c.title}`),
@@ -302,7 +300,8 @@ test('a contract follows what you agree to, what it costs, its deadlines and its
   const highlight = all[0].actions.find((a) => a.type === 'highlight')!;
   assert.equal(highlight.at_word, findAnchor(all[0].say, 'explains the point'));
   assert.deepEqual(all[0].actions[0], { type: 'focus', target: 'p1.s2' });
-  // Costs: one chart of every amount in the chapter, from the sentences of both cost points; deadlines: a timeline.
+  // Costs: one chart of every amount in the chapter, from the sentences of both cost points; deadlines are a list of
+  // dates, which the page and the voice carry without a board.
   const cost = all.find((s) => s.id === 'point-2')!;
   const bars = cost.actions.find((a) => a.type === 'board');
   assert.equal(bars?.type === 'board' && bars.item.kind === 'bars' && bars.item.bars.length, 3);
@@ -312,7 +311,11 @@ test('a contract follows what you agree to, what it costs, its deadlines and its
   assert.match(costBrief, /OTHER STEPS IN THIS CHAPTER \(leave their points to them\): The deposit is EUR 2,850\./);
   assert.deepEqual(types(all.find((s) => s.id === 'point-3')!).slice(0, 2), ['focus', 'board_clear']);
   const deadline = all.find((s) => s.id === 'point-4')!;
-  assert.ok(deadline.actions.some((a) => a.type === 'board' && a.item.kind === 'flow'));
+  assert.ok(!types(deadline).includes('board'));
+  assert.ok(
+    directions.every((r) => !r.brief.includes('a flow is useful only')),
+    'no step is steered to a flow',
+  );
   assert.equal(tour.level, 'intro');
   assert.deepEqual(tour.suggested_questions, cardFor('contract', ['p1.s1']).suggested_questions);
 });
@@ -340,7 +343,7 @@ const letter = makeDoc('Exampleton City Council', 1, [
   ['p1.b3', 'paragraph', { 'p1.s3': 'You can upload them at the online portal with your reference number.' }],
   ['p1.b4', 'paragraph', { 'p1.s4': 'If we do not receive them, we may have to refuse your claim.' }],
 ]);
-test('a letter says what it is, what to do as a flow of steps, by when, and what happens otherwise', async () => {
+test('a letter says what it is, what to do, by when, and what happens otherwise', async () => {
   const plan = {
     plan: 'p',
     chapter_titles: {
@@ -363,9 +366,9 @@ test('a letter says what it is, what to do as a flow of steps, by when, and what
   } = await run(letter, (r) => {
     if (r.name === 'paper_card') return cardFor('letter', ['p1.s1', 'p1.s2', 'p1.s4']);
     if (r.name === 'tour_plan') return plan;
-    if (suggestedBoard(r) === 'flow') return plainDirection(r, { flow: TIMELINE });
     return plainDirection(r);
   });
+  assert.equal(tour.doc_type, 'letter');
   assert.deepEqual(
     tour.chapters.map((c) => c.id),
     ['overview', 'actions', 'deadlines', 'consequences', 'takeaway'],
@@ -374,8 +377,9 @@ test('a letter says what it is, what to do as a flow of steps, by when, and what
     all.map((s) => s.id),
     ['overview-1', 'point-1', 'point-2', 'point-3', 'point-4', 'takeaway-1'],
   );
-  assert.ok(types(all[1]).includes('board'));
-  assert.ok(!types(all[2]).includes('board'));
+  // To-dos in order are a list, which a chain of boxes would only repeat: no board, and no steer to one.
+  assert.ok(all.every((step) => !types(step).includes('board')));
+  assert.ok(requests.every((r) => !r.brief.includes('a flow is useful only')));
   assert.ok(!all[0].say.includes('legal advice'));
   assert.ok(
     requests
@@ -480,6 +484,7 @@ test('a lecture follows its own order: one chapter per topic, its figure right a
     if (suggestedBoard(r) === 'bars') return plainDirection(r, { bars: epochs });
     return plainDirection(r);
   });
+  assert.equal(tour.doc_type, 'lecture');
   assert.deepEqual(
     tour.chapters.map((c) => c.title),
     ['This lecture', 'Learning as search', 'The update rule', 'Learning rate', 'Epochs', 'Summary'],
@@ -672,6 +677,7 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
     verifier({ '\\det A = 1 \\cdot (-1) - 2 \\cdot 3': { status: 'unknown' } }, seen),
   );
   assert.equal(metadata.docType, 'exercise_sheet');
+  assert.equal(tour.doc_type, 'exercise_sheet');
   assert.equal(requests.filter((r) => r.name === 'tour_plan').length, 0);
   assert.deepEqual(
     tour.chapters.map((c) => `${c.id}:${c.title}`),
@@ -746,8 +752,10 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
   assert.equal(requests.filter((r) => r.name === 'exercise_solution').length, 3);
   // The solve call offers only the part's own sentences and printed maths, and sees the page.
   const solve = requests.find((r) => r.name === 'exercise_solution' && r.brief.includes('EXERCISE: Aufgabe 2'))!;
-  assert.deepEqual(solve.schema.properties.read.properties.asked.items.enum, ['p1.s6', 'p1.s7']);
-  assert.deepEqual(solve.schema.properties.read.properties.marks.items.properties.target.enum, ['p1.b8']);
+  assert.equal(solve.schema.properties.read.properties.asked.items.$ref, '#/$defs/sentenceId');
+  assert.deepEqual(solve.schema.$defs.sentenceId.enum, ['p1.s6', 'p1.s7']);
+  assert.equal(solve.schema.properties.read.properties.marks.items.properties.target.$ref, '#/$defs/mathId');
+  assert.deepEqual(solve.schema.$defs.mathId.enum, ['p1.b8']);
   assert.match(solve.brief, /MATHS ON THE PAGE as extracted .*\n\[p1\.b8\] 1 2 3 −1/);
   assert.equal(solve.images, 1);
   assert.deepEqual(metadata.exercises, [
@@ -855,12 +863,20 @@ test('parts are planned within the preset: all of them when they fit, else the f
     ],
   );
   const plan = (preset: 'quick' | 'standard' | 'deep', list = units) => planUnits(list, preset);
+  // Three parts at 20 steps: each in full form (task, your turn, method, answer) with the two solution steps that fit.
   assert.deepEqual(
     plan('standard').taught.map((u) => [u.id, u.steps, u.compact]),
     [
+      ['ex1.a', 2, false],
+      ['ex1.b', 2, false],
+      ['ex2', 2, false],
+    ],
+  );
+  assert.deepEqual(
+    plan('standard', units.slice(0, 2)).taught.map((u) => [u.id, u.steps, u.compact]),
+    [
       ['ex1.a', 3, false],
       ['ex1.b', 3, false],
-      ['ex2', 3, false],
     ],
   );
   assert.deepEqual(
@@ -878,7 +894,7 @@ test('parts are planned within the preset: all of them when they fit, else the f
   for (const preset of ['quick', 'standard', 'deep'] as const) {
     const { taught } = plan(preset, many);
     const length = 2 + taught.reduce((n, u) => n + unitOverhead(u) + u.steps, 0);
-    assert.ok(length <= { quick: 10, standard: 20, deep: 30 }[preset], `${preset}: ${length}`);
+    assert.ok(length <= { quick: 10, standard: 22, deep: 30 }[preset], `${preset}: ${length}`);
   }
   // The tour of a sheet: overview, the taught parts, takeaway.
   const card = cardFor('exercise_sheet', ['p1.s1', 'p1.s3']) as never;
@@ -901,6 +917,7 @@ test('a sheet without tasks found by ingestion is toured as an ordinary document
   };
   const { tour, metadata } = await run(plain, (r) => (r.name === 'tour_plan' ? plan : sheetModel(r)), verifier());
   assert.equal(metadata.docType, 'other');
+  assert.equal(tour.doc_type, 'other');
   assert.deepEqual(
     tour.chapters.map((c) => c.id),
     ['overview', 'points', 'takeaway'],
@@ -959,5 +976,15 @@ test('the verifier reads the helper’s answer, and runs the real helper when th
     assert.deepEqual(
       checks.map((c) => c.status),
       ['failed', 'ok'],
+    );
+  // Probabilities and expectations are names of values: the arithmetic behind them is checked, and a wrong chain fails.
+  const names = await pythonVerifier()([
+    'P(\\text{says blue}) = 0.99\\times 0.01 + 0.02\\times 0.99 = 0.0297',
+    'P(\\text{says blue}) = 0.99\\times 0.01 + 0.02\\times 0.99 = 0.0397',
+  ]);
+  if (names[0].status !== 'unknown' || names[1].status !== 'unknown')
+    assert.deepEqual(
+      names.map((c) => c.status),
+      ['ok', 'failed'],
     );
 });

@@ -10,13 +10,24 @@ import {
   type Tour,
 } from '../../../shared/paper';
 import { findAnchor, tourProblems } from './assemble';
-import { checkBoard, checkBars, checkFlow, checkFormula, FLOW_NODE_IDS } from './board';
+import {
+  boardPart,
+  boardParts,
+  checkBoard,
+  checkBars,
+  checkFlow,
+  checkFormula,
+  FLOW_NODE_IDS,
+  type BoardKind,
+} from './board';
 import { checkExample, claimsNumericExample, exampleActions } from './example';
-import { insightStep } from './insight';
+import { answerNarrationProblems, insightStep, readsSource } from './insight';
 import { regionOf } from './direct';
 import { CUE_ACTIONS } from './ask-authoring';
+import { boardKindOf, labelIllustrative, NESTED_KINDS, repeatsShown, type ShownBoard } from './ask-boards';
 import { ANSWERABLE, type AskAnswer, type AskTurn } from './ask-types';
 import type { Retrieval } from './ask-retrieval';
+import { groundedProblems } from './visual-rules';
 import {
   exactBounds,
   figureTextTargets,
@@ -45,8 +56,8 @@ const SPOKEN_COMMANDS: Record<string, string> = {
   right: '',
 };
 
-/** Element IDs a model sometimes cites in its narration: "[p3.s12]", "(fig2.a)", "eq1". */
-const SPOKEN_ID = /\s*[[(]?\b(?:p\d+\.[sb]\d+|(?:fig|tab)\d+(?:\.[a-z])?|eq\d+|sec-\d+(?:\.\d+)*|page\d+)\b[\])]?/g;
+/** Element IDs a model sometimes cites in its narration: "[p3.s12]", "(fig2.a)", "eq1", "equ2". */
+const SPOKEN_ID = /\s*[[(]?\b(?:p\d+\.[sb]\d+|(?:fig|tab)\d+(?:\.[a-z])?|equ?\d+|sec-\d+(?:\.\d+)*|page\d+)\b[\])]?/g;
 
 /**
  * Text as the voice should read it: no element IDs, markdown or LaTeX remnants ("$\sqrt{d_k}$" becomes "square root of
@@ -87,52 +98,98 @@ function markLabel(label: string): { label?: string } {
   return text && splitWords(text).length <= 4 && text.length <= 40 ? { label: text } : {};
 }
 
+/** What a board has to meet beyond its own checks; ask.ts sets it from the question and the tour. */
+export interface BoardRules {
+  /** The question is about the document's results (a table is in focus): only the document's own numbers count. */
+  results?: boolean;
+  /** The tour's latest boards, which an answer does not draw again. */
+  shown?: readonly ShownBoard[];
+  /** Told the kind and the reasons when a board the model drew is not kept. */
+  dropped?: (kind: string, problems: string[]) => void;
+}
+
+type Drawn = { item: BoardItem; focus: (number | null)[] };
+
 /**
- * A board item from the model's flat board, or null when it is "none" or fails the board's own checks, which the tour
- * writer uses too: a formula that KaTeX renders with terms that are exact separate parts of it, bars of numbers printed
- * in `evidence` (the text the model was shown), a flow of 3 or more stages; labels too long are refused, not cut. Each
- * part carries the word where `say` explains it, for board_focus.
+ * A board item from the model's board, or null when it is "none" or fails the checks of a tour step's board: its own
+ * (a formula that KaTeX renders with terms that are exact separate parts of it, bars and every other document value
+ * printed in `evidence`, the text the model was shown, a flow of 3 or more stages, sound dimensions, dates and
+ * distributions; labels too long are refused, not cut), then the visual rules (a flow that is a chain, a plot of
+ * straight lines or labels that are only numbers show nothing real) and, for a question about results, the document's
+ * own numbers. A made-up case is labelled illustrative and a picture the tour just showed is not drawn again. Each part
+ * carries the word where `say` explains it, for board_focus.
  */
 export function boardFromAnswer(
   raw: unknown,
   say: string,
   evidence: string,
+  rules: BoardRules = {},
 ): { item: BoardItem; focus: (number | null)[] } | null {
   if (!isRaw(raw)) return null;
-  if (raw.kind === 'scene') {
-    const { item } = checkBoard('scene', raw.scene ?? raw, evidence);
-    return item && item.kind === 'scene'
-      ? { item, focus: item.objects.map((object) => (object.text ? anchorAt(say, object.text) : null)) }
-      : null;
-  }
-  if (raw.kind === 'plot') {
-    const { item } = checkBoard('plot', raw.plot ?? raw);
-    return item && item.kind === 'plot' ? { item, focus: item.curves.map((c) => anchorAt(say, c.label)) } : null;
-  }
+  const kind = boardKindOf(raw);
+  const drop = (problems: string[]) => {
+    if (kind !== 'none') rules.dropped?.(kind, problems);
+    return null;
+  };
+  const made = drawn(raw, kind, say, evidence, drop);
+  if (!made) return null;
+  const problems = groundedProblems(made.item, { results: rules.results ?? false });
+  if (problems.length) return drop(problems);
+  if (repeatsShown(made.item, rules.shown)) return drop(['it repeats a board the tour just showed']);
+  return { ...made, item: labelIllustrative(made.item) };
+}
+
+/** The checked board of the kind the model chose, with the word each of its parts is spoken at. */
+function drawn(
+  raw: Raw,
+  kind: string,
+  say: string,
+  evidence: string,
+  drop: (problems: string[]) => null,
+): Drawn | null {
   const at = (part: Raw | undefined) => (part ? anchorAt(say, str(part.anchor)) : null);
-  if (raw.kind === 'formula') {
-    const { item } = checkFormula(raw);
+  // The item sits under its kind's name; a board whose fields are written flat (as answers once did) is read as well.
+  const body = isRaw(raw[kind]) ? (raw[kind] as Raw) : raw;
+  if (kind === 'formula') {
+    const { item, problems } = checkFormula(body);
     // Each checked term keeps the anchor of the term it came from, matched by its LaTeX ignoring spaces.
     const squash = (s: string) => s.replace(/\s+/g, '');
-    const given = list(raw.terms);
+    const given = list(body.terms);
     const source = (latex: string) => given.find((t) => squash(str(t.latex)) === squash(latex));
-    return item ? { item, focus: item.terms.map((t) => at(source(t.latex))) } : null;
+    return item ? { item, focus: item.terms.map((t) => at(source(t.latex))) } : drop(problems);
   }
-  if (raw.kind === 'flow') {
-    // The stages in the order given, each leading to the next.
-    const given = list(raw.nodes);
+  if (kind === 'flow') {
+    // The stages in the order given, joined by the arrows the model drew, else each leading to the next.
+    const given = list(body.nodes);
     const nodes = given.map((n, i) => ({ id: FLOW_NODE_IDS[i] ?? `node-${i + 1}`, label: n.label }));
-    const edges = nodes.slice(1).map((n, i) => [nodes[i].id, n.id]);
-    const { item } = checkFlow({ title: raw.title, nodes, edges });
-    return item ? { item, focus: item.nodes.map((n) => at(given[nodes.findIndex((m) => m.id === n.id)])) } : null;
+    const arrows = list(body.edges).map((e) => [str(e.from), str(e.to)]);
+    const edges = arrows.length ? arrows : nodes.slice(1).map((n, i) => [nodes[i].id, n.id]);
+    const { item, problems } = checkFlow({ title: body.title, nodes, edges });
+    return item
+      ? { item, focus: item.nodes.map((n) => at(given[nodes.findIndex((m) => m.id === n.id)])) }
+      : drop(problems);
   }
-  if (raw.kind === 'bars') {
-    const given = list(raw.bars);
+  if (kind === 'bars') {
+    const given = list(body.bars);
     const bars = given.map((b) => ({ label: b.label, value: b.value }));
-    const { item } = checkBars({ ...raw, bars }, evidence);
-    return item ? { item, focus: given.map(at) } : null;
+    const { item, problems } = checkBars({ ...body, bars }, evidence);
+    return item ? { item, focus: given.map(at) } : drop(problems);
   }
-  return null;
+  if (!(NESTED_KINDS as readonly string[]).includes(kind)) return null;
+  const { focus: _focus, ...data } = body;
+  const { item, problems } = checkBoard(kind as BoardKind, data, evidence);
+  if (!item) return drop(problems.length ? problems : [`it has no ${kind} data; fill it or set the kind to none`]);
+  // Parts spoken by their label come first (a curve, a scene object); `focus` entries name any part and its words.
+  const lit: (number | null)[] = Array.from({ length: boardParts(item) }, () => null);
+  if (item.kind === 'scene')
+    item.objects.forEach((object, i) => (lit[i] = object.text ? anchorAt(say, object.text) : null));
+  if (item.kind === 'plot') item.curves.forEach((curve, i) => (lit[i] = anchorAt(say, curve.label)));
+  for (const entry of list(body.focus)) {
+    const part = boardPart(item, str(entry.part));
+    const spoken = anchorAt(say, str(entry.anchor));
+    if (part >= 0 && spoken !== null) lit[part] = spoken;
+  }
+  return { item, focus: lit };
 }
 
 export interface AnswerContext {
@@ -147,6 +204,10 @@ export interface AnswerContext {
   imaged?: string;
   /** Once an answer starts a numerical example, its correction must retain a visible example. */
   requireExample?: boolean;
+  /** What a board must meet beyond its own checks: results questions, the tour's latest boards. */
+  boards?: BoardRules;
+  /** The start of the step IDs, fixed for a question so that a step shown early and the whole answer agree. */
+  idPrefix?: string;
 }
 
 /** What the camera does to show an element, and which view it is in (one page of text, one figure, one equation). */
@@ -268,7 +329,7 @@ function toStep(
   }
   if (!moves && first && context.retrieval.home) look(context.retrieval.home, 0);
   const example = checkExample(raw.example, say).example;
-  const board = example ? null : boardFromAnswer(raw.board, say, context.evidence);
+  const board = example ? null : boardFromAnswer(raw.board, say, context.evidence, context.boards);
   if (example) actions.push(...exampleActions(example));
   if (board) {
     const focus = board.focus.flatMap((at, part) =>
@@ -316,22 +377,46 @@ function followups(raw: unknown, context: AnswerContext): string[] {
   return out.slice(0, 2);
 }
 
+const MAX_STEPS = 3;
+
+/** The steps of an answer as checked tour steps; the same steps come out of a half-written answer's first steps. */
+export function buildSteps(raw: unknown, context: AnswerContext): Step[] {
+  const view = viewer(context.doc);
+  const highlighted = new Set<string>();
+  const prefix = context.idPrefix ?? `ask-${randomUUID().slice(0, 8)}`;
+  const steps: Step[] = [];
+  for (const item of list(raw).slice(0, MAX_STEPS)) {
+    const step = toStep(item, `${prefix}-${steps.length + 1}`, !steps.length, context, view, highlighted);
+    if (step) steps.push(step);
+  }
+  return checked(steps, context);
+}
+
 /** The model's answer as checked tour steps, or null when no step survives. */
 export function buildAnswer(value: unknown, context: AnswerContext): AskAnswer | null {
   if (!isRaw(value)) return null;
   if (answerVisualProblems(value, context).length) return null;
-  const view = viewer(context.doc);
-  const highlighted = new Set<string>();
-  const prefix = `ask-${randomUUID().slice(0, 8)}`;
-  const steps: Step[] = [];
-  for (const raw of list(value.steps).slice(0, 3)) {
-    const step = toStep(raw, `${prefix}-${steps.length + 1}`, !steps.length, context, view, highlighted);
-    if (step) steps.push(step);
-  }
-  const valid = checked(steps, context);
+  const valid = buildSteps(value.steps, context);
   if (!valid.length) return null;
   const answerable = ANSWERABLE.find((a) => a === value.answerable) ?? 'partly';
   return { answerable, steps: valid, followups: followups(value.followups, context) };
+}
+
+/**
+ * The steps of an answer still being written that can be shown now: all of its whole steps so far, when they already
+ * pass what the finished answer must pass (visual cues, a worked example, narration that is not read from the page or
+ * copied from the task), else null, and the answer waits for the whole call and its repairs. The first step is shown
+ * whatever its board, since a wait costs more than a board; a later step whose board fails its checks is held back, so
+ * that its correction can be made while the steps before it are spoken.
+ */
+export function readySteps(raw: unknown[], context: AnswerContext, authoringRules: readonly string[]): Step[] | null {
+  const value = { steps: raw };
+  const trial = { ...context, requireExample: context.requireExample || hasWorkedExample(value) };
+  if (answerVisualProblems(value, trial).length || answerBoardProblems(value, trial, 1).length) return null;
+  const steps = buildSteps(raw, trial);
+  if (steps.length !== Math.min(raw.length, MAX_STEPS)) return null;
+  if (steps.some((step) => readsSource(step.say, context.doc))) return null;
+  return answerNarrationProblems(steps, authoringRules).length ? null : steps;
 }
 
 /** Measured actions must survive conversion exactly; bad action/anchor requests a model correction. */
@@ -344,8 +429,10 @@ export function answerVisualProblems(value: unknown, context: AnswerContext): st
     ];
   return steps.flatMap((step, index) => {
     const problems = visualCueProblems(step.cues, context.imaged, context.retrieval.measured);
-    if (isRaw(step.board) && step.board.kind === 'scene')
-      problems.push(...checkBoard('scene', step.board.scene ?? step.board, context.evidence).problems);
+    if (isRaw(step.board) && boardKindOf(step.board) === 'scene') {
+      const { focus: _focus, ...scene } = isRaw(step.board.scene) ? step.board.scene : step.board;
+      problems.push(...checkBoard('scene', scene, context.evidence).problems);
+    }
     const say = spoken(str(step.say));
     problems.push(...checkExample(step.example, say, claimsNumericExample(say)).problems);
     for (const cue of list(step.cues)) {
@@ -357,6 +444,29 @@ export function answerVisualProblems(value: unknown, context: AnswerContext): st
     }
     return problems.map((problem) => `Step ${index + 1}: ${problem}`);
   });
+}
+
+/** A board dropped only because the tour just showed it is a choice of the checks, not a fault of the answer. */
+const CHOICE = /^it repeats a board the tour just showed$/;
+
+/**
+ * Why the boards of an answer's steps from `from` on (counting from 0) would not be drawn, as instructions for a
+ * correction: each fails the checks of a tour step's board. A step with an example frames shows those instead.
+ */
+export function answerBoardProblems(value: unknown, context: AnswerContext, from = 0): string[] {
+  if (!isRaw(value)) return [];
+  return list(value.steps)
+    .slice(0, MAX_STEPS)
+    .flatMap((step, index) => {
+      if (index < from || step.example !== undefined || !isRaw(step.board)) return [];
+      const found: string[] = [];
+      boardFromAnswer(step.board, spoken(str(step.say)), context.evidence, {
+        ...context.boards,
+        dropped: (kind, problems) =>
+          found.push(...problems.filter((p) => !CHOICE.test(p)).map((p) => `Step ${index + 1}: board ${kind}: ${p}`)),
+      });
+      return found;
+    });
 }
 
 /** A repair must retain an example once the response introduces a worked numerical case. */

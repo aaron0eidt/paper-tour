@@ -3,8 +3,8 @@
 /* One glass card: a tray (status and question chips) that folds open above the field. It reads on the dark stage
    and on a white page alike. */
 .ask {
-  --ask-glass: rgba(20, 23, 32, 0.9);
-  --ask-edge: rgba(255, 255, 255, 0.08);
+  --ask-glass: var(--surface-glass-soft);
+  --ask-edge: var(--glass-edge);
   --ask-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   width: min(680px, 100%);
   margin: 0 auto;
@@ -39,19 +39,28 @@
   pointer-events: none;
 }
 
-/* The tray expands upward inside the floating card, without resizing the PDF. */
+/* The tray expands upward inside the floating card, without resizing the PDF. While the tour plays the
+   card is just the bar; its width and the bar never change, so a control stays under the pointer when
+   the learner engages and the tray opens above it. */
 .ask.ask-dock {
   position: relative;
   left: 0;
   right: 0;
   bottom: auto;
   z-index: 18;
-  width: min(640px, 100%);
-  transition: width 320ms var(--ask-ease);
+  width: min(600px, 100%);
 }
 
-.ask.ask-dock.expanded {
-  width: min(640px, 100%);
+/* At rest the card recedes: the page and what is highlighted stay the focus. */
+.ask.ask-dock:not(.expanded) .ask-card {
+  background: var(--surface-rest);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    var(--shadow-floating);
+}
+
+.ask.ask-dock:not(.expanded) .ask-card:hover {
+  background: var(--ask-glass);
 }
 
 .ask-card {
@@ -62,8 +71,7 @@
   backdrop-filter: blur(18px) saturate(140%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 18px 44px -16px rgba(0, 0, 0, 0.65),
-    0 2px 8px rgba(0, 0, 0, 0.28);
+    var(--shadow-floating);
   transition:
     border-color 180ms ease,
     box-shadow 220ms ease;
@@ -72,12 +80,11 @@
 .ask-card.focused,
 .ask-card.busy,
 .ask-card.away {
-  border-color: rgba(126, 166, 255, 0.42);
+  border-color: var(--border-accent);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 0 0 4px rgba(126, 166, 255, 0.1),
-    0 18px 44px -16px rgba(0, 0, 0, 0.65),
-    0 2px 8px rgba(0, 0, 0, 0.28);
+    var(--shadow-floating);
 }
 
 .ask :focus-visible {
@@ -181,20 +188,20 @@
 }
 
 .ask-action:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
   color: var(--text);
 }
 
 .ask-action.resume {
   padding: 0 12px 0 10px;
   border-radius: 999px;
-  background: rgba(126, 166, 255, 0.14);
+  background: var(--surface-selected);
   color: var(--accent);
 }
 
 .ask-action.resume:hover {
   background: rgba(126, 166, 255, 0.22);
-  color: #b4cbff;
+  color: var(--accent-ink);
 }
 
 /* Icons sit on the first line when a message wraps. */
@@ -212,7 +219,7 @@
 }
 
 .ask-status.failed {
-  color: #ffcfcf;
+  color: var(--error-ink);
 }
 
 .ask-status.failed svg {
@@ -239,18 +246,19 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  /* min-width: 0 lets a long question shrink to the card and end in an ellipsis instead of being cut off. */
+  /* A long question wraps onto a second line, and only then ends in an ellipsis, rather than being cut off. */
   min-width: 0;
   max-width: 100%;
-  height: 30px;
-  padding: 0 12px;
+  min-height: 30px;
+  padding: 5px 13px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.025);
-  color: #c9cdd9;
+  border-radius: 16px;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
   font-size: 12.5px;
   font-weight: 500;
-  white-space: nowrap;
+  line-height: 1.35;
+  text-align: left;
   cursor: pointer;
   animation: ask-rise 260ms var(--ask-ease) both;
   animation-delay: calc(var(--i, 0) * 45ms);
@@ -261,9 +269,21 @@
 }
 
 .ask-chip span {
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* An answer that is ready plays at once. */
+.ask-chip .ready-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6fd6a1;
+  box-shadow: 0 0 0 3px rgba(111, 214, 161, 0.16);
 }
 
 .ask-chip:hover {
@@ -347,7 +367,7 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
   color: var(--faint);
   cursor: pointer;
   transition:
@@ -363,11 +383,11 @@
 
 .ask-send.ready {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
 }
 
 .ask-send.ready:hover {
-  background: #96b7ff;
+  background: var(--accent-hover);
 }
 
 .ask-send.stop {
@@ -419,9 +439,8 @@
 }
 
 @media (max-width: 860px) {
-  .ask.ask-dock,
-  .ask.ask-dock.expanded {
-    width: calc(100% - 24px);
+  .ask.ask-dock {
+    width: 100%;
   }
   .ask-kbd {
     display: none;
@@ -435,7 +454,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ask.ask-dock,
   .ask-tray,
   .ask-tray-clip {
     transition: none;
@@ -477,7 +495,7 @@
 }
 .ask-mic.recording {
   border-color: var(--error);
-  background: #6b2834;
+  background: var(--error-surface);
 }
 .ask-mic:disabled {
   opacity: 0.4;
@@ -501,7 +519,7 @@
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-subtle);
   color: var(--text);
   font: inherit;
   font-size: 12px;
@@ -532,10 +550,10 @@
   right: 0;
   width: 235px;
   max-width: calc(100vw - 40px);
-  border: 1px solid #3d465b;
+  border: 1px solid var(--border-strong);
   border-radius: 12px;
-  background: #1a1e2a;
-  box-shadow: 0 12px 42px #0007;
+  background: var(--panel);
+  box-shadow: var(--shadow-floating);
   padding: 6px;
 }
 .ask-language-heading {
@@ -569,10 +587,10 @@
   cursor: pointer;
 }
 .ask-language-list [role='option'].active {
-  background: #2b364e;
+  background: var(--surface-selected);
 }
 .ask-language-list [role='option'][aria-selected='true'] {
-  color: #b7ceff;
+  color: var(--accent-ink);
 }
 .ask-language-list [role='option'] > span {
   display: grid;
@@ -582,41 +600,27 @@
   color: var(--muted);
   font-size: 10px;
 }
+/* A phone keeps the bar to one row, so the card stays low: the language is an icon, and the controls
+   never move when the field gets focus. */
 @media (max-width: 500px) {
   .ask-bar {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) 32px 32px;
-    gap: 7px 8px;
-    padding: 8px 10px;
+    gap: 8px;
+    padding: 6px 7px 6px 13px;
   }
   .ask-bar > .ask-spark {
-    grid-column: 1;
-    grid-row: 1;
     align-self: center;
     margin: 0;
   }
-  .ask .ask-input {
-    grid-column: 2 / 5;
-    grid-row: 1;
-    width: 100%;
-    box-sizing: border-box;
+  .ask .ask-language {
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
   }
-  .ask-language-menu {
-    left: 0;
-    right: auto;
-  }
-  .ask-language-control {
-    grid-column: 1 / 3;
-    grid-row: 2;
-    justify-self: start;
-  }
-  .ask-mic {
-    grid-column: 3;
-    grid-row: 2;
-  }
-  .ask-send {
-    grid-column: 4;
-    grid-row: 2;
+  .ask-language > span,
+  .ask-language > svg:last-child {
+    display: none;
   }
 }
 
@@ -865,8 +869,8 @@
   background: var(--accent);
 }
 .ask-checklist li[data-state='done'] .ask-check-mark {
-  color: #aacabb;
-  border-color: #4b675d;
+  color: var(--success);
+  border-color: var(--success-border);
 }
 .ask-checklist li[data-state='failed'] .ask-check-mark {
   color: var(--warn);
@@ -949,6 +953,52 @@
   background: rgba(100,150,255,.12);
   box-sizing: border-box;
 }
+/* While the object inside is found the rectangle shimmers quietly; found, it flows into the object's outline. */
+.pdf-region-selection.snapping {
+  overflow: hidden;
+}
+.pdf-region-selection.snapping::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(190, 210, 255, 0.26) 50%, transparent 62%);
+  background-size: 300% 100%;
+  animation: region-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes region-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+.pdf-region-outline {
+  position: absolute;
+  z-index: 8;
+  overflow: visible;
+  pointer-events: none;
+}
+.pdf-region-outline path {
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.pdf-region-outline .line {
+  fill: rgba(100, 150, 255, 0.13);
+  stroke: #7ea6ff;
+  stroke-width: calc(2px * var(--inv-zoom, 1));
+}
+.pdf-region-outline .glow {
+  fill: none;
+  stroke: rgba(126, 166, 255, 0.22);
+  stroke-width: calc(7px * var(--inv-zoom, 1));
+}
+@media (prefers-reduced-motion: reduce) {
+  .pdf-region-selection.snapping::after {
+    animation: none;
+    background: rgba(190, 210, 255, 0.12);
+  }
+}
 .pdf-region-picker { position: absolute; inset: 0; z-index: 12; cursor: crosshair; touch-action: none; }
 .pdf-region-instruction {
   position: absolute;
@@ -963,7 +1013,7 @@
   padding: 9px 10px 9px 14px;
   border: 1px solid rgba(126,166,255,.3);
   border-radius: 12px;
-  background: rgba(20,23,32,.96);
+  background: var(--surface-glass);
   color: var(--text);
   box-shadow: 0 5px 24px rgba(0,0,0,.25);
   font-size: 12px;
@@ -972,17 +1022,9 @@
 .pdf-region-instruction button { flex: none; padding: 5px 7px; font-size: 11px; }
 .pdf-region-instruction kbd { margin-left: 5px; font-size: 10px; }
 @media (max-width: 680px) {
-  .ask-bar { flex-wrap: wrap; }
-  .ask .ask-input { flex-basis: calc(100% - 42px); }
   .ask-kbd { display: none; }
-  .ask-language-control { margin-right: auto; }
 }
 @media (max-width: 500px) {
-  .ask-bar { grid-template-columns: 18px minmax(0, 1fr) 32px 32px 32px; }
-  .ask .ask-input { grid-column: 2 / 6; }
-  .ask-region { grid-column: 3; grid-row: 2; }
-  .ask-mic { grid-column: 4; }
-  .ask-send { grid-column: 5; }
   .ask-selection-chip small { max-width: 180px; }
   .pdf-region-instruction { width: calc(100% - 30px); box-sizing: border-box; gap: 8px; }
 }

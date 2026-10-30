@@ -163,6 +163,63 @@ export function repeatsPrinted(label: string, printed: string): boolean {
   return ` ${b} `.includes(` ${a} `);
 }
 
+/** Function words of the document languages (see language.ts), which every text uses and which say nothing. */
+const STOP_WORDS = new Set(
+  `a about above after again all also am an and any are as at be because been before being below between both but by
+  can could did do does doing down during each few for from further had has have having he her here hers him his how i
+  if in into is it its itself just me more most my no nor not now of off on once only or other our out over own same she
+  should so some such than that the their them then there these they this those through to too under until up very was
+  we were what when where which while who whom why will with would you your
+  der die das den dem des ein eine einer einem und oder ist sind wird werden für mit auf von zu im nicht auch sich als
+  bei diese dieses kann müssen sie wir es er aber wie noch nur durch nach aus um
+  le la les un une des et ou est sont pour avec sur du de dans pas aussi cette ce qui que il elle ils
+  el los las una y o es son para con en del también este esta se por
+  il lo gli e sono per con su di non anche questo questa che si
+  os as um uma são em do da também
+  het de een en of zijn voor met op van naar niet ook deze dit worden`.split(/\s+/),
+);
+/** Light stemming: a plural or verb ending s goes, so "keys" and "key" match. */
+const stem = (word: string) =>
+  word.length > 4 && word.endsWith('ies')
+    ? `${word.slice(0, -3)}y`
+    : word.length > 3 && word.endsWith('s') && !/(?:ss|us|is)$/.test(word)
+      ? word.slice(0, -1)
+      : word;
+/** The words that carry a text's content: lowercased, without function words and single characters, lightly stemmed. */
+const contentWords = (text: string) =>
+  words(text)
+    .filter((w) => w.length > 1 && !STOP_WORDS.has(w))
+    .map(stem);
+
+/** Fewer content words than this say too little to judge. */
+const MIN_CONTENT_WORDS = 12;
+/**
+ * A step that mostly restates the sentences it highlights. The share is how many of the narration's content words the
+ * highlighted text also uses. Calibrated on the 28 steps with highlighted sentences in three real tours of one paper
+ * (one standard and two deep runs). The seven steps at 0.50 to 0.81 reword their sentences nearly word for word. The
+ * six between 0.44 and 0.49 are mixed: a reworded claim plus a comparison or a consequence. The fifteen below 0.44
+ * explain (a cause, how it works, what it means), down to 0.09. Half flags the clear restatements and leaves the mixed
+ * steps alone.
+ */
+export const RESTATEMENT_SHARE = 0.5;
+
+/** How much of the narration is already in the highlighted sentences, from 0 to 1; 0 when there is too little to judge. */
+export function restatedShare(say: string, highlighted: readonly string[]): number {
+  const spoken = contentWords(say);
+  if (spoken.length < MIN_CONTENT_WORDS) return 0;
+  const source = new Set(highlighted.flatMap(contentWords));
+  return spoken.filter((word) => source.has(word)).length / spoken.length;
+}
+
+/** The learner can read the highlighted sentences, so narration that mostly repeats them adds nothing; repaired once. */
+export function restatesHighlights(say: string, highlighted: readonly string[]): boolean {
+  return restatedShare(say, highlighted) >= RESTATEMENT_SHARE;
+}
+
+/** The repair turn for a step that restates what it highlights. */
+export const RESTATEMENT_REPAIR =
+  'This mostly restates the highlighted sentences, which the learner can read. Lead with the point, then explain why it holds or how it works, in your own words.';
+
 /** A long almost-verbatim reading of the source is repaired once, like an invalid board. */
 export function readsSource(say: string, doc: Doc): boolean {
   const spoken = words(say);

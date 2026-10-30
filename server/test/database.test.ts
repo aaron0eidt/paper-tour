@@ -266,14 +266,23 @@ const databaseTest = test(
           stepId: 'hello',
         });
         assert.equal((await service.manifest(owner, id)).readerState?.stepId, 'hello');
-        await assert.rejects(() =>
-          service.saveState(owner, id, {
-            page: 1,
-            pageOffset: 0,
-            zoom: 1,
-            tourId: null,
-            stepId: 'hello',
-          }),
+        // A step of a saved tour must exist in it.
+        await assert.rejects(
+          () =>
+            service.saveState(owner, id, {
+              page: 1,
+              pageOffset: 0,
+              zoom: 1,
+              tourId: manifest.selectedTour!.id,
+              stepId: 'no-such-step',
+            }),
+          (error) => error instanceof HttpError && error.status === 400,
+        );
+        // The place in a tour still being written has no tour yet: the reader saves its step with no tour id.
+        await service.saveState(owner, id, { page: 1, pageOffset: 0.2, zoom: 1, tourId: null, stepId: 'hello' });
+        assert.deepEqual(
+          [(await service.manifest(owner, id)).readerState?.tourId, (await service.manifest(owner, id)).readerState?.stepId],
+          [null, 'hello'],
         );
         await service.remove(owner, id);
         await assert.rejects(() => service.manifest(owner, id));

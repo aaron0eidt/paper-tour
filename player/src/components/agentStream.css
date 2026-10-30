@@ -7,9 +7,9 @@
   align-items: center;
   justify-content: center;
   gap: 3px;
-  background: #202d48;
-  border: 1px solid #47618a;
-  color: #c7d8ff;
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+  color: var(--accent-ink);
 }
 .agent-orb > span {
   width: 3px;
@@ -62,7 +62,7 @@
   min-width: 30px;
   display: flex;
   justify-content: center;
-  color: #a6c5bc;
+  color: var(--success);
   font-size: 14px;
   line-height: 24px;
 }
@@ -118,8 +118,8 @@
   padding: 14px 17px;
   margin-top: 6px;
   border-radius: 3px 16px 16px;
-  border: 1px solid #34425c;
-  background: #1b2232;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
   font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
@@ -154,8 +154,8 @@
 }
 .activity-view-switch button[aria-pressed='true'] {
   color: var(--accent);
-  border-color: #47618a;
-  background: #202d48;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .activity-dialog .activity-progress {
   display: grid;
@@ -221,7 +221,7 @@
   font-size: 0.92em;
   padding: 1px 4px;
   border-radius: 3px;
-  background: #111722;
+  background: var(--bg);
 }
 .agent-speech summary {
   cursor: pointer;
@@ -230,4 +230,68 @@
 }
 .agent-speech details[open] summary {
   margin-bottom: 12px;
+}
+
+/* The transcript takes the space left by the dialog's fixed header and current action. */
+.activity-body > .agent-stream {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 220px;
+}
+.activity-body .agent-feed {
+  flex: 1;
+  height: auto;
+  min-height: 180px;
+  padding: 8px 4px 16px 0;
+}
+.activity-dialog .activity-progress {
+  padding: 0 0 12px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.agent-orb {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: var(--line);
+}
+.agent-entry {
+  padding-bottom: 18px;
+}
+.agent-speech {
+  padding: 12px 15px;
+  background: var(--panel-2);
+  border-color: var(--line);
+  border-radius: 9px;
+  line-height: 1.65;
+}
+.agent-speech code {
+  background: var(--bg);
+}
+.agent-message-more > summary {
+  list-style: none;
+}
+.agent-message-more > summary::-webkit-details-marker {
+  display: none;
+}
+.agent-message-preview {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.65;
+  margin-bottom: 8px;
+}
+.agent-message-toggle {
+  color: var(--accent);
+  font-size: 11px;
+}
+.agent-message-more[open] .agent-message-preview {
+  display: none;
+}
+.agent-message-more[open] .agent-message-toggle {
+  font-size: 0;
+}
+.agent-message-more[open] .agent-message-toggle::after {
+  content: 'Collapse message';
+  font-size: 11px;
 }

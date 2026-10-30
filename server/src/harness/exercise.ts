@@ -9,17 +9,22 @@ import {
 } from '../../../shared/paper';
 import type { MuseMessage } from '../muse/client';
 import { findAnchor } from './assemble';
-import { BOARD_LIMITS, checkFormula, type FormulaItem } from './board';
+import { BOARD_LIMITS, checkFormula, numbersIn, type FormulaItem } from './board';
 import type { Beat, PlanChapter, Preset, TourPlan } from './beats';
 import type { PaperCard } from './card';
 import { TONE } from './doctype';
 import { taskName } from './paper-block';
+import { idEnum, pick } from './schema-budget';
+import type { UnitVisual } from './exercise-visual';
+import { unitTaskLines } from './unit-task';
 import type { LineCheck } from './verify';
 
 // The tutor for exercise sheets (notes/HARNESS.md, "Tutor"): each taught part gets one solve call that reads the task,
 // names the method and writes the solution as lines of maths; code checks the lines' LaTeX and their maths, and turns
 // the part into steps: the task (givens and question highlighted), the method, one board line per solution step built
-// term by term, and the answer. When the tour is tight, the method joins the task and the answer the last line.
+// term by term, and the answer. When the tour is tight, the method joins the first solution line and the answer the last
+// one. Before the solution comes a checkpoint (coach mode): the learner tries first, with up to three hints that go from
+// a nudge to almost the answer and never contain the result, and the steps after it reveal the solution.
 
 /** One exercise part the tour teaches: a part of a task, or a task without parts, and its plan. */
 export interface Unit {
@@ -39,15 +44,24 @@ export interface Unit {
   pages: number[];
   /** Most solution steps on the board. */
   steps: number;
-  /** When the tour is tight: the task and the method in one step, and the answer with the last solution step. */
+  /** When the tour is tight: the method joins the first solution step, and the answer the last one. */
   compact: boolean;
 }
 
 /** Tour length for a sheet by preset: longer than a paper's, since a solution step is short. */
 export const SHEET_STEPS: Record<Preset, number> = { quick: 10, standard: 22, deep: 30 };
 const STEP_CAP: Record<Preset, number> = { quick: 2, standard: 3, deep: 4 };
-/** Steps of a part besides its solution steps: the task, the method and the answer, or one in compact form. */
-export const unitOverhead = (unit: Pick<Unit, 'compact'>) => (unit.compact ? 1 : 3);
+/** The checkpoint's limits, as the tour schema states them (a paper's quick checks keep to them too, check.ts). */
+export const COACH_PROMPT_MAX = 300;
+export const COACH_HINT_MAX = 200;
+/** Most sentences (or formulas) of a task a solve call may cite from. */
+const UNIT_IDS = 400;
+const COACH_HINTS = 3;
+/**
+ * Steps of a part besides its solution steps: the task, the checkpoint, the method and the answer; in compact form the
+ * task and the checkpoint, since the method joins the first solution step and the answer the last.
+ */
+export const unitOverhead = (unit: Pick<Unit, 'compact'>) => (unit.compact ? 2 : 4);
 
 /** Every part of the sheet in reading order; a task without parts is one unit. */
 export function exerciseUnits(doc: Doc): Unit[] {
@@ -81,25 +95,29 @@ export function exerciseUnits(doc: Doc): Unit[] {
 
 /**
  * Which parts the tour teaches and how deeply, within the preset's length (two steps go to the overview and the
- * takeaway). Every part in full when it fits with the preset's solution steps; else every part in compact form when
- * each gets at least two solution steps; else as many parts as fit, the first part of each task first, then the second
- * ones, in reading order.
+ * takeaway; each part also keeps the steps unitOverhead counts, the checkpoint among them). Every part in full when it
+ * fits with at least two solution steps (up to the preset's); else every part in compact form when each gets at least
+ * two solution steps; else as many parts as fit, the first part of each task first, then the second ones, in reading
+ * order.
  */
 export function planUnits(units: Unit[], preset: Preset): { taught: Unit[]; skipped: Unit[] } {
   const room = SHEET_STEPS[preset] - 2;
   const cap = STEP_CAP[preset];
   if (!units.length) return { taught: [], skipped: [] };
   const each = Math.floor(room / units.length);
-  if (each >= 3 + cap) return { taught: units.map((u) => ({ ...u, steps: cap })), skipped: [] };
-  if (each >= 3)
-    return { taught: units.map((u) => ({ ...u, steps: Math.min(cap, each - 1), compact: true })), skipped: [] };
+  const full = unitOverhead({ compact: false }),
+    tight = unitOverhead({ compact: true });
+  // Every part in full form with as many solution steps as fit (at least two), else in compact form.
+  if (each >= full + 2) return { taught: units.map((u) => ({ ...u, steps: Math.min(cap, each - full) })), skipped: [] };
+  if (each >= tight + 2)
+    return { taught: units.map((u) => ({ ...u, steps: Math.min(cap, each - tight), compact: true })), skipped: [] };
   const rank = new Map<string, number>();
   for (const u of units)
     rank.set(u.id, units.filter((o) => o.task === u.task && units.indexOf(o) < units.indexOf(u)).length);
   const chosen = new Set(
     [...units]
       .sort((a, b) => rank.get(a.id)! - rank.get(b.id)! || units.indexOf(a) - units.indexOf(b))
-      .slice(0, Math.max(1, Math.floor(room / 3)))
+      .slice(0, Math.max(1, Math.floor(room / (tight + 2))))
       .map((u) => u.id),
   );
   return {
@@ -163,29 +181,12 @@ export function exercisePlan(card: PaperCard, doc: Doc, preset: Preset): TourPla
 
 /** The solve call's brief: the part's text with IDs, the maths only the page shows, and the parts before it. */
 export function unitBrief(unit: Unit, doc: Doc): string {
-  const blocks = new Map(doc.blocks.map((b) => [b.id, b]));
-  const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
-  const quote = (ids: string[]) =>
-    ids.flatMap((id) => blocks.get(id)?.sentences ?? []).map((id) => `[${id}] ${sentences.get(id)?.text ?? ''}`);
   const points = unit.part?.points ?? unit.task.points;
-  const lines = [`EXERCISE: ${unit.name}${points !== undefined ? `, ${points} points` : ''}`];
-  if (unit.statement.length) lines.push('TASK STATEMENT, shared by its parts:', ...quote(unit.statement));
-  lines.push(unit.part ? 'THIS PART:' : 'THE TASK:', ...quote(unit.blocks));
-  if (unit.maths.length)
-    lines.push(
-      'MATHS ON THE PAGE as extracted (often garbled; read it in the page image):',
-      ...unit.maths.map((id) => `[${id}] ${blocks.get(id)!.text.replace(/\s+/g, ' ').trim()}`),
-    );
-  const earlier = unit.part ? unit.task.parts.slice(0, unit.task.parts.indexOf(unit.part)) : [];
-  if (earlier.length)
-    lines.push(
-      'EARLIER PARTS OF THIS TASK:',
-      ...earlier.map((p) => `${p.label}) ${quote(p.blocks.slice(0, 1)).join(' ')}`),
-    );
-  lines.push(
+  return [
+    `EXERCISE: ${unit.name}${points !== undefined ? `, ${points} points` : ''}`,
+    ...unitTaskLines(unit, doc),
     `The page${unit.pages.length > 1 ? 's' : ''} with this exercise ${unit.pages.length > 1 ? 'are' : 'is'} attached.`,
-  );
-  return lines.join('\n');
+  ].join('\n');
 }
 
 const object = (properties: Record<string, object>) => ({
@@ -237,43 +238,78 @@ function line(fewest: number, most: number, latexMin = 1) {
 
 /** The solve call's response schema; `strict` adds the ID enums (the code checks them again). */
 export function solveSchema(unit: Unit, strict = true): object {
-  if (!strict) return withoutMaxItems(solveSchema({ ...unit, sentences: [], maths: [] }));
-  const ids = (list: string[]) => (list.length ? { type: 'string', enum: list } : { type: 'string', maxLength: 0 });
+  if (!strict) {
+    // The checkpoint is optional and checked by hand (cleanCoach): an answer without a usable one is still a solution.
+    const loose = withoutMaxItems(solveSchema({ ...unit, sentences: [], maths: [] })) as {
+      required: string[];
+      properties: Record<string, object>;
+    };
+    return {
+      ...loose,
+      required: loose.required.filter((key) => key !== 'try'),
+      properties: { ...loose.properties, try: {} },
+    };
+  }
+  // The task's sentences are listed once for the fields that cite them; a task of many pages offers its first
+  // sentences and the rest is checked in code (schema-budget.ts).
+  const sentence = { $ref: '#/$defs/sentenceId' };
   const { title, latex, terms } = line(1, 3).properties;
-  return object({
-    plan: { type: 'string', maxLength: 6000, description: 'Solve the exercise here first and check the result.' },
-    read: object({
-      say: words(55, 'What is given and what is asked, in 20-50 spoken words.'),
-      given: { type: 'array', maxItems: 3, items: ids(unit.sentences) },
-      given_anchor: anchor,
-      asked: { type: 'array', minItems: 1, maxItems: 2, items: ids(unit.sentences) },
-      asked_anchor: anchor,
-      marks: { type: 'array', maxItems: unit.maths.length ? 1 : 0, items: object({ target: ids(unit.maths), anchor }) },
-    }),
-    method: object({
-      say: words(45, 'The idea or method and why it fits, in 15-45 spoken words.'),
-      formula: line(0, 4, 0),
-    }),
-    steps: {
-      type: 'array',
-      minItems: 1,
-      maxItems: Math.max(1, unit.steps),
-      items: object({
-        title,
-        latex,
-        terms,
-        say: words(45, 'What this step does and why it works, in 10-45 spoken words.'),
-        sure: { type: 'boolean', description: 'false when you are not certain this step is right' },
+  return {
+    $defs: { sentenceId: idEnum(pick(unit.sentences, UNIT_IDS)), mathId: idEnum(pick(unit.maths, UNIT_IDS)) },
+    ...object({
+      plan: { type: 'string', maxLength: 6000, description: 'Solve the exercise here first and check the result.' },
+      read: object({
+        say: words(55, 'What is given and what is asked, in 20-50 spoken words.'),
+        given: { type: 'array', maxItems: 3, items: sentence },
+        given_anchor: anchor,
+        asked: { type: 'array', minItems: 1, maxItems: 2, items: sentence },
+        asked_anchor: anchor,
+        marks: {
+          type: 'array',
+          maxItems: unit.maths.length ? 1 : 0,
+          items: object({ target: { $ref: '#/$defs/mathId' }, anchor }),
+        },
       }),
-    },
-    answer: object({ ...line(1, 2).properties, say: words(45, 'The result in words and a one-line summary.') }),
-    check_note: {
-      type: 'string',
-      maxLength: 140,
-      description: 'One short sentence asking the learner to check a step.',
-    },
-    questions: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', minLength: 1, maxLength: 120 } },
-  });
+      method: object({
+        say: words(45, 'The idea or method and why it fits, in 15-45 spoken words.'),
+        formula: line(0, 4, 0),
+      }),
+      steps: {
+        type: 'array',
+        minItems: 1,
+        maxItems: Math.max(1, unit.steps),
+        items: object({
+          title,
+          latex,
+          terms,
+          say: words(45, 'What this step does and why it works, in 10-45 spoken words.'),
+          sure: { type: 'boolean', description: 'false when you are not certain this step is right' },
+        }),
+      },
+      answer: object({ ...line(1, 2).properties, say: words(45, 'The result in words and a one-line summary.') }),
+      try: object({
+        prompt: {
+          type: 'string',
+          minLength: 1,
+          maxLength: COACH_PROMPT_MAX,
+          description:
+            'What the learner should try before seeing the solution, in 1-2 spoken sentences; never the result.',
+        },
+        hints: {
+          type: 'array',
+          maxItems: COACH_HINTS,
+          items: { type: 'string', minLength: 1, maxLength: COACH_HINT_MAX },
+          description: 'Up to 3 hints from a nudge to almost the answer; none contains the final result.',
+        },
+      }),
+      check_note: {
+        type: 'string',
+        maxLength: 140,
+        description: 'One short sentence asking the learner to check a step.',
+      },
+      questions: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', minLength: 1, maxLength: 120 } },
+    }),
+  };
 }
 
 /**
@@ -332,6 +368,14 @@ export const SOLVE_EXAMPLE = {
     terms: [{ latex: '3', label: 'the solution', anchor: 'x equals three' }],
     say: 'So x equals three. Putting it back in, five times three plus two is seventeen, so the answer checks out.',
   },
+  try: {
+    prompt: 'Before we solve it, what would you do first to get the x term alone on one side?',
+    hints: [
+      'Look at what is added to the x term, and how you could undo it.',
+      'Undo an addition by subtracting the same number from both sides, so the equation stays balanced.',
+      'Subtracting that number leaves only the x term on the left; then ask what x is multiplied by.',
+    ],
+  },
   check_note: 'Please check this step yourself.',
   questions: ['Why do we do the same on both sides?', 'How can I check my answer?'],
 };
@@ -355,6 +399,11 @@ export function solveTask(language: string, brief: string, unit: Unit): string {
    "the determinant of A"), never as LaTeX.`,
     `"sure" is false when you are not certain a step is right. Never guess silently: an honest "not sure" is better.`,
     `"answer" is the final result as one line of LaTeX, and its "say" states it in words with a one-line summary.`,
+    `"try" is the learner's turn: the tour stops after the task and the learner attempts the part before the solution is
+   shown. "try.prompt" says in 1-2 spoken sentences in ${lang} what to try first, as a question or a first move, never the
+   result. "try.hints" are 1-3 hints in ${lang} that go from a nudge to almost the answer: the first points at the idea or
+   the question to ask, the second names the method or rule and the first move, the third carries out the first step but
+   stops short of the result. No hint and not the prompt may contain the final result or the "answer" line.`,
     `"check_note" is one short sentence in ${lang} asking the learner to check a step themselves.`,
     `"questions" are two short questions in ${lang} a learner might ask about this exercise, such as why a step works.`,
     ...(unit.compact
@@ -382,6 +431,11 @@ export interface BoardLine {
   board: FormulaItem | null;
   anchors: string[];
 }
+/** A checkpoint: what the learner tries first, and up to three hints from a nudge to almost the answer. */
+export interface Coach {
+  prompt: string;
+  hints: string[];
+}
 export interface Solution {
   read: {
     say: string;
@@ -395,6 +449,8 @@ export interface Solution {
   method: { say: string; line: BoardLine | null };
   steps: (BoardLine & { say: string; sure: boolean })[];
   answer: BoardLine & { say: string };
+  /** The learner's turn before the solution: what to try and the hints, none of which gives the result; null without one. */
+  coach: Coach | null;
   checkNote: string;
   questions: string[];
 }
@@ -418,11 +474,91 @@ function boardLine(raw: Raw, name: string, problems: string[], most: number): Bo
   };
 }
 
+const flatten = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/\\(?:left|right|,|;|!|quad|displaystyle)/g, '')
+    .replace(/\\(?:cdot|times)/g, '*')
+    .replace(/[\s${}]/g, '');
+
+/** Number words of the languages the sheets come in (English and German), for results that are small whole numbers. */
+const NUMBER_WORDS: Record<number, string[]> = Object.fromEntries(
+  [
+    ['zero', 'null'],
+    ['one', 'eins', 'ein'],
+    ['two', 'zwei'],
+    ['three', 'drei'],
+    ['four', 'vier'],
+    ['five', 'fuenf', 'fünf'],
+    ['six', 'sechs'],
+    ['seven', 'sieben'],
+    ['eight', 'acht'],
+    ['nine', 'neun'],
+    ['ten', 'zehn'],
+    ['eleven', 'elf'],
+    ['twelve', 'zwoelf', 'zwölf'],
+    ['thirteen', 'dreizehn'],
+    ['fourteen', 'vierzehn'],
+    ['fifteen', 'fuenfzehn', 'fünfzehn'],
+    ['sixteen', 'sechzehn'],
+    ['seventeen', 'siebzehn'],
+    ['eighteen', 'achtzehn'],
+    ['nineteen', 'neunzehn'],
+    ['twenty', 'zwanzig'],
+  ].map((words, n) => [n, words]),
+);
+
+/**
+ * Whether a hint or a prompt gives the final result away: the answer's own line, its right-hand side, or a number of
+ * the answer (in digits or, for a whole number from three to twenty, in words, since "one" and "two" are everyday words)
+ * that the task itself does not already contain.
+ */
+export function leaksResult(text: string, answer: string, given: string): boolean {
+  const heard = flatten(text);
+  const line = flatten(answer);
+  const result = flatten(answer.split('=').at(-1) ?? '');
+  if (line.length >= 3 && heard.includes(line)) return true;
+  if (result.length >= 3 && heard.includes(result)) return true;
+  const known = new Set(numbersIn(given));
+  const mine = new Set(numbersIn(text));
+  const words = new Set(text.toLowerCase().match(/\p{L}+/gu) ?? []);
+  return numbersIn(answer).some(
+    (n) => !known.has(n) && (mine.has(n) || (n >= 3 && (NUMBER_WORDS[n] ?? []).some((word) => words.has(word)))),
+  );
+}
+
+/** A hint the sheet itself prints for the part: "Hint: ...", "Hinweis: ...". */
+const PRINTED_HINT =
+  /^\s*(?:hints?|tips?|hinweis(?:e)?|tipp|indice|pista|suggerimento|aanwijzing)\s*[:.)\u2013-]\s*(.+)$/i;
+
+/** The checkpoint from the model's "try", or null when it has no usable prompt; the printed hints of the part come first. */
+function cleanCoach(raw: unknown, answer: string, given: string, printed: string[]): Coach | null {
+  const entry = (raw && typeof raw === 'object' ? raw : {}) as Raw;
+  const prompt = clean(entry.prompt);
+  if (spoken(prompt) < 3 || prompt.length > COACH_PROMPT_MAX || leaksResult(prompt, answer, given)) return null;
+  // The ladder only gets more revealing, so everything from the first hint that gives the result away is left out.
+  const own: string[] = [];
+  for (const hint of (Array.isArray(entry.hints) ? entry.hints : []).map(clean).filter(Boolean)) {
+    if (hint.length > COACH_HINT_MAX || leaksResult(hint, answer, given)) break;
+    own.push(hint);
+  }
+  const hints = [
+    ...new Set([...printed.filter((h) => h.length <= COACH_HINT_MAX && !leaksResult(h, answer, given)), ...own]),
+  ];
+  return { prompt, hints: hints.slice(0, COACH_HINTS) };
+}
+
 /**
  * The solution with only known IDs and checked board lines; null when its shape or narration is unusable. Problems
- * with a board line are returned for one repair turn; the line then shows without its board if they stay.
+ * with a board line are returned for one repair turn; the line then shows without its board if they stay. With the
+ * document, the checkpoint's hints can also be checked against the task's own numbers and the sheet's printed hints
+ * go first.
  */
-export function cleanSolution(value: unknown, unit: Unit): { solution: Solution | null; problems: string[] } {
+export function cleanSolution(
+  value: unknown,
+  unit: Unit,
+  doc?: Doc,
+): { solution: Solution | null; problems: string[] } {
   const check = ajv.compile(solveSchema(unit, false));
   if (!check(value))
     return {
@@ -457,11 +593,21 @@ export function cleanSolution(value: unknown, unit: Unit): { solution: Solution 
     return { ...boardLine(s, `step ${i + 1}`, problems, 3), say, sure: s.sure !== false };
   });
   const answer = { ...boardLine(v.answer, 'answer', problems, 2), say: clean(v.answer.say) };
+  const text = new Map((doc?.sentences ?? []).map((sentence) => [sentence.id, sentence.text]));
+  const blocks = new Map((doc?.blocks ?? []).map((block) => [block.id, block]));
+  const given = [
+    ...unit.sentences.map((id) => text.get(id) ?? ''),
+    ...unit.maths.map((id) => blocks.get(id)?.text ?? ''),
+  ].join(' ');
+  const printed = unit.blocks
+    .flatMap((id) => blocks.get(id)?.sentences ?? [])
+    .flatMap((id) => PRINTED_HINT.exec(text.get(id) ?? '')?.[1].trim() ?? []);
   const solution: Solution = {
     read,
     method,
     steps,
     answer,
+    coach: cleanCoach(v.try, answer.latex, given, printed),
     checkNote: clean(v.check_note),
     questions: (v.questions as string[]).map(clean).filter(Boolean).slice(0, 2),
   };
@@ -503,8 +649,19 @@ const UNCHECKED: Record<string, string> = {
 };
 const BOARD_HOLD_MS = 800;
 
-/** The steps that teach one part; `checks` are the verifier's verdicts on the solution lines, in order. */
-export function unitSteps(unit: Unit, s: Solution, checks: LineCheck[], language: string): Step[] {
+/**
+ * The steps that teach one part; `checks` are the verifier's verdicts on the solution lines, in order. A method visual
+ * (exercise-visual.ts) shows with the method, after the checkpoint: on the method step, or in the compact form on the
+ * first solution step, where the line's board follows it once the method has been said. It replaces the rule the method
+ * step would show; the solution lines stay formula boards.
+ */
+export function unitSteps(
+  unit: Unit,
+  s: Solution,
+  checks: LineCheck[],
+  language: string,
+  visual?: UnitVisual | null,
+): Step[] {
   const tag = UNCHECKED[language.slice(0, 2).toLowerCase()] ?? UNCHECKED.en;
   const camera: Action = { type: 'focus', target: unit.blocks[0] };
   const at = (say: string, phrase: string) => {
@@ -512,35 +669,60 @@ export function unitSteps(unit: Unit, s: Solution, checks: LineCheck[], language
     return word ? { at_word: word } : {};
   };
   /** The line's board item, titled "unchecked" when the code could not verify it, and a focus per named term. */
-  const board = (l: BoardLine | null, say: string, check?: LineCheck): Action[] => {
+  const board = (l: BoardLine | null, say: string, check?: LineCheck, from = 0): Action[] => {
     if (!l?.board) return [];
     const title = check && check.status !== 'ok' ? [l.title, tag].filter(Boolean).join(' · ') : l.title;
     const item: FormulaItem = { ...l.board, ...(title ? { title } : {}) };
-    const out: Action[] = [{ type: 'board', item }];
+    // From a word on (after a visual that the narration has been naming): the board and its terms come in there.
+    const out: Action[] = [{ type: 'board', item, ...(from ? { at_word: from } : {}) }];
     const used = new Set<number>();
     l.anchors.forEach((phrase, part) => {
       const word = phrase && part < item.terms.length ? findAnchor(say, phrase) : null;
-      if (word === null || used.has(word)) return;
+      if (word === null || word < from || used.has(word)) return;
       used.add(word);
       out.push({ type: 'board_focus', part, ...(word ? { at_word: word } : {}) });
     });
     return out;
   };
+  /** The method visual and the parts of it the narration names, each lit up where it does. */
+  const sketch = (v: UnitVisual, say: string): Action[] => [
+    { type: 'board', item: v.item },
+    ...v.focus.flatMap(({ part, anchor }): Action[] => {
+      const word = findAnchor(say, anchor);
+      return word === null ? [] : [{ type: 'board_focus', part, ...(word ? { at_word: word } : {}) }];
+    }),
+  ];
   /** A step that failed its check, or that its author doubts and the code could not confirm, asks for a check. */
   const doubt = (say: string, check: LineCheck | undefined, sure: boolean) =>
     check?.status === 'failed' || (!sure && check?.status !== 'ok') ? `${say} ${s.checkNote}`.trim() : say;
 
   const read = s.read;
-  const taskSay = unit.compact && s.method.say ? `${read.say} ${s.method.say}` : read.say;
-  const task: Action[] = [camera, ...(unit.compact ? board(s.method.line, taskSay) : [])];
+  const answerCheck = checks[s.steps.length];
+  // The learner tries first, unless the answer line failed its check: a solution in doubt is not worth a pause.
+  const coach = s.coach && answerCheck?.status !== 'failed' ? s.coach : null;
+  // With a checkpoint the method must not be heard before the learner has tried: it opens the solution instead.
+  const methodFirst = unit.compact && Boolean(coach) && Boolean(s.method.say);
+  const taskSay = unit.compact && s.method.say && !coach ? `${read.say} ${s.method.say}` : read.say;
+  const task: Action[] = [camera, ...(unit.compact && !coach ? board(s.method.line, taskSay) : [])];
   if (read.given.length)
     task.push({ type: 'highlight', targets: read.given, color: 'blue', ...at(taskSay, read.givenAnchor) });
   if (read.asked.length)
     task.push({ type: 'highlight', targets: read.asked, color: 'yellow', ...at(taskSay, read.askedAnchor) });
   if (read.mark) task.push({ type: 'circle', target: read.mark, color: 'blue', ...at(taskSay, read.markAnchor) });
   const steps: Step[] = [{ id: `${unit.id}-task`, say: taskSay, actions: task }];
+  // Your turn: the tour stops here with the question still marked, and the next steps reveal the solution.
+  if (coach)
+    steps.push({
+      id: `${unit.id}-try`,
+      say: coach.prompt,
+      actions: [
+        camera,
+        ...(read.asked.length ? [{ type: 'highlight' as const, targets: read.asked, color: 'yellow' as const }] : []),
+      ],
+      checkpoint: { prompt: coach.prompt, hints: coach.hints },
+    });
   if (!unit.compact && s.method.say) {
-    const actions = [camera, ...board(s.method.line, s.method.say)];
+    const actions = [camera, ...(visual ? sketch(visual, s.method.say) : board(s.method.line, s.method.say))];
     steps.push({
       id: `${unit.id}-method`,
       say: s.method.say,
@@ -548,16 +730,23 @@ export function unitSteps(unit: Unit, s: Solution, checks: LineCheck[], language
       ...(actions.length > 1 ? { hold_ms: BOARD_HOLD_MS } : {}),
     });
   }
-  const answerCheck = checks[s.steps.length];
   const answerSay = doubt(s.answer.say, answerCheck, true) || s.answer.latex;
   const solved: Action = { type: 'highlight', targets: read.asked, color: 'green' };
   s.steps.forEach((step, i) => {
     // In compact form the last step also gives the answer, and lights up the question once the result is said.
     const last = unit.compact && i === s.steps.length - 1;
-    const own = doubt(step.say, checks[i], step.sure);
-    const say = last ? `${own} ${answerSay}` : own;
-    const actions = [camera, ...board(step, say, checks[i])];
-    if (last && read.asked.length) actions.push({ ...solved, at_word: splitWords(own).length });
+    const lead =
+      i === 0 && methodFirst
+        ? `${s.method.say} ${doubt(step.say, checks[i], step.sure)}`
+        : doubt(step.say, checks[i], step.sure);
+    const say = last ? `${lead} ${answerSay}` : lead;
+    const shown = i === 0 && methodFirst && visual ? sketch(visual, s.method.say) : [];
+    const actions = [
+      camera,
+      ...shown,
+      ...board(step, say, checks[i], shown.length ? splitWords(s.method.say).length : 0),
+    ];
+    if (last && read.asked.length) actions.push({ ...solved, at_word: splitWords(lead).length });
     steps.push({ id: `${unit.id}-step-${i + 1}`, say, actions, hold_ms: BOARD_HOLD_MS });
   });
   if (unit.compact && s.steps.length) return steps;

@@ -9,25 +9,29 @@ export interface ModelPickerProps {
   model: string;
   onModelChange(model: string): void;
   disabled?: boolean;
+  loading?: boolean;
   compact?: boolean;
   label?: string;
 }
 
-export function ModelPicker({ catalog, model, onModelChange, disabled = false, compact = false, label = 'Tour model' }: ModelPickerProps) {
+export function ModelPicker({ catalog, model, onModelChange, disabled = false, loading = false, compact = false, label = 'Tour model' }: ModelPickerProps) {
   const id = useId();
   const selected = selectedApiModel(catalog, model);
-  const selectedAbsent = !!model && !selected;
+  const selectedAbsent = !!catalog && !!model && !selected;
+  const hasModels = !!catalog?.models.length;
   return <div className={`model-settings${compact ? ' compact' : ''}`}>
     <label className="model-picker-label" htmlFor={id}>{label}</label>
-    <select id={id} value={model} onChange={(event) => onModelChange(event.target.value)} disabled={disabled || !catalog} aria-describedby={`${id}-prices ${selected?.contributor ? `${id}-training` : ''}`}>
-      {!catalog && <option value="">Loading models…</option>}
+    <select id={id} value={catalog ? model : ''} onChange={(event) => onModelChange(event.target.value)} disabled={disabled || loading || !hasModels} aria-busy={loading} aria-describedby={`${id}-prices ${selected?.contributor ? `${id}-training` : ''}`}>
+      {!catalog && <option value="">{loading ? 'Loading models…' : 'Models unavailable'}</option>}
+      {catalog && !hasModels && <option value="">No models available</option>}
+      {hasModels && !model && <option value="" disabled>Choose a model</option>}
       {selectedAbsent && <option value={model} disabled>{model} — not listed</option>}
       {catalog?.models.map((candidate) => <option key={candidate.id} value={candidate.id} disabled={!candidate.tourCompatible || candidate.available === false}>
         {modelDisplayName(candidate)}{!candidate.tourCompatible ? ` · ${modelPurpose(candidate)}` : candidate.available === false ? ' · unavailable' : ''}
       </option>)}
     </select>
     <div className="model-selected-prices" id={`${id}-prices`}>
-      {selected?.pricing ? <p>Per 1M tokens: input {formatPrice(selected.pricing.inputPerMillionTokens)}, cached input {formatPrice(selected.pricing.cachedInputPerMillionTokens)}, output {formatPrice(selected.pricing.outputPerMillionTokens)}.</p> : <p>{catalog ? 'Prices are not published for this model.' : 'Prices load with the model list.'}</p>}
+      {selected?.pricing ? <p>Per 1M tokens: input {formatPrice(selected.pricing.inputPerMillionTokens)}, cached input {formatPrice(selected.pricing.cachedInputPerMillionTokens)}, output {formatPrice(selected.pricing.outputPerMillionTokens)}.</p> : <p>{loading ? 'Loading model prices…' : !catalog ? 'Retry the model list to see availability and prices.' : !selected ? 'Choose an available model to see its prices.' : 'Prices are not published for this model.'}</p>}
       {catalog?.availability === 'not_configured' && <p>Tour creation is not configured yet. Your model choice will be saved with the PDF.</p>}
       {catalog?.availability === 'unavailable' && <p>Live model availability could not be checked. Listed API prices remain available below.</p>}
       {selected?.available === false && <p>This model is not currently available for tour creation. Choose another model.</p>}

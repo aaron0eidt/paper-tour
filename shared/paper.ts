@@ -2,6 +2,16 @@ import type { PlotItem } from './plot';
 export type { PlotItem } from './plot';
 import type { SceneItem } from './scene';
 export type { SceneItem, SceneObject } from './scene';
+import type { HeatmapItem } from './heatmap';
+export type { HeatmapItem } from './heatmap';
+import type { ScatterItem } from './scatter';
+export type { ScatterItem } from './scatter';
+import type { ShapesItem } from './shapes';
+export type { ShapesItem, ShapesTerm } from './shapes';
+import type { TimelineItem } from './timeline';
+export type { TimelineItem, TimelineEvent, TimelineSpan } from './timeline';
+import type { DistributionItem } from './distribution';
+export type { DistributionItem, DistributionSpec } from './distribution';
 // TypeScript mirror of schema/doc.schema.json and schema/tour.schema.json (version 0.1).
 // The schemas are the source of truth; keep these in sync with them.
 
@@ -71,6 +81,49 @@ export interface DocPanel {
   label?: string;
 }
 
+/** A column of a table grid, after its row labels. */
+export interface DocTableColumn {
+  /** The header text, spanning headers first ("BLEU EN-DE"), without direction marks; equal names get a number. */
+  name: string;
+  /** number: most of the filled cells are numbers. */
+  kind: 'number' | 'text';
+  /** A unit or scale found in the header or the cells: ms, %, ×10^6. */
+  unit?: string;
+  /** Which way is better, only when the header says so (an arrow, "higher is better"). */
+  better?: 'up' | 'down';
+}
+
+export interface DocTableCell {
+  /** As printed; empty for a blank cell. Scripts are written d_model and 10^19. */
+  text: string;
+  /** The number the cell holds, only when the whole cell is one number (0.16 ± 0.11 is 0.16, 2.3 × 10^19 is 2.3e19). */
+  value?: number;
+}
+
+export interface DocTableRow {
+  /** The row label; empty when the row is named by its group or by its cells. */
+  label: string;
+  /** What several rows share: a label centred beside them, or a title line above them. */
+  group?: string;
+  /** Text printed across the row's columns. */
+  note?: string;
+  /** One cell per column. */
+  cells: DocTableCell[];
+}
+
+/** What a table prints, typed. Only present when the table could be read without guessing. */
+export interface DocTableGrid {
+  /** medium: part of it was inferred (no rule under the header, a number printed across several columns). */
+  confidence: 'high' | 'medium';
+  method: 'spans' | 'finder';
+  /** Header of the row-label column, when the table has one. */
+  label_header?: string;
+  columns: DocTableColumn[];
+  rows: DocTableRow[];
+  /** Lines of text under the last row, inside the table box. */
+  notes?: string[];
+}
+
 export interface DocFigure {
   id: string;
   kind: 'figure' | 'table';
@@ -82,11 +135,15 @@ export interface DocFigure {
   image: string;
   panels: DocPanel[];
   referenced_by: string[];
+  /** Tables only, and only when readable: the typed rows and columns. */
+  grid?: DocTableGrid;
 }
 
 export interface DocEquation {
+  /** eq and the printed number (eq1, eq5a), or equ1, equ2, ... in reading order for a display without one. */
   id: string;
-  number: string;
+  /** The printed number; null for a display without one. */
+  number: string | null;
   page: number;
   bbox: BBox;
   block?: string;
@@ -244,6 +301,11 @@ export interface FormulaTerm {
 export type BoardItem =
   | PlotItem
   | SceneItem
+  | HeatmapItem
+  | ScatterItem
+  | ShapesItem
+  | TimelineItem
+  | DistributionItem
   | { kind: 'formula'; title?: string; latex: string; terms: FormulaTerm[] }
   | { kind: 'flow'; title?: string; nodes: { id: string; label: string; color?: Color }[]; edges: [string, string][] }
   | {
@@ -261,7 +323,10 @@ export interface BoardAction {
   at_word?: number;
 }
 
-/** Light up one part of the board item: a formula term, flow node, bar, curve or scene object, by index. */
+/**
+ * Light up one part of the board item, by index: a formula term, flow node, bar, curve (then plot mark), scene object,
+ * heatmap row, scatter point, shapes matrix, timeline event (then span) or distribution (then its region).
+ */
 export interface BoardFocusAction {
   type: 'board_focus';
   part: number;
@@ -279,6 +344,14 @@ export type OverlayAction = HighlightAction | BoxAction | SpotlightAction | Note
 export type BoardControl = BoardAction | BoardFocusAction | BoardClearAction;
 export type Action = CameraAction | OverlayAction | ClearAction | BoardControl;
 
+/** A pause where the learner tries first: the step asks, hints come one at a time, and the next step reveals the answer. */
+export interface Checkpoint {
+  /** What the learner should try, in one or two sentences. */
+  prompt: string;
+  /** Up to three hints, from a nudge to almost the answer. */
+  hints: string[];
+}
+
 export interface Step {
   id: string;
   speaker?: string;
@@ -286,6 +359,8 @@ export interface Step {
   hold_ms?: number;
   audio?: StepAudio;
   actions: Action[];
+  /** The learner tries this before the next step reveals it (exercise sheets, quick checks). */
+  checkpoint?: Checkpoint;
 }
 
 export interface Chapter {
@@ -305,6 +380,8 @@ export interface Tour {
   preset?: 'quick' | 'standard' | 'deep';
   /** Questions offered to the learner when the tour ends. */
   suggested_questions?: string[];
+  /** The kind of document, so the reader can pick its mode; a lecture deck plays slide by slide. */
+  doc_type?: 'research_paper' | 'exercise_sheet' | 'lecture' | 'contract' | 'letter' | 'other';
   chapters: Chapter[];
 }
 

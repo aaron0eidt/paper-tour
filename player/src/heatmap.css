@@ -1,0 +1,204 @@
+/* The heatmap board: a grid of values, or curves between two rows of tokens. Geometry and colours come from heatmap.ts;
+   the build runs on the board's clock (components/HeatmapBoard.tsx), so only focus changes are styled here. */
+
+/* The drawing fills the body, so it knows the room it has, and sits a little above its middle. */
+.board-view[data-kind='heatmap'] .board-body {
+  scrollbar-gutter: stable;
+}
+
+.board-view[data-kind='heatmap'] .board-body::before,
+.board-view[data-kind='heatmap'] .board-body::after {
+  display: none;
+}
+
+.heatmap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.heatmap::before,
+.heatmap::after {
+  content: '';
+  flex: 1 1 0;
+}
+
+.heatmap::after {
+  flex-grow: 1.4;
+}
+
+.hm-svg {
+  display: block;
+  flex: none;
+  margin-inline: auto;
+  overflow: visible;
+}
+
+/* ------------------------------------------------------------------- labels */
+
+.hm-label {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+  transition: fill 360ms ease;
+}
+
+.hm-row.is-focus .hm-label,
+.hm-token.is-focus .hm-label {
+  fill: var(--text);
+}
+
+/* ------------------------------------------------------------------- grid */
+
+/* The row in focus stays as it is and gains an accent edge; the others step back. */
+.hm-row {
+  transition: opacity 360ms ease;
+}
+
+.heatmap.has-focus .hm-row:not(.is-focus) {
+  opacity: 0.42;
+}
+
+.hm-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.hm-ring.is-on {
+  opacity: 1;
+}
+
+/* Colours change in script, so the text colour is set there too (it follows the cell). */
+.hm-value {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.hm-sum {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A masked cell has no value: a quiet tile with fine diagonal hatching. */
+.hm-masked {
+  stroke: var(--board-rule);
+  stroke-width: 1;
+}
+
+.hm-hatch-line {
+  stroke: var(--board-edge);
+  stroke-opacity: 0.45;
+  stroke-width: 1;
+}
+
+/* ------------------------------------------------------------------ links */
+
+.hm-links {
+  stroke: var(--accent);
+  transition:
+    opacity 360ms ease,
+    stroke 360ms ease;
+}
+
+/* Only the focused row's curves stay strong; the rest fade to a trace. */
+.heatmap.has-focus .hm-links:not(.is-focus) {
+  stroke: var(--board-edge);
+  opacity: 0.08;
+}
+
+.hm-link {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.hm-links.is-focus .hm-link {
+  stroke-dasharray: 1;
+  animation: hm-draw 700ms var(--board-ease-out) backwards;
+}
+
+.heatmap[data-paused] .hm-link {
+  animation-play-state: paused;
+}
+
+@keyframes hm-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+.hm-dot {
+  fill: var(--board-edge);
+  transition: fill 360ms ease;
+}
+
+.hm-token.is-focus .hm-dot {
+  fill: var(--accent);
+}
+
+.hm-link-values {
+  animation: board-in 320ms ease backwards;
+}
+
+.hm-link-value {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------------- footer */
+
+.hm-foot {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding-top: 12px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.hm-legend,
+.hm-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hm-ramp {
+  display: block;
+  width: 96px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.hm-hatch-swatch {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--board-rule);
+  border-radius: 3px;
+  background: repeating-linear-gradient(45deg, rgb(123 132 152 / 0.5) 0 1px, transparent 1px 5px);
+}
+
+.hm-caption {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* The tag that says a board's numbers are invented or computed, not the paper's: dashed, to read as "not measured". */
+.board-source {
+  margin-left: auto;
+  border-style: dashed;
+}

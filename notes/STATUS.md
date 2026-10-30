@@ -1,4 +1,54 @@
-# Status (2026-10-29)
+# Status (2026-10-30)
+
+## The generation pipeline now (2026-10-30)
+
+- **How a tour is written** (`server/src/harness/generator.ts`; [HARNESS.md](HARNESS.md) has the detail): for a paper
+  the card and the claims are asked in parallel, and the opening step's visual is planned alone from the card, so that
+  the first step does not wait for the plan of the whole tour. That plan is one call at medium effort, and code holds
+  it to the diversity limits (each board kind once, formula and plot twice, at most 60% of the steps with a board).
+  The steps are directed in parallel, each from a schema that lists only the IDs it may point at. Code checks every
+  narration, pen mark, example and board; what still fails after two corrections is dropped and recorded (the degrade
+  ladder), so one bad board never fails the tour.
+- **Time and progress:** every call has a time limit, and a step has 40 s for repairs, a repair after an unusable first
+  try included; a slow call is asked again at once, lean when it had a board planned. The finished leading steps are
+  announced as partial tours, which the reader plays while the rest is written.
+- **Quick checks** (a prediction or recall question after a chapter, practice and never graded) keep tours concise:
+  none in a quick tour, one in a standard one, two in a deep one.
+- **Changed today:** the visual plan reasons at medium (papers got only 3 to 4 boards at low); the check limits above;
+  the repair cap; `minimal` is a member of the `Effort` type, so its casts are gone; the claims and the opening visual
+  have readable labels in the generation activity.
+- **Checks:** the server type-check passes and all 695 server tests ran (688 passed, 7 database skips). No real model
+  call was made for this entry, so the effect of the new check limits and of the medium plan on real tours is not
+  measured.
+
+## The richer-visuals branch (2026-10-29, evening)
+
+- **Where it is:** `feat/richer-visuals`, six commits on main from 15:08 to 20:23, not merged. They add:
+  - heatmap, scatter and shapes boards, a whole-tour visual plan, direct narration and the paraphrase and repeated-board
+    checks ([VISUALS-V2.md](VISUALS-V2.md)); the default preset is `standard` again;
+  - a degrade ladder (a step loses a failing board, example or pen marks, not the tour), rejection of weak boards, and
+    SAM 3.1 snapping of a learner's selection ([META-MODELS.md](META-MODELS.md));
+  - `Tour.doc_type` and `Step.checkpoint` in both contracts, and a tour of its own for each type: claims for papers, a
+    deck planner and filmstrip for lecture slides, try-first checkpoints for exercise sheets;
+  - real table data and unnumbered equations as targets, and progressive playback in the reader.
+- **Evidence:** seven real runs on `muse-spark-1.3`, `standard`, `harness@26`, at about 19:43: four papers, one
+  lecture deck, two exercise sheets (English and German). 97 steps, 4,790 words, 105 model calls, about $3.12 at list
+  price, 45 to 120 s per tour, all eight board kinds used, no repeated board data, all 313 pointed IDs exist, and none
+  of the seven failed. `node scripts/scorecard.mjs <tour folders>` prints the numbers without model calls; its output
+  is in the README. Seven documents are not a benchmark.
+- **Weak spots the runs show:**
+  - Three of eight document boards have numbers the text does not print (two Casimir bars in arbitrary units, one deck
+    bar of ratios derived from illustrative counts), and none is declared illustrative.
+  - The sheets drew formula boards only (their visual plan fell back), and only 11 of 28 solution lines could be checked
+    numerically (1 of 13 on the English sheet).
+  - One Casimir figure step lost its pen marks to the degrade ladder.
+- **Checks while writing this entry:** the player type-check, the player suites and `validate.py demo/attention`
+  pass. The server type-check fails and 6 server tests fail (531 of 544 pass, 7 skipped) in the board registry, the
+  direction and plan prompts and the tour schema, while timeline and distribution boards are being added in the same
+  checkout; they are not a regression of the commits above. The scorecard test passes
+  (`node --test scripts/scorecard.test.mjs`; the root `npm test` does not run it).
+- **Needs Aaron:** the README "Provenance and team" section is a marked placeholder (dates, authors, what existed before
+  the event, third-party code and documents). There is no LICENSE file yet, and "Paper Tour" is a working name.
 
 ## Check after the 10-29 merges (2026-10-29)
 
@@ -30,9 +80,11 @@
      changed since.
 - **Decisions for Aaron and Nikolas:**
   - The default preset is now `deep` (`server/src/config.ts`, `.env.example`); the plan asked for concise tours.
+    (Superseded on the richer-visuals branch: the default is `standard` again.)
   - After two failed corrections, one beat with an invalid scene, worked example or visual grounding now fails the
     whole tour (`server/src/harness/generator.ts`, around line 402); before, the beat fell back and the tour still
     played. The first runs in [VISUAL-EVALUATION.md](VISUAL-EVALUATION.md) failed on two of three papers before fixes.
+    (Superseded on the richer-visuals branch: the degrade ladder drops the failing part and the tour plays.)
   - Tesseract and OpenCV are new runtime dependencies; local OCR is one of the open hackathon-rule questions.
 
 ## Composable live explanations (2026-10-28)

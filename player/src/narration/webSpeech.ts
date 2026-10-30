@@ -80,9 +80,11 @@ export class WebSpeechNarrator implements Narrator {
     // Keep strong references: Chrome can garbage-collect an utterance and never fire `end`.
     const utterances: SpeechSynthesisUtterance[] = [];
 
+    // A resume or seek speaks from the chunk the start word is in (a sentence start, for the engine).
+    const first = Math.max(0, chunks.findIndex((c) => c.start + c.count > (req.startWord ?? 0)));
     let cancelled = false;
     let finished = false;
-    let last = -1;
+    let last = (chunks[first]?.start ?? 0) - 1;
     let estimateTimer: ReturnType<typeof setTimeout> | undefined;
     let watchdog: ReturnType<typeof setTimeout> | undefined;
     let startTimer: ReturnType<typeof setTimeout> | undefined;
@@ -177,7 +179,7 @@ export class WebSpeechNarrator implements Narrator {
       }
       if (synth.paused) synth.resume();
       const settle = Math.max(0, lastCancelAt + 100 - Date.now());
-      startTimer = setTimeout(() => speakChunk(0, voice), settle);
+      startTimer = setTimeout(() => speakChunk(first, voice), settle);
     }, fallback);
 
     return {

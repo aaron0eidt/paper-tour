@@ -18,6 +18,7 @@ import { ROOT } from '../config';
 import { indexElements } from '../elements';
 import type { Beat, BeatKind, Preset, TourPlan } from './beats';
 import { boardParts } from './board';
+import { equationName } from './equations';
 import { exampleActions } from './example';
 import { insightStep } from './insight';
 import type { PaperCard } from './card';
@@ -69,7 +70,7 @@ export function anchorWord(say: string, anchor: string): number {
 }
 
 /** Marks on a figure or equation share the step's colour: blue while explaining the method, green for the evidence. */
-const markColor = (beat: Beat): Color => (beat.arc === 'evidence' ? 'green' : 'blue');
+const markColor = (beat: Beat): Color => (beat.arc === 'evidence' || beat.move === 'evidence' ? 'green' : 'blue');
 
 /** A mark's label: at most 4 words, else none, since a cut-off label reads worse than no label. */
 function markLabel(label: string): { label?: string } {
@@ -86,7 +87,7 @@ function elementName(beat: Beat, doc: Doc): string {
   const figure = doc.figures.find((f) => f.id === beat.target);
   if (figure) return `${figure.kind === 'table' ? 'Table' : 'Figure'} ${figure.number}`;
   const equation = doc.equations.find((e) => e.id === beat.target);
-  return equation ? `Equation ${equation.number}` : '';
+  return equation ? equationName(equation) : '';
 }
 
 /** One tour step from a beat and its direction; without a direction, the card's own words with a single pointer. */
@@ -99,9 +100,12 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
   const color = markColor(beat);
   const board = direction?.board;
   const example = direction?.example;
-  const actions: Action[] = [
-    beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: beat.evidence[0] },
-  ];
+  // A slide without a sentence to point at is shown whole.
+  const first = beat.evidence[0] ?? (beat.page ? `page${beat.page}` : '');
+  const actions: Action[] = [beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: first }];
+  // A step on several slides moves the camera when a highlight is on another slide than the one on screen.
+  const pageOf = new Map(beat.slides ? doc.sentences.map((s) => [s.id, s.page]) : []);
+  let shown = beat.slides ? (pageOf.get(first) ?? beat.page) : undefined;
   // The board item appears with the step; a formula step also outlines its equation on the page.
   if (board) actions.push({ type: 'board', item: board });
   if (example) actions.push(...exampleActions(example));
@@ -121,6 +125,11 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
       if (found === null || highlightedHere.has(cue.target)) continue;
       highlights++;
       highlightedHere.add(cue.target);
+      const slide = pageOf.get(cue.target);
+      if (slide !== undefined && slide !== shown) {
+        actions.push({ type: 'focus', target: cue.target, ...timing });
+        shown = slide;
+      }
       actions.push({ type: 'highlight', targets: [cue.target], color: beat.tint ?? COLORS[beat.kind], ...timing });
     } else if (cue.action === 'board_focus') {
       // A part lights up when the narration names it: never without its board or anchor, nor twice in a row or at once.
@@ -194,11 +203,121 @@ function boardSettler() {
   };
 }
 
+/** The tour's board hygiene run again over its steps in order, after steps lost their boards. */
+export function settleBoards(tour: Tour): Tour {
+  const settle = boardSettler();
+  return { ...tour, chapters: tour.chapters.map((chapter) => ({ ...chapter, steps: chapter.steps.map(settle) })) };
+}
+
+const round = (n: number) => String(Number(n.toPrecision(6)));
+const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+
+/**
+ * What a board shows, as text: its kind and the values, latex, expressions, points or labels that make it that board.
+ * Two boards with the same signature are the same picture; bars compare their values in any order. Null when a board
+ * has nothing to compare (a scene of plain shapes).
+ */
+export function boardSignature(item: BoardItem): string | null {
+  switch (item.kind) {
+    case 'formula':
+      return `formula|${squash(item.latex)}`;
+    case 'bars':
+      return `bars|${item.bars
+        .map((b) => b.value)
+        .sort((a, b) => a - b)
+        .map(round)
+        .join(',')}`;
+    case 'flow':
+      return `flow|${item.nodes
+        .map((n) => squash(n.label))
+        .sort()
+        .join(',')}`;
+    case 'plot':
+      return `plot|${item.curves
+        .map((c) => squash(c.expression))
+        .sort()
+        .join(
+          ',',
+        )}|${(item.marks ?? []).map((m) => `${m.type}${m.curve}${m.other ?? ''}${m.which ?? ''}${m.at ?? ''}`).join(',')}`;
+    case 'heatmap':
+      return `heatmap|${item.rows.join(',')}|${item.cols.join(',')}|${item.values.map((row) => row.map(round).join(',')).join(';')}`;
+    case 'scatter':
+      return `scatter|${item.points
+        .map((p) => `${squash(p.label)}:${round(p.x)}:${round(p.y)}`)
+        .sort()
+        .join(',')}`;
+    case 'shapes':
+      return `shapes|${JSON.stringify(item.terms)}`;
+    case 'timeline':
+      return `timeline|${item.events
+        .map((e) => `${squash(e.label)}:${round(e.position)}`)
+        .sort()
+        .join(',')}`;
+    case 'distribution':
+      return `distribution|${item.dists
+        .map(
+          (d) =>
+            `${d.family}:${d.mean ?? ''}:${d.sd ?? ''}:${d.min ?? ''}:${d.max ?? ''}:${d.n ?? ''}:${d.p ?? ''}:${d.rate ?? ''}:${(d.counts ?? []).join(',')}`,
+        )
+        .join(';')}`;
+    case 'scene': {
+      const content = item.objects.flatMap((o) => [
+        ...(o.text ? [`${o.type}:${squash(o.text)}`] : []),
+        ...(o.values ? [`${o.type}:${o.values.map((row) => row.map(round).join(',')).join(';')}`] : []),
+        ...(o.plot ? o.plot.curves.map((c) => `plot:${squash(c.expression)}`) : []),
+      ]);
+      return content.length ? `scene|${content.sort().join('|')}` : null;
+    }
+  }
+}
+
+/**
+ * A board that repeats an earlier step's board (the same kind and data) is dropped together with the board_focus cues
+ * that light up its parts; the narration stays and the board hygiene then clears or keeps the screen as for any step
+ * without a board. The steps of one beat may repeat each other, so only earlier beats count; the beats at the `exempt`
+ * indices (an exercise part's solution lines) are neither compared nor remembered.
+ */
+export function dropRepeatedBoards(
+  steps: Step[][],
+  exempt: ReadonlySet<number> = new Set(),
+): {
+  steps: Step[][];
+  dropped: { step: string; kind: BoardItem['kind']; repeats: string }[];
+} {
+  const seen = new Map<string, string>();
+  const dropped: { step: string; kind: BoardItem['kind']; repeats: string }[] = [];
+  const kept = steps.map((list, beat) => {
+    if (exempt.has(beat)) return list;
+    const before = new Map(seen);
+    const out = list.map((step) => {
+      const ordered = step.actions.map((action, index) => ({ action, index }));
+      ordered.sort((a, b) => (a.action.at_word ?? 0) - (b.action.at_word ?? 0) || a.index - b.index);
+      const remove = new Set<number>();
+      let repeating = false;
+      for (const { action, index } of ordered) {
+        if (action.type === 'board') {
+          const signature = boardSignature(action.item);
+          const earlier = signature ? before.get(signature) : undefined;
+          repeating = earlier !== undefined;
+          if (earlier !== undefined) {
+            remove.add(index);
+            dropped.push({ step: step.id, kind: action.item.kind, repeats: earlier });
+          } else if (signature && !seen.has(signature)) seen.set(signature, step.id);
+        } else if (action.type === 'board_clear') repeating = false;
+        else if (action.type === 'board_focus' && repeating) remove.add(index);
+      }
+      return remove.size ? { ...step, actions: step.actions.filter((_, index) => !remove.has(index)) } : step;
+    });
+    return out;
+  });
+  return { steps: kept, dropped };
+}
+
 /**
  * A sentence the tour opens and closes with, such as a contract's "this is not legal advice": it leads the first step,
- * whose cues move on by its words, and ends the last.
+ * whose cues move on by its words, and ends the last (unless the tour is only begun: `closing` false).
  */
-export function frameSteps(steps: Step[][], frame: string): Step[][] {
+export function frameSteps(steps: Step[][], frame: string, closing = true): Step[][] {
   const out = steps.map((list) => [...list]);
   const firstBeat = out.findIndex((list) => list.length);
   if (firstBeat < 0 || !frame.trim()) return out;
@@ -209,6 +328,7 @@ export function frameSteps(steps: Step[][], frame: string): Step[][] {
     say: `${frame} ${first.say}`,
     actions: first.actions.map((a) => (isCamera(a) ? a : { ...a, at_word: (a.at_word ?? 0) + shift })),
   };
+  if (!closing) return out;
   const lastBeat = out.length - 1 - [...out].reverse().findIndex((list) => list.length);
   const last = out[lastBeat].at(-1)!;
   out[lastBeat][out[lastBeat].length - 1] = { ...last, say: `${last.say} ${frame}` };
@@ -262,6 +382,7 @@ export function assembleTour(
     paper: documentId,
     doc_sha256: doc.source.sha256,
     level: plan.type === 'research_paper' ? 'grad' : 'intro',
+    doc_type: plan.type,
     voices: { host: { lang: language, rate: 1 } },
     chapters,
     preset,

@@ -3,6 +3,7 @@ import type { Doc, DocSentence } from '../../../shared/paper';
 import type { MuseMessage } from '../muse/client';
 import { DOC_TYPES, guessType, type DocType } from './doctype';
 import { proseSentences } from './paper-block';
+import { SENTENCE_IDS, equationIds, figureIds, idEnum } from './schema-budget';
 
 export interface CardItem {
   text: string;
@@ -43,7 +44,7 @@ const CLAIM_RE =
   /\b(we (propose|introduce|present|show|find|demonstrate)|in this (paper|work)|outperform|achiev|result|improv|limitation|however|future work|conclu|contribution|defin|denote)/i;
 
 /** Sentence IDs the card may cite: all prose, or for long documents the most claim-like 900 of it, in order. */
-export function evidencePool(doc: Doc, max = 900): DocSentence[] {
+export function evidencePool(doc: Doc, max = SENTENCE_IDS): DocSentence[] {
   const prose = proseSentences(doc);
   if (prose.length <= max) return prose;
   const score = (s: DocSentence, i: number) =>
@@ -58,15 +59,11 @@ export function evidencePool(doc: Doc, max = 900): DocSentence[] {
   return prose.filter((s) => keep.has(s.id));
 }
 
-function enumOrNone(values: string[]) {
-  return values.length ? { type: 'string', enum: values } : { type: 'string', maxLength: 0 };
-}
-
 /** The card's response schema; `strict` adds the ID enums the model must choose from (cleanCard re-checks them). */
 export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
   const text = { type: 'string', minLength: 1, maxLength: 300 };
-  // Repeating the same long enum in six fields exceeds the provider's total
-  // enum budget. A shared definition preserves every allowed source ID.
+  // Repeating the same long enum in six fields exceeds the provider's total enum budget (schema-budget.ts). A shared
+  // definition preserves every allowed source ID; the figures and formulas offered are capped for a very long document.
   const evidence = strict ? { $ref: '#/$defs/evidenceId' } : { type: 'string' };
   const item = {
     type: 'object',
@@ -81,7 +78,7 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
       type: 'object',
       additionalProperties: false,
       required: ['id', 'why'],
-      properties: { id: strict ? enumOrNone(ids) : { type: 'string' }, why: text },
+      properties: { id: strict ? idEnum(ids) : { type: 'string' }, why: text },
     },
   });
   const short = { type: 'string', minLength: 1, maxLength: 80 };
@@ -117,14 +114,8 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
       problem: item,
       key_idea: item,
       method_steps: { type: 'array', minItems: 1, maxItems: 4, items: item },
-      key_figures: ref(
-        doc.figures.map((f) => f.id),
-        3,
-      ),
-      key_formulas: ref(
-        doc.equations.map((e) => e.id),
-        2,
-      ),
+      key_figures: ref(figureIds(doc), 3),
+      key_formulas: ref(equationIds(doc), 2),
       results: { type: 'array', maxItems: 3, items: item },
       limitations: { type: 'array', maxItems: 2, items: item },
       takeaway: item,

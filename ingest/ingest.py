@@ -13,6 +13,9 @@ a bbox is [x0, y0, x1, y1]. The pipeline per page is:
   graphics (images, visible vector paths) + captions -> figure and table regions
   classification -> reading order -> sections -> sentences -> doc.json
 
+A table that can be read without guessing also gets a typed grid of what it prints (table_grid.py). Display
+equations come with their printed number (eq1, eq5a) or, without one, as equ1, equ2, ... in reading order.
+
 On an exercise sheet, task headings ("Aufgabe 1 (4 Punkte)") are found before classification and the
 tasks and their parts ("a)", "(b)") after reading order; doc.json then has an "exercises" list. Other
 documents come out exactly as without that step.
@@ -29,6 +32,9 @@ from statistics import median
 
 import jsonschema
 import pymupdf
+
+import accents
+import table_grid
 
 VERSION = "0.2"
 SCHEMA_ID = "paper-tour/doc@0.1"
@@ -68,19 +74,28 @@ PAPER_HEADINGS = {"abstract", "references", "bibliography"}
 PART_RE = re.compile(r"^(?:\((?P<p>[a-z]|[ivx]{1,4})\)|(?P<q>[a-z]|[ivx]{1,4})[).])(?=\s|$)")
 # Other list items ("2.", "(3)", "•"): not parts, but they end the parts indented further than them
 LIST_MARK_RE = re.compile(r"^(?:\d{1,2}[.)]|\(\d{1,2}\)|[•◦▪▸►∙‣–—*-])(?=\s)")
+_POINTS_UNIT = r"(?:Bonuspunkte|Punkte|Punkt|Pkt|Pts|Pt|points|point|marks|mark|BP|P)\.?"
 POINTS_RE = re.compile(
-    r"(?<![\w.,])(\d{1,3}(?:[.,]\d{1,2})?(?:\s*\+\s*\d{1,3}(?:[.,]\d{1,2})?)*)\s*"
-    r"(?:Bonuspunkte|Punkte|Punkt|Pkt|Pts|Pt|points|point|marks|mark|BP|P)\.?(?=\s*(?:[)\],;]|$))", re.I)
+    r"(?<![\w.,])(\d{1,3}(?:[.,]\d{1,2})?(?:\s*\+\s*\d{1,3}(?:[.,]\d{1,2})?)*)\s*" + _POINTS_UNIT
+    + r"(?=\s*(?:[)\],;]|$))", re.I)
+# "20: 5,10,5 pts.": the total and then the points of each part (the numbers are told from a decimal comma by their sum)
+PART_POINTS_RE = re.compile(
+    r"(?<![\w.,])(?P<total>\d{1,3}(?:[.,]\d{1,2})?)\s*[:=]\s*"
+    r"(?P<parts>\d{1,3}(?:[.,]\d{1,2})?(?:\s*[,;+/]\s*\d{1,3}(?:[.,]\d{1,2})?)+)\s*" + _POINTS_UNIT
+    + r"(?=\s*(?:[)\],;]|$))", re.I)
 ROMAN_LABELS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"]
 # First words of a statement run in after a task heading ("Aufgabe 1: Gegeben sei ..."), as opposed to a title
 STATEMENT_WORDS = {
     "sei", "seien", "es", "gegeben", "man", "wir", "zeigen", "berechnen", "bestimmen", "beweisen", "lösen",
     "finden", "geben", "untersuchen", "entscheiden", "betrachten", "begründen", "skizzieren", "prüfen",
     "überprüfen", "verwenden", "implementieren", "schreiben", "für", "ist", "sind", "wie", "was", "welche",
-    "welcher", "welches", "warum", "bitte", "let", "show", "prove", "compute", "find", "consider", "suppose",
-    "assume", "determine", "calculate", "given", "solve", "use", "write", "explain", "derive", "describe",
-    "give", "verify", "evaluate", "implement", "sketch", "state", "recall", "define", "check", "what", "how",
-    "which", "why", "is", "are", "does", "do", "can", "we", "if", "for", "in",
+    "welcher", "welches", "warum", "bitte", "löse", "löst", "zeige", "berechne", "bestimme", "beweise", "finde",
+    "gib", "gibt", "untersuche", "entscheide", "betrachte", "begründe", "skizziere", "prüfe", "überprüfe",
+    "verwende", "implementiere", "schreibe", "ermittle", "stelle", "bringe", "vereinfache", "zeichne", "erkläre",
+    "nenne", "wähle", "formuliere", "vergleiche", "bilde", "gilt", "kann", "können", "let", "show", "prove",
+    "compute", "find", "consider", "suppose", "assume", "determine", "calculate", "given", "solve", "use", "write",
+    "explain", "derive", "describe", "give", "verify", "evaluate", "implement", "sketch", "state", "recall", "define",
+    "check", "what", "how", "which", "why", "is", "are", "does", "do", "can", "we", "if", "for", "in",
 }
 
 UNNUMBERED_HEADINGS = {
@@ -1796,9 +1811,43 @@ def figure_records(pages):
                 "id": fid, "kind": reg.kind, "number": reg.number, "page": page.n,
                 "bbox": rounded(reg.bbox), "caption": reg.caption.text, "caption_block": reg.caption.id,
                 "image": f"figures/{fid}.png", "panels": panels, "referenced_by": [],
-                "_page": page, "_caption": reg.caption,
+                "_page": page, "_caption": reg.caption, "_rules": table_rules(page, reg),
             })
     return records
+
+
+def table_rules(page, reg):
+    """The rules of a table: its skeleton, and the short rules beside it that the skeleton did not take (a rule
+    under a header cell that spans several columns)."""
+    if reg.kind != "table":
+        return []
+    box = expand(reg.bbox, 2)
+    return list(getattr(reg, "rules", [])) + [r for r in page.hrules if center_in(r, box) and width(r) < 0.6 * width(box)]
+
+
+def compose_in(value, order):
+    """Every string inside value (a grid's dicts and lists) with its split accents joined."""
+    if isinstance(value, str):
+        return accents.compose_text(value, order)
+    if isinstance(value, list):
+        return [compose_in(v, order) for v in value]
+    if isinstance(value, dict):
+        return {k: compose_in(v, order) for k, v in value.items()}
+    return value
+
+
+def add_table_grids(figures, order="before"):
+    """Give each table the typed grid of what it prints, where it can be read without guessing (table_grid.py)."""
+    for f in figures:
+        if f["kind"] != "table":
+            continue
+        try:
+            grid = table_grid.read_grid(f["_page"].pdf, f["bbox"], f["_rules"])
+        except Exception as e:              # a table that cannot be read stays a picture and its text
+            warn(f"table {f['number']}: no grid ({type(e).__name__}: {e})")
+            grid = None
+        if grid:
+            f["grid"] = compose_in(grid, order)
 
 
 def link_references(pages, figures):
@@ -1854,24 +1903,155 @@ def equation_records(pages):
     return out
 
 
+# Displays without a printed number (see unnumbered_equation_records).
+RELATION_RE = re.compile(r"[=≈≃≅≡∝∼∈≤≥≪≫<>→←↦⇒⇔⟹⟺≜]")
+UNMAPPED_RE = re.compile(r"[\ufffd\ue000-\uf8ff]")      # glyphs MuPDF cannot map: large brackets, braces, radicals
+DANGLING_RE = re.compile(r"[=≈≃≡∝∼∈≤≥<>+\-−·×/√∑∏∫(\[{⟨]$")
+LEADING_RE = re.compile(r"^[=≈≃≡∝∼≤≥<>+\-−·×/)\]}⟩⇒⇔⟹⟺]")
+ITEM_RE = re.compile(r"^\(?(?:[ivx]{1,4}|[a-h]|\d{1,2})\)\s+[^\s=+\-−·×/<>≤≥]")     # "(i) X = ...": a list item, not a display
+LIMIT_RE = re.compile(r"\S{1,2}=[-−]?[\dn∞]+[,;]?")    # the limits of a sum or product: "j=1", "n=0", "l=−∞"
+DISPLAY_GAP = 2.5         # blocks closer than this many body sizes sideways belong to one display
+STACK_GAP = 0.6           # ... and closer than this many vertically
+
+
+def display_pool(page, body, boxes):
+    """Blocks that can be a piece of a display: equation blocks, and short paragraph blocks set off like one
+    (a formula typeset mostly in the text font), except those inside a figure or table."""
+    pool = []
+    for b in page.ordered:
+        if b.type == "equation":
+            pass
+        elif (b.type in ("paragraph", "other") and b.horizontal and len(b.rows) <= 3 and b.math >= 0.2
+                and min(r.bbox[0] for r in b.rows) - page.cols[b.cls][0] >= 1.5 * body):
+            pass
+        else:
+            continue
+        if not any(inside_frac(b.bbox, box) >= 0.5 for box in boxes):
+            pool.append(b)
+    return pool
+
+
+def display_clusters(pool, body):
+    """Group the blocks that make up one display: side by side on a line, or stacked like a fraction."""
+    parent = list(range(len(pool)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, a in enumerate(pool):
+        for j in range(i + 1, len(pool)):
+            ba, bb = a.bbox, pool[j].bbox
+            side = y_overlap(ba, bb) > 0 and -x_overlap(ba, bb) <= DISPLAY_GAP * body
+            stacked = x_overlap(ba, bb) > 0 and -y_overlap(ba, bb) <= STACK_GAP * body
+            if side or stacked:
+                parent[find(i)] = find(j)
+    groups = {}
+    for i, b in enumerate(pool):
+        groups.setdefault(find(i), []).append(b)
+    return list(groups.values())
+
+
+def looks_like_equation(text, nrows):
+    """Does the text of an unnumbered display read as a whole formula: a relation, brackets that close, no loose
+    end, and glyphs that came through? A piece of a bigger display fails one of these."""
+    t = " ".join(text.split())
+    n = len(t.replace(" ", ""))
+    if not 5 <= n <= 240 or nrows > 5 or not RELATION_RE.search(" ".join(w for w in t.split() if not LIMIT_RE.fullmatch(w))):
+        return False
+    if len(UNMAPPED_RE.findall(t)) > 0.1 * n or sum(ch.isalnum() for ch in t) < 3:
+        return False
+    if DANGLING_RE.search(t.rstrip(",.;")) or LEADING_RE.match(t) or ITEM_RE.match(t):
+        return False
+    if any(t.count(a) != t.count(b) for a, b in ("()", "[]", "{}")):
+        return False
+    prose = [w for w in t.split() if re.fullmatch(r"[a-z]{4,}", w)]
+    return len(prose) <= 0.4 * len(t.split())
+
+
+def unnumbered_equation_records(pages, numbered, figures, body):
+    """Display equations without a printed number, as doc entries without an ID yet (number None).
+
+    The pieces of a numbered display (a matrix, a fraction, the left half of a line that ends with its number) are
+    not entries, and neither is anything that does not read as a formula on its own. A display set in the text
+    font (no math fonts) must show mostly math glyphs, so a short indented sentence is never taken for one."""
+    taken = {e["block"] for e in numbered if "block" in e}
+    out = []
+    for page in pages:
+        boxes = [f["bbox"] for f in figures if f["page"] == page.n]
+        for group in display_clusters(display_pool(page, body, boxes), body):
+            if any(b.id in taken for b in group):
+                continue
+            rows = [r for b in group for r in b.rows]
+            math = sum(r.math * r.nchars for r in rows) / sum(r.nchars for r in rows)
+            if math < 0.3 and all(b.type != "equation" for b in group):
+                continue
+            group.sort(key=page.ordered.index)
+            text = " ".join(b.raw_text for b in group)
+            if looks_like_equation(text, len(rows)):
+                out.append({"id": None, "number": None, "page": page.n,
+                            "bbox": rounded(union_all(b.bbox for b in group)), "block": group[0].id, "text": text})
+    return out
+
+
+def with_unnumbered_equations(pages, numbered, figures, body):
+    """The numbered equations and the unnumbered displays together in reading order; the unnumbered ones are
+    numbered equ1, equ2, ... in that order, so a numbered equation keeps its ID whatever else is found."""
+    at = {b.id: (page.n, i) for page in pages for i, b in enumerate(page.ordered)}
+    merged = sorted(numbered + unnumbered_equation_records(pages, numbered, figures, body), key=lambda e: at[e["block"]])
+    k = 0
+    for e in merged:
+        if e["number"] is None:
+            k += 1
+            e["id"] = f"equ{k}"
+    return merged
+
+
 # ---------------------------------------------------------------------------- exercises
 
-def parse_points(text):
-    """Points stated in text: "4 Punkte", "2+3 P.", "1,5 points" (summed); None if there are none or they are
-    per part ("je 2 Punkte")."""
+def points_match(text):
+    """The first points statement in text as (match, total, points of the parts or None); None if there is none or
+    the points are per part ("je 2 Punkte")."""
+    m = PART_POINTS_RE.search(text)
+    if m:
+        total = float(m.group("total").replace(",", "."))
+        parts = [float(v.replace(",", ".")) for v in re.split(r"\s*[,;+/]\s*", m.group("parts"))]
+        if abs(sum(parts) - total) < 0.01:
+            whole = lambda v: int(v) if v == int(v) else v
+            return m, whole(round(total, 2)), [whole(round(v, 2)) for v in parts]
     m = POINTS_RE.search(text)
     if m is None or re.search(r"\b(je|jeweils|each)\s*$", text[:m.start()], re.I):
         return None
     total = round(sum(float(v.replace(",", ".")) for v in re.split(r"\s*\+\s*", m.group(1))), 2)
-    return int(total) if total == int(total) else total
+    return m, int(total) if total == int(total) else total, None
+
+
+def parse_points(text):
+    """Points stated in text: "4 Punkte", "2+3 P.", "1,5 points" (summed), "20: 10,10 pts." (the total); None if
+    there are none or they are per part ("je 2 Punkte")."""
+    found = points_match(text)
+    return found[1] if found else None
 
 
 def points_only(text):
     """Points when text is nothing but a points statement, such as "(4 Punkte)" or "[5 points]"."""
-    m = POINTS_RE.search(text)
-    if m is None or re.sub(r"[\s()\[\]]", "", text[:m.start()] + text[m.end():]):
+    found = points_match(text)
+    if found is None or re.sub(r"[\s()\[\]]", "", text[:found[0].start()] + text[found[0].end():]):
         return None
-    return parse_points(text)
+    return found[1]
+
+
+def task_name(groups):
+    """The name a heading's bracket groups give the task, without any points statement: "(Dice)" -> "Dice";
+    "(20: 10,10 pts.)" has none."""
+    for g in groups:
+        found = points_match(g)
+        name = (g[:found[0].start()] + " " + g[found[0].end():] if found else g).strip(" ,;")
+        if re.search(r"[^\W\d_]{2,}", name):
+            return name
+    return ""
 
 
 def bracket_end(text, i):
@@ -1963,10 +2143,12 @@ def task_heading(row, page, stats, paper_like):
     # of the line the statement
     named = any(POINTS_RE.sub("", g).strip(" ,;") for g in split_groups(head)[1])
     title_like = (not named and 0 < len(core.split()) <= 8 and core[:1].isupper() and core[-1:] not in ".:;,!?"
-                  and not re.search(r"[:=]", core) and core.split()[0].lower() not in STATEMENT_WORDS and math < 0.2)
+                  and not re.search(r"[:=]", core) and core.split()[0].lower().rstrip(",;") not in STATEMENT_WORDS
+                  and math < 0.2)
     own_line = not rest or all_bold(row) or large or (short and (title_like or points_only(core) is not None))
     plain, groups = split_groups(head + " " + rest if own_line else head)
-    points = next((p for p in (parse_points(g) for g in groups) if p is not None), None)
+    found = next((f for f in map(points_match, groups) if f), None)
+    points, part_points = (found[1], found[2]) if found else (None, None)
     bare = POINTS_RE.search(plain) if points is None else None
     if bare:                          # "Aufgabe 1 – 4 Punkte"
         points, plain = parse_points(plain), plain[:bare.start()] + plain[bare.end():]
@@ -1974,7 +2156,7 @@ def task_heading(row, page, stats, paper_like):
         points = points_only("(" + tail[-1] + ")") if rest.endswith((")", "]")) else None
     if points is None:
         points = points_beside(page, row)
-    title = plain.strip(" .:–—-") or next((g for g in (POINTS_RE.sub("", g).strip(" ,;") for g in groups) if g), "")
+    title = plain.strip(" .:–—-") or task_name(groups)
     kw = m.group("kw").lower()
     vocab = kw.endswith(SHEET_WORDS)
     score = (2 * kw_bold + 2 * large + 2 * (points is not None) + own_line + delimited
@@ -1982,7 +2164,8 @@ def task_heading(row, page, stats, paper_like):
     if paper_like and not vocab and points is None:
         score = 0                     # "Task 1:" and "Problem 2." run-in heads of a paper
     return {"keyword": m.group("kw"), "number": m.group("num"), "title": title, "points": points,
-            "own_line": own_line, "score": score, "strong": kw_bold or large or points is not None}
+            "part_points": part_points, "own_line": own_line, "score": score,
+            "strong": kw_bold or large or points is not None}
 
 
 def label_words(found):
@@ -2208,6 +2391,11 @@ def settle_points(task, pages):
 
     for part in task["parts"]:
         visit(part)
+    # "(20: 5,10,5 pts.)" gives each part its own points, when there is one number per part and none is stated
+    given = task["head"].get("part_points")
+    if given and len(given) == len(task["parts"]) and all(p["points"] is None for p in task["parts"]):
+        for part, value in zip(task["parts"], given):
+            part["points"] = value
     if task["head"]["points"] is None and not task["parts"]:
         task["head"]["points"] = stated([last_line(task["blocks"][-1])])
 
@@ -2253,6 +2441,21 @@ class Stats:
     pass
 
 
+def compose_split_accents(raw_pages, fonts):
+    """The lines of all pages with each spacing accent joined to its letter (see accents.py), and whether the document
+    sets the accent before or after its letter. Math fonts are left alone: their accents are \\hat and \\ddot."""
+    def skip(ch):
+        return fonts.is_math(ch[4])
+
+    lines = [chars for page in raw_pages for _, chars in page if accents.has_accent([c[0] for c in chars])]
+    order = accents.accent_order(
+        ([c[0] for c in chars], lambda j, chars=chars: skip(chars[j])) for chars in lines)
+    if not lines:
+        return raw_pages, order
+    return [[(horizontal, accents.compose_chars(chars, order, skip)) for horizontal, chars in page]
+            for page in raw_pages], order
+
+
 def analyse(pdf):
     """Run the whole pipeline; returns (pages, sections, figures, equations, stats).
 
@@ -2269,6 +2472,7 @@ def analyse(pdf):
     stats = Stats()
     stats.fonts = Fonts(char_fonts, char_sizes)
     body = stats.fonts.body_size
+    raw_pages, stats.accent_order = compose_split_accents(raw_pages, stats.fonts)
 
     pages, page_segs = [], []
     for pdf_page, lines in zip(pdf, raw_pages):
@@ -2322,8 +2526,9 @@ def analyse(pdf):
     assign_ids_and_sentences(pages, build_vocab(pages))
     stats.exercises = exercise_records(tasks)
     figures = figure_records(pages)
+    add_table_grids(figures, stats.accent_order)
     link_references(pages, figures)
-    equations = equation_records(pages)
+    equations = with_unnumbered_equations(pages, equation_records(pages), figures, body)
     return pages, sections, figures, equations, stats
 
 

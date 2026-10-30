@@ -1,0 +1,259 @@
+/* The distribution board: a curve or bars on a quiet axis, a legend above and readouts beneath. Shapes arrive and morph
+   from script (DistributionBoard.tsx follows the narration); only the focus changes here are CSS transitions. */
+
+/* The drawing keeps its own room, so the body's spacers step aside. */
+.board-view[data-kind='distribution'] .board-body {
+  scrollbar-gutter: stable;
+}
+
+.board-view[data-kind='distribution'] .board-body::before,
+.board-view[data-kind='distribution'] .board-body::after {
+  display: none;
+}
+
+.distribution {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The drawing sits a little above the middle with room to spare, and scrolls from the top without. */
+.distribution::before,
+.distribution::after {
+  content: '';
+  flex: 1 1 0;
+}
+
+.distribution::after {
+  flex-grow: 1.4;
+}
+
+.ds-svg {
+  display: block;
+  flex: none;
+  margin: 0 auto;
+  overflow: visible;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ legend */
+
+.ds-legend {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+  padding-bottom: 14px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  animation: board-rise 480ms var(--board-ease-out) 260ms backwards;
+}
+
+.ds-key {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-weight: 500;
+  opacity: 0.55;
+  transition: opacity 360ms ease;
+}
+
+.ds-key.is-current,
+.ds-key.is-focus {
+  opacity: 1;
+  color: var(--text);
+}
+
+.ds-key i {
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+}
+
+.ds-key em {
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--muted);
+}
+
+/* -------------------------------------------------------------------- axes */
+
+.ds-base,
+.ds-marks {
+  fill: none;
+  stroke: var(--board-bar);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.ds-tick {
+  fill: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: opacity 240ms ease;
+}
+
+/* A tick label under a bound's badge gives way to it. */
+.ds-tick.is-hidden {
+  opacity: 0;
+}
+
+.ds-title {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ----------------------------------------------------------------- shapes */
+
+.ds-curve {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* The first distribution stays behind as a dashed outline once the board has morphed on. */
+.ds-ghost {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  stroke-linejoin: round;
+}
+
+.ds-bar-fill {
+  fill: var(--c);
+  fill-opacity: 0.85;
+  transition: fill-opacity 360ms ease;
+}
+
+.ds-bar.in-region .ds-bar-fill {
+  fill-opacity: 1;
+}
+
+.ds-share {
+  fill: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--board-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+/* The shaded range: the curve's area between the bounds, with its edge drawn crisp. */
+.ds-region {
+  fill: var(--c);
+  fill-opacity: 0.42;
+  stroke: var(--c);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  transition: fill-opacity 360ms ease;
+}
+
+.ds-region.is-focus {
+  fill-opacity: 0.62;
+}
+
+.ds-bound {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  stroke-opacity: 0.7;
+  shape-rendering: crispEdges;
+}
+
+.ds-badge rect {
+  fill: var(--board-bg);
+  stroke: var(--c);
+  stroke-width: 1;
+}
+
+.ds-badge text {
+  fill: var(--c);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ds-mean path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  stroke-opacity: 0.7;
+  shape-rendering: crispEdges;
+}
+
+.ds-mean text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ---------------------------------------------------------------- readouts */
+
+.ds-stats {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 0;
+  animation: board-rise 480ms var(--board-ease-out) 420ms backwards;
+}
+
+.ds-stat {
+  flex: 1 1 96px;
+  min-width: 0;
+  padding: 9px 12px 10px;
+  border: 1px solid var(--board-rule);
+  border-radius: 8px;
+  background: var(--board-raised);
+  transition: border-color 360ms ease;
+}
+
+.ds-stat dt {
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.ds-stat dd {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-stat small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* The chance of the range takes the colour of the distribution on show. */
+.ds-chance {
+  flex-grow: 1.4;
+}
+
+.ds-chance dd {
+  color: var(--c);
+}
+
+.ds-chance.is-focus {
+  border-color: var(--c);
+}

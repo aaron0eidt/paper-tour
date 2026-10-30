@@ -2,7 +2,10 @@
 // so it can be driven by tests with a fake narrator and fake timers.
 
 import { DEFAULT_HOLD_MS, DEFAULT_SPEAKER, splitWords } from './types';
-import type { Action, BoardControl, BoardItem, CameraAction, OverlayAction, Step, Tour } from './types';
+import type { Action, BoardControl, BoardItem, CameraAction, Checkpoint, OverlayAction, Step, Tour } from './types';
+import { normalizeCheckpoint } from './coach';
+import type { AlsoTarget } from './camera';
+import { sentenceStart, sentenceStarts } from './narration/narrator';
 import type { NarrationHandle, Narrator, SpeakCallbacks, SpeakRequest } from './narration/narrator';
 
 export type Status = 'idle' | 'playing' | 'paused' | 'ended';
@@ -12,6 +15,8 @@ export interface ScheduledAction {
   key: string;
   at: number;
   action: Action;
+  /** A camera move only: what the step marks while the move holds, so the frame can keep it all in view. */
+  also?: AlsoTarget[];
 }
 
 export interface FlatStep {
@@ -22,6 +27,8 @@ export interface FlatStep {
   words: string[];
   /** Initial camera at zero, then actions sorted by at_word; ties keep tour order. */
   schedule: ScheduledAction[];
+  /** The learner tries this before the next step reveals it: the tour pauses after the narration. */
+  checkpoint: Checkpoint | null;
 }
 
 export interface OverlayEntry {
@@ -29,7 +36,12 @@ export interface OverlayEntry {
   step: number;
   action: OverlayAction;
   persist: boolean;
+  /** Its step ended: it stays a moment longer to fade out as the tour moves on. */
+  leaving?: boolean;
 }
+
+/** How long the marks of a step that ended take to fade out. */
+export const FADE_MS = 250;
 
 export interface CameraCommand {
   /** Increments on every camera change, so the same target twice still moves the camera. */
@@ -37,6 +49,8 @@ export interface CameraCommand {
   key: string | null;
   /** null = the initial view (no camera action yet). */
   action: CameraAction | null;
+  /** The other marks shown while this move holds (see ScheduledAction.also). */
+  also?: AlsoTarget[];
 }
 
 /** The side board: an item stays across steps until replaced or cleared; its focus belongs to the current step. */
@@ -49,6 +63,19 @@ export interface BoardState {
 }
 
 export const EMPTY_BOARD: BoardState = { key: null, item: null, focus: null };
+/** The board kinds this player draws; a saved tour may carry a kind it does not (a removed one), which is skipped. */
+export const BOARD_KINDS: readonly string[] = [
+  'formula',
+  'flow',
+  'bars',
+  'plot',
+  'scene',
+  'heatmap',
+  'scatter',
+  'shapes',
+  'timeline',
+  'distribution',
+];
 
 /** A board's animation clock follows speech, including pause, restart and silent step previews. */
 export interface BoardPlayback {
@@ -66,6 +93,12 @@ export interface EngineState {
   board: BoardState;
   /** A silent seek shows all of the selected step's actions, rather than an in-progress word. */
   preview?: boolean;
+  /** The step's narration is done and its checkpoint waits for the learner: paused until the answer is asked for. */
+  awaiting?: boolean;
+  /** Everything written of a tour still being written has been played: it goes on when the next step arrives. */
+  waiting?: boolean;
+  /** Counts the times the tour grew, so what is derived from its steps (a clock, a list) is built again. */
+  revision?: number;
 }
 
 /** Progress over the current board's narrated interval, not a separate wall clock. */
@@ -97,6 +130,8 @@ export interface EngineOptions {
   timers?: Timers;
   /** Wait for the initial camera move; later word-synchronized moves do not delay speech. */
   beforeNarration?: (signal: AbortSignal) => Promise<void>;
+  /** The tour is still being written: at its last step it waits for more (see `extend`) instead of ending. */
+  open?: boolean;
 }
 
 const realTimers: Timers = {
@@ -116,11 +151,38 @@ export function isBoard(a: Action): a is BoardControl {
 export function boardAfter(board: BoardState, a: BoardControl, key: string, current: boolean): BoardState {
   // Older saved tours may contain removed video boards. Skip them without opening an empty panel or stalling playback.
   if (a.type === 'board')
-    return ['formula', 'flow', 'bars', 'plot', 'scene'].includes(a.item.kind)
+    return BOARD_KINDS.includes(a.item.kind)
       ? { key, item: a.item, focus: null }
       : EMPTY_BOARD;
   if (a.type === 'board_clear') return EMPTY_BOARD;
   return current && board.item ? { ...board, focus: a.part } : board;
+}
+
+/** What a mark points at, for keeping it in the camera's frame. */
+function markedBy(a: Action): AlsoTarget[] {
+  switch (a.type) {
+    case 'highlight':
+      return a.targets.map((target) => ({ target }));
+    case 'box':
+    case 'arrow':
+    case 'circle':
+    case 'spotlight':
+      return [{ target: a.target, region: a.region }];
+    case 'note':
+      return [{ target: a.anchor, region: a.region }];
+    default:
+      return [];
+  }
+}
+
+/** Each camera move takes the marks scheduled from it up to the next camera move. */
+function keepInFrame(schedule: ScheduledAction[]): void {
+  const moves = schedule.filter((item) => isCamera(item.action));
+  moves.forEach((move, i) => {
+    const until = moves[i + 1]?.at ?? Infinity;
+    const marks = schedule.filter((item) => item.at >= move.at && item.at < until).flatMap((item) => markedBy(item.action));
+    if (marks.length) move.also = marks;
+  });
 }
 
 export function flattenTour(tour: Tour): FlatStep[] {
@@ -137,16 +199,17 @@ export function flattenTour(tour: Tour): FlatStep[] {
           i,
         }))
         .sort((a, b) => a.at - b.at || a.i - b.i)
-        .map(({ key, at, action }) => ({ key, at, action }));
-      out.push({ index, chapterIndex, indexInChapter, step, words: splitWords(step.say), schedule });
+        .map(({ key, at, action }): ScheduledAction => ({ key, at, action }));
+      keepInFrame(schedule);
+      out.push({ index, chapterIndex, indexInChapter, step, words: splitWords(step.say), schedule, checkpoint: normalizeCheckpoint(step.checkpoint) });
     });
   });
   return out;
 }
 
 export class TourEngine {
-  readonly tour: Tour;
-  readonly steps: FlatStep[];
+  private whole: Tour;
+  private flat: FlatStep[];
 
   private narrator: Narrator;
   private fallback?: Narrator;
@@ -159,6 +222,8 @@ export class TourEngine {
   private status: Status = 'idle';
   private index = 0;
   private word = -1;
+  /** The word this run of the step began at: where the narration stands before it has said anything. */
+  private from = 0;
   private overlays: OverlayEntry[] = [];
   private camera: CameraCommand = { seq: 0, key: null, action: null };
   private board: BoardState = EMPTY_BOARD;
@@ -168,13 +233,22 @@ export class TourEngine {
   private token = 0;
   private handle: NarrationHandle | null = null;
   private holdTimer: unknown = null;
+  private fadeTimer: unknown = null;
   private nextAction = 0;
   private narrationDone = false;
   private preview = false;
+  /** Paused at a checkpoint after its step's narration. */
+  private awaiting = false;
+  /** More steps are still being written; the last one waits for them instead of ending the tour. */
+  private open: boolean;
+  /** At the last step written, played to its end, until the next one arrives. */
+  private waiting = false;
+  private revision = 0;
 
   constructor(tour: Tour, opts: EngineOptions) {
-    this.tour = tour;
-    this.steps = flattenTour(tour);
+    this.whole = tour;
+    this.flat = flattenTour(tour);
+    this.open = !!opts.open;
     this.narrator = opts.narrator;
     this.fallback = opts.fallbackNarrator;
     this.rate = opts.rate ?? 1;
@@ -192,14 +266,69 @@ export class TourEngine {
 
   getState = (): EngineState => this.state;
 
+  /** The tour as far as it is written; a new object each time it grows. */
+  get tour(): Tour {
+    return this.whole;
+  }
+
+  get steps(): FlatStep[] {
+    return this.flat;
+  }
+
   get total(): number {
     return this.steps.length;
   }
 
+  /**
+   * Go on with a longer version of the tour while it plays: the steps written so far keep playing, the new ones join
+   * after them, and a tour that had played everything written goes on with the next step. It does not interrupt, seek or
+   * redraw anything. `open` says whether more are still to come; a tour no longer open ends after its last step.
+   * A version that is not longer than the one held (the tour written again, still catching up) changes nothing but `open`.
+   * False, and nothing changed, when the steps it shares with the held ones are not the same (the same ids in the same
+   * chapters): the tour was written differently, and the caller starts the new one.
+   */
+  extend(tour: Tour, open: boolean): boolean {
+    const next = flattenTour(tour);
+    const held = this.flat;
+    for (let i = 0; i < Math.min(next.length, held.length); i++)
+      if (next[i].step.id !== held[i].step.id || next[i].chapterIndex !== held[i].chapterIndex) return false;
+    this.open = open;
+    this.revision++;
+    if (next.length >= held.length) {
+      // A step already shown stays as it was shown; the ones after it are the new tour's.
+      const shown = this.status === 'idle' ? 0 : this.index + 1;
+      this.flat = next.map((fs, i) => (i < shown ? held[i] : fs));
+      this.whole = tour;
+    }
+    const more = this.index + 1 < this.flat.length;
+    // A tour that had ended goes on from its old end when there is more: paused, as after any step.
+    if (this.status === 'ended' && (more || open)) {
+      this.status = 'paused';
+      this.preview = false;
+    }
+    if (this.waiting && this.status === 'playing' && (more || !open)) this.advance();
+    else this.emit();
+    return true;
+  }
+
+  /** No more steps are coming: the tour ends after the last one it has. */
+  close(): void {
+    this.extend(this.whole, false);
+  }
+
   play(): void {
     if (this.status === 'playing' || !this.steps.length) return;
-    // Resume restarts the current step: speechSynthesis.pause/resume is unreliable in Chrome.
-    this.startStep(this.status === 'ended' ? 0 : this.index);
+    // Play at a checkpoint is "show me": the next step reveals the answer.
+    if (this.awaiting) return this.proceed();
+    if (this.status === 'ended') this.startStep(0);
+    // A pause in the middle of a step goes on from there; a silent preview plays the step from its start.
+    else if (this.status === 'paused' && !this.preview && this.word >= 0) this.resume();
+    else this.startStep(this.index);
+  }
+
+  /** The learner is done trying (or gives up): go on to the step that reveals the answer. */
+  reveal(): void {
+    if (this.awaiting) this.proceed();
   }
 
   pause(): void {
@@ -231,11 +360,60 @@ export class TourEngine {
     else this.showStep(i);
   }
 
-  /** Swap the narrator (e.g. mute). A playing step restarts with the new one; the same narrator again changes nothing. */
+  /**
+   * Go to a word of a step, snapped back to the start of its sentence. While playing it speaks from
+   * there; otherwise it shows the step as it is just before that word, without speaking.
+   */
+  seekTo(index: number, word = 0): void {
+    if (!this.steps.length) return;
+    const i = Math.max(0, Math.min(this.steps.length - 1, Math.floor(index)));
+    const from = sentenceStart(this.steps[i].words, word);
+    if (this.status === 'playing') return this.startStep(i, from);
+    this.stopRun();
+    this.rebuild(i, false);
+    this.enterStep(i, from);
+  }
+
+  /** A sentence on: the start of the next one, or of the next step. Backwards: this sentence's start, or the one before. */
+  skip(direction: 1 | -1): void {
+    if (!this.steps.length) return;
+    if (this.status === 'idle') return this.goTo(0);
+    const { words } = this.steps[this.index];
+    const starts = sentenceStarts(words);
+    if (!starts.length) return direction > 0 ? this.next() : this.prev();
+    // Just after a seek no word has been spoken yet: the run's own start is where the narration stands.
+    const at = Math.max(0, this.word, this.from);
+    const here = starts.filter((start) => start <= at).length - 1;
+    if (direction > 0) {
+      if (here + 1 < starts.length) this.seekTo(this.index, starts[here + 1]);
+      else if (this.index + 1 < this.steps.length) this.seekTo(this.index + 1, 0);
+    } else if (at - starts[Math.max(0, here)] >= 3 || (here === 0 && this.index === 0)) {
+      this.seekTo(this.index, starts[Math.max(0, here)]);
+    } else if (here > 0) this.seekTo(this.index, starts[here - 1]);
+    else {
+      const before = this.steps[this.index - 1];
+      this.seekTo(this.index - 1, sentenceStarts(before.words).at(-1) ?? 0);
+    }
+  }
+
+  /** The first step of the next chapter, or of this one when the tour is already well into it. */
+  chapterStart(direction: 1 | -1): number {
+    const current = this.steps[this.index];
+    if (!current) return 0;
+    const first = (chapter: number) => this.steps.findIndex((step) => step.chapterIndex === chapter);
+    if (direction > 0) {
+      const next = first(current.chapterIndex + 1);
+      return next < 0 ? this.steps.length - 1 : next;
+    }
+    const own = first(current.chapterIndex);
+    return own < this.index || this.word > 2 ? own : Math.max(0, first(current.chapterIndex - 1));
+  }
+
+  /** Swap the narrator (e.g. mute). A playing step goes on with the new one from its sentence; the same narrator again changes nothing. */
   setNarrator(narrator: Narrator): void {
     if (narrator === this.narrator) return;
     this.narrator = narrator;
-    if (this.status === 'playing') this.startStep(this.index);
+    if (this.status === 'playing') this.resume();
   }
 
   /** Also changes the speed of the narration in progress, where the narrator supports it. */
@@ -250,6 +428,7 @@ export class TourEngine {
 
   destroy(): void {
     this.stopRun();
+    this.timers.clearTimeout(this.fadeTimer);
     this.listeners.clear();
   }
 
@@ -264,6 +443,9 @@ export class TourEngine {
       camera: this.camera,
       board: this.board,
       preview: this.preview,
+      awaiting: this.awaiting,
+      waiting: this.waiting,
+      revision: this.revision,
     };
   }
 
@@ -274,6 +456,8 @@ export class TourEngine {
 
   private stopRun(): void {
     this.token++;
+    this.awaiting = false;
+    this.waiting = false;
     this.preparation?.abort();
     this.preparation = null;
     const handle = this.handle;
@@ -298,21 +482,23 @@ export class TourEngine {
    */
   private rebuild(i: number, includeCurrent: boolean): void {
     let overlays: OverlayEntry[] = [];
-    let camera: { key: string; action: CameraAction } | null = null;
+    let camera: { key: string; action: CameraAction; also?: AlsoTarget[] } | null = null;
     let board = EMPTY_BOARD;
     const last = includeCurrent ? i : i - 1;
     for (let k = 0; k <= last; k++) {
       for (const item of this.steps[k].schedule) {
         const a = item.action;
         if (a.type === 'clear') overlays = overlays.filter((o) => !o.persist);
-        else if (isCamera(a)) camera = { key: item.key, action: a };
+        else if (isCamera(a)) camera = { key: item.key, action: a, also: item.also };
         else if (isBoard(a)) board = boardAfter(board, a, item.key, k === i);
         else if (k === i || a.persist) overlays.push({ key: item.key, step: k, action: a, persist: !!a.persist });
       }
     }
     this.overlays = overlays;
+    this.timers.clearTimeout(this.fadeTimer);
+    this.fadeTimer = null;
     this.board = board;
-    this.camera = { seq: this.camera.seq + 1, key: camera?.key ?? null, action: camera?.action ?? null };
+    this.camera = { seq: this.camera.seq + 1, key: camera?.key ?? null, action: camera?.action ?? null, also: camera?.also };
     if (includeCurrent) this.nextAction = this.steps[i].schedule.length;
   }
 
@@ -321,7 +507,7 @@ export class TourEngine {
     if (a.type === 'clear') {
       this.overlays = this.overlays.filter((o) => !o.persist);
     } else if (isCamera(a)) {
-      this.camera = { seq: this.camera.seq + 1, key: item.key, action: a };
+      this.camera = { seq: this.camera.seq + 1, key: item.key, action: a, also: item.also };
     } else if (isBoard(a)) {
       this.board = boardAfter(this.board, a, item.key, true);
     } else {
@@ -343,38 +529,76 @@ export class TourEngine {
     this.index = i;
     this.rebuild(i, true);
     this.word = -1;
+    this.from = 0;
     this.preview = true;
     this.status = 'paused';
     this.emit();
   }
 
-  private startStep(i: number): void {
+  /** Play step `i` from word `from`, on the state a natural run would have reached there. */
+  private startStep(i: number, from = 0): void {
     this.stopRun();
     this.rebuild(i, false);
-    this.runStep(i);
+    this.runStep(i, from);
   }
 
-  /** Run step `i` on top of the current visual state. */
-  private runStep(i: number): void {
-    const token = ++this.token;
-    const fs = this.steps[i];
+  /** The step as it is just before word `from`, paused: marks up to the word before it are shown. */
+  private enterStep(i: number, from: number): void {
     this.index = i;
-    this.status = 'playing';
-    this.word = -1;
+    this.word = from - 1;
+    this.from = from;
     this.preview = false;
+    this.status = 'paused';
+    this.begin(from);
+    this.emit();
+  }
+
+  /** Set up a step on top of the visual state: its marks up to the word before `from` are shown. */
+  private begin(from: number): void {
     // The item persists across steps, but a term/node focus belongs to the words
     // that named it. Rebuilding a seek and advancing naturally must agree.
     if (this.board.focus !== null) this.board = { ...this.board, focus: null };
     this.nextAction = 0;
     this.narrationDone = false;
-    this.fireUpTo(0);
+    this.fireUpTo(Math.max(0, from - 1));
+  }
+
+  /** Run step `i` on top of the current visual state, speaking from word `from`. */
+  private runStep(i: number, from = 0): void {
+    const token = ++this.token;
+    const fs = this.steps[i];
+    this.index = i;
+    this.status = 'playing';
+    this.word = from - 1;
+    this.from = from;
+    this.preview = false;
+    this.begin(from);
     this.emit();
     if (token !== this.token) return;
 
-    void this.speakStep(fs, token);
+    void this.speakStep(fs, token, from);
   }
 
-  private async speakStep(fs: FlatStep, token: number): Promise<void> {
+  /**
+   * Go on with the step in progress from the start of the sentence it was in. The step's marks
+   * rewind to that point and replay as the sentence is spoken again, as in a natural run.
+   */
+  private resume(): void {
+    if (!this.narrationDone) return this.startStep(this.index, sentenceStart(this.steps[this.index].words, this.word + 1));
+    // Paused while the step was holding: only the rest of the hold is left.
+    this.stopRun();
+    const token = ++this.token;
+    this.status = 'playing';
+    this.emit();
+    if (token !== this.token) return;
+    this.holdTimer = this.timers.setTimeout(() => {
+      if (token !== this.token) return;
+      this.holdTimer = null;
+      this.advance();
+    }, this.steps[this.index].step.hold_ms ?? DEFAULT_HOLD_MS);
+  }
+
+  private async speakStep(fs: FlatStep, token: number, from: number): Promise<void> {
     if (this.beforeNarration) {
       const preparation = new AbortController();
       this.preparation = preparation;
@@ -396,6 +620,7 @@ export class TourEngine {
       voice: this.tour.voices?.[speaker],
       rate: this.rate,
       audio: fs.step.audio,
+      startWord: from,
     };
     for (const narrator of [this.narrator, this.fallback]) {
       if (token !== this.token || this.narrationDone) return;
@@ -442,6 +667,13 @@ export class TourEngine {
     // Actions with at_word beyond the narration (or skipped by sparse word events) fire now.
     this.fireUpTo(Infinity);
     this.word = fs.words.length - 1;
+    if (fs.checkpoint) {
+      // The learner tries first: nothing advances until they ask for the answer (play, next or "Show solution").
+      this.awaiting = true;
+      this.status = 'paused';
+      this.emit();
+      return;
+    }
     this.emit();
     if (token !== this.token) return;
     this.holdTimer = this.timers.setTimeout(() => {
@@ -451,12 +683,33 @@ export class TourEngine {
     }, fs.step.hold_ms ?? DEFAULT_HOLD_MS);
   }
 
+  private proceed(): void {
+    this.awaiting = false;
+    this.advance();
+  }
+
   private advance(): void {
     if (this.index + 1 < this.steps.length) {
-      this.overlays = this.overlays.filter((o) => o.persist);
+      // The step's marks fade out as the camera moves on, instead of vanishing.
+      if (this.overlays.some((o) => !o.persist)) {
+        this.overlays = this.overlays.map((o) => (o.persist ? o : { ...o, leaving: true }));
+        this.timers.clearTimeout(this.fadeTimer);
+        this.fadeTimer = this.timers.setTimeout(() => {
+          this.fadeTimer = null;
+          if (!this.overlays.some((o) => o.leaving)) return;
+          this.overlays = this.overlays.filter((o) => !o.leaving);
+          this.emit();
+        }, FADE_MS);
+      }
+      this.waiting = false;
       this.runStep(this.index + 1);
+    } else if (this.open) {
+      // Everything written has been played. The step's marks and the board stay while the next one is written.
+      this.waiting = true;
+      this.emit();
     } else {
       this.token++;
+      this.waiting = false;
       this.status = 'ended';
       this.emit();
     }

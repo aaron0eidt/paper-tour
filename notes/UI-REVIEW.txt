@@ -1,0 +1,32 @@
+UI review and regression checks
+
+Library view
+- Search, sort and status filters are kept for this browser tab, separately per account.
+- With tours and Needs attention may overlap: a failed newer run must not hide an existing saved tour.
+- Paused and cancelled runs are not classified as failures.
+- Empty filtered views offer Show all papers without resetting the chosen sort order.
+
+Keyboard and dialogs
+- Paper actions use a native disclosure. Escape, outside click and leaving it with Tab dismiss it.
+- Cancel/Escape returns focus to the original paper actions. Successful edits return focus to the list
+  heading because renaming can move a card or remove it from an active search.
+- Delete starts on Cancel. Unchanged and blank rename submissions are disabled.
+- Clearing search and discarding settings drafts keep focus in the relevant section.
+- The hidden upload input is excluded from sequential keyboard navigation.
+
+Browser verification
+- Library filters/counts, empty results, combined search/sort, and navigation through Settings and the reader.
+- Paper actions Escape/outside click; Rename Cancel; Delete Cancel/Escape and initial focus.
+- Default-model draft/discard and connection-source draft/discard, without saving account changes.
+- Light and dark palettes; normal and narrow layouts down to an observed 520 CSS-pixel viewport, no horizontal overflow.
+- Existing reader navigation and library return. Browser viewport and original dark appearance restored after checking.
+
+Automated coverage
+- Player tests include malformed stored views, search/filter/sort composition, non-mutating sorting,
+  saved-tour/failure overlap, and distinct loading/error/empty model-picker states.
+- Palette regression tests check normal and secondary text, including filenames, on all solid interface
+  surfaces in both themes, as well as light feedback and the independent mathematical canvas palette.
+- Root production build and player suite pass.
+
+These checks do not send authentication/reset emails, change credentials, delete existing papers, or
+start paid tour generations. Those server workflows are not re-tested by this UI pass.

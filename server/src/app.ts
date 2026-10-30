@@ -12,7 +12,8 @@ import type { Library } from './service';
 import type { ReaderState } from '../../shared/contracts';
 import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
-import { DEMO_PAPER, type AskAnswer, type AskRequest } from './harness/ask';
+import { DEMO_PAPER, answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
+import { snapService, type SnapRequest, type SnapResult, type SnapService } from './snap';
 
 const uuid = { type: 'string', format: 'uuid' };
 const documentParams = {
@@ -55,6 +56,16 @@ const askBody = objectBody(
   },
   ['question'],
 );
+/** A loose box on a page, in PDF points; snap.ts checks it against the page. */
+const snapBody = (properties: Record<string, unknown> = {}) =>
+  objectBody(
+    {
+      page: { type: 'integer', minimum: 1 },
+      box: { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number' } },
+      ...properties,
+    },
+    ['page', 'box'],
+  );
 interface Options {
   service: Library;
   authenticate(token: string): Promise<string | null>;
@@ -64,6 +75,8 @@ interface Options {
   settings?: SettingsService;
   /** Questions about demo papers without signing in; defaults to demoAllowed() for this process. */
   demo?: boolean;
+  /** Region snapping (snap.ts); defaults to one built from the service and settings when they can provide it. */
+  snap?: SnapService;
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -98,6 +111,7 @@ async function whileConnected<T>(reply: FastifyReply, run: (signal: AbortSignal)
   }
 }
 export async function createApp(options: Options) {
+  const snap = options.snap ?? snapService(options.service, options.settings);
   const app = Fastify({
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
     logger: options.logger ? { redact: ['req.headers.authorization', 'req.body.apiKey'] } : false,
@@ -287,6 +301,35 @@ export async function createApp(options: Options) {
             }
           },
         );
+      // The leading steps of a tour still being written; the contract is TourPartialView in tour-partial.ts.
+      api.get<{ Params: { id: string; generationId: string }; Querystring: { after?: string; attempt?: string } }>(
+        '/documents/:id/generations/:generationId/partial',
+        {
+          schema: {
+            params: {
+              type: 'object',
+              required: ['id', 'generationId'],
+              properties: { id: uuid, generationId: uuid },
+            },
+            querystring: {
+              type: 'object',
+              additionalProperties: false,
+              properties: { after: { type: 'string', pattern: '^[0-9]{1,6}$' }, attempt: uuid },
+            },
+          },
+        },
+        async (req, reply) => {
+          if (!service.partial) throw new HttpError(503, 'partial_unavailable', 'Partial tours are unavailable.');
+          const { after, attempt } = req.query;
+          reply.header('Cache-Control', 'no-store');
+          return service.partial(
+            owner(req),
+            req.params.id,
+            req.params.generationId,
+            after !== undefined && attempt ? { after: Number(after), attempt } : undefined,
+          );
+        },
+      );
       api.get<{ Params: { id: string; runId: string } }>(
         '/documents/:id/agent-runs/:runId',
         { schema: { params: { type: 'object', required: ['id', 'runId'], properties: { id: uuid, runId: uuid } } } },
@@ -502,10 +545,21 @@ export async function createApp(options: Options) {
       api.post<{ Params: { id: string }; Body: AskRequest }>(
         '/documents/:id/ask',
         { schema: { params: documentParams, body: askBody } },
-        async (req, reply): Promise<AskAnswer> => {
+        async (req, reply): Promise<AskAnswer | FastifyReply> => {
           const ask = service.ask?.bind(service);
           if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
-          return whileConnected(reply, (signal) => ask(owner(req), req.params.id, req.body, signal));
+          return whileConnected(reply, (signal) =>
+            answerResponse(reply, req.headers.accept, () => ask(owner(req), req.params.id, req.body, signal)),
+          );
+        },
+      );
+      // A loose box dragged over a figure, answered with the outline of the object inside it (snap.ts).
+      api.post<{ Params: { id: string }; Body: SnapRequest }>(
+        '/documents/:id/snap',
+        { schema: { params: documentParams, body: snapBody({ analysisId: uuid }) } },
+        async (req, reply): Promise<SnapResult> => {
+          if (!snap) throw new HttpError(503, 'snap_unavailable', 'Snapping is not available on this server.');
+          return whileConnected(reply, (signal) => snap.snap(owner(req), req.params.id, req.body, signal));
         },
       );
     },
@@ -551,10 +605,29 @@ export async function createApp(options: Options) {
               body: askBody,
             },
           },
-          async (req, reply): Promise<AskAnswer> => {
+          async (req, reply): Promise<AskAnswer | FastifyReply> => {
             const ask = options.service.demoAsk?.bind(options.service);
             if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
-            return whileConnected(reply, (signal) => ask(req.params.paper, req.body, signal));
+            return whileConnected(reply, (signal) =>
+              answerResponse(reply, req.headers.accept, () => ask(req.params.paper, req.body, signal)),
+            );
+          },
+        );
+        demo.post<{ Params: { paper: string }; Body: SnapRequest }>(
+          '/:paper/snap',
+          {
+            schema: {
+              params: {
+                type: 'object',
+                required: ['paper'],
+                properties: { paper: { type: 'string', pattern: DEMO_PAPER.source } },
+              },
+              body: snapBody(),
+            },
+          },
+          async (req, reply): Promise<SnapResult> => {
+            if (!snap) throw new HttpError(503, 'snap_unavailable', 'Snapping is not available on this server.');
+            return whileConnected(reply, (signal) => snap.demoSnap(req.params.paper, req.body, signal));
           },
         );
       },

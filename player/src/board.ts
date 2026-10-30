@@ -1,5 +1,10 @@
+import { canonicalDistribution, distributionProblems } from '../../shared/distribution';
+import { canonicalHeatmap, heatmapProblems } from '../../shared/heatmap';
 import { plotProblems, type PlotItem } from '../../shared/plot';
+import { canonicalScatter, scatterProblems } from '../../shared/scatter';
 import { sceneProblems } from '../../shared/scene';
+import { canonicalShapes, shapesProblems } from '../../shared/shapes';
+import { canonicalTimeline, timelineProblems } from '../../shared/timeline';
 // The side board: checks that a board item can be drawn, and computes what the board draws (term
 // wrapping, flow and bar geometry, easing). Pure, so it can be tested; rendering is in
 // components/Board.tsx.
@@ -112,6 +117,28 @@ export function checkBoardItem(raw: unknown, where: string, warn: (message: stri
     case 'plot': {
       const problems = plotProblems(raw);
       return problems.length ? fail(problems.join(' ')) : (raw as unknown as BoardItem);
+    }
+    // The newer kinds share their checks with the server and keep only what the check keeps (values of a formula
+    // computed, unused options dropped).
+    case 'heatmap': {
+      const problems = heatmapProblems(raw);
+      return problems.length ? fail(problems.join(' ')) : canonicalHeatmap(raw);
+    }
+    case 'scatter': {
+      const problems = scatterProblems(raw);
+      return problems.length ? fail(problems.join(' ')) : canonicalScatter(raw);
+    }
+    case 'shapes': {
+      const problems = shapesProblems(raw);
+      return problems.length ? fail(problems.join(' ')) : canonicalShapes(raw);
+    }
+    case 'timeline': {
+      const problems = timelineProblems(raw);
+      return problems.length ? fail(problems.join(' ')) : canonicalTimeline(raw);
+    }
+    case 'distribution': {
+      const problems = distributionProblems(raw);
+      return problems.length ? fail(problems.join(' ')) : canonicalDistribution(raw);
     }
     case 'formula': {
       const latex = text(raw.latex);
@@ -530,6 +557,16 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
  * bar out: a tour shows a few chosen rows, and the largest of them need not be the best in the document. */
 export function barStandsOut(focused: number | null, index: number): boolean {
   return focused === null || index === focused;
+}
+
+/** The tag of a board whose numbers are not the paper's: invented example values, or values computed from a formula. */
+export function sourceTag(item: BoardItem): { text: string; label: string } | null {
+  if (item.kind !== 'heatmap' && item.kind !== 'scatter' && item.kind !== 'timeline' && item.kind !== 'distribution')
+    return null;
+  if (item.source === 'illustrative') return { text: 'illustrative', label: 'Invented example values, not measured' };
+  if (item.kind === 'heatmap' && item.source === 'formula')
+    return { text: 'from the formula', label: 'Computed from the formula' };
+  return null;
 }
 
 /** "higher is better" or "lower is better" when the tour says which way is better, else null. */

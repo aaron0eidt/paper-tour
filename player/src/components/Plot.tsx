@@ -1,14 +1,35 @@
+// The plot board: curves that draw in on crisp axes (linear or log), the marks the code found on them (a root, a peak, a
+// crossing, a value) as labelled points with guides to the axes, and measured points from the document over them. With
+// no marks and no points it keeps its moving probe, which follows the narration across the curves. Geometry is in
+// plotView.ts; the clock follows speech like the scatter's.
+
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import katex from 'katex';
-import { evaluateExpression, parseExpression, plotSegments, type PlotItem } from '../../../shared/plot';
-import { BOARD_INK, BOARD_PALETTE, plotCursor } from '../board';
-
+import { formatNumber, type PlotItem } from '../../../shared/plot';
+import { BOARD_INK, BOARD_PALETTE, EASE_OUT, cubicBezier, plotCursor } from '../board';
 import type { BoardPlayback } from '../engine';
+import {
+  PLOT_TIME,
+  curveStart,
+  curveValues,
+  markStart,
+  plotDescription,
+  plotDuration,
+  plotGeometry,
+  pointStart,
+  ramp,
+} from '../plotView';
+import { textMeasure, useBoxSize, useBuildClock, useFontsVersion } from './ScatterBoard';
+import '../plot.css';
 
-const WIDTH = 480,
-  HEIGHT = 300;
-const M = { left: 48, right: 20, top: 24, bottom: 42 };
-const short = (n: number) => Number(n.toPrecision(3)).toString();
+const easeOut = cubicBezier(...EASE_OUT);
+const ink = (color: string): CSSProperties => ({ '--c': color }) as CSSProperties;
+/** A mark on a crisp pixel: a 1 px line is sharp only when it is centred on one. */
+const crisp = (v: number) => Math.round(v) + 0.5;
+const short = (n: number) => formatNumber(n);
+/** Plain words (a name with a unit) are set as text; anything with a symbol or a formula in it is typeset. */
+const PLAIN = /^(?=.*\p{L}{3})[\p{L}\p{N}\s().,%/:–-]+$/u;
 function MathLabel({ text }: { text: string }) {
   const html = useMemo(() => {
     try {
@@ -17,7 +38,13 @@ function MathLabel({ text }: { text: string }) {
       return null;
     }
   }, [text]);
-  return /^[\p{L}][\p{L}\s-]+$/u.test(text) ? <span>{text}</span> : html ? <span dangerouslySetInnerHTML={{ __html: html }} /> : <span>{text}</span>;
+  return PLAIN.test(text) ? (
+    <span>{text}</span>
+  ) : html ? (
+    <span dangerouslySetInnerHTML={{ __html: html }} />
+  ) : (
+    <span>{text}</span>
+  );
 }
 
 /** Word events own the position; this short tween only smooths the distance
@@ -47,77 +74,253 @@ export function useSpokenProgress(target: number, playing: boolean): number {
   return shown;
 }
 
-export function PlotBoard({ item, focus, playback }: { item: PlotItem; focus: number | null; playback: BoardPlayback }) {
+export function PlotBoard({
+  item,
+  focus,
+  playback,
+}: {
+  item: PlotItem;
+  focus: number | null;
+  playback: BoardPlayback;
+}) {
   const progress = useSpokenProgress(playback.progress, playback.playing);
-  const trees = useMemo(() => item.curves.map((c) => parseExpression(c.expression)), [item]);
-  const { x: px, a } = plotCursor(item, progress);
-  const outputs = trees.map(tree => evaluateExpression(tree, px, a));
-  const x = (v: number) => M.left + ((v - item.x[0]) / (item.x[1] - item.x[0])) * (WIDTH - M.left - M.right);
-  const y = (v: number) =>
-    HEIGHT - M.bottom - ((v - item.y[0]) / (item.y[1] - item.y[0])) * (HEIGHT - M.top - M.bottom);
-  const paths = trees.map((tree) =>
-    plotSegments(tree, item, a)
-      .map((segment) =>
-        segment.map(([px, py], i) => `${i ? 'L' : 'M'}${x(px).toFixed(2)},${y(py).toFixed(2)}`).join(' '),
-      )
-      .join(' '),
+  const [boxRef, space] = useBoxSize<HTMLDivElement>();
+  const [topRef, top] = useBoxSize<HTMLDivElement>();
+  const [restRef, rest] = useBoxSize<HTMLDivElement>();
+  const fontsVersion = useFontsVersion();
+  const fonts = useMemo(
+    () => ({ tick: textMeasure(500, 11.5), label: textMeasure(600, 12), coords: textMeasure(500, 11) }),
+    [fontsVersion],
   );
+  // Marks and points make the plot a statement; without them the probe walks the curves with the narration.
+  const probing = !item.marks?.length && !item.points?.length;
+  const { x: probeX, a } = plotCursor(item, progress);
+  // The plot takes the room the labels and the legend leave.
+  const box = useMemo(
+    () => (space ? { width: space.width, height: space.height - (top?.height ?? 0) - (rest?.height ?? 0) - 8 } : null),
+    [space, top, rest],
+  );
+  const g = useMemo(() => (box ? plotGeometry(item, box, a, fonts) : null), [item, box, a, fonts]);
+  const elapsed = useBuildClock(plotDuration(item), playback);
+  const curves = item.curves.length;
+  const inkOf = (i: number) => BOARD_INK[item.curves[i].color ?? BOARD_PALETTE[i]];
+  const focusedCurve = focus !== null && focus < curves ? focus : null;
+  const focusedMark = focus !== null && focus >= curves ? focus - curves : null;
+  const outputs = probing ? curveValues(item, probeX, a) : [];
+  const axes = easeOut(ramp(elapsed, 0, PLOT_TIME.axes));
+  const document = item.source === 'document';
+  const caption = document
+    ? 'Function from the document'
+    : item.points?.length
+      ? 'Points measured in the document · curves illustrative'
+      : 'Illustrative function · not measured data';
+
   return (
-    <div className="plot">
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={item.title ?? 'Illustrative function plot'}>
-        {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
-          const vx = item.x[0] + fraction * (item.x[1] - item.x[0]);
-          const vy = item.y[0] + fraction * (item.y[1] - item.y[0]);
-          return (
-            <g key={fraction} className="plot-grid">
-              <line x1={x(vx)} x2={x(vx)} y1={M.top} y2={HEIGHT - M.bottom} />
-              <line x1={M.left} x2={WIDTH - M.right} y1={y(vy)} y2={y(vy)} />
-              <text x={x(vx)} y={HEIGHT - M.bottom + 20} textAnchor="middle">
-                {short(vx)}
-              </text>
-              <text x={M.left - 8} y={y(vy)} textAnchor="end" dominantBaseline="central">
-                {short(vy)}
-              </text>
-            </g>
-          );
-        })}
-        <path className="plot-axis" d={`M${M.left},${M.top}V${HEIGHT - M.bottom}H${WIDTH - M.right}`} />
-        {item.curves.map((curve, i) => {
-          const py = outputs[i];
-          const ink = BOARD_INK[curve.color ?? BOARD_PALETTE[i]];
-          return (
-            <g key={i} opacity={focus === null || focus === i ? 1 : 0.7} style={{ color: ink }}>
-              <path className="plot-curve" d={paths[i]} pathLength={1} />
-              {Number.isFinite(py) && py >= item.y[0] && py <= item.y[1] && (
-                <>
-                  {(focus === i || (focus === null && i === 0)) && <path className="plot-probe" d={`M${x(px)},${HEIGHT - M.bottom}V${y(py)}H${M.left}`} stroke={ink} />}
-                  <circle cx={x(px)} cy={y(py)} r={5} fill={ink} />
-                </>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="plot-axis-labels">
-        <MathLabel text={item.x_label ?? 'x'} />
+    <div className={`plotboard${focus !== null ? ' has-focus' : ''}`} ref={boxRef}>
+      <div className="pl-ylabel" ref={topRef}>
         <MathLabel text={item.y_label ?? 'f(x)'} />
       </div>
-      <ul className="plot-legend">
-        {item.curves.map((c, i) => (
-          <li key={i} style={{ color: BOARD_INK[c.color ?? BOARD_PALETTE[i]] }}>
-            <MathLabel text={c.label} />
-          </li>
-        ))}
-      </ul>
-      <dl className="plot-values" aria-label="Current illustrative values">
-        <div><dt><MathLabel text={item.x_label ?? 'x'} /></dt><dd>{short(px)}</dd></div>
-        {item.parameter && <div><dt>a</dt><dd>{short(a)}</dd></div>}
-        {item.curves.map((curve, i) => <div key={i} style={{ color: BOARD_INK[curve.color ?? BOARD_PALETTE[i]] }}>
-          <dt><MathLabel text={curve.label} /></dt><dd>{Number.isFinite(outputs[i]) ? short(outputs[i]) : '—'}</dd>
-        </div>)}
-      </dl>
-      {item.parameter && <p className="plot-parameter">Fixed input · parameter a changes with the explanation</p>}
-      <p className="plot-caption">Illustrative function · not measured data</p>
+      {g && (
+        <svg className="pl-svg" width={g.width} height={g.height} role="img" aria-label={plotDescription(item, a)}>
+          <g className="pl-axes" opacity={axes}>
+            <g className="pl-grid">
+              {g.yTicks.map((t) => (
+                <line key={`y${t.value}`} x1={g.plot.left} x2={g.plot.right} y1={crisp(t.at)} y2={crisp(t.at)} />
+              ))}
+              {g.xTicks.map((t) => (
+                <line key={`x${t.value}`} x1={crisp(t.at)} x2={crisp(t.at)} y1={g.plot.top} y2={g.plot.bottom} />
+              ))}
+            </g>
+            <path
+              className="pl-axis"
+              d={`M${crisp(g.plot.left)} ${g.plot.top}V${crisp(g.plot.bottom)}H${g.plot.right}`}
+            />
+            <path
+              className="pl-ticks"
+              d={[
+                ...g.yTicks.map((t) => `M${g.plot.left - 4} ${crisp(t.at)}H${g.plot.left}`),
+                ...g.xTicks.map((t) => `M${crisp(t.at)} ${g.plot.bottom}V${g.plot.bottom + 4}`),
+                ...g.yMinor.map((at) => `M${g.plot.left - 2} ${crisp(at)}H${g.plot.left}`),
+                ...g.xMinor.map((at) => `M${crisp(at)} ${g.plot.bottom}V${g.plot.bottom + 2}`),
+              ].join('')}
+            />
+            {g.yTicks.map((t) => (
+              <text
+                key={`yl${t.value}`}
+                className="pl-tick"
+                x={g.plot.left - 8}
+                y={t.at}
+                textAnchor="end"
+                dominantBaseline="central"
+              >
+                {t.label}
+              </text>
+            ))}
+            {g.xTicks.map((t) => (
+              <text
+                key={`xl${t.value}`}
+                className="pl-tick"
+                x={t.at}
+                y={g.plot.bottom + 16}
+                textAnchor="middle"
+                dominantBaseline="central"
+              >
+                {t.label}
+              </text>
+            ))}
+          </g>
+
+          {item.curves.map((_, i) => {
+            const drawn = easeOut(ramp(elapsed, curveStart(i), PLOT_TIME.curve));
+            return (
+              <g key={i} className={`pl-curve-group${i === focusedCurve ? ' is-focus' : ''}`} style={ink(inkOf(i))}>
+                <path
+                  className="pl-curve"
+                  d={g.paths[i]}
+                  pathLength={1}
+                  style={{ strokeDashoffset: 1 - drawn, opacity: drawn > 0 ? 1 : 0 }}
+                />
+              </g>
+            );
+          })}
+
+          {probing &&
+            item.curves.map((_, i) => {
+              const value = outputs[i];
+              const shown = Number.isFinite(value) && value >= item.y[0] && value <= item.y[1];
+              if (!shown || !(focusedCurve === i || (focusedCurve === null && i === 0))) return null;
+              return (
+                <g
+                  key={`probe${i}`}
+                  className="pl-probe"
+                  style={ink(inkOf(i))}
+                  opacity={ramp(elapsed, curveStart(i) + 500, 400)}
+                >
+                  <path className="pl-guide" d={`M${g.x(probeX)} ${g.plot.bottom}V${g.y(value)}H${g.plot.left}`} />
+                  <circle className="pl-dot" cx={g.x(probeX)} cy={g.y(value)} r={5} />
+                </g>
+              );
+            })}
+
+          {g.points.map((point, i) => {
+            const arrive = easeOut(ramp(elapsed, pointStart(item, i), PLOT_TIME.point));
+            return (
+              <g key={`p${i}`} className="pl-point" opacity={arrive}>
+                <circle cx={point.x} cy={point.y} r={4.5 + 3 * (1 - arrive)} />
+                {point.label && (
+                  <text
+                    x={point.labelLeft}
+                    y={point.y}
+                    textAnchor={point.labelLeft < point.x ? 'end' : 'start'}
+                    dominantBaseline="central"
+                  >
+                    {point.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {g.marks.map((placed) => {
+            const k = placed.mark.index;
+            const arrive = easeOut(ramp(elapsed, markStart(item, k), PLOT_TIME.mark));
+            const text = ramp(elapsed, markStart(item, k) + 220, 320);
+            const lit = focusedMark === k;
+            const color = inkOf(Math.max(0, placed.mark.curve - 1));
+            const crossing = placed.mark.type === 'crossing';
+            return (
+              <g
+                key={`m${k}`}
+                className={`pl-mark${lit ? ' is-focus' : ''}`}
+                style={ink(crossing ? 'var(--text)' : color)}
+              >
+                <path
+                  className="pl-guide"
+                  d={`M${placed.x} ${placed.y}V${g.plot.bottom}M${placed.x} ${placed.y}H${g.plot.left}`}
+                  pathLength={2}
+                  style={{ strokeDasharray: '3 4', opacity: arrive }}
+                />
+                <g transform={`translate(${placed.x} ${placed.y - 14 * (1 - arrive)})`} opacity={arrive}>
+                  <g className="pl-pop">
+                    <circle className="pl-halo" r={11} />
+                    <circle className="pl-core" r={5.5} />
+                  </g>
+                </g>
+                <g className="pl-pill" opacity={text}>
+                  <rect
+                    x={placed.rect.left}
+                    y={placed.rect.top}
+                    width={placed.rect.right - placed.rect.left}
+                    height={placed.rect.bottom - placed.rect.top}
+                    rx={6}
+                  />
+                  <text
+                    className="pl-pill-name"
+                    x={placed.rect.left + 9}
+                    y={placed.rect.top + 12}
+                    dominantBaseline="central"
+                  >
+                    {placed.name}
+                  </text>
+                  <text
+                    className="pl-pill-coords"
+                    x={placed.rect.left + 9}
+                    y={placed.rect.top + 25}
+                    dominantBaseline="central"
+                  >
+                    {placed.coords}
+                  </text>
+                </g>
+              </g>
+            );
+          })}
+        </svg>
+      )}
+      <div className="pl-rest" ref={restRef}>
+        <div className="pl-xlabel">
+          <MathLabel text={item.x_label ?? 'x'} />
+        </div>
+        <ul className="pl-legend">
+          {item.curves.map((c, i) => (
+            <li key={i} className={i === focusedCurve ? 'is-focus' : undefined} style={{ color: inkOf(i) }}>
+              <i />
+              <MathLabel text={c.label} />
+            </li>
+          ))}
+        </ul>
+        {(probing || item.parameter) && (
+          <dl className="pl-stats" aria-label="Current illustrative values">
+            {probing && (
+              <div>
+                <dt>
+                  <MathLabel text={item.x_label ?? 'x'} />
+                </dt>
+                <dd>{short(probeX)}</dd>
+              </div>
+            )}
+            {item.parameter && (
+              <div>
+                <dt>a</dt>
+                <dd>{short(a)}</dd>
+              </div>
+            )}
+            {probing &&
+              item.curves.map((curve, i) => (
+                <div key={i} style={{ color: inkOf(i) }}>
+                  <dt>
+                    <MathLabel text={curve.label} />
+                  </dt>
+                  <dd>{Number.isFinite(outputs[i]) ? short(outputs[i]) : '—'}</dd>
+                </div>
+              ))}
+          </dl>
+        )}
+        {item.parameter && probing && <p className="pl-note">Fixed input · parameter a changes with the explanation</p>}
+        <p className="pl-note">
+          {caption}
+          {item.marks?.length ? ' · marked points computed from the curves' : ''}
+        </p>
+      </div>
     </div>
   );
 }

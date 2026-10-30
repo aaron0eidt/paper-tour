@@ -1,29 +1,23 @@
-import { SCENE_SCHEMA } from '../../../shared/scene';
-import { PLOT_SCHEMA } from '../../../shared/plot';
 import type { Doc, Step } from '../../../shared/paper';
 import { selectedSourceIds } from '../../../shared/selection';
 import type { TourImage } from '../tour-generator';
-import { BOARD_KINDS, BOARD_LIMITS } from './board';
+import { answerBoardSchema, boardGuidance, shownLine, type ShownBoard } from './ask-boards';
 import { EXAMPLE_SCHEMA, EXAMPLE_TASK } from './example';
 import { ANSWERABLE, type AskRequest } from './ask-types';
 import type { Passage, Retrieval } from './ask-retrieval';
 import { BOARD_EXAMPLES } from './prompts';
 import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
+import { pick } from './schema-budget';
+import { viewText } from './tables';
 import { BOUNDS_SCHEMA, figureFrameText, measuredFrameText } from './visual-grounding';
+
+/** Most sentences and visuals an answer may point at (schema-budget.ts). */
+const ASK_IDS = 600;
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
 export const CUE_ACTIONS = ['highlight', 'box', 'arrow', 'circle', 'spotlight', 'note'] as const;
-const NO_BOARD = {
-  kind: 'none',
-  title: '',
-  latex: '',
-  terms: [],
-  nodes: [],
-  bars: [],
-  unit: '',
-  higher_is_better: true,
-};
+const NO_BOARD = {};
 /** One short answer for a different document (rule 8): weak models copy format and depth from an example. */
 const EXAMPLE = JSON.stringify({
   plan: 'Asks why the learning rate warms up. p4.s7 gives the reason and eq2 the schedule.',
@@ -38,18 +32,23 @@ const EXAMPLE = JSON.stringify({
       say: 'Equation two gives the schedule. For the first four thousand steps the rate grows linearly, then it decays with the inverse square root of the step number.',
       cues: [{ action: 'box', target: 'eq2', region: 'whole', label: 'the schedule', anchor: 'Equation two gives' }],
       board: {
-        ...NO_BOARD,
-        kind: 'formula',
-        title: 'Learning-rate schedule',
-        latex: 'lr = d^{-0.5} \\cdot \\min(s^{-0.5}, s \\cdot w^{-1.5})',
-        terms: [
-          { latex: 's \\cdot w^{-1.5}', label: 'linear warmup', anchor: 'grows linearly' },
-          { latex: 's^{-0.5}', label: 'decay', anchor: 'inverse square root' },
-        ],
+        formula: {
+          title: 'Learning-rate schedule',
+          latex: 'lr = d^{-0.5} \\cdot \\min(s^{-0.5}, s \\cdot w^{-1.5})',
+          terms: [
+            { latex: 's \\cdot w^{-1.5}', label: 'linear warmup', anchor: 'grows linearly' },
+            { latex: 's^{-0.5}', label: 'decay', anchor: 'inverse square root' },
+          ],
+        },
       },
     },
   ],
   followups: ['How long is the warmup?', 'What happens without warmup?'],
+});
+
+/** A board of a kind with its own fields, with the words each part is lit at (weak models copy the format). */
+const FOCUS_EXAMPLE = JSON.stringify({
+  heatmap: { ...BOARD_EXAMPLES.heatmap.heatmap, focus: [{ part: 'row-2', anchor: 'Along the rust row' }] },
 });
 
 /** The task's fixed part: identical for every question on a document, so it extends the cached prefix. */
@@ -59,11 +58,12 @@ the document while it speaks.
 ${EXAMPLE_TASK}
 ${SOURCE_VISUAL_POLICY}
 PLOT TOOL EXAMPLE (format only; choose the actual function for this question): ${JSON.stringify(BOARD_EXAMPLES.plot.plot)}
-Actively choose useful live visuals for the answer: a plot for function behavior or parameter changes, bars for comparable quantities, and timed example frames for calculations or transformations. Use native scenes for vectors, matrices and custom visual explanations: positioned objects with stable id,type,x,y,w,h and optional color,text,values,plot,background; object types text/math/rect/circle/arrow/vector/matrix/plot, normalized0..1positions, signed endpoint deltas for arrows/vectors. Bind vector/arrow/circle objects to axes with plotId and data-domain x,y,endpoint deltas; never guess their normalized alignment with an embedded plot. Keep semantic identities across scene frames, make the transformation visible, and avoid foreground collisions. Use them whenever they clarify the answer. Measured source-component cues are sufficient for a straightforward diagram path; avoid decorative motion and duplicate boards.
+Actively choose a useful live visual for the answer (item 5 lists the kinds) and timed example frames for calculations or transformations. Use native scenes for vectors, matrices and custom visual explanations: positioned objects with stable id,type,x,y,w,h and optional color,text,values,plot,background; object types text/math/rect/circle/arrow/vector/matrix/plot, normalized0..1positions, signed endpoint deltas for arrows/vectors. Bind vector/arrow/circle objects to axes with plotId and data-domain x,y,endpoint deltas; never guess their normalized alignment with an embedded plot. Keep semantic identities across scene frames, make the transformation visible, and avoid foreground collisions. Use them whenever they clarify the answer. Measured source-component cues are sufficient for a straightforward diagram path; avoid decorative motion and duplicate boards.
 Start with the actual PDF equation, figure, table or sentence and choose precise source cues when they suffice. A copied formula must preserve the source and be actively used through term emphasis, substitution or a connected plot. Never fill a sideboard with colorful prose, table descriptions or an input/output flow containing unexplained number pairs. Choose a separate visual only for an important insight that the PDF cues alone cannot show; function behavior calls for a plot, vector transformations for actual components, and meaningful numerical comparisons for charts. A recap or trivial unit conversion does not need another panel.
 1. "answerable": "yes" if the document answers the question, "partly" if it answers part of it, "no" if it does not.
 2. Write 1 to 3 steps. The first sentence of the first step answers the question directly. Each "say" has at most 100
    words in clear spoken sentences. Explain the intermediate reasoning and meaning of the result; do not compress a mechanism into a list of labels. Add a step only when the answer has parts, for example the idea, then the formula.
+   The first step starts the voice, so keep it to about 40 words and put it on the page (the direct answer and its source cues); its board, if the answer needs one, belongs to the next step unless the whole answer is one step.
 3. Say only what the document supports. Knowledge from outside it is allowed only as background: start that sentence
    with "As background," and point at nothing while saying it. When the document does not answer the question, say so
    plainly, then point at the closest passage.
@@ -80,14 +80,15 @@ Start with the actual PDF equation, figure, table or sentence and choose precise
    asks to "highlight" it; action "highlight" is exclusively for sentence IDs. Do not use spotlight or note on a measured
    ID. Never guess a position from a caption or substitute an overview for a specific component. Selected page crops
    have a different coordinate frame: no fine figure marks.
-5. For a function intuition you may use board.kind plot and optional board.plot: kind plot, x/y ranges, curves [{expression,label}], optional parameter {from,to}. Safe expressions use x/a, arithmetic and whitelisted sin/cos/tanh/exp/log/sqrt/abs/relu/sigmoid/min/max/softmax(x,0); no code. Explain the mechanism and label it illustrative, never measured data.
-6. The board is optional, at most one item per step; otherwise its "kind" is "none" and the other fields stay empty.
-   - "formula" when the question is about an equation: its LaTeX, and 2 to 4 terms, each a separate part with "latex"
-     copied exactly from the formula, a "label" of 1 to 4 words and an "anchor" where "say" explains that term.
-   - "bars" to compare 2 to 6 numbers copied exactly from the passages or table cells, with their "unit".
-   - "flow" only for informative dependencies, branching, feedback or changing values that source annotations cannot show; never for a plain list of stages. Each "label" has at most 3 words.
+5. The board is optional, at most one item per step; otherwise its "kind" is "none" and the other fields stay empty.
+${boardGuidance()}
+   - formula: the whole formula in "latex" and 2 to 4 "terms", each a separate part with "latex" copied exactly from the formula, a "label" of 1 to 4 words and an "anchor" where "say" explains that term.
+   - bars: 2 to 6 numbers copied exactly from the document or table cells, with their "unit".
+   - flow: each "label" has at most 3 words; "edges" join the nodes.
+   - plot: x/y ranges, curves [{expression,label}], optional parameter {from,to}. Safe expressions use x/a, arithmetic and whitelisted sin/cos/tanh/exp/log/sqrt/abs/relu/sigmoid/min/max/softmax(x,0); no code. Explain the mechanism; it is illustrative, never measured data, unless it plots the document's own formula.
 6. "followups": two questions of at most 12 words that the learner could ask next. Each goes one step further than this
    answer and the conversation so far, is answered by the document, and was not asked before.
+BOARD WITH FOCUS (format only, for a different document): ${FOCUS_EXAMPLE}
 EXAMPLE OUTPUT for a different document:
 ${EXAMPLE}`;
 }
@@ -101,7 +102,14 @@ function passageLine(p: Passage, doc: Doc): string {
 }
 
 /** The task's variable part: the question, the conversation so far, the narration and the retrieved passages. */
-export function askContext(request: AskRequest, retrieval: Retrieval, doc: Doc, step?: Step, image?: TourImage) {
+export function askContext(
+  request: AskRequest,
+  retrieval: Retrieval,
+  doc: Doc,
+  step?: Step,
+  image?: TourImage,
+  shown: readonly ShownBoard[] = [],
+) {
   const lines = [`QUESTION: ${request.question}`];
   if (request.selection) {
     const selected = selectedSourceIds(doc, request.selection);
@@ -117,13 +125,25 @@ export function askContext(request: AskRequest, retrieval: Retrieval, doc: Doc, 
     for (const turn of request.history) lines.push(`Q: ${turn.question}`, `A: ${clip(turn.answer, 700)}`);
   }
   if (step) lines.push(`THE TOUR WAS SAYING: ${step.say}`);
+  const seen = shownLine(shown);
+  if (seen) lines.push(seen);
   if (retrieval.focus.length)
     lines.push(
       'IN FOCUS (on screen, asked about or named in the question):',
       ...retrieval.focus.map((p) => passageLine(p, doc)),
     );
-  for (const table of retrieval.tables)
-    lines.push(`CELLS OF [${table.id}] (extracted, one line per block):`, ...table.lines);
+  for (const table of retrieval.tables) {
+    if (!table.text) {
+      lines.push(`CELLS OF [${table.id}] (extracted, one line per block):`, ...table.lines);
+      continue;
+    }
+    lines.push('TABLE AS READ (typed rows and columns; numbers exactly as printed; "-" is a blank cell):', table.text);
+    if (table.views?.length)
+      lines.push(
+        'READY BOARDS BUILT FROM THE TABLE BY CODE (every number is a cell of the table or computed from cells): use one as it is, in the object of its kind (board.scatter, board.heatmap) or as board.bars, shorten its title or drop rows, or build your own by copying numbers exactly as printed.',
+        ...table.views.map(viewText),
+      );
+  }
   if (retrieval.ranked.length)
     lines.push('RETRIEVED PASSAGES (best match first):', ...retrieval.ranked.map((p) => passageLine(p, doc)));
   if (!retrieval.focus.length && !retrieval.ranked.length) lines.push('No passage matched the question.');
@@ -168,7 +188,8 @@ export function answerProviderSchema<T>(schema: T): T {
  * IDs. Regions other than "whole" are offered only when the model can see the figure.
  */
 export function answerSchema(retrieval: Retrieval, regions: readonly string[] = ['whole']) {
-  const ids = [...retrieval.sentences, ...retrieval.visuals];
+  // What a question retrieves is small, but a selection can cover a page: the focus comes first and the rest is cut.
+  const ids = pick([...retrieval.sentences, ...retrieval.visuals], ASK_IDS);
   const text = (maxLength: number, description?: string) => ({
     type: 'string',
     maxLength,
@@ -204,23 +225,7 @@ export function answerSchema(retrieval: Retrieval, regions: readonly string[] = 
       maxItems: 4,
       items: { type: 'string', enum: retrieval.measured.map((t) => t.id) },
     };
-  const limits = BOARD_LIMITS;
-  const parts = (max: number, item: object) => ({ type: 'array', maxItems: max, items: item });
-  const board = object({
-    kind: { type: 'string', enum: ['none', ...BOARD_KINDS] },
-    title: text(limits.title),
-    latex: text(400, 'formula only: the LaTeX of the whole formula.'),
-    terms: parts(
-      limits.terms[1],
-      object({ latex: text(160, 'Copied exactly from latex.'), label: text(limits.termLabel), anchor }),
-    ),
-    nodes: parts(limits.nodes[1], object({ label: text(limits.nodeLabel), anchor })),
-    bars: parts(limits.bars[1], object({ label: text(limits.barLabel), value: { type: 'number' }, anchor })),
-    unit: text(limits.unit),
-    higher_is_better: { type: 'boolean' },
-  });
-  board.properties.plot = PLOT_SCHEMA;
-  board.properties.scene = SCENE_SCHEMA;
+  const board = answerBoardSchema(anchor);
   const step = object({
     say: {
       type: 'string',

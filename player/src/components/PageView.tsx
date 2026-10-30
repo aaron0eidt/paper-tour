@@ -1,5 +1,5 @@
 import { getLivePage, isPdfOpen } from '../pdfLifetime';
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Detail } from '../canvasPlan';
 import { BLOCK_COLORS, MARKER, STROKE } from '../colors';
@@ -26,8 +26,15 @@ interface Props {
   scale: number;
   detail: Detail | null;
   shapes?: PageShapes;
+  /** Overlay keys of the mark the voice is on; null shows every mark alike. */
+  current?: readonly string[] | null;
   spotlight: boolean;
+  spotlightLeaving?: boolean;
   debug: DebugPage | null;
+  /** A deck's slide: the one showing, the one fading out, or hidden. Without it the page is one of a stack. */
+  slide?: 'current' | 'leaving' | 'hidden';
+  /** A deck: this page now has (or no longer has) its canvas, so the slide before it can stay until it is there. */
+  onDrawn?(n: number, drawn: boolean): void;
 }
 
 function roundedRect([x0, y0, x1, y1]: BBox, r: number): string {
@@ -41,16 +48,50 @@ function roundedRect([x0, y0, x1, y1]: BBox, r: number): string {
 const rectProps = ([x0, y0, x1, y1]: BBox) => ({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
 
 const PREVIEW_SCALE = 1;
+// A slide that gets no canvas this long shows anyway.
+const SLIDE_GIVE_UP_MS = 1500;
 const BOX_RADIUS = 5;
 // Concentric with box corners (holes are padded SPOT_PAD - BOX_PAD more), so a box on the
 // spotlit target is never clipped at its corners.
 const HOLE_RADIUS = BOX_RADIUS + SPOT_PAD - BOX_PAD;
 
+/** The class of a mark: the one being read is `current`, earlier ones `past`, and one whose step ended `leaving`. */
+function tone(key: string, current: readonly string[] | null, leaving?: boolean): string {
+  if (leaving) return ' leaving';
+  if (!current) return '';
+  return current.some((k) => key === k || key.startsWith(`${k}.`)) ? ' current' : ' past';
+}
+
+/** Where along a passage each line starts and ends, 0 to 1, weighted by the line's width. */
+function sweepSpans(rects: BBox[]): [number, number][] {
+  const total = rects.reduce((sum, r) => sum + (r[2] - r[0]), 0) || 1;
+  let done = 0;
+  return rects.map((r) => {
+    const from = done / total;
+    done += r[2] - r[0];
+    return [from, done / total];
+  });
+}
+
 /** One page: a pdf.js canvas with SVG layers on top that use page points directly via viewBox. */
-export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes, spotlight, debug }: Props) {
+export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes, current = null, spotlight, spotlightLeaving, debug, slide, onDrawn }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const { width: w, height: h } = box;
+  // A slide comes in once its canvas is there (or, if it never gets one, after a moment), never as a blank white page.
+  const [drawn, setDrawn] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
+  const notified = useRef(false);
+  useEffect(() => {
+    if (!drawn && !notified.current) return;
+    notified.current = drawn;
+    onDrawn?.(box.n, drawn);
+  }, [drawn, box.n, onDrawn]);
+  useEffect(() => {
+    if (slide !== 'current' || drawn) return setGaveUp(false);
+    const timer = setTimeout(() => setGaveUp(true), SLIDE_GIVE_UP_MS);
+    return () => clearTimeout(timer);
+  }, [slide, drawn]);
 
   // Render into a fresh canvas and swap it in when done, so the old one stays visible meanwhile.
   useEffect(() => {
@@ -59,6 +100,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
     if (!pdf || scale <= 0) {
       for (const c of host.querySelectorAll('canvas')) c.width = c.height = 0; // free memory now
       host.replaceChildren();
+      setDrawn(false);
       return;
     }
     let cancelled = false;
@@ -75,6 +117,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
           if (cancelled || !isPdfOpen(pdf)) return;
           for (const c of host.querySelectorAll('canvas')) c.width = c.height = 0;
           host.replaceChildren(canvas);
+          setDrawn(true);
         }
       })
       .catch((err) => {
@@ -124,29 +167,43 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
 
   const viewBox = `0 0 ${w} ${h}`;
   return (
-    <div className="page" style={{ left: box.x, top: box.y, width: w, height: h }} data-page={box.n}>
+    <div className={slide ? `page slide slide-${slide}${drawn || gaveUp ? ' ready' : ''}` : 'page'} style={{ left: box.x, top: box.y, width: w, height: h }} data-page={box.n} aria-hidden={slide === 'hidden' ? true : undefined}>
       <div className="page-canvas" ref={hostRef} />
       <div className="page-detail" ref={detailRef} />
 
       <svg className="layer layer-marker" viewBox={viewBox} preserveAspectRatio="none">
-        {shapes?.markers.map((m) => (
-          <g key={m.key} fill={MARKER[m.color]}>
-            {m.rects.map((r, i) => (
-              <rect
-                key={i}
-                className="hl-rect"
-                {...rectProps([r[0] - 1.5, r[1] - 0.5, r[2] + 1.5, r[3] + 0.5])}
-                rx={2}
-                style={{ animationDelay: `${i * 110}ms` }}
-              />
-            ))}
-          </g>
-        ))}
+        {shapes?.markers.map((m) => {
+          const spans = sweepSpans(m.rects);
+          return (
+            <g key={m.key} fill={MARKER[m.color]} className={`mark${tone(m.key, current, m.leaving)}`}>
+              {m.rects.map((r, i) => (
+                <rect
+                  key={i}
+                  className="hl-rect"
+                  {...rectProps([r[0] - 1.5, r[1] - 0.5, r[2] + 1.5, r[3] + 0.5])}
+                  rx={2}
+                  style={{ animationDelay: `${i * 110}ms` }}
+                />
+              ))}
+              {/* The narration's progress along the passage; only the current mark shows it. */}
+              <g className="hl-sweep" fill={STROKE[m.color]}>
+                {m.rects.map((r, i) => (
+                  <rect
+                    key={i}
+                    {...rectProps([r[0] - 1.5, r[1] - 0.5, r[2] + 1.5, r[3] + 0.5])}
+                    rx={2}
+                    style={{ '--from': spans[i][0], '--to': spans[i][1] } as CSSProperties}
+                  />
+                ))}
+              </g>
+            </g>
+          );
+        })}
       </svg>
 
       <svg className="layer layer-fx" viewBox={viewBox} preserveAspectRatio="none">
         {shapes?.underlines.map((m) => (
-          <g key={m.key} fill={STROKE[m.color]}>
+          <g key={m.key} fill={STROKE[m.color]} className={`mark${tone(m.key, current, m.leaving)}`}>
             {m.rects.map((r, i) => (
               <rect
                 key={i}
@@ -159,7 +216,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
           </g>
         ))}
         {shapes?.boxes.map((b) => (
-          <g key={b.key} className="box">
+          <g key={b.key} className={`box${tone(b.key, current, b.leaving)}`}>
             <path className="box-fill" d={roundedRect(b.rect, BOX_RADIUS)} fill={STROKE[b.color]} />
             <path className="box-stroke" d={roundedRect(b.rect, BOX_RADIUS)} stroke={STROKE[b.color]} pathLength={1} />
           </g>
@@ -167,7 +224,7 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
         {/* Drawn last so boxes outside the hole dim like everything else. */}
         {spotlight && (
           <path
-            className={shapes?.readingSpotlight ? 'spotlight spotlight-reading' : 'spotlight'}
+            className={`${shapes?.readingSpotlight ? 'spotlight spotlight-reading' : 'spotlight'}${spotlightLeaving ? ' leaving' : ''}`}
             fillRule="evenodd"
             d={`M0,0H${w}V${h}H0Z ${(shapes?.holes ?? []).map((r) => roundedRect(r, HOLE_RADIUS)).join(' ')}`}
           />
@@ -178,7 +235,9 @@ export const PageView = memo(function PageView({ box, pdf, scale, detail, shapes
       {!!shapes?.pens.length && (
         <svg className="layer layer-pen" viewBox={viewBox} preserveAspectRatio="none">
           {shapes.pens.map((p) => (
-            <PenMark key={p.key} pen={p} />
+            <g key={p.key} className={`pen${tone(p.key, current, p.leaving)}`}>
+              <PenMark pen={p} />
+            </g>
           ))}
         </svg>
       )}

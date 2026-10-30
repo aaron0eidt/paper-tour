@@ -126,20 +126,21 @@
             "type": "array",
             "description": "Sentences that cite this figure or table, e.g. \"as shown in Figure 2\".",
             "items": { "$ref": "#/$defs/sentenceId" }
-          }
+          },
+          "grid": { "$ref": "#/$defs/tableGrid" }
         }
       }
     },
     "equations": {
       "type": "array",
-      "description": "Numbered display equations. Best effort; may be empty.",
+      "description": "Display equations in reading order: the numbered ones, and the ones without a printed number (number null, IDs equ1, equ2, ...). Best effort; may be empty.",
       "items": {
         "type": "object",
         "required": ["id", "number", "page", "bbox", "text"],
         "additionalProperties": false,
         "properties": {
           "id": { "$ref": "#/$defs/equationId" },
-          "number": { "type": "string" },
+          "number": { "type": ["string", "null"], "description": "Printed number such as \"3\" or \"A.1\"; null for a display without one." },
           "page": { "type": "integer", "minimum": 1 },
           "bbox": { "$ref": "#/$defs/bbox" },
           "block": { "$ref": "#/$defs/blockId" },
@@ -183,12 +184,71 @@
       "minItems": 4,
       "maxItems": 4
     },
+    "tableGrid": {
+      "type": "object",
+      "description": "What a table prints, as typed rows and columns. Only on tables that could be read without guessing; a table without a grid is still a picture and its table_text blocks. Every row has one cell per column. Scripts are written d_model and 10^19.",
+      "required": ["confidence", "method", "columns", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "confidence": { "enum": ["high", "medium"], "description": "high: header, columns and rows were found without guessing. medium: part of it was inferred (no rule under the header, a number printed across several columns, a header found by its content)." },
+        "method": { "enum": ["spans", "finder"], "description": "spans: read from the words and their positions. finder: the cells of a fully ruled table, from PyMuPDF's table finder." },
+        "label_header": { "type": "string", "description": "Header of the row-label column, when the table has one (the leftmost column, if it holds text)." },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The columns after the row-label column.",
+          "items": {
+            "type": "object",
+            "required": ["name", "kind"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "description": "The header text, spanning headers first (\"BLEU EN-DE\"), without direction marks." },
+              "kind": { "enum": ["number", "text"], "description": "number: most filled cells are numbers." },
+              "unit": { "type": "string", "description": "A unit or scale found in the header or the cells: ms, %, kg · m^2, ×10^6." },
+              "better": { "enum": ["up", "down"], "description": "Which way is better, only when the header says so: an arrow, or \"higher is better\"." }
+            }
+          }
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["label", "cells"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "description": "The row label; empty when the row is named by its group or by its cells." },
+              "group": { "type": "string", "description": "What several rows share: a label centred beside them, or a title line above them." },
+              "note": { "type": "string", "description": "Text printed across the row's columns, such as a remark." },
+              "cells": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["text"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "text": { "type": "string", "description": "As printed; empty for a blank cell. A cell printed across several columns is repeated in each." },
+                    "value": { "type": "number", "description": "The number the cell holds, only when the whole cell is one number: 2.3 × 10^19 is 2.3e19, 0.16 ± 0.11 is 0.16. Ranges and inequalities have none." }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" }, "description": "Lines of text under the last row, inside the table box." }
+      }
+    },
     "blockId": { "type": "string", "pattern": "^p[1-9][0-9]*\\.b[1-9][0-9]*$" },
     "sentenceId": { "type": "string", "pattern": "^p[1-9][0-9]*\\.s[1-9][0-9]*$" },
     "sectionId": { "type": "string", "pattern": "^sec-[a-z0-9][a-z0-9.-]*$" },
     "figureId": { "type": "string", "pattern": "^(fig|tab)[0-9A-Za-z]+$" },
     "panelId": { "type": "string", "pattern": "^(fig|tab)[0-9A-Za-z]+\\.[a-z]$" },
-    "equationId": { "type": "string", "pattern": "^eq[0-9A-Za-z]+$" },
+    "equationId": {
+      "type": "string",
+      "description": "\"eq\" and the printed number without punctuation: eq1, eq12, eqA1, eq5a. A display without a number is equ1, equ2, ... in reading order; a printed number always has a digit before any lowercase letter, so the two cannot collide.",
+      "pattern": "^eq[0-9A-Za-z]+$"
+    },
     "exerciseId": {
       "type": "string",
       "description": "\"ex\" and the printed number: ex1, ex2.3, exH1, exIV; a number printed twice gets a suffix, ex1-2.",

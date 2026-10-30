@@ -173,9 +173,26 @@ function provider(fn: (request: Request) => Response | unknown): typeof fetch {
     return result instanceof Response ? result : reply(result);
   }) as typeof fetch;
 }
-/** A well-behaved model: the card above, and per beat a direction using its first allowed action and target. */
+/** A visual plan that gives each listed step the visual `pick` returns, or none. */
+function planFor(request: Request, pick: (beat: string) => string = () => 'none') {
+  const beats: string[] = request.schema.properties.beats.items.properties.beat.enum;
+  return {
+    plan: 'p',
+    beats: beats.map((beat) => {
+      const visual = pick(beat);
+      return {
+        beat,
+        visual,
+        idea: visual === 'none' ? '' : 'Show how the parts relate.',
+        data: visual === 'none' ? '' : 'Illustrative values.',
+      };
+    }),
+  };
+}
+/** A well-behaved model: the card above, no side boards, and per beat a direction using its first allowed action and target. */
 function goodModel(request: Request) {
   if (request.name === 'paper_card') return card;
+  if (['visual_plan', 'opening_visual'].includes(request.name)) return planFor(request);
   if (request.task.includes('STEP KIND: formula (a closer look'))
     return { plan: 'Compute the worked case.', say: exampleSay, example: numericalExample(), cues: [] };
   const cue = request.schema.properties.cues.items.properties;
@@ -206,6 +223,7 @@ test('a standard tour follows the argument in a handful of steps and ends with q
     ['problem', 'idea', 'method', 'evidence', 'limits', 'takeaway'],
   );
   assert.equal(names.filter((n) => n === 'paper_card').length, 1);
+  assert.equal(names.filter((n) => n === 'visual_plan').length, 1);
   assert.equal(names.filter((n) => n === 'beat_direction').length, all.length);
   assert.deepEqual(tour.suggested_questions, card.suggested_questions);
   assert.equal(tour.preset, 'standard');
@@ -353,8 +371,9 @@ test('a failed repair cannot publish a verbatim fallback from the paper card', a
   await assert.rejects(run, (error) => error instanceof ProcessingError && error.code === 'invalid_tour');
 });
 
-test('deep formula details correct their concrete sequence within two repairs and never publish a symbolic-only example', async () => {
+test('deep formula details correct their concrete sequence within two repairs; a still failing one is dropped and flagged, never published as a symbolic-only example', async () => {
   let attempts = 0;
+  const events: { type: string; data: Record<string, unknown> }[] = [];
   const run = (correct: boolean) =>
     new HarnessTourGenerator(
       settings,
@@ -369,7 +388,12 @@ test('deep formula details correct their concrete sequence within two repairs an
         }
         return goodModel(request);
       }),
-    ).generate(input);
+    ).generate({
+      ...input,
+      onEvent: async (type, data) => {
+        events.push({ type, data });
+      },
+    });
   const corrected = await run(true);
   assert.equal(attempts, 2);
   const detail = steps(corrected.tour).find((step) => step.id === 'formula-2')!;
@@ -378,12 +402,29 @@ test('deep formula details correct their concrete sequence within two repairs an
     [false, '2+2=4'],
   );
   assert.ok(!(corrected.metadata.omittedDetails as string[]).includes('formula-2'));
+  assert.deepEqual(corrected.metadata.degraded, []);
+  assert.ok(!events.some((event) => event.type === 'beat.degraded'));
   attempts = 0;
-  await assert.rejects(
-    run(false),
-    (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
+  const dropped = await run(false);
+  assert.equal(attempts, 3, 'two corrections, then the example is given up');
+  // The tour still plays: the detail keeps its narration and its page cues, with no board and no example.
+  const bare = steps(dropped.tour).find((step) => step.id === 'formula-2')!;
+  assert.equal(bare.say, exampleSay);
+  assert.ok(!bare.actions.some((a) => a.type === 'board' || a.type === 'board_focus'));
+  assert.ok(bare.actions.some((a) => a.type === 'box' && a.target === 'eq1'));
+  // And the loss is visible, in the metadata and in the events.
+  const flagged = (dropped.metadata.degraded as { beat: string; dropped: string[]; problems: string[] }[]).filter(
+    (d) => d.beat === 'formula-2',
   );
-  assert.equal(attempts, 3);
+  assert.equal(flagged.length, 1);
+  assert.deepEqual(flagged[0].dropped, ['example']);
+  assert.match(flagged[0].problems.join(' '), /needs example frames/);
+  const event = events.filter((e) => e.type === 'beat.degraded' && e.data.beat === 'formula-2').at(-1)!;
+  assert.deepEqual(event.data.dropped, ['example']);
+  assert.equal(
+    events.filter((e) => e.type === 'beat.completed' && e.data.beat === 'formula-2').at(-1)!.data.outcome,
+    'degraded',
+  );
 });
 
 test('a fatal beat request records the failed planned item before rejecting the generation', async () => {
@@ -391,7 +432,13 @@ test('a fatal beat request records the failed planned item before rejecting the 
   const generator = new HarnessTourGenerator(
     settings,
     'quick',
-    provider((request) => (request.name === 'paper_card' ? card : reply({}, 401))),
+    provider((request) =>
+      request.name === 'paper_card'
+        ? card
+        : ['visual_plan', 'opening_visual'].includes(request.name)
+          ? planFor(request)
+          : reply({}, 401),
+    ),
   );
   await assert.rejects(
     generator.generate({
@@ -428,6 +475,8 @@ test('fatal direction failure aborts siblings and drains their events before gen
   const transport: typeof fetch = async (_url, init) => {
     const request = JSON.parse(String(init?.body));
     if (request.response_format.json_schema.name === 'paper_card') return reply(card);
+    if (['visual_plan', 'opening_visual'].includes(request.response_format.json_schema.name))
+      return reply(planFor({ schema: request.response_format.json_schema.schema } as Request));
     requests++;
     if (requests === 1) return reply({}, 401);
     const signal = init!.signal!;
@@ -516,12 +565,15 @@ test('decoder padding is repaired before a tour can publish it', async () => {
   assert.ok(steps(result.tour).every((step) => !/\p{Cf}{8,}/u.test(step.say)));
 });
 
-test('a non-formula beat cannot silently remove its numerical example during repair', async () => {
+test('a non-formula beat cannot silently remove its numerical example during repair: it is dropped visibly', async () => {
   let attempts = 0;
   const generator = new HarnessTourGenerator(
     settings,
     'quick',
     provider((request) => {
+      // The method step is planned with a flow, a kind whose steps may carry a worked example.
+      if (['visual_plan', 'opening_visual'].includes(request.name))
+        return planFor(request, (beat) => (beat.startsWith('method') ? 'flow' : 'none'));
       if (request.name === 'beat_direction' && request.task.includes('STEP KIND: method')) {
         attempts++;
         return { plan: 'p', say: attempts === 1 ? exampleSay : SAY, cues: [] };
@@ -529,9 +581,13 @@ test('a non-formula beat cannot silently remove its numerical example during rep
       return goodModel(request);
     }),
   );
-  await assert.rejects(
-    generator.generate(input),
-    (error) => error instanceof ProcessingError && error.code === 'worked_example_failed',
-  );
+  const { tour, metadata } = await generator.generate(input);
   assert.equal(attempts, 3);
+  const method = steps(tour).find((step) => step.id === 'method-1')!;
+  assert.equal(method.say, SAY);
+  assert.ok(!method.actions.some((a) => a.type === 'board'));
+  assert.deepEqual(
+    (metadata.degraded as { beat: string; dropped: string[] }[]).map((d) => [d.beat, ...d.dropped]),
+    [['method-1', 'example']],
+  );
 });

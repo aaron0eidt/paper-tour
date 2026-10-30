@@ -2,6 +2,8 @@
 // comes back exactly as it was. Bundled for Node with esbuild like the other player tests (no test framework).
 
 import { answerTour, openQuestions, visualShown, waitingLabel } from '../src/ask/answer';
+import { UNCLEAR, unclearOffered, unclearQuestion } from '../src/ask/unclear';
+import type { UnclearState } from '../src/ask/unclear';
 import type { AskAnswer } from '../src/ask/api';
 import { hasRegionArea, regionFromDrag } from '../src/ask/regionSelection';
 import { project, unproject } from '../src/camera';
@@ -273,6 +275,44 @@ test('a region is clamped to its starting page and a click is not accepted', () 
   eq(regionFromDrag(page, [332, 1260], [-100, 2000]), { page: 2, rect: [0, .5, .5, 1] });
   eq(hasRegionArea(regionFromDrag(page, [100, 1000], [100, 1000]), page, 4), false);
   eq(hasRegionArea(regionFromDrag(page, [100, 1000], [105, 1100]), page, 1), false);
+});
+
+const STEP = 'Recurrent models process tokens one by one, which blocks parallel training. The tour introduces the fix next.';
+
+test('"Not clear?" offers simpler, an example, a term and deeper, in that order', () => {
+  eq(UNCLEAR.map((choice) => choice.kind), ['simpler', 'example', 'term', 'deeper']);
+  for (const { label, hint } of UNCLEAR) eq([!!label, !!hint], [true, true], 'each says what it gives');
+});
+
+test('each choice is a clear question that quotes the first sentence of the step', () => {
+  const questions = UNCLEAR.map(({ kind }) => unclearQuestion(kind, STEP));
+  eq(new Set(questions).size, 4, 'four different questions');
+  for (const question of questions) {
+    eq(question.endsWith('“Recurrent models process tokens one by one, which blocks parallel training.”'), true, question);
+    eq(question.includes('The tour introduces'), false, 'only the first sentence');
+  }
+  eq(questions[0].startsWith('Say this more simply'), true);
+  eq(/example/i.test(questions[1]), true);
+  eq(/key term/i.test(questions[2]), true);
+  eq(/deeper/i.test(questions[3]), true);
+});
+
+test('a long first sentence is cut at a word, and a step without words asks without a quote', () => {
+  const cut = unclearQuestion('example', `${'longword '.repeat(40)}end.`);
+  eq(cut.includes('longword…”'), true, 'cut at a word, with an ellipsis inside the quote');
+  eq(cut.length < 190, true, `${cut.length} characters`);
+  eq(unclearQuestion('deeper', '   '), 'Go deeper on this and explain why it works.');
+});
+
+test('"Not clear?" shows on a step of a tour under way, not before, after, while trying or set aside', () => {
+  const base: UnclearState = { asking: true, status: 'playing', aside: false };
+  eq(unclearOffered(base), true, 'playing');
+  eq(unclearOffered({ ...base, status: 'paused' }), true, 'paused');
+  eq(unclearOffered({ ...base, status: 'idle' }), false, 'before the tour starts');
+  eq(unclearOffered({ ...base, status: 'ended' }), false, 'the end card has its own questions');
+  eq(unclearOffered({ ...base, awaiting: true, status: 'paused' }), false, 'a checkpoint has its own hints');
+  eq(unclearOffered({ ...base, aside: true }), false, 'a question, an answer or a region is on');
+  eq(unclearOffered({ ...base, asking: false }), false, 'nothing to ask about');
 });
 
 console.log(results.join('\n'));

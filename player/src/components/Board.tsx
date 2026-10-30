@@ -1,3 +1,8 @@
+import { DistributionBoard } from './DistributionBoard';
+import { HeatmapBoard } from './HeatmapBoard';
+import { ScatterBoard } from './ScatterBoard';
+import { ShapesBoard } from './ShapesBoard';
+import { TimelineBoard } from './TimelineBoard';
 import { PlotBoard } from './Plot';
 import { SceneBoard } from './SceneBoard';
 // The side board beside the stage: it shows the engine's board item (a formula built term by term,
@@ -29,10 +34,12 @@ import {
   fitText,
   flowGeometry,
   formatValue,
+  sourceTag,
   termColor,
   wrapTerms,
 } from '../board';
 import type { BarsItem, FlowItem } from '../board';
+import { BOARD_KINDS } from '../engine';
 import type { BoardPlayback, BoardState } from '../engine';
 import type { BoardItem } from '../types';
 import '../board.css';
@@ -98,7 +105,7 @@ export function BoardSplit({ board, playback = { playing: false, progress: 1 }, 
 
   useEffect(() => {
     dispatch(
-      board.item && board.key && ['formula', 'flow', 'bars', 'plot', 'scene'].includes(board.item.kind)
+      board.item && board.key && BOARD_KINDS.includes(board.item.kind)
         ? { type: 'show', shown: { key: board.key, item: board.item }, animate: playback.playing }
         : { type: 'close' },
     );
@@ -154,16 +161,22 @@ const BoardView = memo(function BoardView({
   continuous?: boolean;
 }) {
   const unit = item.kind === 'bars' ? barsUnit(item) : null;
+  const tag = sourceTag(item);
   const bodyRef = useRef<HTMLDivElement>(null);
   useFocusInView(bodyRef, focus);
   return (
     <div className={`board-view${leaving ? ' leaving' : ''}${from || continuous ? ' is-frame-transition' : ''}`} data-kind={item.kind}>
-      {(item.title || unit) && (
+      {(item.title || unit || tag) && (
         <header className="board-head">
           {item.title && <h2 className="board-title">{item.title}</h2>}
           {unit && (
             <span className="board-unit" title={unit.label}>
               {unit.text}
+            </span>
+          )}
+          {tag && (
+            <span className="board-unit board-source" title={tag.label}>
+              {tag.text}
             </span>
           )}
         </header>
@@ -174,6 +187,11 @@ const BoardView = memo(function BoardView({
         {item.kind === 'bars' && <BarsBoard item={item} focus={focus} playback={playback} from={from} range={range} />}
         {item.kind === 'plot' && <PlotBoard item={item} focus={focus} playback={playback} />}
         {item.kind === 'scene' && <SceneBoard item={item} focus={focus} playback={playback} />}
+        {item.kind === 'heatmap' && <HeatmapBoard item={item} focus={focus} playback={playback} />}
+        {item.kind === 'scatter' && <ScatterBoard item={item} focus={focus} playback={playback} />}
+        {item.kind === 'shapes' && <ShapesBoard item={item} focus={focus} playback={playback} />}
+        {item.kind === 'timeline' && <TimelineBoard item={item} focus={focus} playback={playback} />}
+        {item.kind === 'distribution' && <DistributionBoard item={item} focus={focus} playback={playback} />}
       </div>
     </div>
   );

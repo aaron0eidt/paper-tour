@@ -1,4 +1,6 @@
 import { transcribe } from './muse/transcribe';
+import { voiceHints, type VoiceHints } from './muse/voice-hints';
+import { AnswerCache, answerKey } from './ask-cache';
 import { SelectionError, validateSelection } from '../../shared/selection';
 import { selectionImages } from './selection-image';
 import { generationRecorder } from './activity';
@@ -27,6 +29,7 @@ import { Database, type Db } from './db';
 import { HttpError, missing, ProcessingError } from './errors';
 import { BUCKET, type FileStorage } from './storage';
 import { ensureTourGeneration, generationSummary } from './tour-worker';
+import { partialView, type TourPartialView } from './tour-partial';
 import type { TourImage } from './tour-generator';
 import type { MuseConfig } from './config';
 import type { SettingsService } from './settings';
@@ -34,6 +37,7 @@ import {
   answerQuestion,
   askError,
   askModel,
+  findStep,
   demoImage,
   demoSelectionImages,
   DEMO_ROOT,
@@ -66,6 +70,13 @@ export interface Library {
   list(owner: string): Promise<DocumentSummary[]>;
   models(owner?: string): Promise<ModelCatalog>;
   activity?(owner: string, id: string, generationId: string, after: string): Promise<GenerationActivity>;
+  /** The leading steps of a tour still being written (tour-partial.ts); `held` is what the reader already has. */
+  partial?(
+    owner: string,
+    id: string,
+    generationId: string,
+    held?: { after: number; attempt: string },
+  ): Promise<TourPartialView>;
   resumeConfigured?(owner: string): Promise<void>;
   reserve(owner: string, filename: string, size: number, selection?: TourModelSelection): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
@@ -95,6 +106,21 @@ export interface Library {
   ask?(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
   /** Local development only: a question about demo/<paper>/ without an account (see app.ts). */
   demoAsk?(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
+}
+
+/** What one question needs to be answered: the document, the question and where to find its images and key. */
+interface AnswerInput {
+  documentId: string;
+  analysisId?: string;
+  doc: Doc;
+  tour?: Tour;
+  request: AskRequest;
+  model: string;
+  muse(): Promise<MuseConfig>;
+  image(): Promise<TourImage | undefined>;
+  images(): Promise<TourImage[]>;
+  signal?: AbortSignal;
+  demo?: boolean;
 }
 
 export class DocumentService implements Library {
@@ -148,6 +174,15 @@ export class DocumentService implements Library {
       status: generation.status,
       events: rows.map((r) => ({ id: r.id, type: r.type, data: r.data, at: iso(r.created_at) })),
     };
+  }
+  async partial(
+    owner: string,
+    id: string,
+    generationId: string,
+    held?: { after: number; attempt: string },
+  ): Promise<TourPartialView> {
+    await this.owned(owner, id);
+    return (await partialView(this.db.pool, id, generationId, held)) ?? missing();
   }
   async agentRun(owner: string, id: string, runId: string) {
     await this.owned(owner, id);
@@ -517,7 +552,8 @@ export class DocumentService implements Library {
     const d = await this.owned(owner, id);
     if (state.page > (d.page_count ?? 100))
       throw new HttpError(400, 'invalid_position', 'The page is outside this PDF.');
-    if (!state.tourId && state.stepId) throw new HttpError(400, 'invalid_position', 'A tour step needs its tour.');
+    // A step with no tour is a place in a tour still being written (it has no tours row until it is finished, and the
+    // reader saves where the learner is as it plays). Which step it is can only be checked against a saved tour.
     if (state.tourId) {
       const {
         rows: [tour],
@@ -702,20 +738,62 @@ export class DocumentService implements Library {
       demo: true,
     });
   }
+  /** Terms and language of the documents asked about by voice, by analysis; a few, since each is read once. */
+  private readonly hints = new Map<string, VoiceHints>();
   async transcribe(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal) {
-    await this.owned(owner, id);
-    return this.voice(owner, audio, async () => (await this.askSettings().resolveMuse(owner)).config, signal);
+    const document = await this.owned(owner, id);
+    return this.voice(
+      owner,
+      audio,
+      async () => (await this.askSettings().resolveMuse(owner)).config,
+      (language) => this.libraryHints(document, language),
+      signal,
+    );
   }
   async demoTranscribe(paper: string, audio: Uint8Array, signal?: AbortSignal) {
-    if (!(await loadDemo(paper, this.demoRoot))) missing();
-    return this.voice('demo', audio, async () => this.askSettings().base, signal);
+    const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
+    return this.voice(
+      'demo',
+      audio,
+      async () => this.askSettings().base,
+      async (language) => voiceHints(demo.doc, language),
+      signal,
+    );
   }
-  private async voice(key: string, audio: Uint8Array, config: () => Promise<MuseConfig>, signal?: AbortSignal) {
+  /** What the recogniser should expect of this document (voice-hints.ts); none if it cannot be read, never an error. */
+  private async libraryHints(document: Row, language: string): Promise<VoiceHints | undefined> {
+    const analysisId = document.current_analysis_id;
+    if (!analysisId) return undefined;
+    const key = `${analysisId}:${language}`;
+    const known = this.hints.get(key);
+    if (known) return known;
+    const {
+      rows: [analysis],
+    } = await this.db.query(
+      "select doc from analyses where id=$1 and document_id=$2 and status in ('ready','limited')",
+      [analysisId, document.id],
+    );
+    if (!analysis) return undefined;
+    const hints = voiceHints(analysis.doc as Doc, language);
+    if (this.hints.size >= 32) this.hints.delete(this.hints.keys().next().value!);
+    this.hints.set(key, hints);
+    return hints;
+  }
+  private async voice(
+    key: string,
+    audio: Uint8Array,
+    config: () => Promise<MuseConfig>,
+    hints: (language: string) => Promise<VoiceHints | undefined>,
+    signal?: AbortSignal,
+  ) {
     const limitKey = `voice:${key}`;
     if (this.asking.get(limitKey)) throw new HttpError(429, 'voice_busy', 'Wait for the current transcription.');
     this.asking.set(limitKey, 1);
     try {
-      return await transcribe(await config(), audio, this.askSettings().transport, signal);
+      const resolved = await config();
+      // A document that cannot be read for hints is transcribed without them.
+      const bias = await hints(resolved.language).catch(() => undefined);
+      return await transcribe(resolved, audio, this.askSettings().transport, signal, bias);
     } finally {
       this.asking.delete(limitKey);
     }
@@ -724,23 +802,39 @@ export class DocumentService implements Library {
     if (!this.settings) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
     return this.settings;
   }
+  /**
+   * Answered questions of one learner and document version: asking the same thing again, or tapping a suggestion that
+   * was already prefetched, serves the stored answer at once (ask-cache.ts) and takes no model call or slot below.
+   */
+  readonly answers = new AnswerCache();
+  private async answer(key: string, input: AnswerInput): Promise<AskAnswer> {
+    const cacheKey = answerKey({
+      scope: key,
+      documentId: input.documentId,
+      version: input.analysisId ?? input.doc.source.sha256,
+      request: input.request,
+      step: findStep(input.tour, input.request.stepId),
+      language: input.tour?.voices?.host?.lang,
+      model: input.model,
+    });
+    const { answer, source } = await this.answers.serve(
+      cacheKey,
+      (signal) => this.generate(key, { ...input, signal }),
+      input.signal,
+    );
+    if (source !== 'model')
+      console.log(
+        JSON.stringify({
+          event: 'question_cached',
+          ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
+          source,
+          steps: answer.steps.length,
+        }),
+      );
+    return answer;
+  }
   /** Answer under a limit of two questions in flight per key, and log what it cost in calls and time. */
-  private async answer(
-    key: string,
-    input: {
-      documentId: string;
-      analysisId?: string;
-      doc: Doc;
-      tour?: Tour;
-      request: AskRequest;
-      model: string;
-      muse(): Promise<MuseConfig>;
-      image(): Promise<TourImage | undefined>;
-      images(): Promise<TourImage[]>;
-      signal?: AbortSignal;
-      demo?: boolean;
-    },
-  ): Promise<AskAnswer> {
+  private async generate(key: string, input: AnswerInput): Promise<AskAnswer> {
     const active = this.asking.get(key) ?? 0;
     if (active >= 2) throw new HttpError(429, 'too_many_questions', 'Wait for the current answer, then ask again.');
     this.asking.set(key, active + 1);

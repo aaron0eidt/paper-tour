@@ -90,10 +90,114 @@
   }
 }
 
+/* Marks perform: the one the voice is on stays bright, earlier ones settle back, and the marks of a
+   step that ended fade out as the camera moves on. */
+.mark,
+.box,
+.pen {
+  transition: opacity 450ms ease;
+}
+
+.mark.past,
+.box.past,
+.pen.past {
+  opacity: 0.55;
+}
+
+.mark.leaving,
+.box.leaving,
+.pen.leaving,
+.spotlight.leaving {
+  animation: mark-out 250ms ease forwards;
+}
+
+.screen-layer .note.leaving,
+.screen-layer .box-label.leaving {
+  animation: mark-out 250ms ease forwards;
+  pointer-events: none;
+}
+
+@keyframes mark-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* A reading sweep: a deeper tone follows the narration along the highlighted lines (the share of
+   the passage read so far is --sweep, each line's part of it --from and --to). */
+.hl-sweep rect {
+  fill-opacity: 0.3;
+  transform-box: fill-box;
+  transform-origin: 0 50%;
+  transform: scaleX(clamp(0, calc((var(--sweep, 1) - var(--from, 0)) / (var(--to, 1) - var(--from, 0))), 1));
+  transition: transform 420ms linear;
+}
+
+.hl-sweep {
+  transition: opacity 450ms ease;
+}
+
+.mark:not(.current) .hl-sweep {
+  opacity: 0;
+}
+
+.mark:not(.current) .hl-sweep rect {
+  transform: scaleX(1);
+}
+
+/* A box settles in with a soft glow once its outline is drawn, and keeps it only while it is current. */
+.box-fill {
+  animation: box-glow 1500ms ease both;
+}
+
+@keyframes box-glow {
+  0% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.07;
+  }
+  62% {
+    opacity: 0.22;
+  }
+  100% {
+    opacity: 0.1;
+  }
+}
+
+.box-stroke {
+  transition: stroke-width 300ms ease;
+}
+
+.box.current .box-stroke {
+  stroke-width: calc(3.2px * var(--inv-zoom, 1));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .layer-marker .hl-rect,
   .spotlight.spotlight-reading {
     animation: none;
+  }
+  .mark,
+  .box,
+  .pen,
+  .hl-sweep,
+  .hl-sweep rect,
+  .box-stroke {
+    transition: none;
+  }
+  .mark.leaving,
+  .box.leaving,
+  .pen.leaving,
+  .spotlight.leaving,
+  .screen-layer .note.leaving,
+  .screen-layer .box-label.leaving {
+    animation: none;
+    opacity: 0;
+  }
+  .box-fill {
+    animation: none;
+    opacity: 0.1;
   }
   .pen-stroke {
     animation: none;

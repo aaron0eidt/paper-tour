@@ -11,6 +11,7 @@ import {
   continuousBoardFrame,
   interpolateBars,
   plotCursor,
+  sourceTag,
   barPath,
   barsLayout,
   barStandsOut,
@@ -27,6 +28,31 @@ import {
   wrapTerms,
 } from '../src/board';
 import type { BarsItem, FlowItem } from '../src/board';
+import {
+  HEATMAP_TIMING,
+  cellLook,
+  contrast,
+  gridLayout,
+  heatmapDomain,
+  heatmapAlt,
+  heatmapEnd,
+  heatmapInk,
+  heatmapLegend,
+  heatmapLevel,
+  heatmapModel,
+  heatmapPlaces,
+  heatmapRamp,
+  heatmapRgb,
+  heatmapText,
+  labelBlock,
+  linkLook,
+  linksLayout,
+  luminance,
+  morphProgress,
+  rowMorph,
+  rowShown,
+} from '../src/heatmap';
+import type { HeatmapItem } from '../../shared/heatmap';
 import type { BoardItem } from '../src/types';
 import type { SceneItem } from '../../shared/scene';
 import { sceneMatrixText } from '../../shared/scene';
@@ -121,10 +147,10 @@ test('items that cannot be drawn are skipped with a warning', () => {
   eq(checkBoardItem({ kind: 'flow', nodes: [{ id: 'a', label: 'A' }], edges: [] }, 'step "s"', warn), null, 'one box');
   const oneBar = { kind: 'bars', bars: [{ label: 'x', value: 1 }, { label: 'y', value: Number.NaN }] };
   eq(checkBoardItem(oneBar, 'step "s"', warn), null, 'one number');
-  eq(checkBoardItem({ kind: 'timeline' }, 'step "s"', warn), null, 'unknown kind');
+  eq(checkBoardItem({ kind: 'video' }, 'step "s"', warn), null, 'unknown kind');
   eq(checkBoardItem(null, 'step "s"', warn), null, 'missing');
   eq(warnings.length, 5, 'warnings');
-  ok(warnings[3].includes('"timeline"') && warnings[3].includes('step "s"'), 'names the kind and the step');
+  ok(warnings[3].includes('"video"') && warnings[3].includes('step "s"'), 'names the kind and the step');
 });
 
 test('a flow drops boxes without labels, edges to unknown boxes and self-loops', () => {
@@ -497,6 +523,239 @@ test('scene vectors use signed endpoints and share the plotted data coordinate s
   eq(sceneTransitionAllowed(item.objects, rebound), false, 'data-space and canvas-space values are never mixed');
 });
 
+// ----------------------------------------------------- heatmap, scatter, shapes
+
+const sensors: HeatmapItem = {
+  kind: 'heatmap',
+  rows: ['soil', 'air', 'water', 'light'],
+  cols: ['soil', 'air', 'water', 'light'],
+  values: [
+    [1, 0.62, 0.35, -0.1],
+    [0.62, 1, 0.48, 0.05],
+    [0.35, 0.48, 1, 0.3],
+    [-0.1, 0.05, 0.3, 1],
+  ],
+  source: 'illustrative',
+};
+const scores = (mask?: 'upper'): HeatmapItem => ({
+  kind: 'heatmap',
+  rows: ['a', 'b', 'c'],
+  cols: ['x', 'y', 'z'],
+  values: [
+    [2, 1, 0],
+    [0, 3, 1],
+    [1, 1, 4],
+  ],
+  source: 'illustrative',
+  normalize: 'rows',
+  ...(mask ? { mask } : {}),
+});
+
+test('a heatmap, scatter or shapes item is checked with the shared rules and kept in its clean form', () => {
+  warnings.length = 0;
+  const formula = checkBoardItem(
+    { kind: 'heatmap', rows: ['a', 'b'], cols: ['x', 'y', 'z'], expression: ' x * a ', source: 'formula', extra: 1 },
+    'step "s"',
+    warn,
+  );
+  eq(formula, { kind: 'heatmap', rows: ['a', 'b'], cols: ['x', 'y', 'z'], values: [[1, 2, 3], [2, 4, 6]], expression: 'x * a', source: 'formula' }, 'values computed');
+  const scatter = checkBoardItem(
+    { kind: 'scatter', x_label: 'cost ($)', y_label: 'yield (%)', source: 'document', points: [{ label: 'A', x: 1, y: 2 }, { label: 'B', x: 3, y: 5 }, { label: 'C', x: 6, y: 7 }] },
+    'step "s"',
+    warn,
+  );
+  eq((scatter as { points: unknown[] }).points.length, 3, 'scatter points');
+  const shapes = checkBoardItem(
+    {
+      kind: 'shapes',
+      terms: [
+        { kind: 'matrix', name: 'A', rows: 'm', cols: 'k' },
+        { kind: 'op', op: 'times' },
+        { kind: 'matrix', name: 'B', rows: 'k', cols: 'n' },
+        { kind: 'op', op: 'equals' },
+        { kind: 'matrix', name: 'C', rows: 'm', cols: 'n' },
+      ],
+    },
+    'step "s"',
+    warn,
+  );
+  eq((shapes as { terms: unknown[] }).terms.length, 5, 'shapes terms');
+  eq(warnings.length, 0, 'no warnings');
+});
+
+test('invalid heatmap, scatter and shapes items are skipped with the reason', () => {
+  warnings.length = 0;
+  const ragged = { kind: 'heatmap', rows: ['a', 'b'], cols: ['x', 'y'], values: [[1, 2], [3]], source: 'illustrative' };
+  eq(checkBoardItem(ragged, 'step "s"', warn), null, 'ragged grid');
+  const lone = { kind: 'scatter', x_label: 'x', y_label: 'y', source: 'illustrative', points: [{ label: 'A', x: 1, y: 2 }] };
+  eq(checkBoardItem(lone, 'step "s"', warn), null, 'one point');
+  const clash = {
+    kind: 'shapes',
+    terms: [
+      { kind: 'matrix', name: 'A', rows: 'm', cols: 'k' },
+      { kind: 'op', op: 'times' },
+      { kind: 'matrix', name: 'B', rows: 'j', cols: 'n' },
+    ],
+  };
+  eq(checkBoardItem(clash, 'step "s"', warn), null, 'dimensions that do not agree');
+  eq(warnings.length, 3, 'one warning each');
+  ok(warnings[0].includes('row 2') && warnings[0].includes('step "s"'), 'says where the grid is ragged');
+  ok(warnings[1].includes('points'), 'names the points');
+  ok(warnings[2].includes('times'), 'names the operator');
+});
+
+test('the source tag marks invented and computed values, never the paper\'s', () => {
+  eq(sourceTag(sensors)?.text, 'illustrative', 'illustrative');
+  eq(sourceTag({ ...sensors, source: 'formula' })?.text, 'from the formula', 'formula');
+  eq(sourceTag({ ...sensors, source: 'document' }), null, 'document');
+  eq(sourceTag(bleu), null, 'bars have none');
+});
+
+test('the colour scale rises in lightness, stays readable under its text, and runs warm below zero', () => {
+  const levels = Array.from({ length: 101 }, (_, i) => i / 100);
+  const lights = levels.map((t) => luminance(heatmapRgb(t, false)));
+  ok(lights.every((v, i) => i === 0 || v >= lights[i - 1]), 'sequential lightness rises');
+  const warm = levels.map((t) => luminance(heatmapRgb(-t, true)));
+  ok(warm.every((v, i) => i === 0 || v >= warm[i - 1]), 'negative side rises too');
+  eq(heatmapRgb(0, true), heatmapRgb(0, false), 'both sides start at the same neutral');
+  const [r, , b] = heatmapRgb(-0.75, true);
+  const [r2, , b2] = heatmapRgb(0.75, true);
+  ok(r > b && b2 > r2, 'negative is warm, positive is cool');
+  for (const diverging of [false, true])
+    for (const t of levels.map((v) => (diverging ? 2 * v - 1 : v))) {
+      const fill = heatmapRgb(t, diverging);
+      ok(contrast(luminance(fill), luminance(heatmapInk(fill))) >= 4, `text on level ${t} reads at 4:1 or better`);
+    }
+  ok(heatmapRamp(false).startsWith('linear-gradient(90deg, rgb(24 29 43) 0%') && heatmapRamp(true).includes('50%'), 'legend gradient');
+});
+
+test('the domain anchors weights at zero, spreads a narrow band, centres signed values and skips masked cells', () => {
+  eq(heatmapDomain([[0.1, 0.5], [0.9, 0.3]], false), [0, 0.9], 'low values start at zero');
+  eq(heatmapDomain([[0.8, 0.85], [0.9, 0.95]], false), [0.8, 0.95], 'a narrow band spreads');
+  eq(heatmapDomain([[-2, 1], [0.5, 0]], true), [-2, 2], 'symmetric around zero');
+  eq(heatmapDomain([[1, 99], [3, 4]], false, 'upper'), [0, 4], 'masked cells do not count');
+  eq(heatmapDomain([[5, 5], [5, 5]], false), [5, 6], 'a flat grid still has a span');
+  eq(heatmapLevel(1, [0, 4], false), 0.25, 'sequential level');
+  eq(heatmapLevel(-1, [-2, 2], true), -0.5, 'diverging level');
+  eq(heatmapLevel(9, [0, 4], false), 1, 'clamped');
+});
+
+test('cell text keeps few places, never prints a small value as zero and carries the unit', () => {
+  eq(heatmapPlaces([[1, 2], [3, 4]]), 0, 'integers');
+  eq(heatmapPlaces([[0.123456, 2]]), 2, 'at most two places');
+  eq(heatmapPlaces([[1, 99.5], [3, 4]], 'upper'), 0, 'masked cells are not measured');
+  eq(heatmapText(0.5, 2), '0.50', 'fixed places');
+  eq(heatmapText(0.001, 2), '~0', 'small but not zero');
+  eq(heatmapText(0, 2), '0.00', 'zero is zero');
+  eq(heatmapText(-0.004, 2, '%'), '~0%', 'small with a unit');
+  eq(heatmapText(12.5, 1, '%'), '12.5%', 'percent');
+  eq(heatmapText(-0.35, 2), '-0.35', 'negative');
+  eq(heatmapLegend(heatmapModel(scores()).raw), { low: '0', high: '4' }, 'legend trims places');
+  eq(heatmapLegend(heatmapModel(sensors).raw), { low: '-0.1', high: '1' }, 'a sequential scale starts at the lowest signed value');
+  eq(heatmapLegend(heatmapModel({ ...sensors, scale: 'diverging' }).raw), { low: '-1', high: '1' }, 'diverging legend');
+  eq(heatmapLegend(heatmapModel(scores()).raw, 'score'), { low: '0', high: '4 score' }, 'unit follows the high end');
+  eq(heatmapLegend(heatmapModel(scores()).raw, '%'), { low: '0%', high: '4%' }, 'percent stays on both');
+});
+
+test('normalizing turns scores into weights: colour and text move from the first state to the second', () => {
+  const model = heatmapModel(scores());
+  ok(model.weights !== null, 'weights exist');
+  for (const row of model.weights!.values) ok(Math.abs(row.reduce((a, b) => a + b, 0) - 1) < 1e-9, 'a row sums to one');
+  const before = cellLook(model, 1, 1, 0);
+  const after = cellLook(model, 1, 1, 1);
+  eq([before.rawOpacity, before.weightOpacity], [1, 0], 'scores show first');
+  eq([after.rawOpacity, after.weightOpacity], [0, 1], 'weights show last');
+  eq(before.rawText, '3', 'raw text');
+  eq(after.weightText, '0.84', 'weight text');
+  ok(before.fill !== after.fill, 'the colour moves');
+  const mid = cellLook(model, 1, 1, 0.5);
+  eq([mid.rawOpacity, mid.weightOpacity], [0, 0], 'the numbers pass the midpoint blank, never as meaningless in-between values');
+  eq(cellLook(heatmapModel(sensors), 0, 1, 1).weightOpacity, 0, 'no weights without normalize');
+});
+
+test('masked cells weigh zero and do not set the scale', () => {
+  const model = heatmapModel(scores('upper'));
+  eq(model.weights!.values[0], [1, 0, 0], 'the first row sees only itself');
+  ok(Math.abs(model.weights!.values[2].reduce((a, b) => a + b, 0) - 1) < 1e-9, 'the last row still sums to one');
+  eq(model.raw.domain[1], 4, 'raw domain ignores the masked 1 and 0 above the diagonal');
+  eq(heatmapAlt(scores('upper')).includes('a: x 1.00'), true, 'the alt text has the weights');
+  ok(!heatmapAlt(scores('upper')).includes('a: x 1.00, y'), 'and leaves masked cells out');
+});
+
+test('links weigh by value, follow the scores into the weights and run warm for negative scores', () => {
+  const model = heatmapModel(scores());
+  const first = linkLook(model, 0, 0, 0);
+  const last = linkLook(model, 0, 0, 1);
+  // Score 2 of a 0-4 span; its weight is 0.665 of a span that ends at the grid's largest weight, 0.910.
+  ok(first.strength === 0.5 && Math.abs(last.strength - 0.731) < 0.005, 'strength follows scores, then weights');
+  eq(linkLook(model, 0, 2, 0).strength, 0, 'the lowest score has no strength');
+  const signed = heatmapModel({ ...sensors, scale: 'diverging' });
+  eq(linkLook(signed, 0, 3, 0), { strength: 0.1, negative: true }, 'a negative score is drawn by size, in the warm colour');
+  eq(linkLook(signed, 0, 1, 0).negative, false, 'a positive one is not');
+});
+
+test('the build: rows arrive in order, the morph waits for the grid, and the end is at the last row', () => {
+  const { first, every, pause } = HEATMAP_TIMING;
+  eq(rowShown(0, 0), 0, 'nothing at the start');
+  ok(rowShown(first + 300, 0) > rowShown(first + 300, 3), 'earlier rows are further along');
+  eq(rowShown(heatmapEnd(4, false), 3), 1, 'all rows in at the end');
+  const gridDone = first + 3 * every + HEATMAP_TIMING.fade;
+  eq(heatmapEnd(4, false), gridDone, 'no morph: the grid is the end');
+  eq(rowMorph(gridDone + pause - 1, 0, 4), 0, 'the morph has not started');
+  ok(rowMorph(gridDone + pause + 300, 0, 4) > rowMorph(gridDone + pause + 300, 3, 4), 'rows turn one after another');
+  eq(rowMorph(heatmapEnd(4, true), 3, 4), 1, 'the last row has turned at the end');
+  ok(heatmapEnd(4, true) > gridDone + pause && heatmapEnd(4, true) - gridDone - pause < 1100, 'about a second of morph');
+  eq([morphProgress(0, 4), morphProgress(heatmapEnd(4, true), 4)], [0, 1], 'overall progress spans 0 to 1');
+});
+
+test('labels stay on one line, then wrap to two, then turn to read upward', () => {
+  eq(labelBlock(['ab', 'cde'], 40, measure).mode, 'flat', 'short labels');
+  const wrapped = labelBlock(['red wine', 'dry'], 40, measure);
+  eq([wrapped.mode, wrapped.lines], ['wrap', [['red', 'wine'], ['dry']]], 'words wrap');
+  const turned = labelBlock(['fermentation', 'dry'], 40, measure);
+  eq(turned.mode, 'rotated', 'a word that cannot fit turns');
+  ok(turned.height <= 92 + 4, 'a turned label is cut to a bounded height');
+  const long = labelBlock(['a very long label indeed that goes on', 'b'], 20, measure);
+  ok(long.lines[0][0].endsWith('…') && measure(long.lines[0][0]) <= 92, 'a very long label ends in an ellipsis');
+});
+
+test('a grid fills the width up to 64px cells, keeps its cells from turning into strips, and fits the height', () => {
+  const wide = gridLayout(sensors, { width: 600, height: 400 }, measure, 28);
+  ok(wide.cw <= 64 && wide.ch <= wide.cw, 'cells are at most 64px and never taller than wide');
+  ok(wide.width <= 600 && wide.height <= 400, 'fits a roomy board');
+  ok(wide.values, 'values print on big cells');
+  const short = gridLayout(sensors, { width: 600, height: 150 }, measure, 28);
+  ok(short.cw <= (150 - short.cols.height) / sensors.rows.length / 0.62 + 1, 'cells narrow to keep their shape on a short board');
+  const tight = gridLayout(sensors, { width: 300, height: 70 }, measure, 28);
+  ok(tight.ch >= 14 && tight.height > 70, 'a grid that cannot fit keeps readable cells and scrolls');
+  ok(!tight.values || tight.cw >= 28 + 8, 'values print only where they fit');
+  const narrow = gridLayout(sensors, { width: 160, height: 400 }, measure, 28);
+  ok(!narrow.values && narrow.width <= 160, 'small cells print no values');
+  const sums = gridLayout(scores(), { width: 400, height: 300 }, measure, 28);
+  ok(sums.sumX !== null && sums.sumX >= sums.x0 + 3 * sums.cw, 'a normalized grid reserves a column for the sums');
+  eq(gridLayout(sensors, { width: 400, height: 300 }, measure, 28).sumX, null, 'and others do not');
+});
+
+test('long column labels turn instead of overlapping', () => {
+  const item: HeatmapItem = { ...sensors, cols: ['temperature', 'humidity', 'pressure', 'luminosity'] };
+  const layout = gridLayout(item, { width: 280, height: 300 }, measure, 28);
+  eq(layout.cols.mode, 'rotated', 'rotated');
+  ok(layout.y0 > 60, 'the header makes room for them');
+});
+
+test('links: curves join each row to its columns, skip masked cells and stay inside the board', () => {
+  const layout = linksLayout(scores('upper'), { width: 360, height: 320 }, measure, 28);
+  eq(layout.curves.map((row) => row.map(Boolean)), [[true, false, false], [true, true, false], [true, true, true]], 'masked cells have no curve');
+  ok(layout.curves[2][0].startsWith(`M${layout.bottomX[2]} ${layout.bottomY} `), 'a curve starts at its row dot');
+  ok(layout.curves[2][0].endsWith(`${layout.topX[0]} ${layout.topY}`), 'and ends at its column dot');
+  ok(layout.topX.every((x) => x > 0 && x < 360) && layout.bottomX.every((x) => x > 0 && x < 360), 'tokens are inside');
+  ok(layout.bottomY - layout.topY >= 84 && layout.height <= 320, 'room for curves, within the board');
+  ok(layout.valueY !== null, 'values fit under the column tokens');
+  eq(linksLayout(scores(), { width: 120, height: 320 }, measure, 28).valueY, null, 'narrow slots print no values');
+  const uneven = linksLayout({ ...scores(), rows: ['a', 'b', 'c', 'd'], values: [...scores().values, [1, 2, 3]] }, { width: 360, height: 320 }, measure, 28);
+  ok(uneven.bottomX.length === 4 && uneven.topX.length === 3, 'rows and columns spread on their own');
+});
+
 // ------------------------------------------------------------------- easing
 
 test('cubic-bezier matches CSS: linear, ease and the board ease-out', () => {
@@ -507,6 +766,58 @@ test('cubic-bezier matches CSS: linear, ease and the board ease-out', () => {
   const samples = Array.from({ length: 21 }, (_, i) => out(i / 20));
   ok(samples.every((v, i) => i === 0 || v >= samples[i - 1]), 'monotonic');
   ok(samples[0] === 0 && samples[20] === 1 && samples[10] > 0.85, 'quick to start, soft to land');
+});
+
+test('a timeline and a distribution are checked and resolved with the shared code, so a saved tour cannot disagree with the server', () => {
+  warnings.length = 0;
+  const lease = {
+    kind: 'timeline',
+    unit: 'month',
+    source: 'illustrative',
+    anchor: { label: 'Start' },
+    events: [
+      { label: 'Notice allowed', after: 'Start', offset: 3 },
+      { label: 'Earliest exit', after: 'Notice allowed', offset: 3 },
+    ],
+    spans: [{ label: 'Notice runs', from: 'Notice allowed', to: 'Earliest exit', role: 'notice' }],
+  };
+  const timeline = checkBoardItem(lease, 'step "s"', warn);
+  ok(timeline?.kind === 'timeline', 'a valid timeline is kept');
+  eq(timeline?.kind === 'timeline' && timeline.events.map((e) => e.position), [91.3125, 182.625], 'positions are computed, not taken from the file');
+  eq(checkBoardItem({ ...lease, events: [{ label: 'A', after: 'B', offset: 1 }, { label: 'B', after: 'A', offset: 1 }] }, 'step "s"', warn), null, 'a cycle is skipped');
+  ok(warnings.at(-1)!.includes('each measured from another'), warnings.at(-1) ?? '');
+  const bell = {
+    kind: 'distribution',
+    x_label: 'reaction time (ms)',
+    source: 'illustrative',
+    dists: [
+      { family: 'normal', label: 'Before', mean: 250, sd: 30 },
+      { family: 'normal', label: 'After', mean: 230, sd: 20 },
+    ],
+    region: { from: 300 },
+  };
+  const distribution = checkBoardItem(bell, 'step "s"', warn);
+  ok(distribution?.kind === 'distribution' && distribution.region!.probabilities.length === 2, 'the region\'s chances are computed');
+  eq(checkBoardItem({ ...bell, dists: [bell.dists[0], { family: 'binomial', label: 'x', n: 5, p: 0.5 }] }, 'step "s"', warn), null, 'discrete and continuous cannot share an axis');
+  eq(sourceTag(timeline!)?.text, 'illustrative');
+  eq(sourceTag(distribution!)?.text, 'illustrative');
+  eq(sourceTag({ ...bell, source: 'document' } as never), null, 'a document\'s own numbers carry no tag');
+});
+
+test('a plot keeps its marks and points, and one whose mark cannot be found is skipped', () => {
+  warnings.length = 0;
+  const plot = {
+    kind: 'plot',
+    x: [0, 20],
+    y: [0, 400],
+    curves: [{ expression: 'x*x', label: 'n^2' }, { expression: '10*x', label: '10n' }],
+    marks: [{ type: 'crossing', curve: 1, other: 2, nth: 2 }],
+    points: [{ x: 5, y: 25 }],
+  };
+  const kept = checkBoardItem(plot, 'step "s"', warn);
+  ok(kept?.kind === 'plot' && kept.marks?.length === 1 && kept.points?.length === 1, 'marks and points are kept');
+  eq(checkBoardItem({ ...plot, marks: [{ type: 'root', curve: 1, nth: 4 }] }, 'step "s"', warn), null);
+  ok(warnings.at(-1)!.includes('has only'), warnings.at(-1) ?? '');
 });
 
 console.log(results.join('\n'));

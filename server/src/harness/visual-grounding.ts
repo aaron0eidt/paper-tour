@@ -26,6 +26,57 @@ export function measuredCueTargets(target: string, members: unknown, measured: M
   return ids.flatMap((id) => measured.find((t) => t.id === id) ?? []);
 }
 
+/** The faults of one cue and how many separate marks it draws; none for a cue that is not a pen or measured mark. */
+function cueFaults(
+  raw: unknown,
+  index: number,
+  imaged: string | undefined,
+  measured: MeasuredTarget[],
+): { problems: string[]; marks: number } {
+  const none = { problems: [], marks: 0 };
+  if (!raw || typeof raw !== 'object') return none;
+  const diagram = measured.some((t) => t.kind === 'component' || t.kind === 'panel');
+  const c = raw as Record<string, unknown>;
+  const at = `Cue ${index + 1}`;
+  const problems: string[] = [];
+  const selected = measuredCueTargets(String(c.target), c.members, measured);
+  // A measured target is meaningful for a box only. Check it before branching
+  // on action: otherwise highlight is silently dropped as a non-sentence,
+  // and spotlight loses its region during canonical conversion.
+  const measuredRequest = selected.length || String(c.target).startsWith('measured:') || c.members !== undefined;
+  if (!measuredRequest && !['arrow', 'circle', 'box'].includes(String(c.action))) return none;
+  if (
+    c.members !== undefined &&
+    (!Array.isArray(c.members) || c.members.length > 4 || c.members.some((id) => !measured.some((t) => t.id === id)))
+  )
+    problems.push(`${at}: members must be at most four listed measured IDs.`);
+  if (String(c.target).startsWith('measured:') && !selected.length)
+    problems.push(`${at}: choose a measured ID from the supplied catalog.`);
+  if (selected.length) {
+    if (selected.some((t) => t.target !== imaged))
+      problems.push(`${at}: measured targets must belong to the attached figure.`);
+    if (c.action !== 'box')
+      problems.push(`${at}: use box for a measured component or panel, preserving its exact boundary.`);
+    if (c.bounds !== undefined && JSON.stringify(c.bounds) !== '[0,0,1,1]')
+      problems.push(`${at}: a measured target already has exact bounds; omit bounds rather than replacing them.`);
+    if (c.region !== undefined && c.region !== 'whole')
+      problems.push(`${at}: measured targets use region whole; never crop them with a guessed region.`);
+    return { problems, marks: selected.length };
+  }
+  if (c.bounds !== undefined && !exactBounds(c.bounds))
+    problems.push(`${at}: bounds must be four finite ordered numbers within 0..1.`);
+  const partial =
+    (c.bounds !== undefined && JSON.stringify(c.bounds) !== '[0,0,1,1]') ||
+    (c.region !== undefined && c.region !== 'whole');
+  if (!imaged && (c.action !== 'box' || partial))
+    problems.push(`${at}: fine geometry requires the actual attached figure crop.`);
+  if (diagram && (c.action !== 'box' || partial))
+    problems.push(
+      `${at}: this diagram has measured geometry. Choose a listed component/panel ID or members; do not estimate bounds.`,
+    );
+  return { problems, marks: 1 };
+}
+
 /** Authoring errors request a correction; they never silently substitute a different mark. */
 export function visualCueProblems(
   cues: unknown,
@@ -33,54 +84,17 @@ export function visualCueProblems(
   measured: MeasuredTarget[] = [],
 ): string[] {
   if (!Array.isArray(cues)) return [];
-  const problems: string[] = [];
-  const diagram = measured.some((t) => t.kind === 'component' || t.kind === 'panel');
-  let count = 0;
-  for (const [index, raw] of cues.entries()) {
-    if (!raw || typeof raw !== 'object') continue;
-    const c = raw as Record<string, unknown>;
-    const at = `Cue ${index + 1}`;
-    const selected = measuredCueTargets(String(c.target), c.members, measured);
-    // A measured target is meaningful for a box only. Check it before branching
-    // on action: otherwise highlight is silently dropped as a non-sentence,
-    // and spotlight loses its region during canonical conversion.
-    const measuredRequest = selected.length || String(c.target).startsWith('measured:') || c.members !== undefined;
-    if (!measuredRequest && !['arrow', 'circle', 'box'].includes(String(c.action))) continue;
-    if (
-      c.members !== undefined &&
-      (!Array.isArray(c.members) || c.members.length > 4 || c.members.some((id) => !measured.some((t) => t.id === id)))
-    )
-      problems.push(`${at}: members must be at most four listed measured IDs.`);
-    if (String(c.target).startsWith('measured:') && !selected.length)
-      problems.push(`${at}: choose a measured ID from the supplied catalog.`);
-    if (selected.length) {
-      if (selected.some((t) => t.target !== imaged))
-        problems.push(`${at}: measured targets must belong to the attached figure.`);
-      if (c.action !== 'box')
-        problems.push(`${at}: use box for a measured component or panel, preserving its exact boundary.`);
-      if (c.bounds !== undefined && JSON.stringify(c.bounds) !== '[0,0,1,1]')
-        problems.push(`${at}: a measured target already has exact bounds; omit bounds rather than replacing them.`);
-      if (c.region !== undefined && c.region !== 'whole')
-        problems.push(`${at}: measured targets use region whole; never crop them with a guessed region.`);
-      count += selected.length;
-    } else {
-      count++;
-      if (c.bounds !== undefined && !exactBounds(c.bounds))
-        problems.push(`${at}: bounds must be four finite ordered numbers within 0..1.`);
-      const partial =
-        (c.bounds !== undefined && JSON.stringify(c.bounds) !== '[0,0,1,1]') ||
-        (c.region !== undefined && c.region !== 'whole');
-      if (!imaged && (c.action !== 'box' || partial))
-        problems.push(`${at}: fine geometry requires the actual attached figure crop.`);
-      if (diagram && (c.action !== 'box' || partial))
-        problems.push(
-          `${at}: this diagram has measured geometry. Choose a listed component/panel ID or members; do not estimate bounds.`,
-        );
-    }
-  }
-  if (count > 4)
+  const faults = cues.map((raw, index) => cueFaults(raw, index, imaged, measured));
+  const problems = faults.flatMap((fault) => fault.problems);
+  if (faults.reduce((count, fault) => count + fault.marks, 0) > 4)
     problems.push('Use at most four separate visual marks in this step; split a larger explanation across steps.');
   return [...new Set(problems)];
+}
+
+/** The positions of the cues whose marks cannot be drawn as asked: a step that stays faulty publishes without them. */
+export function faultyVisualCues(cues: unknown, imaged: string | undefined, measured: MeasuredTarget[] = []): number[] {
+  if (!Array.isArray(cues)) return [];
+  return cues.flatMap((raw, index) => (cueFaults(raw, index, imaged, measured).problems.length ? [index] : []));
 }
 
 /** Authoring-only geometry. Published tours continue to use their existing `region` tuple. */

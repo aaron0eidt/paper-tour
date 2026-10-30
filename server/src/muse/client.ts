@@ -12,6 +12,8 @@ import {
 } from '../ai/provider';
 export { providerFailureReason } from '../ai/provider';
 
+/** How much the model reasons before it answers; `minimal` is the provider's lowest setting, below `low`. */
+export type Effort = 'minimal' | 'low' | 'medium' | 'high';
 export type MuseContent = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 export interface MuseMessage {
   role: 'developer' | 'user' | 'assistant';
@@ -45,7 +47,7 @@ export class MuseClient {
     signal?: AbortSignal,
     onDelta?: (text: string) => Promise<void>,
     onUsage?: (usage: ModelUsage) => Promise<void>,
-    effort: 'low' | 'medium' | 'high' = 'medium',
+    effort: Effort = 'medium',
     onNarration?: (text: string) => Promise<void>,
   ): Promise<Completion> {
     if (!this.config.apiKey.trim())

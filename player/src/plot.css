@@ -1,0 +1,291 @@
+/* The plot board: crisp axes at the size of the board, curves that draw in, marks the code found on them as labelled
+   points. Parts arrive from script (components/Plot.tsx follows the narration); only the focus changes here are CSS
+   transitions. */
+
+/* The drawing keeps its own room, so the body's spacers step aside. */
+.board-view[data-kind='plot'] .board-body {
+  scrollbar-gutter: stable;
+}
+
+.board-view[data-kind='plot'] .board-body::before,
+.board-view[data-kind='plot'] .board-body::after {
+  display: none;
+}
+
+.plotboard {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The drawing sits a little above the middle with room to spare, and scrolls from the top without. */
+.plotboard::before,
+.plotboard::after {
+  content: '';
+  flex: 1 1 0;
+}
+
+.plotboard::after {
+  flex-grow: 1.4;
+}
+
+.pl-svg {
+  display: block;
+  flex: none;
+  margin: 0 auto;
+  overflow: visible;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ labels */
+
+.pl-ylabel,
+.pl-xlabel {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pl-ylabel {
+  padding-bottom: 6px;
+  animation: board-rise 480ms var(--board-ease-out) 260ms backwards;
+}
+
+.pl-xlabel {
+  padding: 2px 0 0;
+  text-align: right;
+}
+
+.pl-ylabel .katex,
+.pl-xlabel .katex,
+.pl-legend .katex,
+.pl-stats .katex {
+  font-size: 1em;
+}
+
+.pl-rest {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 10px;
+  animation: board-rise 480ms var(--board-ease-out) 420ms backwards;
+}
+
+.pl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+}
+
+.pl-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c);
+  opacity: 0.8;
+  transition: opacity 360ms ease;
+}
+
+.pl-legend li.is-focus {
+  opacity: 1;
+}
+
+.pl-legend i {
+  width: 14px;
+  height: 0;
+  border-top: 2.25px solid currentColor;
+  border-radius: 2px;
+}
+
+.pl-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* -------------------------------------------------------------------- axes */
+
+.pl-grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.pl-zero {
+  fill: none;
+  stroke: var(--board-bar);
+  stroke-width: 1;
+  stroke-opacity: 0.7;
+  shape-rendering: crispEdges;
+}
+
+.pl-axis,
+.pl-ticks {
+  fill: none;
+  stroke: var(--board-bar);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.pl-tick {
+  fill: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ curves */
+
+.pl-curve {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  transition: stroke-width 360ms ease;
+}
+
+.plotboard.has-focus .pl-curve-group:not(.is-focus) {
+  opacity: 0.4;
+}
+
+.pl-curve-group {
+  transition: opacity 360ms ease;
+}
+
+.pl-curve-group.is-focus .pl-curve {
+  stroke-width: 3;
+}
+
+/* The probe walks the curve with the narration (a plot without marks). */
+.pl-guide {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  stroke-opacity: 0.6;
+}
+
+.pl-dot {
+  fill: var(--c);
+  stroke: var(--board-bg);
+  stroke-width: 1.5;
+}
+
+/* ------------------------------------------------------------------- marks */
+
+.pl-mark {
+  transition: opacity 360ms ease;
+}
+
+.plotboard.has-focus .pl-mark:not(.is-focus) {
+  opacity: 0.55;
+}
+
+.pl-mark .pl-guide {
+  stroke-opacity: 0.45;
+  transition: stroke-opacity 360ms ease;
+}
+
+.pl-mark.is-focus .pl-guide {
+  stroke-opacity: 0.9;
+}
+
+.pl-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 360ms var(--board-ease-out);
+}
+
+.pl-core {
+  fill: var(--c);
+  stroke: var(--board-bg);
+  stroke-width: 2;
+}
+
+.pl-halo {
+  fill: var(--c);
+  opacity: 0.16;
+  transition: opacity 360ms ease;
+}
+
+.pl-mark.is-focus .pl-pop {
+  transform: scale(1.35);
+}
+
+.pl-mark.is-focus .pl-halo {
+  opacity: 0.3;
+}
+
+.pl-pill rect {
+  fill: var(--board-bg);
+  stroke: var(--c);
+  stroke-opacity: 0.7;
+  stroke-width: 1;
+}
+
+.pl-pill-name {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pl-pill-coords {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Measured points are hollow rings over the curves, set apart from the marks the code computed. */
+.pl-point circle {
+  fill: var(--board-bg);
+  stroke: var(--text);
+  stroke-width: 1.75;
+}
+
+.pl-point text {
+  fill: var(--text);
+  font-size: 11.5px;
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: var(--board-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+/* ----------------------------------------------------------------- readouts */
+
+.pl-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pl-stats > div {
+  flex: 1 1 95px;
+  min-width: 0;
+  padding: 9px 12px 10px;
+  border: 1px solid var(--board-rule);
+  border-radius: 8px;
+  background: var(--board-raised);
+  text-align: center;
+}
+
+.pl-stats dt {
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.pl-stats dd {
+  margin: 5px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+}

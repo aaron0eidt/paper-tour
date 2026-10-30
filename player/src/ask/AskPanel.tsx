@@ -4,11 +4,12 @@ import { LanguagePicker } from './LanguagePicker';
 // when it ends, a waiting state, the answer's verdict and follow-ups, and errors in plain words. It does not play
 // answers: the reader plays them as a second tour and sets the tour aside meanwhile ("Back to the tour").
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { answerText, askErrorMessage, askQuestion, isCancelled, MAX_HISTORY } from './api';
-import type { Answerable, AskAnswer, AskSource, AskTurn } from './api';
+import type { Answerable, AskAnswer, AskRequest, AskSource, AskTurn } from './api';
 import { openQuestions, waitingLabel } from './answer';
+import { AnswerKeeper, prefetchPossible } from './prefetch';
 import { AlertIcon, AnswerIcon, MicrophoneIcon, PauseIcon, RegionIcon, ResumeIcon, SendIcon, SparkIcon, StopIcon } from './icons';
 import type { RegionSelection } from './regionSelection';
 import './ask.css';
@@ -34,10 +35,24 @@ export interface AskPanelProps {
   away?: boolean;
   /** An answer is playing: its follow-ups wait until it ends, so the tray covers less of what it shows. */
   answering?: boolean;
+  /** A question to ask now, from outside the field (a suggestion on the tour's end card); a new id asks again. */
+  request?: { id: number; question: string } | null;
+  /**
+   * Questions to have answered in the background now (the tour is on its last step), so that picking one plays at once.
+   * `stamp` changes when where the learner is changes, so what was asked for is checked against it again.
+   */
+  prefetch?: { questions: readonly string[]; stamp: string } | null;
+  /** The questions among the suggested ones whose answers are kept, as the end card marks them. */
+  onReady?(questions: string[]): void;
   /** A question was sent: set the tour aside. */
   onAsk?(question: string): void;
   /** Play the answer; the panel never drives an engine itself. */
   onAnswer(answer: AskAnswer, question: string): void;
+  /**
+   * Play the answer while it is still written: called with the answer so far each time another step is whole (the first
+   * call starts it), and last with `open` false and the whole answer. Without it an answer plays when it is complete.
+   */
+  onAnswerPart?(answer: AskAnswer, question: string, open: boolean): void;
   /** The learner stopped a question before its answer came. */
   onCancel?(): void;
   onResume?(): void;
@@ -46,6 +61,8 @@ export interface AskPanelProps {
   onPauseAnswer?(): void;
   onContinueAnswer?(): void;
   selection?: RegionSelection | null;
+  /** The region was snapped to the object inside it. */
+  selectionSnapped?: boolean;
   selecting?: boolean;
   selectionPreview?: ReactNode;
   onSelectRegion?(): void;
@@ -85,6 +102,8 @@ export function AskPanel(props: AskPanelProps) {
   const [focused, setFocused] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const request = useRef<AbortController | null>(null);
+  // An answer is playing while the rest of it is still written.
+  const writing = useRef(false);
   // The reader's callbacks as of now, for an answer that arrives after it re-rendered.
   const latest = useRef(props);
   latest.current = props;
@@ -100,8 +119,12 @@ export function AskPanel(props: AskPanelProps) {
   const voiceBusy = voice.phase !== 'idle';
   const busy = phase.kind === 'thinking';
   const key = sourceKey(source);
+  // Answers asked for ahead of the learner (prefetch.ts); the panel redraws when one is kept, to mark its chip.
+  const keeper = useMemo(() => new AnswerKeeper(askQuestion), []);
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => keeper.subscribe(redraw), [keeper]);
 
-  // A new document or tour starts a new conversation.
+  // A new document or tour starts a new conversation. Leaving the document stops the background questions too.
   useEffect(() => {
     setDraft('');
     setPhase({ kind: 'idle' });
@@ -110,16 +133,24 @@ export function AskPanel(props: AskPanelProps) {
       const pending = request.current;
       request.current = null;
       pending?.abort();
+      keeper.clear();
     };
-  }, [key, tourId]);
+  }, [key, tourId, keeper]);
 
   useEffect(() => {
     if (props.selection && !props.selecting) input.current?.focus();
   }, [props.selection, props.selecting]);
 
-  // The reader went back to the tour on its own (a step picked in the sidebar, another tour): the answer is gone.
+  // The reader went back to the tour on its own (a step picked in the sidebar, another tour): the answer is gone, and an
+  // answer still being written has nowhere to play.
   useEffect(() => {
-    if (!away) setPhase((current) => (current.kind === 'answered' ? { kind: 'idle' } : current));
+    if (away) return;
+    setPhase((current) => (current.kind === 'answered' ? { kind: 'idle' } : current));
+    if (writing.current) {
+      writing.current = false;
+      request.current?.abort();
+      request.current = null;
+    }
   }, [away]);
 
   // While waiting, the status says what is happening, so a long wait does not look stuck.
@@ -149,28 +180,84 @@ export function AskPanel(props: AskPanelProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // What a question sends. The questions asked in the background are built the same way, so a kept answer is the one a
+  // click would have waited for.
+  const requestFor = useCallback(
+    (question: string, where: AskContext): AskRequest => ({
+      question,
+      responseLanguage: language || undefined,
+      tourId: tourId ?? undefined,
+      ...where,
+      history,
+    }),
+    [language, tourId, history],
+  );
+
+  // An answer is here, from the network or kept ahead: remember it, show its verdict and hand it to the reader to play.
+  const deliver = useCallback((question: string, answer: AskAnswer) => {
+    setHistory((turns) => [...turns, { question, answer: answerText(answer) }].slice(-MAX_HISTORY));
+    setPhase({ kind: 'answered', question, answer });
+    setDraft('');
+    // The keyboard goes back to the player, so Space pauses the answer.
+    input.current?.blur();
+    latest.current.onAnswer(answer, question);
+  }, []);
+
+  // The answer that began playing while it was written is complete (or ends where it stopped): remember it and close it.
+  const finish = useCallback((question: string, answer: AskAnswer) => {
+    writing.current = false;
+    setHistory((turns) => [...turns, { question, answer: answerText(answer) }].slice(-MAX_HISTORY));
+    setPhase({ kind: 'answered', question, answer });
+    latest.current.onAnswerPart?.(answer, question, false);
+  }, []);
+
   const ask = useCallback(
     async (text: string) => {
       const question = text.replace(/\s+/g, ' ').trim();
       if (!question || busy || voiceBusy || latest.current.selecting) return;
       request.current?.abort();
+      writing.current = false;
       const controller = new AbortController();
       request.current = controller;
       setDraft(question);
-      setPhase({ kind: 'thinking', question, since: Date.now() });
       // Where the learner is, read before the tour is set aside.
-      const where = latest.current.context?.() ?? {};
+      const sent = requestFor(question, latest.current.context?.() ?? {});
+      const early = keeper.take(source, sent);
+      if (early) {
+        // Answered ahead of time: the tour is set aside and the answer plays, with no wait to show.
+        request.current = null;
+        latest.current.onAsk?.(question);
+        deliver(question, early);
+        return;
+      }
+      setPhase({ kind: 'thinking', question, since: Date.now() });
       latest.current.onAsk?.(question);
+      // The answer as far as it is written, once its first step is here: it plays from then on, and the field is free.
+      let begun: AskAnswer | null = null;
+      const progress = (part: AskAnswer) => {
+        if (request.current !== controller) return;
+        if (!begun) {
+          writing.current = true;
+          setDraft('');
+          input.current?.blur();
+          setPhase({ kind: 'answered', question, answer: part });
+        }
+        begun = part;
+        latest.current.onAnswerPart?.(part, question, true);
+      };
       let answer: AskAnswer;
       try {
-        answer = await askQuestion(
+        answer = await keeper.answer(
           source,
-          { question, responseLanguage: language || undefined, tourId: tourId ?? undefined, ...where, history },
+          sent,
           controller.signal,
+          latest.current.onAnswerPart ? progress : undefined,
         );
       } catch (error) {
         if (request.current !== controller) return;
         request.current = null;
+        // Steps were already playing: the answer ends with them, rather than failing after the learner heard it begin.
+        if (begun) return finish(question, begun);
         // Stopped by the learner: back to the question, ready to edit or send again.
         if (isCancelled(error)) {
           setPhase({ kind: 'stopped', question });
@@ -180,15 +267,34 @@ export function AskPanel(props: AskPanelProps) {
       }
       if (request.current !== controller) return;
       request.current = null;
-      setHistory((turns) => [...turns, { question, answer: answerText(answer) }].slice(-MAX_HISTORY));
-      setPhase({ kind: 'answered', question, answer });
-      setDraft('');
-      // The keyboard goes back to the player, so Space pauses the answer.
-      input.current?.blur();
-      latest.current.onAnswer(answer, question);
+      if (begun) finish(question, answer);
+      else deliver(question, answer);
     },
-    [busy, voiceBusy, source, tourId, history, language],
+    [busy, voiceBusy, source, keeper, requestFor, deliver, finish],
   );
+
+  // The tour's last step asks for the answers to its suggested questions, one at a time, with the request a click on
+  // each would send. Nothing is asked for while the learner is in a conversation or the list is empty.
+  const wanted = props.prefetch;
+  const prefetchKey = wanted ? `${wanted.stamp}\n${wanted.questions.join('\n')}` : '';
+  useEffect(() => {
+    const now = latest.current.prefetch;
+    if (!now?.questions.length || !prefetchPossible(source, import.meta.env)) {
+      keeper.hold();
+      return;
+    }
+    const where = latest.current.context?.() ?? {};
+    keeper.prefetch(source, now.questions.map((question) => requestFor(question, where)));
+  }, [prefetchKey, keeper, source, requestFor]);
+
+  // A question picked outside the field goes through the same flow as one typed in it.
+  const askNow = useRef(ask);
+  askNow.current = ask;
+  const requestedId = props.request?.id;
+  useEffect(() => {
+    const question = latest.current.request?.question;
+    if (requestedId !== undefined && question) void askNow.current(question);
+  }, [requestedId]);
 
   const stop = () => request.current?.abort();
   // Back to the tour folds the panel away and hands the keyboard back to the player; the conversation stays.
@@ -222,6 +328,12 @@ export function AskPanel(props: AskPanelProps) {
   const typing = draft.trim() !== '' && !busy && !(phase.kind === 'failed' && draft.trim() === phase.question);
   const asked = history.map((turn) => turn.question);
   const offered = openQuestions(suggestions, asked);
+  // A suggested question whose answer is kept plays at once: its chip says so, and so does the tour's end card.
+  const ready = keeper.size ? offered.filter((q) => keeper.has(source, requestFor(q, props.context?.() ?? {}))) : [];
+  const readyKey = ready.join('\n');
+  useEffect(() => {
+    latest.current.onReady?.(readyKey ? readyKey.split('\n') : []);
+  }, [readyKey]);
   const invite = phase.kind === 'idle' && !typing && ended && !away && offered.length > 0;
   const questions =
     typing || busy || phase.kind === 'failed'
@@ -230,7 +342,8 @@ export function AskPanel(props: AskPanelProps) {
         ? answering
           ? []
           : openQuestions(phase.answer.followups, asked, 2)
-        : invite || (focused && !history.length)
+        : // Questions about the whole document make no sense beside a chosen region: its chip is the context.
+          invite || (focused && !history.length && !props.selection)
           ? offered
           : [];
   const back = away && !busy && !voiceBusy && !props.selecting;
@@ -329,19 +442,24 @@ export function AskPanel(props: AskPanelProps) {
         )}
         {questions.length > 0 && (
           <div className="ask-chips" key={phase.kind === 'answered' ? `answer:${phase.question}` : 'suggested'}>
-            {questions.map((q, i) => (
-              <button
-                type="button"
-                className="ask-chip"
-                key={`${i}:${q}`}
-                title={q}
-                style={order(i)}
-                onMouseDown={keepFocus}
-                onClick={() => void ask(q)}
-              >
-                <span>{q}</span>
-              </button>
-            ))}
+            {questions.map((q, i) => {
+              const instant = ready.includes(q);
+              return (
+                <button
+                  type="button"
+                  className={`ask-chip${instant ? ' ready' : ''}`}
+                  key={`${i}:${q}`}
+                  title={instant ? `${q} (answer ready)` : q}
+                  aria-label={instant ? `${q} (answer ready)` : undefined}
+                  style={order(i)}
+                  onMouseDown={keepFocus}
+                  onClick={() => void ask(q)}
+                >
+                  <span>{q}</span>
+                  {instant && <i className="ready-dot" aria-hidden="true" />}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -366,7 +484,7 @@ export function AskPanel(props: AskPanelProps) {
         {props.selection && !props.selecting && (
           <div className="ask-selection-chip">
             {props.selectionPreview}
-            <span><strong>Selected region</strong><small>Page {props.selection.page} · included with your question</small></span>
+            <span><strong>Selected region</strong><small>Page {props.selection.page} · {props.selectionSnapped ? 'snapped to the object · ' : ''}included with your question</small></span>
             <button type="button" onClick={props.onSelectRegion} disabled={busy || voiceBusy} aria-label="Change selected region">Change</button>
             <button type="button" onClick={props.onClearRegion} disabled={busy || voiceBusy} aria-label="Remove selected region" title="Remove selected region">×</button>
           </div>
@@ -435,15 +553,18 @@ export function AskPanel(props: AskPanelProps) {
               {voice.phase === 'transcribing' ? '…' : <MicrophoneIcon />}
             </button>
           )}
-          <button
-            type="submit"
-            className={`ask-send${busy ? ' stop' : empty ? '' : ' ready'}`}
-            disabled={voiceBusy || props.selecting || (!busy && empty)}
-            aria-label={busy ? 'Stop generating answer' : 'Ask'}
-            title={busy ? 'Stop generating answer (Esc)' : 'Ask (Enter)'}
-          >
-            {busy ? <StopIcon /> : <SendIcon />}
-          </button>
+          {/* Nothing to send yet: the bar stays quiet, and the controls before it do not move when it appears. */}
+          {(busy || !empty) && (
+            <button
+              type="submit"
+              className={`ask-send${busy ? ' stop' : ' ready'}`}
+              disabled={voiceBusy || props.selecting}
+              aria-label={busy ? 'Stop generating answer' : 'Ask'}
+              title={busy ? 'Stop generating answer (Esc)' : 'Ask (Enter)'}
+            >
+              {busy ? <StopIcon /> : <SendIcon />}
+            </button>
+          )}
         </form>
       </div>
     </section>

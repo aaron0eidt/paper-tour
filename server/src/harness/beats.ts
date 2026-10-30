@@ -3,6 +3,7 @@ import type { BoardKind } from './board';
 import { ARCS, type Arc, type CardItem, type CardRef, type PaperCard } from './card';
 import type { DocType } from './doctype';
 import type { Unit } from './exercise';
+import type { Move } from './moves';
 import { indexElements } from '../elements';
 
 export const PRESETS = ['quick', 'standard', 'deep'] as const;
@@ -36,7 +37,7 @@ export interface Beat {
   target?: string;
   detail?: boolean;
   questions?: string[];
-  /** The side-board item the beat may draw: a formula's terms, a method's flow or a result's numbers as bars. */
+  /** The side-board item the beat may draw: a formula's terms or a result's numbers as bars. */
   board?: BoardKind;
   /** Highlight colour; by kind when unset. */
   tint?: Color;
@@ -50,6 +51,16 @@ export interface Beat {
   page?: number;
   /** An exercise beat's part and its plan. */
   unit?: Unit;
+  /** What the step does in a claim's argument; its narration follows that move's grammar (moves.ts). */
+  move?: Move;
+  /** The claim a step of a claim-organised paper tour belongs to, and how far its evidence reaches. */
+  claim?: { n: number; of: number; text: string; scope?: string };
+  /** The spoken length the step aims for, fewest and most words; the kind's default when unset. */
+  say?: [number, number];
+  /** A slide step: the pages (slides) it covers, the lead slide first. */
+  slides?: number[];
+  /** Earlier slides the step connects back to, which the narration names. */
+  callbacks?: number[];
 }
 
 export interface PlanChapter {
@@ -110,12 +121,12 @@ const RESULT_RE = /\b(result|accura|perform|compar|score|bleu|error|outperform|b
 
 const TEACHING_ROLES: Partial<Record<BeatKind, string>> = {
   problem:
-    'State the problem and motivation as the paper presents them, with its scope and terminology. Keep a neutral tone without adding a hook or rhetorical question.',
-  idea: 'Describe the central contribution and its relation to the stated problem, preserving the authors’ claims and qualifications.',
+    'State the problem in one plain sentence, then say what makes it hard or what goes wrong today. The learner can read the highlighted sentences, so add the cause or the stakes instead of rewording them. Keep a neutral tone without a hook or rhetorical question.',
+  idea: 'Say the central contribution in one sentence, then why it answers the stated problem: what it changes and what that buys. Preserve the authors’ claims and qualifications and add the intuition, not a rewording of the highlighted sentences.',
   method:
-    'Actively choose the visual that clarifies this mechanism: a process flow, an input/output plot, a numerical comparison or a worked transformation. Explain the method in the order presented: inputs, operations and outputs. Explain reasons supported by the text; do not invent failure cases or unsupported causal claims.',
+    'Explain how the mechanism works in the order presented: inputs, operations and outputs, and why each part is needed. Do not reword the highlighted sentences. Give reasons supported by the text; do not invent failure cases or unsupported causal claims.',
   result:
-    'Present the experiment, metric and comparable baseline, then the relevant values and their difference. State only the supported implication and its scope.',
+    'Lead with the result: the experiment, metric and comparable baseline, then the values and their difference. Then say what the gap supports and what it does not establish; state only the supported implication and its scope.',
   limitation:
     'Show where the preceding explanation stops working or remains uncertain, and why that boundary matters for applying the method.',
   takeaway:
@@ -135,10 +146,11 @@ function mechanismEvidence(item: CardItem, doc: Doc): string[] {
 export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   const deep = preset === 'deep';
   const beats: Omit<Beat, 'id'>[] = [];
-  // The board a beat may draw: a method as a flow, a result's numbers as bars (formulas and figures below).
+  // The board a beat may draw: a result's numbers as bars (formulas and figures below). A method gets none: a chain of
+  // stages is a list, and a flow with a branch or a loop is for the visual plan to choose.
   const boards: Partial<Record<BeatKind, BoardKind>> = { result: 'bars' };
   const text = (kind: BeatKind, arc: Arc, item: CardItem | undefined) => {
-    const board = kind === 'method' ? 'flow' : boards[kind];
+    const board = boards[kind];
     if (item?.text && item.evidence.length)
       beats.push({
         kind,
@@ -171,7 +183,7 @@ export function planBeats(card: PaperCard, doc: Doc, preset: Preset): Beat[] {
   const figure = (ref: CardRef | undefined) => {
     if (!ref) return;
     const arc = figureArc(ref);
-    // A table's numbers may become bars, and a diagram of the method a simplified flow; a results plot draws on itself.
+    // A table's numbers may become bars; the figure of a method or a results plot is taught on the page.
     const table = doc.figures.find((f) => f.id === ref.id)?.kind === 'table';
     const board: BoardKind | undefined = table ? 'bars' : undefined;
     const beat: Omit<Beat, 'id'> = {

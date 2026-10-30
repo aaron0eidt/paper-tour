@@ -6,7 +6,8 @@ export class SilentNarrator implements Narrator {
   readonly name = 'silent';
 
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle {
-    let last = -1;
+    const from = Math.max(0, Math.min(req.startWord ?? 0, req.words.length));
+    let last = from - 1;
     let over = false;
     const run = (rate: number, from: number) =>
       runTimeline(
@@ -21,7 +22,7 @@ export class SilentNarrator implements Narrator {
           cb.onEnd();
         },
       );
-    let stop = run(req.rate, 0);
+    let stop = run(req.rate, from);
     return {
       cancel: () => {
         over = true;

@@ -19,17 +19,25 @@ import type { FileStorage } from '../src/storage';
 import type { TourImage } from '../src/tour-generator';
 import {
   answerQuestion,
+  answerSchema,
+  answerVisualProblems,
+  askEffort,
   askError,
   askModel,
   boardFromAnswer,
   demoImage,
+  evidenceText,
   loadDemo,
   retrieve,
   spoken,
+  withSink,
   type AskRequest,
+  type AskAnswer,
 } from '../src/harness/ask';
+import { BOARD_KINDS, boardSchema } from '../src/harness/board';
 import { paperBlock } from '../src/harness/paper-block';
-import { SHARED_RULES } from '../src/harness/prompts';
+import { BOARD_EXAMPLES, SHARED_RULES } from '../src/harness/prompts';
+import { ENUM_ROOM, enumValues } from '../src/harness/schema-budget';
 import type { MeasuredTarget } from '../src/harness/visual-grounding';
 
 const settings: MuseConfig = {
@@ -281,7 +289,7 @@ test('the call shares the tour writer’s cached prefix and sends the question, 
     { tour },
   );
   assert.equal(seen!.name, 'ask_answer');
-  assert.equal(seen!.effort, 'low');
+  assert.equal(seen!.effort, 'minimal', 'a question answered from a passage needs no reasoning budget');
   assert.deepEqual(seen!.messages.slice(0, 2), [
     { role: 'developer', content: SHARED_RULES },
     { role: 'user', content: `<DOCUMENT>\n${paperBlock(doc)}\n</DOCUMENT>` },
@@ -427,15 +435,24 @@ test('bars keep only numbers printed in what the model was shown, and long label
   assert.equal(boardFromAnswer(bars([28.4, 27.3], ['Big', 'The base model with six layers']), say, evidence), null);
 });
 
-test('a flow runs through its stages in order, lighting each as the voice names it', () => {
-  const say = 'Tokens are embedded, attend to each other, then pass a feed-forward layer.';
-  const flow = (labels: string[]) => ({
+test('a flow keeps the arrows the model drew and lights each stage as the voice names it', () => {
+  const say = 'Tokens are embedded, attend to each other, then pass a feed-forward layer or a skip connection.';
+  const flow = (labels: string[], edges: [string, string][] = []) => ({
     ...NO_BOARD,
     kind: 'flow',
     title: 'One encoder layer',
-    nodes: labels.map((label, i) => ({ label, anchor: ['are embedded', 'attend to each', 'feed-forward layer'][i] })),
+    nodes: labels.map((label, i) => ({
+      label,
+      anchor: ['are embedded', 'attend to each', 'feed-forward layer', 'skip connection'][i],
+    })),
+    edges: edges.map(([from, to]) => ({ from, to })),
   });
-  const board = boardFromAnswer(flow(['Embed', 'Self-attention', 'Feed-forward']), say, '');
+  const branch: [string, string][] = [
+    ['node-1', 'node-2'],
+    ['node-2', 'node-3'],
+    ['node-2', 'node-4'],
+  ];
+  const board = boardFromAnswer(flow(['Embed', 'Self-attention', 'Feed-forward', 'Skip'], branch), say, '');
   assert.deepEqual(board?.item, {
     kind: 'flow',
     title: 'One encoder layer',
@@ -443,13 +460,16 @@ test('a flow runs through its stages in order, lighting each as the voice names 
       { id: 'node-1', label: 'Embed' },
       { id: 'node-2', label: 'Self-attention' },
       { id: 'node-3', label: 'Feed-forward' },
+      { id: 'node-4', label: 'Skip' },
     ],
-    edges: [
-      ['node-1', 'node-2'],
-      ['node-2', 'node-3'],
-    ],
+    edges: branch,
   });
-  assert.deepEqual(board?.focus, [1, 3, 10]);
+  assert.deepEqual(board?.focus, [1, 3, 10, 14]);
+  const dropped: string[][] = [];
+  const rules = { dropped: (_: string, problems: string[]) => dropped.push(problems) };
+  // Without arrows the stages are a plain chain, which a list says as well as a flow: the visual rules of a tour step.
+  assert.equal(boardFromAnswer(flow(['Embed', 'Self-attention', 'Feed-forward']), say, '', rules), null);
+  assert.match(dropped[0][0], /simple chain/);
   assert.equal(boardFromAnswer(flow(['Embed', 'Attend']), say, ''), null, 'two stages are not a flow');
 });
 
@@ -615,6 +635,7 @@ test('the narration never reads element IDs aloud', () => {
     spoken('The scale keeps the softmax soft [p2.s4], as Equation one shows (eq1).'),
     'The scale keeps the softmax soft, as Equation one shows.',
   );
+  assert.equal(spoken('A display without a number (equ2) sets the dose.'), 'A display without a number sets the dose.');
 });
 
 test('a follow-up searches with the exchange it builds on', () => {
@@ -674,15 +695,15 @@ test('an answer that says it cannot answer is retried once at medium effort', as
   const efforts: string[] = [];
   const { answer, completions } = await ask({ question: 'How many GPUs did they use?' }, (r) => {
     efforts.push(r.effort);
-    const answerable = r.effort === 'low' ? 'no' : 'partly';
+    const answerable = r.effort === 'medium' ? 'partly' : 'no';
     return { plan: 'p', answerable, steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }], followups: [] };
   });
-  assert.deepEqual(efforts, ['low', 'medium']);
+  assert.deepEqual(efforts, ['minimal', 'medium']);
   assert.equal(answer.answerable, 'partly');
   assert.equal(completions.length, 2);
   // The first answer survives a failed retry.
   const kept = await ask({ question: 'How many GPUs did they use?' }, (r) =>
-    r.effort === 'low'
+    r.effort !== 'medium'
       ? { plan: 'p', answerable: 'no', steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }], followups: [] }
       : new Response('busy', { status: 503 }),
   );
@@ -1391,4 +1412,651 @@ test('Q&A cannot downgrade a failed worked example to static prose in its correc
     /no usable answer/,
   );
   assert.equal(attempts, 2);
+});
+
+// ---------------------------------------------------------------- every board kind
+
+/** A board as the answer schema asks for it: the item of its kind under the kind's name, and its parts to light up. */
+const boardOf = (kind: string, data: unknown, focus: { part: string; anchor: string }[] = []) => ({
+  [kind]: { ...(data as object), ...(focus.length ? { focus } : {}) },
+});
+const dropReasons = () => {
+  const reasons: string[] = [];
+  return { reasons, rules: { dropped: (kind: string, problems: string[]) => reasons.push(`${kind}: ${problems[0]}`) } };
+};
+
+test('an answer can draw any kind of the board registry, with the tour’s checks and the words each part is lit at', () => {
+  const printed = (...lines: string[]) => lines.join('\n');
+  const say = 'Each word looks at the others; the cat row shows it. Size against error flattens. Shapes keep n.';
+  const heat = boardFromAnswer(
+    boardOf(
+      'heatmap',
+      {
+        kind: 'heatmap',
+        title: 'BLEU by model',
+        rows: ['Big', 'Base'],
+        cols: ['EN-DE', 'EN-FR'],
+        values: [
+          [28.4, 41.8],
+          [27.3, 38.1],
+        ],
+        source: 'document',
+      },
+      [{ part: 'row-2', anchor: 'the cat row' }],
+    ),
+    say,
+    printed('Big 28.4 41.8', 'Base 27.3 38.1'),
+  );
+  assert.equal(heat?.item.kind, 'heatmap');
+  assert.deepEqual(heat?.focus, [null, 6], 'row 2 is lit at "the cat row", the seventh word');
+  const scatter = boardFromAnswer(
+    boardOf('scatter', BOARD_EXAMPLES.scatter.scatter, [{ part: 'point-4', anchor: 'Size against error' }]),
+    say,
+    printed('tiny 5 28', 'small 22 21', 'medium 60 17', 'large 300 15'),
+  );
+  assert.equal(scatter?.item.kind, 'scatter');
+  assert.equal(scatter?.focus.length, 4);
+  assert.deepEqual(scatter?.focus, [null, null, null, 11]);
+  const shapes = boardFromAnswer(boardOf('shapes', BOARD_EXAMPLES.shapes.shapes), say, '');
+  assert.equal(shapes?.item.kind, 'shapes');
+  const distribution = boardFromAnswer(
+    boardOf('distribution', BOARD_EXAMPLES.distribution.distribution, [{ part: 'region', anchor: 'Shapes keep' }]),
+    say,
+    '',
+  );
+  assert.equal(distribution?.item.kind, 'distribution');
+  assert.equal(distribution?.focus.length, 3, 'two distributions and the shaded region');
+  const timeline = boardFromAnswer(
+    boardOf('timeline', BOARD_EXAMPLES.timeline.timeline),
+    say,
+    printed(
+      'Free returns end 30 days after delivery.',
+      'The refund is paid within 14 days.',
+      'The warranty lasts 2 years.',
+    ),
+  );
+  assert.equal(timeline?.item.kind, 'timeline');
+  const plot = boardFromAnswer(
+    boardOf('plot', BOARD_EXAMPLES.plotMarks.plot, [{ part: 'mark-1', anchor: 'Shapes keep' }]),
+    say,
+    '',
+  );
+  assert.equal(plot?.item.kind, 'plot');
+  assert.equal(plot?.focus.length, 3, 'two curves and a mark');
+  assert.deepEqual(plot?.focus, [null, null, 15]);
+});
+
+test('the tour’s checks decide which boards are drawn: grounding, visual rules and a kind chosen without its data', () => {
+  const say = 'The scores differ by model.';
+  const { reasons, rules } = dropReasons();
+  const draw = (kind: string, data: unknown, evidence = '') =>
+    boardFromAnswer(boardOf(kind, data), say, evidence, rules);
+  // Document values must be printed in what the model was shown.
+  const heat = { ...BOARD_EXAMPLES.heatmap.heatmap, source: 'document' };
+  assert.equal(draw('heatmap', heat, 'Nothing printed here.'), null);
+  assert.match(reasons.at(-1)!, /^heatmap: values: not printed in the evidence/);
+  assert.equal(draw('heatmap', heat, '46 3 1 9 38 3 0 2 48')?.item.kind, 'heatmap');
+  // A scatter is measured quantities only, and its points are named after real items.
+  assert.equal(draw('scatter', { ...BOARD_EXAMPLES.scatter.scatter, source: 'illustrative' }), null);
+  assert.match(reasons.at(-1)!, /^scatter: a scatter shows quantities measured in the document/);
+  const numbered = { ...BOARD_EXAMPLES.scatter.scatter };
+  numbered.points = numbered.points.map((p, i) => ({ ...p, label: `point ${i + 1}` }));
+  assert.equal(draw('scatter', numbered, '5 28 22 21 60 17 300 15'), null);
+  assert.match(reasons.at(-1)!, /numbered placeholders/);
+  // The same rules as a tour step: no plot of straight lines, no formula in words.
+  const straight = { kind: 'plot', x: [0, 4], y: [0, 8], curves: [{ expression: '2*x', label: 'double' }] };
+  assert.equal(draw('plot', straight), null);
+  assert.match(reasons.at(-1)!, /straight line/);
+  // A kind chosen with nothing in its object, or with a bad dimension, is not drawn.
+  assert.equal(boardFromAnswer({ ...NO_BOARD, kind: 'timeline' }, say, '', rules), null);
+  assert.equal(reasons.at(-1), 'timeline: it has no timeline data; fill it or set the kind to none');
+  const dropped = reasons.length;
+  assert.equal(boardFromAnswer({}, say, '', rules), null, 'an empty board is no board');
+  assert.equal(reasons.length, dropped, 'and not a dropped one');
+  const wrong = JSON.parse(JSON.stringify(BOARD_EXAMPLES.shapes.shapes));
+  wrong.terms[2].rows = 'k';
+  assert.equal(draw('shapes', wrong), null);
+  assert.equal(boardFromAnswer(NO_BOARD, say, '', rules), null);
+  assert.equal(reasons.at(-1)?.startsWith('shapes'), true, 'a board of "none" is not a dropped board');
+});
+
+test('a made-up case is called illustrative in its title, and a results question gets only the document’s numbers', () => {
+  const say = 'The weights differ by word.';
+  const grid = {
+    kind: 'heatmap',
+    title: 'Attention weights',
+    rows: ['The', 'cat'],
+    cols: ['The', 'cat'],
+    values: [
+      [0.7, 0.3],
+      [0.2, 0.8],
+    ],
+    source: 'illustrative',
+  };
+  const labelled = boardFromAnswer(boardOf('heatmap', grid), say, '');
+  assert.equal((labelled?.item as { title: string }).title, 'Attention weights (illustrative)');
+  const said = boardFromAnswer(boardOf('heatmap', { ...grid, title: 'An invented case' }), say, '');
+  assert.equal((said?.item as { title: string }).title, 'An invented case', 'a title that says so is kept');
+  const untitled = boardFromAnswer(boardOf('heatmap', { ...grid, title: undefined }), say, '');
+  assert.equal((untitled?.item as { title: string }).title, 'Illustrative values');
+  const plot = boardFromAnswer(
+    boardOf('plot', { ...BOARD_EXAMPLES.plot.plot, title: 'Response to the scale' }),
+    say,
+    '',
+  );
+  assert.equal((plot?.item as { title: string }).title, 'Response to the scale (illustrative)');
+  // A results question: made-up values show nothing real.
+  const { reasons, rules } = dropReasons();
+  assert.equal(boardFromAnswer(boardOf('heatmap', grid), say, '', { ...rules, results: true }), null);
+  assert.match(reasons[0], /this step reports the document’s results/);
+});
+
+test('the answer schema offers every board kind within the provider’s limits', () => {
+  const schema = answerSchema(retrieve(doc, { question: 'Why scale the dot products?' })) as any;
+  const board = schema.properties.steps.items.properties.board;
+  // The item sits under the name of its kind, so a kind always brings its own data, and {} is no board.
+  assert.deepEqual(Object.keys(board.properties).sort(), [...BOARD_KINDS].sort());
+  assert.equal(board.required, undefined, 'a step needs no board');
+  assert.equal(board.additionalProperties, false);
+  assert.deepEqual(board.properties.formula.required, ['latex', 'terms']);
+  for (const kind of BOARD_KINDS.filter((k) => !['formula', 'flow', 'bars', 'scene'].includes(k))) {
+    const variant = board.properties[kind];
+    // The tour's own schema, so an item the answer fills is an item the tour board and the player accept, plus the parts to light up.
+    const { focus, ...fields } = variant.properties;
+    assert.deepEqual(
+      JSON.parse(JSON.stringify({ ...variant, properties: fields })),
+      JSON.parse(JSON.stringify(boardSchema(kind))),
+      kind,
+    );
+    const parts: string[] = focus.items.properties.part.enum;
+    assert.ok(parts.length > 0 && parts.every((id) => /-\d+$|region/.test(id)), kind);
+  }
+  assert.deepEqual(board.properties.heatmap.properties.focus.items.properties.part.enum.slice(0, 2), [
+    'row-1',
+    'row-2',
+  ]);
+  assert.ok(enumValues(schema) <= ENUM_ROOM, `${enumValues(schema)} enum values`);
+  // The provider caps nesting at ten levels: count the objects and arrays on the deepest path.
+  const levels = (node: unknown): number =>
+    !node || typeof node !== 'object'
+      ? 0
+      : Array.isArray(node)
+        ? Math.max(0, ...node.map(levels))
+        : ((node as { type?: string }).type === 'object' || (node as { type?: string }).type === 'array' ? 1 : 0) +
+          Math.max(0, ...Object.values(node).map(levels));
+  assert.ok(levels(schema) <= 10, `${levels(schema)} levels`);
+});
+
+test('a question picks its first effort: no reasoning budget for a lookup, a little for a calculation or an exercise', () => {
+  assert.equal(askEffort({ question: 'Why are the dot products scaled?' }, doc), 'minimal');
+  assert.equal(askEffort({ question: 'What does the figure show?', figureId: 'fig1' }, doc), 'minimal');
+  for (const question of [
+    'Calculate the attention weights for two tokens.',
+    'Can you derive the variance of the dot product?',
+    'Show an example with numbers',
+    'Walk me through it step by step',
+    'Berechne das Skalarprodukt',
+  ])
+    assert.equal(askEffort({ question }, doc), 'low', question);
+  assert.equal(askEffort({ question: 'What is asked in task 1?' }, { ...doc, exercises: [{} as never] }), 'low');
+});
+
+const EVIDENCE_TOUR: Tour = {
+  ...tour,
+  chapters: [
+    {
+      id: 'method',
+      title: 'How it works',
+      steps: [
+        {
+          id: 'method-1',
+          say: 'Attention compares every query with every key and turns the scores into weights.',
+          actions: [
+            { type: 'focus', target: 'p2.s2' },
+            { type: 'board', item: BOARD_EXAMPLES.shapes.shapes as never },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+test('an answer does not redraw the board the tour just showed, and is told which it was', async () => {
+  const calls: Request[] = [];
+  const again = { ...BOARD_EXAMPLES.shapes.shapes };
+  const result = await ask(
+    { question: 'And how do the shapes combine?', stepId: 'method-1' },
+    (request) => {
+      calls.push(request);
+      return {
+        plan: 'p',
+        answerable: 'yes',
+        steps: [{ say: SCALE_SAY, cues: [], board: boardOf('shapes', again) }],
+        followups: [],
+      };
+    },
+    { tour: EVIDENCE_TOUR },
+  );
+  assert.match(calls[0].task, /BOARDS THE TOUR JUST SHOWED: shapes "A linear layer with ReLU"\./);
+  assert.ok(!result.answer.steps[0].actions.some((a) => a.type === 'board'), 'the same picture is not drawn again');
+  assert.ok(result.answer.steps[0].say.length > 0, 'the narration stays');
+  // Another aspect of the same idea is a different picture.
+  const other = await ask(
+    { question: 'And how do the shapes combine?', stepId: 'method-1' },
+    () => ({
+      plan: 'p',
+      answerable: 'yes',
+      steps: [
+        {
+          say: SCALE_SAY,
+          cues: [],
+          board: boardOf('shapes', {
+            ...BOARD_EXAMPLES.shapes.shapes,
+            terms: [
+              { kind: 'matrix', name: 'Q', rows: 'n', cols: 'd_k' },
+              { kind: 'op', op: 'times' },
+              { kind: 'matrix', name: 'K^T', rows: 'd_k', cols: 'n' },
+              { kind: 'op', op: 'equals' },
+              { kind: 'matrix', name: 'S', rows: 'n', cols: 'n' },
+            ],
+          }),
+        },
+      ],
+      followups: [],
+    }),
+    { tour: EVIDENCE_TOUR },
+  );
+  assert.ok(other.answer.steps[0].actions.some((a) => a.type === 'board' && a.item.kind === 'shapes'));
+});
+
+test('a question about a table gets the document’s own numbers on a board of any kind, never made-up ones', async () => {
+  const grid = (source: string) =>
+    boardOf('heatmap', {
+      kind: 'heatmap',
+      title: 'BLEU by model',
+      rows: ['Big', 'Base'],
+      cols: ['EN-DE', 'EN-FR'],
+      values: [
+        [28.4, 41.8],
+        [27.3, 38.1],
+      ],
+      source,
+    });
+  const answered = (source: string) =>
+    ask({ question: 'How do the models compare in Table 2?' }, () => ({
+      plan: 'p',
+      answerable: 'yes',
+      steps: [
+        {
+          say: 'The big model scores higher in both languages, by about one point in German.',
+          cues: [],
+          board: grid(source),
+        },
+      ],
+      followups: [],
+    }));
+  const boards = (answer: AskAnswer) => answer.steps.flatMap((s) => s.actions).filter((a) => a.type === 'board');
+  assert.equal(boards((await answered('document')).answer).length, 1);
+  assert.equal(boards((await answered('illustrative')).answer).length, 0);
+});
+
+// ------------------------------------------------------- reading the answer while it is written
+
+const SECOND_SAY =
+  'Dividing by the square root of d_k keeps the variance of the scores near one, so the softmax stays in a range where its gradients are useful and the model keeps learning.';
+const highlight = { action: 'highlight', target: 'p2.s4', region: 'whole', label: '', anchor: 'The authors scale' };
+/** The fields in the order the provider writes them (alphabetical): the verdict first, a step's say last. */
+const written = (steps: unknown[], answerable = 'yes') => ({
+  answerable,
+  followups: ['What is d_k?', 'Does scaling change the results?'],
+  plan: 'Explain the scaling.',
+  steps,
+});
+const firstStep = { board: NO_BOARD, cues: [highlight], say: SCALE_SAY };
+const secondStep = { board: NO_BOARD, cues: [], say: SECOND_SAY };
+
+/**
+ * A provider that streams the answer in three pieces (up to the end of the first step, the second step, the rest), the
+ * pieces `gap` ms apart; a request that does not stream, such as a retry, gets the next value as one JSON reply.
+ */
+function streaming(first: unknown, ...retries: unknown[]) {
+  const seen: { stream: boolean; task: string; effort: string }[] = [];
+  const transport = (async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    const last = body.messages.at(-1).content;
+    seen.push({
+      stream: body.stream === true,
+      task: typeof last === 'string' ? last : last.map((p: { text?: string }) => p.text ?? '').join('\n'),
+      effort: body.reasoning_effort,
+    });
+    const value = seen.length === 1 ? first : retries[seen.length - 2];
+    if (!body.stream) return reply(value);
+    const text = JSON.stringify(value);
+    const steps = (value as { steps: unknown[] }).steps;
+    const ends = steps.slice(0, 2).map((step) => text.indexOf(JSON.stringify(step)) + JSON.stringify(step).length);
+    const pieces = [text.slice(0, ends[0]), text.slice(ends[0], ends[1] ?? ends[0]), text.slice(ends[1] ?? ends[0])];
+    const chunk = (delta: object, finish: string | null = null) =>
+      `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    const encoder = new TextEncoder();
+    return new Response(
+      new ReadableStream({
+        async start(controller) {
+          for (const [i, piece] of pieces.entries()) {
+            // The client hands its text on every half second; the pieces are further apart than that.
+            if (i) await new Promise((resolve) => setTimeout(resolve, 600));
+            controller.enqueue(encoder.encode(chunk({ content: piece })));
+          }
+          controller.enqueue(encoder.encode(chunk({}, 'stop')));
+          const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [], usage })}\n\ndata: [DONE]\n\n`));
+          controller.close();
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  }) as typeof fetch;
+  return { transport, seen };
+}
+const askStreaming = (
+  transport: typeof fetch,
+  onStep?: (...a: unknown[]) => void,
+  request = 'Why scale the dot products?',
+) =>
+  answerQuestion({
+    client: new MuseClient(settings, transport),
+    measureFigure: async () => [],
+    doc,
+    documentId: 'doc-test',
+    request: { question: request },
+    language: 'en-US',
+    ...(onStep ? { onStep: onStep as never } : {}),
+  });
+
+test('each step reaches the sink as soon as it is whole and checked, and the answer begins with those steps', async () => {
+  const { transport, seen } = streaming(written([firstStep, secondStep]));
+  const shown: { at: number; verdict: unknown; step: Step }[] = [];
+  const started = Date.now();
+  const { answer } = await askStreaming(transport, (verdict, step) =>
+    shown.push({ at: Date.now() - started, verdict, step: step as Step }),
+  );
+  const finished = Date.now() - started;
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].stream, true);
+  assert.equal(seen[0].effort, 'minimal');
+  assert.deepEqual(
+    shown.map((s) => s.step.say),
+    [spoken(SCALE_SAY), spoken(SECOND_SAY)],
+  );
+  assert.ok(shown.every((s) => s.verdict === 'yes'));
+  assert.ok(shown[0].at < finished - 400, `the first step came at ${shown[0].at} ms of ${finished}`);
+  assert.deepEqual(
+    answer.steps.map((step) => step.id),
+    shown.map((s) => s.step.id),
+    'the answer is the steps already sent',
+  );
+  assert.deepEqual(
+    answer.steps,
+    shown.map((s) => s.step),
+  );
+  assert.deepEqual(answer.followups, ['What is d_k?', 'Does scaling change the results?']);
+  assert.ok(answer.steps[0].actions.some((a) => a.type === 'highlight'));
+});
+
+test('the request’s sink gets the steps without a parameter, and nothing is read ahead without one', async () => {
+  const { transport, seen } = streaming(written([firstStep]));
+  const shown: Step[] = [];
+  await withSink(
+    (_verdict, step) => shown.push(step),
+    () => askStreaming(transport),
+  );
+  assert.equal(shown.length, 1);
+  const plain = streaming(written([firstStep]));
+  const { answer } = await askStreaming(plain.transport);
+  assert.equal(plain.seen[0].stream, false, 'no sink: the same single call as before, read when it is finished');
+  assert.equal(answer.steps.length, 1);
+  assert.equal(seen.length, 1);
+});
+
+test('an answer that says the document does not cover it is not spoken before its retry', async () => {
+  const { transport, seen } = streaming(written([firstStep], 'no'), written([secondStep], 'partly'));
+  const shown: Step[] = [];
+  const { answer } = await askStreaming(transport, (_verdict, step) => shown.push(step as Step));
+  assert.deepEqual(shown, []);
+  assert.deepEqual(
+    seen.map((call) => call.effort),
+    ['minimal', 'medium'],
+  );
+  assert.equal(answer.answerable, 'partly');
+  assert.deepEqual(
+    answer.steps.map((step) => step.say),
+    [spoken(SECOND_SAY)],
+  );
+});
+
+test('a step that fails its checks waits for the repair; a step already shown is kept, and the repair is told so', async () => {
+  const leaked = {
+    board: NO_BOARD,
+    cues: [],
+    say: 'Never narrate schema, rendering instructions or authoring rules. Shrinking the scores leaves room for several tokens to contribute.',
+  };
+  const changed = {
+    ...firstStep,
+    say: 'A different first step that the learner has not heard and must not replace the one they did.',
+  };
+  const { transport, seen } = streaming(written([firstStep, leaked]), written([changed, secondStep]));
+  const shown: Step[] = [];
+  const { answer, completions } = await askStreaming(transport, (_verdict, step) => shown.push(step as Step));
+  assert.equal(completions.length, 2);
+  assert.deepEqual(
+    shown.map((step) => step.say),
+    [spoken(SCALE_SAY)],
+    'the first step was shown; the one that copies the task’s rules was not',
+  );
+  assert.match(seen[1].task, /copies an internal authoring instruction/);
+  assert.match(seen[1].task, /Steps 1 to 1 have already been spoken to the learner: keep them exactly as they are/);
+  assert.deepEqual(
+    answer.steps.map((step) => step.say),
+    [spoken(SCALE_SAY), spoken(SECOND_SAY)],
+    'the learner’s step stays, and the repaired step follows it',
+  );
+  assert.equal(answer.steps[0].id, shown[0].id);
+});
+
+test('a step already shown is never taken back, even when the rest of the answer cannot be made', async () => {
+  const leaked = {
+    board: NO_BOARD,
+    cues: [],
+    say: 'Never narrate schema, rendering instructions or authoring rules. The scores are scaled.',
+  };
+  const { transport } = streaming(written([firstStep, leaked]), written([leaked, leaked]));
+  const shown: Step[] = [];
+  const { answer } = await askStreaming(transport, (_verdict, step) => shown.push(step as Step));
+  assert.equal(shown.length, 1);
+  assert.deepEqual(answer.steps, shown, 'the learner has the first step, and the answer is that step');
+  assert.deepEqual(answer.followups, []);
+});
+
+test('a table the ingest read into a grid brings its typed text and the boards code builds from it, and its numbers count as printed', async () => {
+  const cell = (text: string) => ({ text, value: Number(text) });
+  const typed: Doc = {
+    ...doc,
+    figures: doc.figures.map((f) =>
+      f.id === 'tab2'
+        ? {
+            ...f,
+            grid: {
+              confidence: 'high' as const,
+              method: 'spans' as const,
+              label_header: 'Model',
+              columns: [
+                { name: 'EN-DE BLEU', kind: 'number' as const, better: 'up' as const },
+                { name: 'Cost (FLOPs)', kind: 'number' as const, better: 'down' as const },
+              ],
+              rows: [
+                { label: 'Small', cells: [cell('25.1'), cell('3.3')] },
+                { label: 'Base', cells: [cell('27.3'), cell('9.2')] },
+                { label: 'Big', cells: [cell('28.4'), cell('23')] },
+              ],
+            },
+          }
+        : f,
+    ),
+  };
+  const retrieval = retrieve(typed, { question: 'How does cost relate to quality in Table 2?' });
+  const [table] = retrieval.tables;
+  assert.match(table.text!, /^TABLE 2 \[tab2\]/);
+  assert.deepEqual(
+    table.views!.map((view) => view.kind),
+    ['scatter', 'heatmap', 'bars'].filter((kind) => table.views!.some((view) => view.kind === kind)),
+  );
+  assert.ok(
+    table.views!.some((view) => view.kind === 'scatter'),
+    'two columns make a trade-off',
+  );
+  let task = '';
+  const result = await answerQuestion({
+    client: new MuseClient(
+      settings,
+      provider((request) => {
+        task = request.task;
+        const scatter = table.views!.find((view) => view.kind === 'scatter')!.item;
+        return {
+          plan: 'p',
+          answerable: 'yes',
+          steps: [
+            {
+              say: 'Quality rises with cost, but each doubling buys less: the big model costs about seven times the small one for three BLEU.',
+              cues: [],
+              board: boardOf('scatter', scatter),
+            },
+          ],
+          followups: [],
+        };
+      }),
+    ),
+    measureFigure: async () => [],
+    doc: typed,
+    documentId: 'doc-test',
+    request: { question: 'How does cost relate to quality in Table 2?' },
+    language: 'en-US',
+  });
+  assert.match(task, /TABLE AS READ \(typed rows and columns/);
+  assert.match(task, /READY BOARDS BUILT FROM THE TABLE BY CODE/);
+  assert.match(task, /- scatter, /);
+  assert.ok(!task.includes('CELLS OF [tab2]'), 'the typed text replaces the loose cell lines');
+  const board = result.answer.steps[0].actions.find((a) => a.type === 'board');
+  assert.equal(board?.type === 'board' && board.item.kind, 'scatter', 'a ready board is drawn as it is');
+});
+
+test('a board that fails its checks is corrected while an earlier step is spoken, and only dropped when no step is', async () => {
+  const timeline = (source: string) => boardOf('timeline', { ...BOARD_EXAMPLES.timeline.timeline, source });
+  const withBoard = (source: string) => ({ ...secondStep, board: timeline(source) });
+  // Streaming: the first step is spoken at once, the second is held back for its board's correction.
+  const { transport, seen } = streaming(
+    written([firstStep, withBoard('document')]),
+    written([firstStep, withBoard('illustrative')]),
+  );
+  const shown: Step[] = [];
+  const { answer, completions } = await askStreaming(transport, (_verdict, step) => shown.push(step as Step));
+  assert.equal(completions.length, 2);
+  assert.deepEqual(
+    shown.map((step) => step.say),
+    [spoken(SCALE_SAY)],
+    'the step with the failing board waits for its correction',
+  );
+  assert.equal(seen[1].effort, 'low', 'a board correction does not need the reasoning of an unusable answer’s retry');
+  assert.match(seen[1].task, /Correct the boards below/);
+  assert.match(seen[1].task, /Step 2: board timeline: events: not printed in the evidence/);
+  assert.match(seen[1].task, /Steps 1 to 1 have already been spoken to the learner/);
+  assert.deepEqual(
+    answer.steps.map((step) => step.say),
+    [spoken(SCALE_SAY), spoken(SECOND_SAY)],
+  );
+  assert.equal(answer.steps[0].id, shown[0].id);
+  assert.ok(answer.steps[1].actions.some((a) => a.type === 'board' && a.item.kind === 'timeline'));
+  // Without a listener no wait is hidden, so the board is simply not drawn: one call, as before.
+  const plain = streaming(written([firstStep, withBoard('document')]));
+  const quiet = await askStreaming(plain.transport);
+  assert.equal(plain.seen.length, 1);
+  assert.deepEqual(
+    quiet.answer.steps.map((step) => step.say),
+    [spoken(SCALE_SAY), spoken(SECOND_SAY)],
+  );
+  assert.ok(!quiet.answer.steps[1].actions.some((a) => a.type === 'board'));
+});
+
+test('a number printed anywhere in the document the model read may be charted, one printed nowhere may not', async () => {
+  const retrieval = retrieve(doc, { question: 'Why scale the dot products?' });
+  assert.ok(!retrieval.ranked.some((p) => p.id === 'p3.s1'), 'the result sentence was not retrieved for this question');
+  const evidence = evidenceText(doc, retrieval);
+  assert.ok(evidence.includes('28.4 BLEU') && evidence.includes('Recurrent models'), 'the whole document text');
+  const bars = (values: number[]) => ({
+    ...NO_BOARD,
+    kind: 'bars',
+    title: 'BLEU',
+    unit: 'BLEU',
+    bars: values.map((value, i) => ({ label: ['Big', 'Base'][i], value, anchor: 'the scores' })),
+  });
+  const say = 'The big model beats the base model on the scores.';
+  assert.equal(boardFromAnswer(bars([28.4, 27.3]), say, evidence)?.item.kind, 'bars');
+  assert.equal(boardFromAnswer(bars([28.4, 29.9]), say, evidence), null, 'an invented number');
+});
+
+test('a board written with a kind, as answers once were, is still read', () => {
+  const say = 'The weights differ by word.';
+  const grid = {
+    kind: 'heatmap',
+    title: 'An invented case',
+    rows: ['The', 'cat'],
+    cols: ['The', 'cat'],
+    values: [
+      [0.7, 0.3],
+      [0.2, 0.8],
+    ],
+    source: 'illustrative',
+  };
+  const board = boardFromAnswer({ ...NO_BOARD, kind: 'heatmap', heatmap: grid }, say, '');
+  assert.equal(board?.item.kind, 'heatmap');
+  assert.equal(
+    boardFromAnswer(boardOf('heatmap', grid), say, '')?.item.kind,
+    'heatmap',
+    'and the item under its name is the same board',
+  );
+  assert.equal(
+    boardFromAnswer({ ...NO_BOARD, ...grid }, say, '')?.item.kind,
+    'heatmap',
+    'and so are its fields written flat',
+  );
+});
+
+test('a chosen answer language goes with every step shown early, so the first one is spoken in it', async () => {
+  const { transport } = streaming(written([firstStep, secondStep]));
+  const languages: unknown[] = [];
+  const { answer } = await answerQuestion({
+    client: new MuseClient(settings, transport),
+    measureFigure: async () => [],
+    doc,
+    documentId: 'doc-test',
+    request: { question: 'Why scale the dot products?', responseLanguage: 'uk-UA' },
+    language: 'en-US',
+    onStep: (_verdict, _step, language) => languages.push(language),
+  });
+  assert.deepEqual(languages, ['uk-UA', 'uk-UA']);
+  assert.equal(answer.language, 'uk-UA');
+  const plain = streaming(written([firstStep]));
+  const none: unknown[] = [];
+  await askStreaming(plain.transport, (_verdict, _step, language) => none.push(language));
+  assert.deepEqual(none, [undefined], 'without a chosen language the tour’s voice speaks');
+});
+
+test('a scene under its kind’s name is checked and sent back for correction like any scene', () => {
+  const retrieval = retrieve(doc, { question: 'Why scale the dot products?' });
+  const context = { doc, retrieval, documentId: 'doc-test', question: 'Why?', history: [], evidence: '' };
+  const words = {
+    kind: 'scene',
+    objects: [{ id: 'a', type: 'text', x: 0.1, y: 0.1, w: 0.5, h: 0.1, text: 'Only words' }],
+  };
+  const problems = answerVisualProblems({ steps: [{ say: SCALE_SAY, cues: [], board: { scene: words } }] }, context);
+  assert.match(problems.join(' '), /Step 1: .*meaningful quantitative transformation/);
+  assert.deepEqual(answerVisualProblems({ steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }] }, context), []);
 });

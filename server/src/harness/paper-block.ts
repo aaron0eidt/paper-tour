@@ -1,5 +1,7 @@
 import type { Doc, DocExercise, DocExercisePart, DocSentence } from '../../../shared/paper';
-import { paperLike } from './doctype';
+import { deckLike, paperLike } from './doctype';
+import { DECK_PROSE, slideCards } from './deck';
+import { equationTag } from './equations';
 
 /** Block types whose sentences a tour may speak about and highlight (headings appear as section lines). */
 const PROSE = new Set(['paragraph', 'footnote']);
@@ -10,9 +12,30 @@ const PROSE = new Set(['paragraph', 'footnote']);
 const PROSE_OUTSIDE_PAPERS = new Set([...PROSE, 'title', 'authors', 'other']);
 
 export function proseSentences(doc: Doc): DocSentence[] {
-  const prose = paperLike(doc) ? PROSE : PROSE_OUTSIDE_PAPERS;
+  // A deck's slide titles are content too: a slide with a picture and a title has nothing else a tour could cite.
+  const prose = deckLike(doc) ? DECK_PROSE : paperLike(doc) ? PROSE : PROSE_OUTSIDE_PAPERS;
   const types = new Map(doc.blocks.map((b) => [b.id, b.type]));
   return doc.sentences.filter((s) => prose.has(types.get(s.block) ?? ''));
+}
+
+/**
+ * The name stored for a task without any points note, which older ingestions kept as its title: "20:" and
+ * "25: 5,10,5,5 pts." name nothing, "Simplifying, 4 points" is "Simplifying". Empty when no name is left.
+ */
+export function taskTitle(title: string | undefined): string {
+  const unit = '(?:bonuspunkte|punkte|punkt|pkt|pts|pt|points?|marks?|bp|p)';
+  const number = '\\d{1,3}(?:[.,]\\d{1,2})?';
+  const points = new RegExp(
+    `(?<![\\w.,])${number}(?:\\s*[:=]\\s*${number}(?:\\s*[,;+/]\\s*${number})*|(?:\\s*\\+\\s*${number})*)\\s*${unit}\\b\\.?`,
+    'giu',
+  );
+  const name = (title ?? '')
+    .replace(points, ' ')
+    .replace(/(?<![\w.,])\d{1,3}\s*:(?=\s|$)/g, ' ')
+    .replace(/[([]\s*[)\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:.\u2013\u2014-]+|[\s,;:.\u2013\u2014-]+$/g, '');
+  return /\p{L}{2,}/u.test(name) ? name : '';
 }
 
 /** A task's printed name, without its points or the statement run in after it: "Aufgabe 1: Lineare Gleichungen". */
@@ -21,7 +44,8 @@ export function taskName(doc: Doc, task: DocExercise): string {
   const at = text.indexOf(task.number);
   let name = at > 0 ? text.slice(0, at + task.number.length) : at === 0 ? (/^\S+\s*\S+/.exec(text)?.[0] ?? '') : '';
   name = name.replace(/[.:\s]+$/, '') || task.number;
-  return task.title && name.length < 40 ? `${name}: ${task.title}` : name;
+  const title = taskTitle(task.title);
+  return title && name.length < 40 ? `${name}: ${title}` : name;
 }
 
 /**
@@ -67,13 +91,33 @@ function exerciseLines(doc: Doc): string[] {
  * cache it as a shared prefix.
  */
 export function paperBlock(doc: Doc): string {
-  const lines = [`TITLE: ${doc.source.title ?? 'Untitled document'}`, `PAGES: ${doc.pages.length}`, ''];
+  const deck = deckLike(doc);
+  const lines = [
+    `TITLE: ${doc.source.title ?? 'Untitled document'}`,
+    `PAGES: ${doc.pages.length}${deck ? ' (a slide deck: each page is one slide)' : ''}`,
+    '',
+  ];
   const prose = new Set(proseSentences(doc).map((s) => s.id));
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const sectionTitle = new Map(doc.sections.map((s) => [s.id, `${s.number ? `${s.number} ` : ''}${s.title}`]));
   let section: string | undefined;
-  lines.push('TEXT (reading order):');
-  for (const block of doc.blocks) {
+  if (deck) {
+    // Every slide is listed, also one with a title and a picture only, so that each can be named by its number.
+    lines.push("SLIDES (in order; a slide's title sentence is in brackets after its number):");
+    for (const slide of slideCards(doc)) {
+      const note =
+        slide.role !== 'content'
+          ? ` (${slide.role} slide)`
+          : slide.picture
+            ? ' (hardly any text: a picture, plot, table or code)'
+            : '';
+      lines.push(
+        `## SLIDE ${slide.page}${slide.titleId ? ` [${slide.titleId}]` : ''}: ${slide.title || 'no title'}${note}`,
+      );
+      for (const { id, text } of slide.body) if (prose.has(id)) lines.push(`[${id}] ${text}`);
+    }
+  } else lines.push('TEXT (reading order):');
+  for (const block of deck ? [] : doc.blocks) {
     const ids = block.sentences.filter((id) => prose.has(id));
     if (!ids.length) continue;
     if (block.section !== section) {
@@ -85,14 +129,18 @@ export function paperBlock(doc: Doc): string {
   if (doc.figures.length) lines.push('', 'FIGURES AND TABLES:');
   for (const f of doc.figures) {
     const panels = f.panels.map((p) => `${p.id}${p.label ? ` (${p.label})` : ''}`).join(', ');
+    const columns = f.grid ? f.grid.columns.map((c) => c.name) : [];
     lines.push(
       `[${f.id}] ${f.kind} ${f.number}, page ${f.page}: ${f.caption}` +
         (f.referenced_by.length ? ` | cited by ${f.referenced_by.slice(0, 8).join(', ')}` : '') +
-        (panels ? ` | panels ${panels}` : ''),
+        (panels ? ` | panels ${panels}` : '') +
+        (f.grid
+          ? ` | ${f.grid.rows.length} rows, columns ${columns.slice(0, 8).join(', ')}${columns.length > 8 ? ', ...' : ''}`
+          : ''),
     );
   }
   if (doc.equations.length) lines.push('', 'EQUATIONS (extracted text, may be garbled):');
-  for (const e of doc.equations) lines.push(`[${e.id}] (${e.number}), page ${e.page}: ${e.text}`);
+  for (const e of doc.equations) lines.push(`[${e.id}] ${equationTag(e)}, page ${e.page}: ${e.text}`);
   if (doc.exercises?.length) lines.push('', 'EXERCISES (tasks and their parts):', ...exerciseLines(doc));
   return lines.join('\n');
 }

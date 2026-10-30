@@ -137,10 +137,10 @@ export function ScreenLayer({ camera, notes, labels, obstacles = [], occlusions 
     <div className="screen-layer">
       {labels.map((label) => (
         <Annotation key={`label:${label.key}`} id={`label:${label.key}`} text={label.text}
-          label={label} placement={placements.get(`label:${label.key}`)} vp={vp} onMeasure={measure} />
+          label={label} leaving={label.leaving} placement={placements.get(`label:${label.key}`)} vp={vp} onMeasure={measure} />
       ))}
       {notes.map((n) => (
-        <Annotation key={`note:${n.key}`} id={`note:${n.key}`} text={n.text} note
+        <Annotation key={`note:${n.key}`} id={`note:${n.key}`} text={n.text} note leaving={n.leaving}
           anchor={project(n.rect, view, vp)} placement={placements.get(`note:${n.key}`)} vp={vp} onMeasure={measure} />
       ))}
     </div>
@@ -171,11 +171,13 @@ export function chooseSide(pref: SceneNote['side'], a: ScreenRect, size: { w: nu
 
 /** One mounted element supplies real font/wrapping measurements at each useful width.
  * Hidden labels stay measured, but never flash over a figure while layout catches up. */
-function Annotation({ id, text, label, note = false, anchor, placement, vp, onMeasure }: {
+function Annotation({ id, text, label, note = false, leaving = false, anchor, placement, vp, onMeasure }: {
   id: string;
   text: string;
   label?: SceneLabel;
   note?: boolean;
+  /** Its step ended: it fades out. */
+  leaving?: boolean;
   anchor?: ScreenRect;
   placement?: LabelPlacement;
   vp: Viewport;
@@ -210,7 +212,7 @@ function Annotation({ id, text, label, note = false, anchor, placement, vp, onMe
   const length = placement && (horizontal ? placement.bottom - placement.top : placement.right - placement.left);
   const arrow = along !== null && length && along > 12 && along < length - 12 ? along : null;
   return (
-    <div ref={ref} className={note ? `note note-${side}` : `box-label${label?.pin ? ' pen-label' : ''}`}
+    <div ref={ref} className={`${note ? `note note-${side}` : `box-label${label?.pin ? ' pen-label' : ''}`}${leaving ? ' leaving' : ''}`}
       style={{ left: placement?.left ?? 0, top: placement?.top ?? 0,
         maxWidth: placement?.maxWidth ?? labelWidths(vp.width, note)[0],
         ...(label ? chip(label.color) : {}), visibility: placement ? undefined : 'hidden' }}

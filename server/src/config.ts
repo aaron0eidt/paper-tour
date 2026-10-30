@@ -59,7 +59,7 @@ export function config(): Config {
     maxPages: 100,
     analysisTimeoutMs: 300_000,
     tours: {
-      preset: choice('TOUR_PRESET', ['quick', 'standard', 'deep'], 'deep'),
+      preset: choice('TOUR_PRESET', ['quick', 'standard', 'deep'], 'standard'),
     },
     agent: {
       enabled: process.env.PAPER_AGENT_ENABLED === 'true',

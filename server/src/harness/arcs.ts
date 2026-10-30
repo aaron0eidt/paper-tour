@@ -5,6 +5,7 @@ import { MAX_STEPS, type Beat, type BeatKind, type PlanChapter, type Preset, typ
 import type { CardItem, PaperCard } from './card';
 import { DOC_TYPE_HELP, type DocType } from './doctype';
 import { proseSentences } from './paper-block';
+import { equationIds, figureIds, idEnum } from './schema-budget';
 
 // Tours of documents that are neither papers nor exercise sheets (notes/HARNESS.md, stage B with the model): one call
 // picks the points each chapter of the type's arc makes, with evidence; code turns them into beats.
@@ -82,17 +83,7 @@ export const ARC_SPECS: Record<ArcType, ArcSpec[]> = {
       ),
       board: 'bars',
     },
-    {
-      ...point(
-        'deadlines',
-        'deadlines, notice periods, the term and how to end it',
-        0,
-        sizes(1, 2, 3),
-        'pink',
-        'Deadlines',
-      ),
-      board: 'flow',
-    },
+    point('deadlines', 'deadlines, notice periods, the term and how to end it', 0, sizes(1, 2, 3), 'pink', 'Deadlines'),
     point(
       'risks',
       'risks and catches: penalties, liability, automatic renewals and anything easy to miss',
@@ -105,10 +96,7 @@ export const ARC_SPECS: Record<ArcType, ArcSpec[]> = {
   ],
   letter: [
     overview('who writes, about what, and why the reader gets this letter or form'),
-    {
-      ...point('actions', 'what the reader must do, one action per item, in order', 1, sizes(1, 2, 3), 'blue', 'To do'),
-      board: 'flow',
-    },
+    point('actions', 'what the reader must do, one action per item, in order', 1, sizes(1, 2, 3), 'blue', 'To do'),
     point('deadlines', 'by when: every date or period the reader must meet', 0, sizes(1, 1, 2), 'pink', 'By when'),
     point(
       'consequences',
@@ -148,11 +136,13 @@ export interface ArcPlan {
 export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset: Preset, strict = true) {
   const specs = ARC_SPECS[type];
   const short = { type: 'string', minLength: 1, maxLength: 80 };
+  // Every list shares the one definition of the sentence IDs: written into each field they would be counted once for
+  // each, and a long document's sentences would exceed the provider's enum budget (schema-budget.ts).
   const evidence = {
     type: 'array',
     minItems: 1,
     maxItems: 3,
-    items: strict ? { type: 'string', enum: sentenceIds } : { type: 'string' },
+    items: strict ? { $ref: '#/$defs/sentenceId' } : { type: 'string' },
   };
   const object = (properties: Record<string, object>) => ({
     type: 'object',
@@ -161,7 +151,7 @@ export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset
     properties,
   });
   const text = { type: 'string', minLength: 1, maxLength: 300 };
-  const visuals = ['', ...doc.figures.map((f) => f.id), ...doc.equations.map((e) => e.id)];
+  const visuals = ['', ...figureIds(doc), ...equationIds(doc)];
   const topic = object({
     title: short,
     text,
@@ -170,22 +160,25 @@ export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset
     visual: strict ? { type: 'string', enum: visuals } : { type: 'string' },
   });
   const titled = specs.filter((s) => !(type === 'lecture' && s.id === 'topics'));
-  return object({
-    plan: { type: 'string', maxLength: 1500 },
-    chapter_titles: object(Object.fromEntries(titled.map((s) => [s.id, short]))),
-    ...Object.fromEntries(
-      specs.map((s) => [
-        s.id,
-        {
-          type: 'array',
-          minItems: s.min,
-          maxItems: s.max[preset],
-          items: type === 'lecture' && s.id === 'topics' ? topic : object({ text, evidence }),
-        },
-      ]),
-    ),
-    ...(type === 'contract' ? { disclaimer: { type: 'string', minLength: 1, maxLength: 200 } } : {}),
-  });
+  return {
+    ...(strict ? { $defs: { sentenceId: idEnum(sentenceIds) } } : {}),
+    ...object({
+      plan: { type: 'string', maxLength: 1500 },
+      chapter_titles: object(Object.fromEntries(titled.map((s) => [s.id, short]))),
+      ...Object.fromEntries(
+        specs.map((s) => [
+          s.id,
+          {
+            type: 'array',
+            minItems: s.min,
+            maxItems: s.max[preset],
+            items: type === 'lecture' && s.id === 'topics' ? topic : object({ text, evidence }),
+          },
+        ]),
+      ),
+      ...(type === 'contract' ? { disclaimer: { type: 'string', minLength: 1, maxLength: 200 } } : {}),
+    }),
+  };
 }
 
 export function arcTask(type: ArcType, language: string, preset: Preset) {
@@ -199,7 +192,7 @@ export function arcTask(type: ArcType, language: string, preset: Preset) {
     type === 'lecture'
       ? [
           `Each topic has a "title" of at most 5 words in ${lang}. "board" draws the topic on a side board: formula when
-   it centres on one formula, flow for a process with stages, bars for numbers the lecture compares, else none.
+   it centres on one formula, flow for a process with a branch, merge or loop, bars for numbers the lecture compares, else none.
    "visual" is the ID of a figure or equation the topic is about, or "".`,
         ]
       : type === 'contract'
@@ -296,7 +289,7 @@ function position(doc: Doc, item: ArcItem): number {
 /**
  * The beats and chapters of the type's arc. A lecture follows its own order, one chapter per topic, with the topic's
  * figure or equation right after it; the other types keep the arc's chapters, and each chapter's first step may draw
- * the chapter's board (a contract's costs as bars, its deadlines as a timeline, a letter's to-dos as a flow).
+ * the chapter's board (a contract's costs as bars).
  */
 export function arcTourPlan(
   plan: ArcPlan,

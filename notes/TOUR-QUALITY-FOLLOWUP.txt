@@ -1,0 +1,17 @@
+Tour quality follow-up — 30 October 2026
+Base inspected: feat/richer-visuals at 61c5f6c.
+Status: recorded for review after Aaron finishes his generation work. These issues are intentionally outside the UI polish PR.
+
+Observed on the local Attention Is All You Need v11 tour (both v10/v11 set to deep):
+- v10: 1,169 words / 21 steps; v11: 605 words / 15 steps, including two questions and two answers.
+- Claim-based chapters repeatedly return to introductory passages: primary camera pages 2 → 6 → 2 → 8 → 2 → 4 → 3 → 2.
+- The worked attention example was omitted after three roughly 45-second timeouts; chart visuals were dropped for validation/time reasons while the result was published ready.
+- A selected architecture figure + approximate question “Erkläre” retrieved positional-encoding passages because the completed tour's final narration contains a suggested question about that topic. Selection intent should take precedence over unrelated old narration, with genuinely relevant conversation retained.
+- Scientific notation from older PDF analyses loses superscript information (“2.3 · 1019”). The existing number reader rejects genuine FLOP values, so the new scatter chart is removed. Preserve typed evidence and support unambiguous scientific notation; do not reinterpret arbitrary digit strings or bypass grounding.
+- The formula step speaks about query-key similarity and softmax while its board only shows X W^Q_i = Q_i dimensions. Check agreement between narration, source cues and visual operations.
+- Omitted steps are always described as “Skipped to avoid repeating earlier content” in the checklist, even when the cause was a timeout.
+- Reader footer at ~900px viewport left only ~12px for caption text after controls. The UI polish branch addresses this with a container-width CSS layout; no playback behavior changes.
+
+These are observations from one saved generation, not a claim about every generated tour. The positional-encoding content was broadly supported, but addressed the marked architecture only partially. Some weaknesses already existed on main; the branch makes them more visible.
+
+Recommended next checks with Aaron: deep-tour coverage and paper order; source-first question context; transparent handling of reduced coverage; semantic visual validation. Preserve the richer live renderers and progressive playback.

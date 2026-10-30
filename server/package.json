@@ -19,6 +19,7 @@
     "@ai-sdk/openai-compatible": "3.0.80",
     "@fastify/cors": "^10.1.0",
     "@fastify/static": "^10.1.8",
+    "@meta-sam/parser": "0.1.0",
     "@supabase/supabase-js": "^2.58.0",
     "ai": "7.0.156",
     "ajv": "^8.20.0",

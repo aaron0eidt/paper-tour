@@ -286,6 +286,62 @@ class ExerciseTests(unittest.TestCase):
         self.assertIn("(5 Punkte)", [self.text(i) for i in ex["blocks"]])
         self.assert_valid()
 
+    def test_points_notes_are_no_title_and_split_over_the_parts(self):
+        """"Problem 1. (20: 10,10 pts.) (Binary paradox)": 20 points in all, 10 for each part, and "Binary paradox"
+        is the name; "(20: 3,2 pts.)" alone names nothing, so the task is its number only."""
+        def page(p):
+            write(p, 72, 70, "Problem Set 3", size=16, font="tibo")
+            run_in(p, 72, 110, "Problem 1.", "(20: 10,10 pts.) (Binary paradox) Two children are born to one family.")
+            write(p, 80, 126, "(a) Find the probability that both are girls.")
+            write(p, 80, 140, "(b) Find it given that the older one is a girl.")
+            run_in(p, 72, 170, "Problem 2.", "(25: 5,10,5,5 pts.) (Dice) A drawer holds four dice.")
+            for k, part in enumerate("abcd"):
+                write(p, 80, 186 + 14 * k, f"({part}) Compute the probability of case {k + 1}.")
+            run_in(p, 72, 260, "Problem 3.", "(20: 12,8 points)")
+            write(p, 80, 276, "(a) Show that the expected value exists.")
+            write(p, 80, 290, "(b) Compute it.")
+            run_in(p, 72, 320, "Problem 4.", "(6 points) (The blue taxi) Witnesses report a taxi.")
+        doc = self.ingest(page)
+        got = {e["number"]: e for e in doc["exercises"]}
+        self.assertEqual([(e["number"], e.get("title"), e.get("points")) for e in doc["exercises"]],
+                         [("1", "Binary paradox", 20), ("2", "Dice", 25), ("3", None, 20), ("4", "The blue taxi", 6)])
+        self.assertEqual([p.get("points") for p in got["1"]["parts"]], [10, 10])
+        self.assertEqual([p.get("points") for p in got["2"]["parts"]], [5, 10, 5, 5])
+        self.assertEqual([p.get("points") for p in got["3"]["parts"]], [12, 8])
+        for e in doc["exercises"]:
+            self.assertNotRegex(e.get("title", ""), r"\d|pts|points")
+        self.assert_valid()
+
+    def test_an_imperative_after_the_number_is_the_statement_not_a_name(self):
+        """"Aufgabe 4.1. Löse das lineare Gleichungssystem" names nothing; "Aufgabe 4.2. (Eigenwerte)" does."""
+        def page(p):
+            write(p, 72, 80, "Arbeitsblatt 4", size=16, font="tibo")
+            write(p, 72, 120, "Aufgabe 4.1. Löse das lineare Gleichungssystem")
+            write(p, 72, 136, "2x + 3y = 7 und 5x + 4y = 3.")
+            write(p, 72, 170, "Aufgabe 4.2. Zeige, dass das lineare Gleichungssystem")
+            write(p, 72, 186, "x + y = 0 nur die triviale Lösung besitzt.")
+            write(p, 72, 220, "Aufgabe 4.3 (Eigenwerte)", font="tibo")
+            write(p, 72, 236, "Berechne die Eigenwerte der Matrix A.")
+        doc = self.ingest(page)
+        self.assertEqual([(e["number"], e.get("title")) for e in doc["exercises"]],
+                         [("4.1", None), ("4.2", None), ("4.3", "Eigenwerte")])
+        self.assert_valid()
+
+    def test_points_statements(self):
+        """The points of a statement: a sum, a decimal comma, a total with its parts; none for "je 2 Punkte"."""
+        parse = ingest.parse_points
+        self.assertEqual((parse("4 Punkte"), parse("2+3 P."), parse("1,5 points"), parse("(6 pts)")), (4, 5, 1.5, 6))
+        self.assertEqual((parse("20: 10,10 pts."), parse("25: 5,10,5,5 pts."), parse("20: 3,2,10,5 pts.")), (20, 25, 20))
+        self.assertEqual(ingest.points_match("20: 10,10 pts.")[2], [10, 10])
+        self.assertIsNone(ingest.points_match("4 Punkte")[2])
+        self.assertIsNone(parse("je 2 Punkte"))
+        # the parts of a total that does not add up are not parts: "20: 7,8 pts." reads as a number and its decimal
+        self.assertEqual(ingest.points_match("20: 7,8 pts.")[1:], (7.8, None))
+        self.assertEqual(ingest.points_only("(25: 5,10,5,5 pts.)"), 25)
+        self.assertEqual(ingest.task_name(["20: 10,10 pts.", "Dice"]), "Dice")
+        self.assertEqual(ingest.task_name(["Simplifying, 4 points"]), "Simplifying")
+        self.assertEqual(ingest.task_name(["20: 10,10 pts.", "5 pts"]), "")
+
     def test_points_wrapped_onto_the_next_line(self):
         """"(2 Punkte)" broken after its number, as a justified line often breaks it."""
         def page(p):
@@ -414,7 +470,9 @@ class ExerciseTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             outline.main([self.folder])
         text = out.getvalue()
-        self.assertIn(", 0 equations, 1 exercises;", text)
+        # the sheet's system of equations is a display without a number: it is the equation equ1
+        self.assertIn(", 1 equations, 1 exercises;", text)
+        self.assertRegex(text, r"(?m)^equ1 +p1 +p1\.b\d+ +x1 \+ 2 x2 = 5, 3 x1 \+ 4 x2 = 6$")
         self.assertRegex(text, r"(?m)^## Exercises\nex1 +p1 +4 points, p1\.b\d+ … p1\.b\d+ \(\d+ blocks\)$")
         self.assertRegex(text, r"(?m)^ +heading p1\.b\d+: Aufgabe 1 \(4 Punkte\)$")
         self.assertRegex(text, r"(?m)^  ex1\.a +p1 +p1\.b\d+: a\) Berechnen Sie")

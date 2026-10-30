@@ -159,6 +159,13 @@ export class Resolver {
     return null;
   }
 
+  /** The horizontal extent of the text block a sentence, block or heading belongs to, in page points. */
+  columnOf(id: string): [number, number] | null {
+    const sentence = this.sentences.get(id);
+    const block = this.blocks.get(sentence ? sentence.block : this.blocks.has(id) ? id : (this.sections.get(id) ?? ''));
+    return block ? [block.bbox[0], block.bbox[2]] : null;
+  }
+
   resolveTarget(id: string, region?: Region, opts: { lines?: boolean } = {}): PageRects[] | null {
     const groups = this.resolve(id, region ? {} : opts);
     return groups ? applyRegion(groups, region) : null;

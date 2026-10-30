@@ -28,6 +28,7 @@ export function AuthForm({
   }[currentMode];
 
   function switchMode(next: Mode) {
+    if (busy) return;
     setMode(next);
     setError(null);
     setNotice(null);
@@ -36,6 +37,7 @@ export function AuthForm({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -93,6 +95,7 @@ export function AuthForm({
           <button
             type="button"
             className={currentMode === 'login' ? 'selected' : ''}
+            aria-pressed={currentMode === 'login'}
             onClick={() => switchMode('login')}
             disabled={busy}
           >
@@ -101,6 +104,7 @@ export function AuthForm({
           <button
             type="button"
             className={currentMode === 'signup' ? 'selected' : ''}
+            aria-pressed={currentMode === 'signup'}
             onClick={() => switchMode('signup')}
             disabled={busy}
           >
@@ -164,12 +168,12 @@ export function AuthForm({
                 ]}
           </button>
           {currentMode === 'login' && (
-            <button type="button" className="library-text-button" onClick={() => switchMode('reset')}>
+            <button type="button" className="library-text-button" disabled={busy} onClick={() => switchMode('reset')}>
               Forgot password?
             </button>
           )}
           {currentMode === 'reset' && (
-            <button type="button" className="library-text-button" onClick={() => switchMode('login')}>
+            <button type="button" className="library-text-button" disabled={busy} onClick={() => switchMode('login')}>
               Back to sign in
             </button>
           )}
