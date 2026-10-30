@@ -1,7 +1,9 @@
-import type { Doc, Step, Tour } from '../../../shared/paper';
-import { selectedSourceIds } from '../../../shared/selection';
-import type { AskRequest } from './ask-types';
+import type { BBox, Doc, Step, Tour } from '../../../shared/paper';
+import { selectedSourceIds, type RegionSelection } from '../../../shared/selection';
+import { GENERIC, functionWords } from './ask-generic';
+import type { AskRequest, AskTurn } from './ask-types';
 import { tableLines } from '../../../shared/tableTargets';
+import { documentLanguage } from './language';
 import { proseSentences } from './paper-block';
 import { gridOf, tableText, tableViews, viewsFor, type TableView } from './tables';
 import { figureTextTargets, type MeasuredTarget } from './visual-grounding';
@@ -30,6 +32,16 @@ export interface Retrieval {
   /** Where the camera goes when a step points at nothing. */
   home?: string;
   measured?: MeasuredTarget[];
+  /**
+   * The learner points at something: a selected region, or the figure or equation on screen. That is what the question is
+   * about; `bare` when the question names no topic of its own ("explain", "was heißt das?"), `onStep` when the tour step is
+   * about it too (or the question builds on the tour).
+   */
+  pointing?: { bare: boolean; onStep: boolean };
+  /** The narration the question builds on: all of the step's, or what is about the selection (everything when absent). */
+  narration?: string;
+  /** The earlier exchanges the question builds on (all of them when absent). */
+  history?: AskTurn[];
 }
 
 const STOP = new Set(
@@ -54,13 +66,14 @@ function stem(word: string): string {
 }
 
 /** Search terms of a text: lower-case stems without stop words; "d_k" also yields "dk", as PDF text often writes it. */
-export function searchTerms(text: string): string[] {
+export function searchTerms(text: string, skip?: ReadonlySet<string>): string[] {
   const out: string[] = [];
   for (const raw of text.toLowerCase().match(/\d+(?:[.,]\d+)*|[\p{L}\p{N}]+(?:_[\p{L}\p{N}]+)*/gu) ?? []) {
     const token = raw.replace(/,(?=\d{3}\b)/g, '');
     const parts = token.includes('_') ? [...token.split('_'), token.replace(/_/g, '')] : [token];
     for (const part of parts)
-      if (!STOP.has(part) && (part.length > 1 || /\d/.test(part))) out.push(/\d/.test(part) ? part : stem(part));
+      if (!STOP.has(part) && !skip?.has(part) && (part.length > 1 || /\d/.test(part)))
+        out.push(/\d/.test(part) ? part : stem(part));
   }
   return out;
 }
@@ -115,21 +128,23 @@ function corpus(doc: Doc): { passage: Passage; search: string }[] {
   return out;
 }
 
-/** Elements the question names: "Figure 3", "Table II", "Eq. (2)", "Section 4.1". */
+/** Elements the question names: "Figure 3", "Abbildung 3", "Table II", "Eq. (2)", "Gleichung 2", "Section 4.1", "Abschnitt 4.1". */
 export function namedElements(doc: Doc, question: string): string[] {
   const ids: string[] = [];
-  for (const m of question.matchAll(/\b(fig(?:ure)?s?|tab(?:le)?s?)\.?\s*([0-9]+[a-z]?|[ivxlc]+)\b/gi)) {
-    const kind = m[1].toLowerCase().startsWith('fig') ? 'figure' : 'table';
+  for (const m of question.matchAll(
+    /\b(fig(?:ure)?s?|abb(?:ildung(?:en)?)?|tab(?:le)?s?|tabelle[n]?)\.?\s*([0-9]+[a-z]?|[ivxlc]+)\b/gi,
+  )) {
+    const kind = /^(?:fig|abb)/i.test(m[1]) ? 'figure' : 'table';
     // "Figure 2a" names a panel of Figure 2: the figure brings its panels along.
     const numbers = [m[2], m[2].replace(/(?<=\d)[a-z]$/i, '')].map((n) => n.toLowerCase());
     const f = doc.figures.find((f) => f.kind === kind && numbers.includes(f.number.toLowerCase()));
     if (f) ids.push(f.id);
   }
-  for (const m of question.matchAll(/\b(?:eq(?:uation)?s?)\.?\s*\(?([0-9]+[a-z]?)\)?/gi)) {
+  for (const m of question.matchAll(/\b(?:eq(?:uation)?s?|gleichung(?:en)?)\.?\s*\(?([0-9]+[a-z]?)\)?/gi)) {
     const e = doc.equations.find((e) => e.number?.toLowerCase() === m[1].toLowerCase());
     if (e) ids.push(e.id);
   }
-  for (const m of question.matchAll(/(?:\bsec(?:tion)?s?\.?|§)\s*([0-9]+(?:\.[0-9]+)*)/gi)) {
+  for (const m of question.matchAll(/(?:\b(?:sec(?:tion)?s?|abschnitt|kapitel)\.?|§)\s*([0-9]+(?:\.[0-9]+)*)/gi)) {
     const s = doc.sections.find((s) => s.number === m[1]);
     if (s) ids.push(s.id);
   }
@@ -174,6 +189,9 @@ const RANKED = 12;
 const TABLE_LINES = 40;
 /** Words that point back at the conversation: the question builds on the previous exchange. */
 const REFERRING = /\b(?:it|its|this|that|these|those|they|them|their|there|he|she|his|her|es|das|dies|diese[rsmn]?)\b/i;
+/** A question that refers to the conversation itself, with or without a topic of its own: "you said …", "deine Antwort". */
+const RECALL =
+  /\b(?:(?:did |do )?you (?:said|mentioned|meant|say|mean|mention)|your (?:(?:last|previous) )?(?:answer|response)|du hast (?:gesagt|gemeint)|hast du (?:gesagt|gemeint)|(?:deine|deiner) (?:letzte[nr]? )?antwort|meintest du|sagtest du|vorhin)\b/iu;
 /** A sentence whose first words refer back to the one before it. */
 const ANAPHORIC = /^(?:\S+\s+){0,4}?(?:this|that|these|those|it|its|such|they|thus|hence)\b/i;
 /** A question for a number: how many, how long, what size. */
@@ -183,28 +201,49 @@ const QUANTITY =
 const KIND_WEIGHT: Record<Passage['kind'], number> = { sentence: 1, figure: 1, equation: 1, section: 0.6 };
 const KIND_CAP: Record<Passage['kind'], number> = { sentence: RANKED, figure: 3, equation: 3, section: 2 };
 
+/** A region with no text in it (a picture, a plot the ingest did not box): the sentences next to it say what it is about. */
+function nearby(doc: Doc, selection: RegionSelection, known: (id: string) => string | undefined): string[] {
+  const page = doc.pages.find((p) => p.n === selection.page);
+  if (!page) return [];
+  const [x0, y0, x1, y1] = selection.rect;
+  const box = [x0 * page.width, y0 * page.height, x1 * page.width, y1 * page.height];
+  const gap = ([a, b, c, d]: BBox) =>
+    Math.hypot(Math.max(a - box[2], box[0] - c, 0), Math.max(b - box[3], box[1] - d, 0));
+  return doc.sentences
+    .filter((s) => s.page === selection.page && known(s.id))
+    .map((s) => ({ id: s.id, distance: Math.min(...s.rects.map(gap)) }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3)
+    .map((s) => s.id);
+}
+
+// A sentence ends before a capital letter, not after an abbreviation: "Fig. 1 shows", "z. B. die", "Abb. 2" stay whole.
+const sentencesOf = (text: string) =>
+  text
+    .split(/(?<=[.!?…])(?<!\b(?:Fig|Figs|Abb|Eq|Eqs|Nr|Dr|Prof|vs|e\.g|i\.e|z|z\.\s?B|bzw|ca|usw)\.)\s+(?=\p{Lu})/u)
+    .filter((s) => s.trim());
+
 /**
  * Retrieval in code: BM25 over prose sentences, captions, equations and section titles for the question (with the
- * previous question and the current narration as weaker context), plus what the learner is looking at.
+ * previous question and the current narration as weaker context), plus what the learner is looking at. When the learner
+ * points at something (a selected region, the figure or equation on screen), that is what the question is about: its
+ * own text drives the search, a question without a topic ("explain", "was heißt das?") searches with nothing else, and
+ * the narration and earlier exchanges are left out; with a topic of its own the question leads.
  */
 export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval {
-  const query = new Map<string, number>();
-  const weigh = (text: string | undefined, weight: number) => {
-    for (const t of searchTerms(text ?? '')) query.set(t, Math.max(query.get(t) ?? 0, weight));
-  };
-  // A follow-up also searches with the exchange it builds on, more so when it refers back to it ("how big is it?").
-  // "How long" asks for a number: "long" is not what the question is about.
-  const refers = REFERRING.test(request.question);
-  const quantity = QUANTITY.test(request.question);
-  weigh(request.question.replace(QUANTITY, ' '), 1);
-  weigh(request.history?.at(-1)?.question, refers ? 0.9 : 0.5);
-  weigh(request.history?.at(-1)?.answer, refers ? 0.4 : 0.25);
-  weigh(step?.say, 0.25);
   const items = corpus(doc);
   const byId = new Map(items.map((item) => [item.passage.id, item.passage]));
+  const search = new Map(items.map((item) => [item.passage.id, item.search]));
   const figures = new Map(doc.figures.map((f) => [f.id, f]));
   const panelOf = new Map(doc.figures.flatMap((f) => f.panels.map((p) => [p.id, f.id] as const)));
   const blocks = new Map(doc.blocks.map((b) => [b.id, b]));
+  const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
+  const terms = items.map((i) => searchTerms(i.search));
+  // A term in a fifth of the passages (and at least eight) says little about what a text is about: the function words
+  // that GENERIC does not list.
+  const df = new Map<string, number>();
+  for (const t of terms) for (const word of new Set(t)) df.set(word, (df.get(word) ?? 0) + 1);
+  const common = (t: string) => (df.get(t) ?? 0) > Math.max(8, items.length / 5);
 
   // In focus: the step's evidence with its neighbours, the figure asked about with its citing sentences, named elements.
   const order = items.filter((i) => i.passage.kind === 'sentence').map((i) => i.passage.id);
@@ -215,12 +254,91 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
     const k = known(id);
     if (k && !focus.includes(k)) focus.push(k);
   };
-  const selected = request.selection ? selectedSourceIds(doc, request.selection) : [];
+  const inRegion = request.selection ? selectedSourceIds(doc, request.selection) : [];
+  const selected = request.selection && !inRegion.length ? nearby(doc, request.selection, known) : inRegion;
+  const asked = [known(request.figureId)].find((id) => id && ['figure', 'equation'].includes(byId.get(id)!.kind));
+  const pointed = [...selected, ...(asked ? [asked] : [])];
+  const pointedFigures = [...new Set(pointed.flatMap((id) => figures.get(known(id) ?? '') ?? []))];
+  const pointing = !!request.selection || !!asked;
+  const named = namedElements(doc, request.question);
+  // A task or part of an exercise sheet the question names: the start of its statement.
+  const statement = namedExercise(doc, request.question)
+    .flatMap((id) => blocks.get(id)?.sentences ?? [])
+    .filter((id) => known(id))
+    .slice(0, 4);
+
+  // What the learner points at says: the sentences and labels in the region, an equation with the sentences around it, and
+  // for a figure its caption, the labels inside it and the sentences that cite it.
+  const said = [
+    ...pointed.flatMap((id): string[] => {
+      const block = blocks.get(id);
+      if (sentences.has(id)) return [sentences.get(id)!.text];
+      if (block) return block.sentences.length || block.type === 'header_footer' ? [] : [block.text];
+      return byId.get(id)?.kind === 'equation' ? [search.get(id)!] : [];
+    }),
+    ...pointedFigures.flatMap((f) => [
+      search.get(f.id)!,
+      ...f.referenced_by.slice(0, 3).map((id) => sentences.get(id)?.text ?? ''),
+      ...figureTextTargets(doc, f).map((b) => b.text),
+    ]),
+  ];
+  // The document's own words: its language's function words and the frequent words go; a request word such as "mean" or
+  // "point" can be a content word there.
+  const skip = functionWords(documentLanguage(doc));
+  const subject = new Set(searchTerms(said.join('\n'), skip).filter((t) => !common(t)));
+  // Whether a text shares enough of its distinctive words with the subject to be about it.
+  const about = (text: string) => {
+    const words = new Set(searchTerms(text, skip).filter((t) => !common(t)));
+    const shared = [...words].filter((t) => subject.has(t)).length;
+    return shared >= 1 && shared * 3 >= words.size;
+  };
+  // The question names a topic when a word of it is not a generic one: a word the document never uses may be a topic in
+  // another language, and it does no harm to the search when it is not.
+  const topic = request.question.replace(QUANTITY, ' ');
+  const content = searchTerms(topic, GENERIC);
+  // "What did you say?" asks about the conversation, whatever it points at.
+  const recall = RECALL.test(request.question);
+  const bare = pointing && !content.length && !named.length && !statement.length && !recall;
+  // Beside a selection a pronoun refers to the selection; only beside the figure the camera shows can "it" build on the
+  // last exchange.
+  const refers = recall || (!request.selection && REFERRING.test(request.question));
+  // The step is about what the learner points at when it points at the same elements.
+  const unit = (id: string) => sentences.get(id)?.block ?? panelOf.get(id) ?? id;
+  const there = new Set(
+    [
+      ...pointed,
+      ...pointedFigures.flatMap((f) => [
+        f.id,
+        ...f.panels.map((p) => p.id),
+        ...figureTextTargets(doc, f).map((b) => b.id),
+      ]),
+    ].map(unit),
+  );
+  // A question that names no topic is about what the learner points at and nothing else: no step, no earlier exchange.
+  const onStep = !bare && (!pointing || recall || (!!step && stepTargets(step).some((id) => there.has(unit(id)))));
+  const narration = !step || bare ? '' : onStep ? step.say : sentencesOf(step.say).filter(about).join(' ');
+  const history = bare ? [] : (request.history ?? []);
+
+  const query = new Map<string, number>();
+  const weigh = (list: string[], weight: number) => {
+    for (const t of list) query.set(t, Math.max(query.get(t) ?? 0, weight));
+  };
+  // A follow-up also searches with the exchange it builds on, more so when it refers back to it ("how big is it?").
+  // "How long" asks for a number: "long" is not what the question is about.
+  const quantity = QUANTITY.test(request.question);
+  if (!bare) weigh(searchTerms(topic), 1);
+  // With a topic of its own the question leads: the subject only tips the ranking (the weight of about two question terms
+  // together, half of that for the figure the camera happens to show), and without one it is all the search has.
+  if (pointing) weigh([...subject], bare ? 1 : Math.min(0.5, 2 / subject.size) / (request.selection ? 1 : 2));
+  weigh(searchTerms(history.at(-1)?.question ?? ''), refers ? 0.9 : 0.5);
+  weigh(searchTerms(history.at(-1)?.answer ?? ''), refers ? 0.4 : 0.25);
+  weigh(searchTerms(narration), 0.25);
+
   for (const id of selected) {
     add(id);
     blocks.get(id)?.sentences.forEach(add);
   }
-  const evidence = (step ? stepTargets(step) : [])
+  const evidence = (onStep && step ? stepTargets(step) : [])
     .flatMap((id) => blocks.get(id)?.sentences.slice(0, 4) ?? [id])
     .filter((id) => known(id));
   for (const id of evidence) {
@@ -228,24 +346,13 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
     if (at === undefined) add(id);
     else [order[at - 1], id, order[at + 1]].forEach(add);
   }
-  const asked = [known(request.figureId)].find((id) => id && ['figure', 'equation'].includes(byId.get(id)!.kind));
-  if (asked) {
-    add(asked);
-    figures.get(asked)?.referenced_by.slice(0, 2).forEach(add);
-  }
-  const named = namedElements(doc, request.question);
+  add(asked);
+  // A figure the learner points at brings the sentences that cite it.
+  for (const f of pointedFigures) f.referenced_by.slice(0, 2).forEach(add);
   named.forEach(add);
-  // A task or part of an exercise sheet the question names: the start of its statement.
-  const statement = namedExercise(doc, request.question)
-    .flatMap((id) => blocks.get(id)?.sentences ?? [])
-    .filter((id) => known(id))
-    .slice(0, 4);
   statement.forEach(add);
 
-  const scores = bm25(
-    items.map((i) => searchTerms(i.search)),
-    query,
-  );
+  const scores = bm25(terms, query);
   // A question for a quantity ("how many heads?") prefers passages that print numbers.
   const weight = (p: Passage) => KIND_WEIGHT[p.kind] * (quantity && /\d/.test(p.text) ? 1.5 : 1);
   const taken = new Map<Passage['kind'], number>();
@@ -313,6 +420,9 @@ export function retrieve(doc: Doc, request: AskRequest, step?: Step): Retrieval 
       known(evidence[0]) ??
       named[0] ??
       ranked[0]?.id,
+    ...(pointing ? { pointing: { bare, onStep } } : {}),
+    narration,
+    history,
   };
 }
 
