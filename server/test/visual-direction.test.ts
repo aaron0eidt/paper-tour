@@ -129,7 +129,9 @@ test('existing panel IDs keep their coordinate frame when the source is their co
   assert.throws(() => checkComponents([{ label: 'Invalid', region: [0.8, 0.8, 0.2, 0.2] }]), /positive area/);
 });
 test('the original handcrafted MVP figure direction remains the quality reference', () => {
-  const original = JSON.parse(readFileSync(resolve(ROOT, 'demo/attention/tour.json'), 'utf8')) as Tour;
+  const original = JSON.parse(
+    readFileSync(resolve(ROOT, 'server/test/fixtures/attention-handcrafted.tour.json'), 'utf8'),
+  ) as Tour;
   const steps = original.chapters.flatMap((c) => c.steps);
   const annotations = steps
     .flatMap((s) => s.actions)
