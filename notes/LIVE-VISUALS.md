@@ -31,10 +31,22 @@ Visuals belong to an owner, document and immutable analysis. Tour publication an
 
 These are reproducible contract checks and a small live evaluation, not a universal guarantee of model-selected pedagogy. No paper-specific formulas, coordinates or animation templates were added to production generation.
 
-## Paused follow-up
+## Content scope and completion
 
-Work is paused at the user's request. The follow-up branch `codex/adaptive-content-scope` checkpoints the removal of artificial concept/visual quotas and elapsed-time-driven simplification. It adds paginated teaching-map authoring and an output-truncation batching helper for visual planning; the visual helper is not yet connected to the generator. Initial understanding must precede narration. There is no finished end-to-end verification of this follow-up yet.
+The follow-up branch `codex/adaptive-content-scope` removes artificial concept/visual quotas and elapsed-time-driven simplification. Teaching-map authoring continues across output-sized responses. Visual planning splits requests after provider output truncation, preserving the entire tour and every planned explanation. Initial understanding precedes narration. Neutral narration uses the length the concept needs; profile jobs cannot substitute summaries, silently strip selected visuals, or delete an intentional reuse of the same construction after repairs fail.
 
-Remaining work: integrate and test visual-plan continuation; remove adaptive narration length caps and summary/visual degradation fallbacks; verify the queue heartbeat/cancellation regressions; rerun a real tour and inspect fallback beats, omitted details, left-out work and actual explanations before calling it complete. Provider requests and sandbox execution retain technical time/resource limits. The proposed pg-boss policy has its documented maximum 24-hour lease; heartbeats do not extend it.
+Validation keeps the complete semantic error set internally, so staged repairs of a large map count as progress. Every actual section is listed for the model, including headings without prose. The initial schema and repair instructions distinguish the paper's contribution, mechanisms and evidence; correcting a role reuses its existing concept ID.
 
-The last full suite before this follow-up reported 920 server passes (7 skips), plus passing player, script and Python suites and both builds. That result does not validate the paused edits.
+The shapes tool now uses tagged term variants. Matrices require a name and dimensions; an applied function requires its label. A direct Muse Spark 1.3 probe accepted the contract and produced a valid row-wise normalization construction. The provider-schema regression permits this specific tagged union while retaining the other schema restrictions.
+
+Provider requests and sandbox execution retain technical time/resource limits. pg-boss requires an absolute job lease (the configured maximum is 24 hours); heartbeats detect lost claims but do not renew this lease. Real database regressions check that a healthy job beyond the former 15-minute limit stays active and that cancellation fences its claim and prevents late publication.
+
+## Verification on 1 November 2026
+
+- Full database-backed server suite: 966 passed, 7 skipped, no failures or cancelled tests.
+- Player tests and server/player builds passed. Script tests: 84 passed. Python: 123 run, 2 skipped.
+- New regressions cover more than 30 planned concepts, complete evidence vocabularies, staged planning and repairs, missing visual decisions, large-map error accounting, natural narration length, preserved visual reuse, cancellation and invalid visual publication guards.
+- The final real Muse Spark 1.3 Contributor standard-depth, paper-order run completed in 153.7 seconds: 13 planned concepts, 16 steps, 1,276 spoken words, two computed function plots and a measured BLEU comparison. Fallback beats, omitted details and degraded parts are all empty.
+- The scaling plot compares sigmoid(x) with sigmoid(x/8) for an explicitly illustrative two-way case at dk=64. The positional plot compares frequencies and a shifted sine; the BLEU bars retain the source values. This verifies concrete relationships rather than text-only side panels.
+- A preceding technically complete run used only highlights and was not accepted as sufficient visual quality. Planning guidance now compares source annotations with computed alternatives, without a visual quota. A redundant-example regression ensures an already computed native plot does not require additional manual frames.
+- Final browser inspection found floating tables assigned to the preceding physical section. The generic assembly fix uses supporting prose and actual heading order while preserving source targets. The agent-created final test tour was deterministically regrouped with all 16 narration/action/artifact objects preserved exactly; core validators passed before and after. No new model content or paper-specific rule was inserted by this repair.
