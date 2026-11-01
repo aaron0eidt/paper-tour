@@ -2,6 +2,7 @@ import { claimsNumericExample } from './example';
 import { lossSentence } from '../../../shared/coverage';
 import { splitWords, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
+import { tourProfileGuidance } from '../../../shared/tourProfiles';
 import type { MuseConfig } from '../config';
 import { ProcessingError } from '../errors';
 import type { GeneratedTour, TourGenerationInput, TourGenerator, TourImage, TourProgress } from '../tour-generator';
@@ -227,6 +228,15 @@ export class HarnessTourGenerator implements TourGenerator {
     onProgress?: (progress: TourProgress) => Promise<void>,
     externalSignal?: AbortSignal,
   ): Promise<GeneratedTour> {
+    if (input.profile && input.profile.depth !== this.preset)
+      return new HarnessTourGenerator(
+        this.config,
+        input.profile.depth,
+        this.transport,
+        this.verifier,
+        this.measureFigure,
+        this.pace,
+      ).generate(input, onProgress, externalSignal);
     if (!this.configured)
       throw new ProcessingError('muse_not_configured', 'Tour creation needs a Muse API key on the server.');
     const siblings = new AbortController();
@@ -261,6 +271,9 @@ export class HarnessTourGenerator implements TourGenerator {
       onProgress?.({ stage, imagesDone: done, imagesTotal: total });
     const prefix: MuseMessage[] = [
       { role: 'developer', content: SHARED_RULES },
+      ...(tourProfileGuidance(input.profile)
+        ? [{ role: 'user' as const, content: tourProfileGuidance(input.profile) }]
+        : []),
       { role: 'user', content: `<DOCUMENT>\n${paperBlock(doc)}\n</DOCUMENT>` },
     ];
 
@@ -1376,6 +1389,7 @@ export class HarnessTourGenerator implements TourGenerator {
         language,
         promptVersion: HARNESS_VERSION,
         preset: this.preset,
+        profile: input.profile ?? null,
         docType: plan.type,
         cardSource,
         planSource,

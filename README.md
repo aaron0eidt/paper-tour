@@ -357,6 +357,11 @@ New tours use the guided harness (`TOUR_PRESET=standard`). The first steps can b
 written. Activity shows readable narration, concurrent work and timing diagnostics; the floating question bubble also
 shows progress.
 
+**Create tour** opens reusable teaching profiles: Concept-led (the existing default), Overview, or In paper order.
+Explanation depth and reader familiarity are separate choices; the model stays selected in Settings. Duplicate a
+profile to save custom instructions. Editing creates a revision, while each generation and saved tour keeps its
+effective profile snapshot. Profile APIs are owner-scoped under `/api/tour-profiles`.
+
 Set `PAPER_AGENT_ENABLED=true` for new tours to use the persistent paper agent instead. Existing jobs keep their
 original engine. The agent uses Meta Responses, saved paper sessions and seven scoped paper tools; its instructions and
 tool schemas are in `server/src/agent/tools.ts`. Runs and tool results are private server-side records. **Activity**

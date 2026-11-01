@@ -1,0 +1,117 @@
+.tour-profile-dialog {
+  width: min(600px, calc(100vw - 36px));
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-floating);
+  font: inherit;
+}
+.tour-profile-dialog::backdrop {
+  background: var(--backdrop);
+}
+.tour-profile-dialog header {
+  display: flex;
+  gap: 20px;
+  align-items: start;
+  justify-content: space-between;
+}
+.tour-profile-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.tour-profile-dialog p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 8px 0 16px;
+}
+.tour-profile-dialog form {
+  display: grid;
+  gap: 16px;
+  margin-top: 22px;
+}
+.tour-profile-dialog label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.tour-profile-dialog input,
+.tour-profile-dialog textarea,
+.tour-profile-dialog select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.tour-profile-dialog textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.tour-profile-dialog button {
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.tour-profile-dialog button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.tour-profile-dialog button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tour-profile-dialog :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.tour-profile-dialog a {
+  color: var(--accent);
+}
+.tour-profile-dialog .tour-profile-error {
+  color: var(--error-ink);
+}
+.tour-profile-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.tour-profile-manage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tour-profile-dialog footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.tour-profile-dialog form > p {
+  margin: 0;
+}
+@media (max-width: 520px) {
+  .tour-profile-dialog {
+    padding: 18px;
+  }
+  .tour-profile-options {
+    grid-template-columns: 1fr;
+  }
+}

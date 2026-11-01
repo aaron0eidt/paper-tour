@@ -1389,6 +1389,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                   {manifest.tours.map((tour, index) => (
                     <option key={tour.id} value={tour.id}>
                       {manifest.tours.length > 1 ? `v${manifest.tours.length - index} · ` : ''}
+                      {tour.profile ? `${tour.profile.name} · ${tour.profile.depth} · ` : ''}
                       {tour.title}
                     </option>
                   ))}

@@ -1,3 +1,6 @@
+import type { TourModelSelection } from '../../shared/contracts';
+import type { TourProfileDraft } from '../../shared/tourProfiles';
+import { TOUR_STRUCTURES, TOUR_DEPTHS, TOUR_AUDIENCES } from '../../shared/tourProfiles';
 import { pipeUIMessageStreamToResponse } from 'ai';
 import { activityFrames, activityUIStream } from './ai/activity-stream';
 import { RESPONSE_LANGUAGES } from '../../shared/languages';
@@ -173,6 +176,51 @@ export async function createApp(options: Options) {
         },
       );
       api.get('/models', async (req) => service.models(owner(req)));
+      const profileFields = {
+        name: text(80),
+        instructions: { type: 'string', maxLength: 6000 },
+        structure: { enum: TOUR_STRUCTURES },
+        depth: { enum: TOUR_DEPTHS },
+        audience: { enum: TOUR_AUDIENCES },
+      };
+      api.get('/tour-profiles', async (req) => {
+        if (!service.tourProfiles) throw new HttpError(503, 'profiles_unavailable', 'Tour profiles are unavailable.');
+        return service.tourProfiles(owner(req));
+      });
+      api.post<{ Body: TourProfileDraft }>(
+        '/tour-profiles',
+        {
+          schema: { body: objectBody(profileFields, ['name', 'instructions', 'structure', 'depth', 'audience']) },
+        },
+        async (req, reply) => {
+          if (!service.createTourProfile)
+            throw new HttpError(503, 'profiles_unavailable', 'Tour profiles are unavailable.');
+          return reply.code(201).send(await service.createTourProfile(owner(req), req.body));
+        },
+      );
+      api.put<{ Params: { profileId: string }; Body: TourProfileDraft & { expectedRevision: number } }>(
+        '/tour-profiles/:profileId',
+        {
+          schema: {
+            params: objectBody({ profileId: uuid }, ['profileId']),
+            body: objectBody({ ...profileFields, expectedRevision: { type: 'integer', minimum: 1 } }, [
+              'name',
+              'instructions',
+              'structure',
+              'depth',
+              'audience',
+              'expectedRevision',
+            ]),
+          },
+        },
+        async (req) => {
+          if (!service.reviseTourProfile)
+            throw new HttpError(503, 'profiles_unavailable', 'Tour profiles are unavailable.');
+          const { expectedRevision, ...draft } = req.body;
+          return service.reviseTourProfile(owner(req), req.params.profileId, expectedRevision, draft);
+        },
+      );
+
       if (options.settings) {
         const settings = options.settings;
         api.get('/settings', async (req) => settings.get(owner(req)));
@@ -380,7 +428,7 @@ export async function createApp(options: Options) {
       );
       api.post<{
         Params: { id: string };
-        Body: { regenerate?: boolean; model?: string; allowTraining?: boolean } | undefined;
+        Body: (TourModelSelection & { regenerate?: boolean }) | undefined;
       }>(
         '/documents/:id/tours',
         {
@@ -392,6 +440,10 @@ export async function createApp(options: Options) {
             body: objectBody(
               {
                 regenerate: { type: 'boolean' },
+                profileId: text(120),
+                profileRevision: { type: 'integer', minimum: 1 },
+                depth: { enum: TOUR_DEPTHS },
+                audience: { enum: TOUR_AUDIENCES },
                 model: { type: 'string', minLength: 1, maxLength: 200 },
                 allowTraining: { type: 'boolean' },
               },
@@ -399,11 +451,10 @@ export async function createApp(options: Options) {
             ),
           },
         },
-        async (req) =>
-          service.generateTour(owner(req), req.params.id, req.body?.regenerate ?? false, {
-            model: req.body?.model,
-            allowTraining: req.body?.allowTraining,
-          }),
+        async (req) => {
+          const { regenerate = false, ...selection } = req.body ?? {};
+          return service.generateTour(owner(req), req.params.id, regenerate, selection);
+        },
       );
       api.post<{ Params: { id: string } }>(
         '/documents/:id/analyze',
