@@ -198,7 +198,7 @@ export function cleanTeachingPlan(value: unknown, doc: Doc): { plan: TeachingPla
       problems.push(`Section ${section.sectionId} is marked teach but no concept cites its material. Add the actual concepts/evidence, or explain its different treatment.`);
   if (!held.concepts.some((c) => c.role === 'contribution')) problems.push('Include the paper’s main contribution.');
   if (!held.concepts.some((c) => c.role === 'evidence')) problems.push('Include the evidence for the contribution.');
-  if (problems.length) return { plan: null, problems: problems.slice(0, 12) };
+  if (problems.length) return { plan: null, problems };
   return { plan: { version: 'teaching-plan@1', ...held }, problems: [] };
 }
 

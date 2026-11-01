@@ -301,6 +301,62 @@ test('identical complete-map validation errors still stop after two attempts', a
   assert.deepEqual(failures, [1, 2]);
 });
 
+test('complete-map progress tracks every missing section beyond the former twelve-diagnostic cutoff', async () => {
+  const extraSections = Array.from({ length: 18 }, (_, i) => ({
+    id: `sec-appendix-${i}`,
+    title: `Appendix ${i}`,
+    level: 1,
+    page: 2,
+    block: `appendix-heading-${i}`,
+  }));
+  const document = {
+    ...doc,
+    sections: [...doc.sections, ...extraSections],
+    blocks: [
+      ...doc.blocks,
+      ...extraSections.map((section) => ({
+        id: section.block,
+        type: 'heading' as const,
+        page: 2,
+        bbox: [0, 700, 500, 720] as [number, number, number, number],
+        text: section.title,
+        sentences: [],
+      })),
+    ],
+  };
+  const accounting: TeachingPlan['sections'] = extraSections.map((section) => ({
+    sectionId: section.id,
+    treatment: 'background',
+    reason: 'Source appendix accounted for separately from the main explanation.',
+  }));
+  const failures: number[] = [],
+    diagnostics: string[][] = [];
+  let calls = 0;
+  const result = await authorTeachingPlan({
+    ...base(),
+    doc: document,
+    onProblems: async (problems, count) => {
+      failures.push(count);
+      diagnostics.push(problems);
+    },
+    call: async () => {
+      switch (calls++) {
+        case 0:
+          return { value: page([contribution, evidence], true) };
+        case 1:
+          return { value: page([], true, accounting.slice(0, 12)) };
+        default:
+          return { value: page([], true, accounting.slice(12)) };
+      }
+    },
+  });
+  assert.equal(calls, 3);
+  assert.equal(diagnostics[0].length, 18, 'all unresolved sections are retained in the internal validation result');
+  assert.equal(diagnostics[1].length, 6);
+  assert.deepEqual(failures, [1, 1], 'fixing the first twelve issues is recognized as strict diagnostic improvement');
+  assert.equal(result.sections.length, document.sections.length);
+});
+
 test('output truncation requests smaller complete-entry batches and preserves all earlier understanding', async () => {
   let calls = 0;
   const result = await authorTeachingPlan({
