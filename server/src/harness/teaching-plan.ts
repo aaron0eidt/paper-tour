@@ -133,7 +133,7 @@ export function teachingPlanTask(preferences: TeachingPreferences, language: str
     'Choose the number and granularity of concepts from this paper’s complexity, contribution, dependencies and the selected teaching profile. There is no target or maximum concept count. Preserve every concept the reader needs; split difficult mechanisms into distinct explanations rather than compressing or dropping them to fit a quota.',
     'Understand the complete paper before beginning its narration. Do not replace careful initial understanding with a generic opening or optimize the content to start playback sooner. An overview changes emphasis, not factual accuracy or the prerequisites needed to understand a claim.',
     'For each concept give stable short IDs, source evidence and prerequisite concept IDs. The first evidence ID is the primary passage/figure/equation where this concept is taught; put secondary support afterwards. Dependencies must be acyclic.',
-    'When the object being explained is an equation, diagram or table, cite its actual equation/figure ID as primary evidence, rather than only a paragraph that mentions it. Keep supporting prose IDs too. This lets the tutor point to and work with the original object on the page.',
+    'When the object being explained is an equation, diagram or table, cite its actual equation/figure ID as primary evidence, rather than only a paragraph that mentions it. Then cite the main supporting prose where the paper explains this concept, before secondary support. Its actual section determines the chapter even if the visual floats elsewhere on the page. This lets the tutor point to and work with the original object on the page.',
     'Importance explains why understanding this concept is needed for the paper’s main question; difficulty estimates this audience’s required prior knowledge or multi-step reasoning. They are different decisions.',
     'State the audience assumption and confidence honestly. A likely misconception is a teaching hypothesis, not an observed fact about the learner.',
     'The objective says what the reader should be able to explain. A new visual must name the relationship or change it reveals and why source annotation alone is insufficient. Use none when no visual adds understanding.',
@@ -277,6 +277,10 @@ export function teachingTourPlan(
 ): TourPlan {
   const elements = new Map(indexElements(doc).map((e) => [e.id, e]));
   const blocks = new Map(doc.blocks.map((block, rank) => [block.id, { block, rank }]));
+  const prose = new Set(proseSentences(doc).map((sentence) => sentence.id));
+  const sections = [...doc.sections].sort(
+    (a, b) => (blocks.get(a.block)?.rank ?? Infinity) - (blocks.get(b.block)?.rank ?? Infinity),
+  );
   const locate = (id: string) => {
     const element = elements.get(id);
     if (!element) return undefined;
@@ -297,23 +301,43 @@ export function teachingTourPlan(
     const fraction = sentence && near ? (near.block.sentences.indexOf(id) + 1) / (near.block.sentences.length + 1) : 0;
     return { ...element, rank: near ? near.rank + fraction : Number.MAX_SAFE_INTEGER, sectionId: near?.block.section };
   };
-  const location = (concept: TeachingConcept) => concept.evidence.map(locate).find((source) => source !== undefined);
+  const sectionAt = (source: ReturnType<typeof locate>) => {
+    const declared = sections.find((section) => section.id === source?.sectionId);
+    const preceding = [...sections]
+      .reverse()
+      .find((section) => (blocks.get(section.block)?.rank ?? Infinity) <= (source?.rank ?? -1));
+    // Prose follows the actual heading sequence; ingestion's section label can lag behind a float.
+    return source && prose.has(source.id) ? (preceding ?? declared) : (declared ?? preceding);
+  };
+  const location = (concept: TeachingConcept) => {
+    const primary = concept.evidence.map(locate).find((source) => source !== undefined);
+    // Floats may be printed before the section that explains them. Keep their physical location for targeting,
+    // but use the concept's cited prose to identify the actual semantic section, never the caption's neighbour.
+    const support =
+      primary && ['figure', 'table', 'equation'].includes(primary.kind)
+        ? concept.evidence
+            .filter((id) => prose.has(id))
+            .map(locate)
+            .find((source) => sectionAt(source))
+        : undefined;
+    const section = sectionAt(support ?? primary);
+    return { primary, section, sectionRank: blocks.get(section?.block ?? '')?.rank ?? -1 };
+  };
+  const locations = new Map(teaching.concepts.map((concept) => [concept.id, location(concept)]));
   let selected = selectedTeachingConcepts(teaching, preferences);
   if (preferences.structure === 'paper')
     selected = selected.sort((a, b) => {
-      const x = location(a),
-        y = location(b);
-      return (x?.rank ?? Number.MAX_SAFE_INTEGER) - (y?.rank ?? Number.MAX_SAFE_INTEGER);
+      const x = locations.get(a.id)!,
+        y = locations.get(b.id)!;
+      return (
+        x.sectionRank - y.sectionRank ||
+        (x.primary?.rank ?? Number.MAX_SAFE_INTEGER) - (y.primary?.rank ?? Number.MAX_SAFE_INTEGER)
+      );
     });
   const chapters: TourPlan['chapters'] = [];
   const beats: Beat[] = [];
   for (const concept of selected) {
-    const where = location(concept);
-    const section =
-      doc.sections.find((s) => s.id === where?.sectionId) ??
-      doc.sections
-        .filter((s) => (blocks.get(s.block)?.rank ?? Infinity) <= (where?.rank ?? -1))
-        .sort((a, b) => (blocks.get(b.block)?.rank ?? 0) - (blocks.get(a.block)?.rank ?? 0))[0];
+    const section = locations.get(concept.id)!.section;
     // A chapter is a contiguous sequence; repeated roles must not reorder dependencies at assembly time.
     const group = preferences.structure === 'paper' ? (section?.id ?? 'opening') : concept.role;
     const arc = chapters.at(-1)?.id.startsWith(`${group}:`) ? chapters.at(-1)!.id : `${group}:${chapters.length}`;
