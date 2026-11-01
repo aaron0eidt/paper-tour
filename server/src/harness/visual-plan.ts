@@ -160,7 +160,7 @@ const KINDS_ORDER: BoardKind[] = [
 ];
 
 /** The plan call's response schema: one entry per step, in tour order. */
-export function visualPlanSchema(beats: Beat[], { sheet }: PlanOptions = {}) {
+export function visualPlanSchema(beats: Beat[], { sheet, adaptive }: PlanOptions = {}) {
   const ids = beats.map((beat) => beat.id);
   return {
     type: 'object',
@@ -181,13 +181,17 @@ export function visualPlanSchema(beats: Beat[], { sheet }: PlanOptions = {}) {
             visual: { type: 'string', enum: ['none', ...(sheet ? sheetKinds() : BOARD_KINDS)] },
             idea: {
               type: 'string',
-              maxLength: IDEA_WORDS * 9,
-              description: `One sentence of at most ${IDEA_WORDS} words: what the learner sees and what clicks. Empty for none.`,
+              ...(!adaptive ? { maxLength: IDEA_WORDS * 9 } : {}),
+              description: adaptive
+                ? 'What the learner sees and which relationship it explains. Empty for none.'
+                : `One sentence of at most ${IDEA_WORDS} words: what the learner sees and what clicks. Empty for none.`,
             },
             data: {
               type: 'string',
-              maxLength: DATA_WORDS * 9,
-              description: `At most ${DATA_WORDS} words: exactly which numbers, symbols or labels it uses; document values as printed, made-up ones marked illustrative. Empty for none.`,
+              ...(!adaptive ? { maxLength: DATA_WORDS * 9 } : {}),
+              description: adaptive
+                ? 'The exact source values, symbols and labels needed for this explanation; distinguish illustrative inputs from measured data. Empty for none.'
+                : `At most ${DATA_WORDS} words: exactly which numbers, symbols or labels it uses; document values as printed, made-up ones marked illustrative. Empty for none.`,
             },
           },
         },
@@ -277,8 +281,8 @@ ${kinds}
    least four different kinds. Prefer heatmap, scatter, shapes, plot, timeline and distribution where they fit, since
    they show relationships rather than single numbers. A figure step usually teaches on the figure itself.`
   }
-3. For each visual, "idea" says in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks.
-   "data" says exactly which numbers, symbols or labels it uses (at most ${DATA_WORDS} words): document values copied
+3. For each visual, "idea" says ${adaptive ? 'what the learner sees and the relationship it explains' : `in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks`}.
+   "data" says exactly which numbers, symbols or labels it uses${adaptive ? '' : ` (at most ${DATA_WORDS} words)`}: document values copied
    as printed, anything else marked illustrative. A step that reports results (a result or a table) uses only the
    document's own numbers, which its evidence quotes; illustrative values only explain a mechanism. At least one
    results step on a table with ready boards (listed under TABLES) draws one, naming its columns. Labels are real
@@ -438,6 +442,24 @@ export function cleanVisualPlan(
   const known = new Set(beats.map((beat) => beat.id));
   const kinds = new Set<string>(['none', ...BOARD_KINDS]);
   const listed = (value as { beats?: unknown } | null)?.beats;
+  if (adaptive) {
+    const ids = Array.isArray(listed) ? listed.map((entry) => entry?.beat) : [];
+    const missing = beats.filter((beat) => !settled.has(beat.id) && !ids.includes(beat.id));
+    if (
+      !Array.isArray(listed) ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !known.has(id)) ||
+      missing.length
+    )
+      return {
+        plan: null,
+        problems: [
+          'Return exactly one visual decision for each requested beat; include explicit none where no new visual helps.',
+          ...missing.map((beat) => `Missing visual decision: ${beat.id}`),
+        ],
+        adjusted: [],
+      };
+  }
   // A step planned ahead of the rest is kept as it was decided, and counted before any other step: the tour's limits
   // hold for it too.
   const entries = new Map<string, StepVisual>([...settled].filter(([id]) => known.has(id)));
@@ -456,7 +478,7 @@ export function cleanVisualPlan(
       problems.push(`${id}: visual must be none or one of ${BOARD_KINDS.join(', ')}`);
       continue;
     }
-    const idea = words(entry.idea, IDEA_WORDS);
+    const idea = adaptive && typeof entry.idea === 'string' ? entry.idea.trim() : words(entry.idea, IDEA_WORDS);
     if (visual !== 'none' && !idea) {
       problems.push(`${id}: a ${visual} needs an idea: what the learner sees and what clicks`);
       continue;
@@ -464,9 +486,15 @@ export function cleanVisualPlan(
     entries.set(id, {
       visual,
       idea: visual === 'none' ? '' : idea,
-      data: visual === 'none' ? '' : words(entry.data, DATA_WORDS),
+      data:
+        visual === 'none'
+          ? ''
+          : adaptive && typeof entry.data === 'string'
+            ? entry.data.trim()
+            : words(entry.data, DATA_WORDS),
     });
   }
+  if (adaptive && problems.length) return { plan: null, problems, adjusted: [] };
   if (entries.size === ahead)
     return { plan: null, problems: problems.length ? problems : ['beats: no entry'], adjusted: [] };
   const plan: VisualPlan = new Map();

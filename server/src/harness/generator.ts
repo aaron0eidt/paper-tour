@@ -4,11 +4,9 @@ import { indexElements } from '../elements';
 import { isAuthoredVisual } from '../visuals/inspect';
 import { reviewAuthoredWithModel } from '../visuals/model-author';
 import type { TeachingPlan } from '../../../shared/teachingPlan';
-import {
-  teachingEvidence,
-  teachingTourPlan,
-} from './teaching-plan';
+import { teachingEvidence, teachingTourPlan } from './teaching-plan';
 import { authorTeachingPlan } from './teaching-author';
+import { authorVisualPlan } from './visual-author';
 import { lossSentence } from '../../../shared/coverage';
 import { splitWords, type BoardItem, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
@@ -702,6 +700,23 @@ export class HarnessTourGenerator implements TourGenerator {
           ],
         },
       ];
+      if (adaptive) {
+        visuals = await authorVisualPlan({
+          doc,
+          card: card!,
+          beats: plannable,
+          settled,
+          sheet: sheetTour,
+          language,
+          prefix,
+          signal,
+          call: (messages, schema) => call(messages, 'visual_plan', schema, 8_000, 'medium', signal),
+          retryable: recoverable,
+          onProblems: async (problems, attempt) => {
+            await input.onEvent?.('validation.failed', { stage: 'visuals', problems, attempt });
+          },
+        });
+      }
       if (!rest.length) visuals = new Map(settled);
       for (let attempt = 0; attempt < 2 && !visuals; attempt++) {
         try {
@@ -1100,7 +1115,7 @@ export class HarnessTourGenerator implements TourGenerator {
             now.task.push(...repairTurn(completion.value, issues));
             continue;
           }
-          if (next && !rewrites && attempt < 2) {
+          if (next && (adaptive || (!rewrites && attempt < 2))) {
             // A step on slides is held against the slides' whole text, which the learner can read; any other against
             // the sentences it highlights.
             const highlighted = beat.slides
@@ -1143,7 +1158,9 @@ export class HarnessTourGenerator implements TourGenerator {
           if (!next)
             now.task.push(
               ...repairTurn(completion.value, [
-                `say must be 8-${sayLimit(beat)} spoken words.`,
+                beat.flexibleNarration
+                  ? 'Provide a complete explanation of the planned learning objective, with actual narration instead of empty or malformed text. Preserve necessary reasoning and qualifications; no word target applies.'
+                  : `say must be 8-${sayLimit(beat)} spoken words.`,
                 'Every cue needs an allowed action, a listed target and an anchor copied from say.',
               ]),
             );
@@ -1173,13 +1190,22 @@ export class HarnessTourGenerator implements TourGenerator {
         }
       }
       await progress('writing', ++directed, beats.length);
+      if (adaptive && (!direction || rewriting || faulty(direction))) {
+        const problems = [
+          ...(direction?.boardProblems ?? []),
+          ...(direction?.exampleProblems ?? []),
+          ...(direction?.visualProblems ?? []),
+          ...(rewriting ? ['The requested narration correction has not been resolved.'] : []),
+        ];
+        await input.onEvent?.('validation.failed', { stage: 'direction', beat: beat.id, problems, exhausted: true });
+        const unavailable = !direction && (fault === 'slow' || fault === 'unavailable');
+        throw new ProcessingError(
+          unavailable ? 'muse_unavailable' : 'invalid_tour_direction',
+          `The planned explanation ${beat.id} could not be completed and validated after its repair attempts. ${problems.join(' ')} Saved completed work is preserved; no summary substitute or degraded visual was published.`,
+          unavailable,
+        );
+      }
       if (!direction) {
-        if (adaptive && (fault === 'slow' || fault === 'unavailable'))
-          throw new ProcessingError(
-            'muse_unavailable',
-            'The planned explanation could not be completed after the bounded request attempts.',
-            true,
-          );
         // A step whose worked example was given up for the time, and whose narration alone is nothing without it, is left
         // out for that; any other, for what went wrong with its latest try.
         const omission: Omission =
@@ -1250,9 +1276,22 @@ export class HarnessTourGenerator implements TourGenerator {
     const siteAt = new Map(sites.map((site) => [site.beats.at(-1)!, site]));
     const ownSteps = (i: number, result: BeatResult): Step[] => {
       if ('steps' in result) return result.steps;
+      if (adaptive && !result.direction)
+        throw new ProcessingError(
+          'invalid_tour_direction',
+          `The planned explanation ${beats[i].id} is missing. Its summary cannot replace the completed explanation.`,
+        );
       if (beats[i].detail && !result.direction) return [];
       const step = beatStep(beats[i], result.targets, result.direction, doc);
-      return readsSource(step.say, doc) ? [] : [step];
+      if (readsSource(step.say, doc)) {
+        if (adaptive)
+          throw new ProcessingError(
+            'invalid_tour_direction',
+            `The planned explanation ${beats[i].id} only reads its source and has not been completed.`,
+          );
+        return [];
+      }
+      return [step];
     };
     const stepsOf = (i: number): Step[] => {
       const known = beatSteps.get(i);
@@ -1265,10 +1304,9 @@ export class HarnessTourGenerator implements TourGenerator {
     const buildTour = (count: number) => {
       const lists = beats.slice(0, count).map((_, i) => stepsOf(i));
       // A board that repeats an earlier step's data is dropped with its cues; the narration stays.
-      const repeats = dropRepeatedBoards(
-        lists,
-        new Set(beats.slice(0, count).flatMap((beat, i) => (beat.unit ? [i] : []))),
-      );
+      const repeats: ReturnType<typeof dropRepeatedBoards> = adaptive
+        ? { steps: lists, dropped: [] }
+        : dropRepeatedBoards(lists, new Set(beats.slice(0, count).flatMap((beat, i) => (beat.unit ? [i] : []))));
       const whole = count === beats.length;
       const tour = assembleTour(
         card!,
@@ -1297,7 +1335,7 @@ export class HarnessTourGenerator implements TourGenerator {
       let problems = check(tour);
       const late: { beat: string; dropped: ['board']; problems: string[]; causes: { board: 'checks' } }[] = [];
       const named = boardStepsOf(tour, problems);
-      if (named.size) {
+      if (named.size && !adaptive) {
         const bare = settleBoards(withoutBoards(tour, new Set(named.keys())));
         if (!check(bare).length) {
           tour = bare;

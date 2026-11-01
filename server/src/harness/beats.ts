@@ -57,6 +57,8 @@ export interface Beat {
   claim?: { n: number; of: number; text: string; scope?: string };
   /** The spoken length the step aims for, fewest and most words; the kind's default when unset. */
   say?: [number, number];
+  /** Model-planned teaching content determines narration length instead of legacy word targets. */
+  flexibleNarration?: boolean;
   /** A slide step: the pages (slides) it covers, the lead slide first. */
   slides?: number[];
   /** Earlier slides the step connects back to, which the narration names. */

@@ -179,13 +179,17 @@ function safeFailure(error: unknown, signal: AbortSignal) {
       ? 'This paper exceeds the current tour generation limits.'
       : code === 'generation_timeout'
         ? 'Tour creation exceeded the five-minute time limit. Please retry.'
-        : ['invalid_tour', 'muse_invalid_response', 'muse_output_truncated'].includes(code)
-          ? 'The model returned an incomplete or invalid tour. Please retry.'
-          : code === 'document_deleted'
-            ? 'This document has been deleted.'
-            : code === 'muse_request_rejected'
-              ? 'The model could not process this paper. Check the server model configuration.'
-              : 'Tour creation is temporarily unavailable. Please retry.';
+        : code === 'invalid_teaching_plan'
+          ? 'The teaching plan could not be completed and checked. Your saved tours are unchanged; see Activity for the specific problems.'
+          : ['invalid_tour_direction', 'invalid_visual_plan'].includes(code)
+            ? 'A planned explanation or visual could not be completed and checked. Completed chapters are saved; see Activity for details.'
+            : ['invalid_tour', 'muse_invalid_response', 'muse_output_truncated'].includes(code)
+              ? 'The model returned an incomplete or invalid tour. Please retry.'
+              : code === 'document_deleted'
+                ? 'This document has been deleted.'
+                : code === 'muse_request_rejected'
+                  ? 'The model could not process this paper. Check the server model configuration.'
+                  : 'Tour creation is temporarily unavailable. Please retry.';
   if (code === 'image_preparation_failed' || code === 'invalid_image_path')
     message = 'The paper images could not be prepared for the model.';
   return { code, message, configuration, transient: known?.transient ?? !signal.aborted };
@@ -346,10 +350,12 @@ export class TourWorker {
       }
       const controller = new AbortController();
       // A profile's scope is independent of its individual provider-request timeout.
-      const timeout = row.profile ? undefined : setTimeout(
-        () => controller.abort(new Error('Tour generation timed out.')),
-        this.config.muse?.timeoutMs ?? 300_000,
-      );
+      const timeout = row.profile
+        ? undefined
+        : setTimeout(
+            () => controller.abort(new Error('Tour generation timed out.')),
+            this.config.muse?.timeoutMs ?? 300_000,
+          );
       timeout?.unref();
       const abort = () => controller.abort(jobSignal?.reason);
       jobSignal?.addEventListener('abort', abort, { once: true });

@@ -32,14 +32,20 @@ export async function authorVisualPlan(input: VisualAuthorInput): Promise<Visual
     input.signal.throwIfAborted();
     const batch = pending.shift()!;
     if (!batch.length) continue;
-    const messages: MuseMessage[] = [...input.prefix, {
-      role: 'user',
-      content: `${visualPlanTask(input.language, options)}\n\n${visualPlanBrief(input.card, input.beats, input.doc, held)}\n\nPlan only these requested beat IDs in this response: ${batch.map((beat) => beat.id).join(', ')}. Every other beat remains in the tour. Previously saved visual decisions are context, not a quota.`,
-    }];
-    let accepted = false, split = false, problems: string[] = [];
+    const messages: MuseMessage[] = [
+      ...input.prefix,
+      {
+        role: 'user',
+        content: `${visualPlanTask(input.language, options)}\n\n${visualPlanBrief(input.card, input.beats, input.doc, held)}\n\nPlan only these requested beat IDs in this response: ${batch.map((beat) => beat.id).join(', ')}. Every other beat remains in the tour. Previously saved visual decisions are context, not a quota.`,
+      },
+    ];
+    let accepted = false,
+      split = false,
+      problems: string[] = [];
     for (let attempt = 0; attempt < 2 && !accepted && !split; attempt++) {
       try {
         const result = await input.call(messages, visualPlanSchema(batch, options));
+        input.signal.throwIfAborted();
         const checked = cleanVisualPlan(result.value, batch, options);
         if (checked.plan) {
           for (const [id, visual] of checked.plan) held.set(id, visual);
@@ -63,7 +69,11 @@ export async function authorVisualPlan(input: VisualAuthorInput): Promise<Visual
       }
     }
     if (!accepted && !split)
-      throw new ProcessingError('invalid_visual_plan', `The planned explanations need a valid visual decision for every beat. ${problems.join(' ')}`);
+      throw new ProcessingError(
+        'invalid_visual_plan',
+        `The planned explanations need a valid visual decision for every beat. ${problems.join(' ')}`,
+      );
   }
+  input.signal.throwIfAborted();
   return held;
 }

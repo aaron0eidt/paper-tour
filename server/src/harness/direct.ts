@@ -301,7 +301,8 @@ function cueTargets(actions: CueAction[], targets: BeatTargets): string[] {
 const sayWords = (beat: Beat) => beat.say?.[1] ?? (beat.detail ? 140 : 90);
 const sayShortest = (beat: Beat) => beat.say?.[0] ?? (beat.detail ? 90 : 50);
 /** The most words a step may have before it is sent back for a rewrite: a margin over what it aims for. */
-export const sayLimit = (beat: Beat) => (beat.say ? Math.round(beat.say[1] * 1.35) : beat.detail ? 175 : 115);
+export const sayLimit = (beat: Beat) =>
+  beat.flexibleNarration ? Infinity : beat.say ? Math.round(beat.say[1] * 1.35) : beat.detail ? 175 : 115;
 
 /**
  * A step may run this far past the most words it aims for before it is sent back once to be shortened (the hard limit
@@ -309,7 +310,7 @@ export const sayLimit = (beat: Beat) => (beat.say ? Math.round(beat.say[1] * 1.3
  * slide step its own.
  */
 export const SAY_MARGIN = 1.15;
-export const sayCap = (beat: Beat) => Math.ceil(sayWords(beat) * SAY_MARGIN);
+export const sayCap = (beat: Beat) => (beat.flexibleNarration ? Infinity : Math.ceil(sayWords(beat) * SAY_MARGIN));
 
 /** The repair for narration past its cap, or none: how long it is, how long it may be, and what to cut. */
 export function lengthProblems(say: string, beat: Beat): string[] {
@@ -328,6 +329,7 @@ export function directOptions(beat: Beat, type?: DocType, targets?: BeatTargets,
     actions: actionsFor(beat, targets, visual),
     ...(board ? { board } : {}),
     words: sayWords(beat),
+    ...(beat.flexibleNarration ? { flexibleNarration: true } : {}),
     ...(beat.say ? { fewest: beat.say[0] } : {}),
     detail: beat.detail,
     ...(beat.move ? { move: beat.move } : {}),
@@ -378,9 +380,11 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
             ? {
                 ...boardSchema(kind),
                 description:
-                  kind === 'scene'
-                    ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
-                    : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,
+                  visual?.flexible && visual.visual === kind
+                    ? `Selected visual for this teaching step: supply a complete valid ${kind} board, or a validated worked example that demonstrates the same planned concept. Do not omit it or supply an empty placeholder.`
+                    : kind === 'scene'
+                      ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
+                      : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,
               }
             : {},
         ]),
@@ -389,8 +393,10 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
       say: {
         type: 'string',
         minLength: 20,
-        maxLength: sayLimit(beat) * 9,
-        description: `About ${sayShortest(beat)}-${sayWords(beat)} spoken words.`,
+        ...(!beat.flexibleNarration ? { maxLength: sayLimit(beat) * 9 } : {}),
+        description: beat.flexibleNarration
+          ? 'Explain the planned learning objective at the natural length it needs; preserve necessary reasoning, examples and qualifications.'
+          : `About ${sayShortest(beat)}-${sayWords(beat)} spoken words.`,
       },
       cues: {
         type: 'array',
@@ -633,6 +639,15 @@ export function cleanDirection(
     }));
   const boards = candidates.filter((c) => c.check.item);
   const boardProblems = candidates.flatMap((c) => c.check.problems.map((p) => `${c.kind}: ${p}`));
+  if (
+    visual?.flexible &&
+    visual.visual !== 'none' &&
+    !boards.some((candidate) => candidate.check.item?.kind === visual.visual) &&
+    !(example.example && !example.problems.length)
+  )
+    boardProblems.push(
+      `The teaching plan selected ${visual.visual}, but this step provides no valid selected visual or worked example. Supply the complete planned visual or a validated worked example that demonstrates the same concept; do not omit it or replace it with an empty placeholder.`,
+    );
   if (boards.length > 1)
     boardProblems.push(
       'Choose one useful native board, or put successive states in example.frames; multiple simultaneous boards cannot be shown.',

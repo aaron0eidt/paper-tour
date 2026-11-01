@@ -51,7 +51,8 @@ const CUE_HELP: Record<string, string> = {
   spotlight: 'spotlight dims everything else.',
 };
 const FOCUS_HELP: Record<BoardKind, string> = {
-  program: 'The program animates using t at the words being spoken; board_focus target scene-1 names the complete live scene.',
+  program:
+    'The program animates using t at the words being spoken; board_focus target scene-1 names the complete live scene.',
   plotly: 'The plot supports hover/zoom and parameter changes; board_focus target plot-1 names the chart.',
   scene:
     'board_focus lights up object-1, object-2 etc by its position in the scene objects array, while stable object IDs identify the same quantity across frames.',
@@ -370,6 +371,8 @@ export interface DirectOptions {
   actions: readonly string[];
   board?: BoardKind;
   words: number;
+  /** Teaching content determines explanation length; legacy word targets do not apply. */
+  flexibleNarration?: boolean;
   /** The fewest words a planned step aims for; 50 (90 for a detail) when unset. */
   fewest?: number;
   /** What the step does in a claim's argument, which adds that move's grammar to the rules. */
@@ -393,14 +396,16 @@ const SLIDE_VOICE = [
 export function directTask(
   language: string,
   brief: string,
-  { actions, board, words, fewest, move, slides, type, detail, bare }: DirectOptions,
+  { actions, board, words, fewest, move, slides, type, detail, bare, flexibleNarration }: DirectOptions,
 ) {
   const pen = actions.includes('arrow') || actions.includes('circle');
   const page = actions.filter((a) => CUE_HELP[a]);
   const help = page.map((a) => CUE_HELP[a]);
   if (board && actions.includes('board_focus')) help.push(FOCUS_HELP[board]);
   const rules = [
-    `"say" is ${fewest ?? (detail ? 90 : 50)}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
+    flexibleNarration
+      ? `Explain this planned learning objective at the natural length it needs, including the reasoning, necessary example and qualifications. Do not compress or omit necessary content to hit a word target. Keep this explanation coherent with the distinct concepts in the plan rather than replacing it with a summary. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`
+      : `"say" is ${fewest ?? (detail ? 90 : 50)}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
     'The highlight shows where the point is written, so never read it out or paraphrase it, and skip what a reader gets from it at a glance. State the point in one plain sentence, then explain what the text leaves implicit: why it holds, how it works, what it changes, what would happen without it. Add one concrete example or analogy only when it makes the idea click, labelled illustrative.',
     'No rhetorical questions, invented stories, hooks or suspense. Preserve the document’s qualifications and keep its statements apart from labelled illustrative explanations. Use the source outline for continuity without inventing a narrative arc.',
   ];

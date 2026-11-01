@@ -55,7 +55,10 @@ export function teachingPlanSchema(doc: Doc, strict = true) {
         description:
           'A concise source-grounded explanation addressed to the reader. Declarative sentences, never author instructions or a learning objective.',
       },
-      role: { type: 'string', enum: CONCEPT_ROLES },
+      role: {
+        type: 'string', enum: CONCEPT_ROLES,
+        description: 'Classify the concept: contribution = the paper\'s main new claim or proposed approach; mechanism = how the approach works; evidence = measured or demonstrated support for the claim; prerequisite = background needed to understand it; limitation = a stated boundary or uncertainty. The full plan must contain at least one role exactly "contribution" and one role exactly "evidence". A novelty-oriented title does not substitute for the correct role value.',
+      },
       evidence: { type: 'array', minItems: 1, items: source },
       prerequisites: { type: 'array', items: text(64) },
       importance: { type: 'string', enum: TEACHING_LEVELS },
@@ -114,6 +117,7 @@ export function teachingPlanTask(preferences: TeachingPreferences, language: str
     `Plan what this paper should teach in ${language}. Audience familiarity: ${preferences.audience}; scope: ${preferences.structure}; depth: ${preferences.depth}.`,
     'Read the full document, including methods, results and limitations. Repetition in abstract/introduction/conclusion is a signal, never a requirement.',
     'Separate the new contribution from prerequisite background, the mechanism that supports it, actual evidence and limitations.',
+    'Use the exact role values correctly: contribution means the main new claim or proposed approach, mechanism means how it works, and evidence means measured or demonstrated support. The complete plan must include at least one contribution and one evidence concept. If a novelty concept was mistakenly labeled mechanism, correct that existing concept with its same stable ID and role:"contribution"; do not add a duplicate concept or merely rename its title.',
     'Choose the number and granularity of concepts from this paper’s complexity, contribution, dependencies and the selected teaching profile. There is no target or maximum concept count. Preserve every concept the reader needs; split difficult mechanisms into distinct explanations rather than compressing or dropping them to fit a quota.',
     'Understand the complete paper before beginning its narration. Do not replace careful initial understanding with a generic opening or optimize the content to start playback sooner. An overview changes emphasis, not factual accuracy or the prerequisites needed to understand a claim.',
     'For each concept give stable short IDs, source evidence and prerequisite concept IDs. The first evidence ID is the primary passage/figure/equation where this concept is taught; put secondary support afterwards. Dependencies must be acyclic.',
@@ -307,6 +311,7 @@ export function teachingTourPlan(
         }[concept.role] as Beat['kind']);
     beats.push({
       id: `teach-${concept.id}`,
+      flexibleNarration: true,
       kind,
       arc,
       point: concept.summary,
@@ -329,6 +334,7 @@ export function teachingTourPlan(
   chapters.push({ id: 'teaching-takeaway', title: 'What to remember' });
   beats.push({
     id: 'takeaway-1',
+    flexibleNarration: true,
     kind: 'takeaway',
     arc: 'teaching-takeaway',
     point: card.takeaway.text,
