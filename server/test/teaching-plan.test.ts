@@ -248,8 +248,10 @@ test('adaptive visual planning preserves useful repeated representations and per
   assert.equal(result.adjusted.length, 0);
   assert.ok([...result.plan!.values()].every((visual) => visual.visual === 'plot' && visual.flexible));
   const detail = { ...beats.find((beat) => beat.kind === 'formula')!, detail: true };
-  assert.deepEqual(exampleRules(detail, result.plan!.get(detail.id)), { offered: true, required: true });
-  const allocated = allocateFrames(result.plan!, beats);
+  assert.deepEqual(exampleRules(detail, result.plan!.get(detail.id)), { offered: false, required: false });
+  const formula = { visual: 'formula' as const, idea: 'Trace the actual computation', data: '', flexible: true };
+  assert.deepEqual(exampleRules(detail, formula), { offered: true, required: true });
+  const allocated = allocateFrames(new Map([[detail.id, formula]]), [detail]);
   assert.ok(allocated.get(detail.id)!.frames!.includes('scene'));
   assert.match(visualPlanTask('en-US', { adaptive: true }), /no per-kind/);
   const taught = teachingTourPlan(plan(), doc, prefs, card, paperPlan(card, doc, 'standard'));

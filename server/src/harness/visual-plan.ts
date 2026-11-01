@@ -74,8 +74,8 @@ export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolea
   if (visual.bare) return { offered: false, required: false };
   // These contain their own executable demonstration, including intermediate states and interactive inputs.
   if (visual.visual === 'program' || visual.visual === 'plotly') return { offered: false, required: false };
-  if (visual.flexible) return { offered: visual.visual !== 'none' || detail, required: detail };
   if (RELATIONAL_KINDS.includes(visual.visual)) return { offered: false, required: false };
+  if (visual.flexible) return { offered: visual.visual !== 'none' || detail, required: detail };
   return { offered: visual.visual !== 'none' || detail, required: detail };
 }
 
@@ -281,6 +281,18 @@ ${kinds}
    least four different kinds. Prefer heatmap, scatter, shapes, plot, timeline and distribution where they fit, since
    they show relationships rather than single numbers. A figure step usually teaches on the figure itself.`
   }
+${
+  adaptive
+    ? `Before finalizing each decision, compare the best source annotation with a concrete computed alternative.
+   For a function's shape or sensitivity, consider a function plot with an input/parameter change. For matrix or vector
+   operations, consider a changing construction showing intermediate states. For measured comparisons, consider a plot
+   of the actual source values. A formula printed on the page is not already a demonstration of how it behaves.
+   Choosing none must mean the original source actually conveys this relationship with annotation, not merely that
+   a nearby paragraph mentions it. Use program or plotly when the native boards cannot express the needed operation;
+   those tools exist so you can implement a precise explanation rather than settle for a generic diagram. There is
+   no required number of visuals: judge the information gained for each learning objective.`
+    : ''
+}
 3. For each visual, "idea" says ${adaptive ? 'what the learner sees and the relationship it explains' : `in one sentence (at most ${IDEA_WORDS} words) what the learner sees and what clicks`}.
    "data" says exactly which numbers, symbols or labels it uses${adaptive ? '' : ` (at most ${DATA_WORDS} words)`}: document values copied
    as printed, anything else marked illustrative. A step that reports results (a result or a table) uses only the

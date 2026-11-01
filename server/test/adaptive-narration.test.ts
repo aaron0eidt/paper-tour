@@ -12,6 +12,7 @@ import {
   sayLimit,
 } from '../src/harness/direct';
 import { directTask } from '../src/harness/prompts';
+import { claimsNumericExample } from '../src/harness/example';
 import { teachingTourPlan } from '../src/harness/teaching-plan';
 import { HarnessTourGenerator } from './harness-fixture';
 import {
@@ -28,6 +29,48 @@ import {
 } from './plan-fixture';
 
 const profile = profileSnapshot(BUILTIN_TOUR_PROFILES[2]);
+
+test('a computed adaptive plot demonstrates a numerical case without redundant example frames', () => {
+  const beat: Beat = {
+    id: 'computed-plot',
+    kind: 'method',
+    arc: 'method',
+    point: 'Explain how the square responds to its input.',
+    evidence: ['p1.s3'],
+    flexibleNarration: true,
+  };
+  const visual = {
+    visual: 'plot' as const,
+    idea: 'Squared input',
+    data: 'Illustrative input and its computed square.',
+    flexible: true,
+  };
+  const say =
+    'Consider this illustrative numerical example in the Squared input plot. At x equals 1 the output is 1, and at x equals 2 the output is 4. The curve shows why doubling this input multiplies the output by four.';
+  assert.ok(claimsNumericExample(say));
+  const direction = cleanDirection(
+    {
+      plan: 'Demonstrate the values on the computed curve.',
+      say,
+      cues: [],
+      plot: {
+        kind: 'plot',
+        title: 'Squared input',
+        source: 'illustrative',
+        x: [-2, 2],
+        y: [0, 4],
+        curves: [{ expression: 'x^2', label: 'Squared input' }],
+        marks: [{ type: 'value', curve: 1, at: 1 }],
+      },
+    },
+    beat,
+    beatTargets(beat, doc, visual),
+    false,
+    visual,
+  );
+  assert.ok(direction?.board, JSON.stringify(direction?.boardProblems));
+  assert.deepEqual(direction?.exampleProblems, []);
+});
 const concept = (id: string, over: Partial<TeachingConcept> = {}): TeachingConcept => ({
   id,
   title: id,
