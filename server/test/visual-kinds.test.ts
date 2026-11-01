@@ -427,7 +427,7 @@ test('an empty board of a new kind means no board, and a broken one reports prob
   assert.equal(checkBoard('heatmap', { ...heatmap(), rows: ['a'] }).item, null);
 });
 
-test('provider schemas are flat JSON Schema and accept the valid items', () => {
+test('provider schemas accept valid items and only shapes use disjoint tagged term variants', () => {
   const ajv = new Ajv2020({ strict: false });
   const valid = {
     heatmap: heatmap(),
@@ -440,7 +440,23 @@ test('provider schemas are flat JSON Schema and accept the valid items', () => {
     ['shapes', SHAPES_SCHEMA],
   ] as const) {
     assert.equal(boardSchema(kind), schema);
-    assert.doesNotMatch(JSON.stringify(schema), /\$ref|oneOf|anyOf|allOf/, kind);
+    assert.doesNotMatch(JSON.stringify(schema), /\$ref|\$defs|oneOf|allOf/, kind);
+    if (kind === 'shapes') {
+      const terms = SHAPES_SCHEMA.properties.terms;
+      const outsideTerms = {
+        ...SHAPES_SCHEMA,
+        properties: { ...SHAPES_SCHEMA.properties, terms: { ...terms, items: {} } },
+      };
+      assert.doesNotMatch(JSON.stringify(outsideTerms), /anyOf/, 'only shapes.terms.items may contain a union');
+      const tags = terms.items.anyOf.flatMap((variant) => {
+        assert.equal(variant.type, 'object');
+        assert.equal(variant.additionalProperties, false);
+        assert.equal(variant.properties.kind.enum.length, 1, 'each variant names one term kind');
+        assert.doesNotMatch(JSON.stringify(variant), /oneOf|anyOf|allOf/, 'term variants remain flat');
+        return (variant.properties.op?.enum ?? ['']).map((op) => `${variant.properties.kind.enum[0]}:${op}`);
+      });
+      assert.equal(new Set(tags).size, tags.length, 'kind/op tags make the shapes variants disjoint');
+    } else assert.doesNotMatch(JSON.stringify(schema), /anyOf/, kind);
     assert.equal(schema.additionalProperties, false);
     const validate = ajv.compile(schema);
     const item = { kind, ...valid[kind] };
