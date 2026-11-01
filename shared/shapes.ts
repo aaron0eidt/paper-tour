@@ -57,35 +57,57 @@ export const SHAPES_SCHEMA = {
       description:
         '3, 5, 7 or 9 terms: a matrix, an operator, a matrix and so on, ending with a matrix; at most 5 matrices. Dimensions must agree.',
       items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['kind'],
-        properties: {
-          kind: {
-            type: 'string',
-            enum: ['matrix', 'op'],
-            description: 'matrix at the odd places, op at the even places.',
+        anyOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'name', 'rows', 'cols'],
+            properties: {
+              kind: { type: 'string', enum: ['matrix'] },
+              name: {
+                type: 'string',
+                minLength: 1,
+                maxLength: SHAPES_LIMITS.name,
+                pattern: '\\S',
+                description: 'The matrix name in LaTeX, such as A^T.',
+              },
+              rows: dimension('Its number of rows as a symbol such as n or d_k, or a number.'),
+              cols: dimension('Its number of columns; a vector has 1.'),
+            },
           },
-          name: {
-            type: 'string',
-            minLength: 1,
-            maxLength: SHAPES_LIMITS.name,
-            description: 'Matrix only: its name in LaTeX, such as A^T.',
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'op'],
+            properties: {
+              kind: { type: 'string', enum: ['op'] },
+              op: {
+                type: 'string',
+                enum: SHAPES_OPS.filter((op) => op !== 'apply'),
+                description:
+                  'times: matrix product, left columns equal right rows. plus and hadamard: equal shapes. equals: the next matrix is the result.',
+              },
+              label: { type: 'string', maxLength: SHAPES_LIMITS.opLabel },
+            },
           },
-          rows: dimension('Matrix only: its number of rows as a symbol such as n or d_k, or a number.'),
-          cols: dimension('Matrix only: its number of columns; a vector has 1.'),
-          op: {
-            type: 'string',
-            enum: [...SHAPES_OPS],
-            description:
-              'Operator only. times: matrix product, left columns must equal right rows. plus and hadamard: equal shapes. equals: the next matrix is the result. apply: a function that keeps the shape, the next matrix is its output.',
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'op', 'label'],
+            properties: {
+              kind: { type: 'string', enum: ['op'] },
+              op: { type: 'string', enum: ['apply'] },
+              label: {
+                type: 'string',
+                minLength: 1,
+                maxLength: SHAPES_LIMITS.opLabel,
+                pattern: '\\S',
+                description:
+                  'Required function name from the operation being explained. apply keeps the shape, and the next matrix is its output.',
+              },
+            },
           },
-          label: {
-            type: 'string',
-            maxLength: SHAPES_LIMITS.opLabel,
-            description: 'Operator only: the function name for apply, such as softmax.',
-          },
-        },
+        ],
       },
     },
   },
