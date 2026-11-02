@@ -686,7 +686,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const onAnswer = useCallback((reply: AskAnswer, question: string) => playAnswer(reply, question, false), [playAnswer]);
 
   // Back to the tour: the answer goes, and the tour returns as it was: its marks and board (it only paused), the
-  // camera on what it showed. Playback resumes only through an explicit play action.
+  // camera on what it showed. The explicit return button resumes a tour that was playing before the question.
   const backToTour = useCallback(() => {
     const { engine: main, away: was, frame: show } = now.current;
     dropAnswer();
@@ -694,12 +694,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     now.current.away = null;
     setAway(null);
     if (!was) return;
-    main?.pause();
     if (was.framed) show(was.framed.cmd, false);
     else {
       framed.current = null;
       camera.animateTo(was.view);
     }
+    if (was.playing) main?.play();
   }, [camera, dropAnswer]);
   // Leaving the answer for somewhere else in the tour: no need to restore the view first.
   const leaveAnswer = useCallback(() => {

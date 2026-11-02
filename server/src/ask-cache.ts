@@ -148,7 +148,7 @@ export function answerKey(input: {
         input.documentId,
         input.version,
         request.tourId ?? null,
-        request.conversationId ?? null,
+        // Thread identity does not change an answer; its server-owned history below does.
         request.page ?? null,
         request.activeVisual ?? null,
         request.visualId ?? null,

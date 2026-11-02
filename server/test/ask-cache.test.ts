@@ -162,6 +162,7 @@ test('a question is the same up to spacing and case, and different in anything t
   assert.match(key, /^[0-9a-f]{64}$/);
   const same = (request: Partial<AskRequest>) => answerKey({ ...base, request: { ...base.request, ...request } });
   assert.equal(same({ question: 'why SCALE the dot products?' }), key);
+  assert.equal(same({ conversationId: 'first-thread' }), same({ conversationId: 'second-thread' }));
   assert.equal(same({ question: '  Why  scale\nthe dot products? ' }), key);
   assert.equal(same({ responseLanguage: undefined, history: [], selection: undefined }), same({}));
   const different = [

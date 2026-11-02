@@ -32,7 +32,7 @@ test('conversation history excludes interrupted/failed turns and retains only it
   assert.equal(conversationHistory(messages)[0].answer, answer.steps[0].say);
 });
 
-test('answer cache isolates conversations and visual revisions', () => {
+test('answer cache shares first-turn prefetch but isolates conversation history and visual revisions', () => {
   const input = {
     scope: 'owner',
     documentId: 'doc',
@@ -41,7 +41,10 @@ test('answer cache isolates conversations and visual revisions', () => {
     request: { question: 'Explain it', conversationId: 'first' },
   };
   const first = answerKey(input);
-  assert.notEqual(first, answerKey({ ...input, request: { ...input.request, conversationId: 'second' } }));
+  assert.equal(first, answerKey({ ...input, request: { ...input.request, conversationId: 'second' } }));
+  assert.notEqual(first, answerKey({ ...input, request: { ...input.request,
+    history: [{ question: 'Earlier question', answer: 'Thread-specific explanation' }],
+  } }));
   assert.notEqual(first, answerKey({ ...input, request: { ...input.request, visualId: 'v1', visualRevision: 2 } }));
 });
 

@@ -21,7 +21,7 @@ test('long-paper evidence enums are shared without losing allowed source IDs', (
     plan: 'Summarize evidence.',
     doc_type: 'research_paper',
     title: 'A research paper',
-    chapter_titles: Object.fromEntries(ARCS.map((arc) => [arc, 'Chapter'])),
+    chapter_titles: Object.fromEntries(ARCS.map((arc) => [arc, `The ${arc}`])),
     problem: claim,
     key_idea: claim,
     method_steps: [claim],

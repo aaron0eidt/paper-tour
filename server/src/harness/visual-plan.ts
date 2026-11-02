@@ -75,7 +75,6 @@ export function exampleRules(beat: Beat, visual?: StepVisual): { offered: boolea
   // These contain their own executable demonstration, including intermediate states and interactive inputs.
   if (visual.visual === 'program' || visual.visual === 'plotly') return { offered: false, required: false };
   if (RELATIONAL_KINDS.includes(visual.visual)) return { offered: false, required: false };
-  if (visual.flexible) return { offered: visual.visual !== 'none' || detail, required: detail };
   return { offered: visual.visual !== 'none' || detail, required: detail };
 }
 

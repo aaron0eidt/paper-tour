@@ -36,6 +36,8 @@ export interface Beat {
   evidence: string[];
   target?: string;
   detail?: boolean;
+  /** Explicit parent when a worked concept has no figure/equation target. */
+  overviewId?: string;
   questions?: string[];
   /** The side-board item the beat may draw: a formula's terms or a result's numbers as bars. */
   board?: BoardKind;

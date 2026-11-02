@@ -955,9 +955,11 @@ export class HarnessTourGenerator implements TourGenerator {
           durationMs: Date.now() - started,
         });
       }
-      const overviewIndex = beat.detail
-        ? beats.findIndex((b) => !b.detail && b.kind === beat.kind && b.target === beat.target)
-        : -1;
+      const overviewIndex = beat.overviewId
+        ? beats.findIndex((b) => b.id === beat.overviewId)
+        : beat.detail && beat.target
+          ? beats.findIndex((b) => !b.detail && b.kind === beat.kind && b.target === beat.target)
+          : -1;
       const overviewResult = results[overviewIndex];
       const overview = overviewResult && 'direction' in overviewResult ? overviewResult.direction?.say : undefined;
       const beatIndex = beats.indexOf(beat);

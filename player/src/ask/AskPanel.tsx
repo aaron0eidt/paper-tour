@@ -337,19 +337,20 @@ export function AskPanel(props: AskPanelProps) {
   // The tour's last step asks for the answers to its suggested questions, one at a time, with the request a click on
   // each would send. Nothing is asked for while the learner is in a conversation or the list is empty.
   const wanted = props.prefetch;
+  const hasConversationHistory = !!sessions.active?.messages.length;
   const prefetchKey = wanted ? `${wanted.stamp}\n${wanted.questions.join('\n')}` : '';
   useEffect(() => {
     const now = latest.current.prefetch;
-    if (persistent || !now?.questions.length || !prefetchPossible(source, import.meta.env)) {
+    if ((persistent && (sessions.loading || hasConversationHistory)) || !now?.questions.length || !prefetchPossible(source, import.meta.env)) {
       keeper.hold();
       return;
     }
     const where = latest.current.context?.() ?? {};
     keeper.prefetch(
       source,
-      now.questions.map((question) => requestFor(question, where)),
+      now.questions.map((question) => ({ ...requestFor(question, where), conversationId: undefined, history: undefined })),
     );
-  }, [prefetchKey, keeper, source, requestFor, persistent]);
+  }, [prefetchKey, keeper, source, requestFor, persistent, sessions.loading, hasConversationHistory]);
 
   // A question picked outside the field goes through the same flow as one typed in it.
   const askNow = useRef(ask);
@@ -393,7 +394,8 @@ export function AskPanel(props: AskPanelProps) {
   const asked = history.map((turn) => turn.question);
   const offered = openQuestions(suggestions, asked);
   // A suggested question whose answer is kept plays at once: its chip says so, and so does the tour's end card.
-  const ready = keeper.size ? offered.filter((q) => keeper.has(source, requestFor(q, props.context?.() ?? {}))) : [];
+  const ready = keeper.size && !(persistent && hasConversationHistory)
+    ? offered.filter((q) => keeper.has(source, requestFor(q, props.context?.() ?? {}))) : [];
   const readyKey = ready.join('\n');
   useEffect(() => {
     latest.current.onReady?.(readyKey ? readyKey.split('\n') : []);

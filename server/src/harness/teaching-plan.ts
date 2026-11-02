@@ -386,6 +386,7 @@ export function teachingTourPlan(
       beats.push({
         ...beats.at(-1)!,
         id: `teach-${concept.id}-worked`,
+        overviewId: `teach-${concept.id}`,
         detail: true,
         role: 'Work a concrete computed example or trace one source-grounded causal path; change an input and explain the resulting difference.',
       });

@@ -212,8 +212,9 @@ cd ../player && npm run dev     # open http://localhost:5174/?paper=mydoc
 
 `run-tour.ts <preset> <out> [folder] [document id] [language]` writes `tour.json`, `metadata.json` (model calls, tokens,
 degraded steps, checked exercise lines) and `events.json` (what every stage did, and when) into `<out>`. Presets are
-`quick` (about 6 steps), `standard` (10 to 12 for papers and decks) and `deep` (up to 22); a tour never has more than
-30. `demo/*/doc.json`, figures and PDFs are gitignored; commit a `tour.json` only when it is meant as a demo.
+`quick`, `standard` and `deep`. The legacy planner targets about 6, 10–12 and up to 22 steps respectively, with a
+30-step ceiling. Profile-based teaching plans adapt coverage to the document without a fixed concept or step cap.
+`demo/*/doc.json`, figures and PDFs are gitignored; commit a `tour.json` only when it is meant as a demo.
 
 Checks:
 
