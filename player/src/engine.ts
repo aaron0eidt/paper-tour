@@ -132,6 +132,8 @@ export interface EngineOptions {
   timers?: Timers;
   /** Wait for the initial camera move; later word-synchronized moves do not delay speech. */
   beforeNarration?: (signal: AbortSignal) => Promise<void>;
+  /** Resolve lazy speech before speaking it (e.g. a grounded equation reading). Rejection pauses, never reads raw text. */
+  prepareNarration?: (step: Step, signal: AbortSignal) => Promise<string | { say: string; actions?: Action[] }>;
   /** The tour is still being written: at its last step it waits for more (see `extend`) instead of ending. */
   open?: boolean;
 }
@@ -218,6 +220,7 @@ export class TourEngine {
   private rate: number;
   private timers: Timers;
   private beforeNarration?: EngineOptions['beforeNarration'];
+  private prepareNarration?: EngineOptions['prepareNarration'];
   private preparation: AbortController | null = null;
   private listeners = new Set<() => void>();
 
@@ -256,6 +259,7 @@ export class TourEngine {
     this.rate = opts.rate ?? 1;
     this.timers = opts.timers ?? realTimers;
     this.beforeNarration = opts.beforeNarration;
+    this.prepareNarration = opts.prepareNarration;
     this.state = this.snapshot();
   }
 
@@ -601,13 +605,43 @@ export class TourEngine {
   }
 
   private async speakStep(fs: FlatStep, token: number, from: number): Promise<void> {
-    if (this.beforeNarration) {
+    if (this.beforeNarration || this.prepareNarration) {
       const preparation = new AbortController();
       this.preparation = preparation;
       try {
-        await this.beforeNarration(preparation.signal);
+        await this.beforeNarration?.(preparation.signal);
+        if (token !== this.token || preparation.signal.aborted) return;
+        if (this.prepareNarration) {
+          const prepared = await this.prepareNarration(fs.step, preparation.signal);
+          const say = typeof prepared === 'string' ? prepared : prepared.say;
+          const actions = typeof prepared === 'string' ? undefined : prepared.actions;
+          if (token !== this.token || preparation.signal.aborted) return;
+          const changedActions = actions && JSON.stringify(actions) !== JSON.stringify(fs.step.actions);
+          if (say !== fs.step.say || changedActions) {
+            // Lazy speech has no timed cues: its source highlight is already on screen.
+            // Update the caption and word clock together, before the narrator receives either.
+            const step = { ...fs.step, say, ...(actions ? { actions } : {}) };
+            this.flat[fs.index] = fs = { ...fs, step, words: splitWords(say) };
+            this.whole = { ...this.whole, chapters: this.whole.chapters.map((chapter, ci) => ci === fs.chapterIndex
+              ? { ...chapter, steps: chapter.steps.map((old, si) => si === fs.indexInChapter ? step : old) } : chapter) };
+            if (actions) {
+              this.flat = flattenTour(this.whole);
+              fs = this.flat[fs.index];
+              this.rebuild(fs.index, false);
+              this.begin(0);
+            }
+            this.revision++;
+            from = 0;
+            this.word = -1;
+            this.emit();
+            if (actions) await this.beforeNarration?.(preparation.signal);
+          }
+        }
       } catch (error) {
-        if (!preparation.signal.aborted) console.warn('[engine] camera preparation failed', error);
+        if (!preparation.signal.aborted) {
+          console.warn('[engine] narration preparation failed', error);
+          if (this.prepareNarration) { this.pause(); return; }
+        }
       } finally {
         if (this.preparation === preparation) this.preparation = null;
       }

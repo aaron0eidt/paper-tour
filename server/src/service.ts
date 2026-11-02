@@ -1,3 +1,7 @@
+import { READING_VISUAL_VERSION } from '../../shared/reading';
+import { ReadingSpeechCache } from './reading-cache';
+import { prepareReadingPassage, readingObject, readingExplanationQuestion, readingAnswerPassage, readingContinuity, readingCaption } from './reading-speech';
+import type { ReadingPassageRequest, ReadingPassage } from '../../shared/reading';
 import { TourProfileStore } from './tour-profiles';
 import { sameTourProfile } from '../../shared/tourProfiles';
 import type { TourProfileCatalog, TourProfileDraft, TourProfile } from '../../shared/tourProfiles';
@@ -126,6 +130,8 @@ export interface Library {
   }>;
   elements(owner: string, id: string, analysisId: string | undefined, ids: string[]): Promise<IndexedElement[]>;
   figure(owner: string, id: string, analysisId: string | undefined, elementId: string): Promise<FigureContext>;
+  readingPassage?(owner: string, id: string, request: ReadingPassageRequest, signal?: AbortSignal): Promise<ReadingPassage>;
+  demoReadingPassage?(paper: string, targetId: string, signal?: AbortSignal, removeCitations?: boolean): Promise<ReadingPassage>;
   ask?(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
   /** Local development only: a question about demo/<paper>/ without an account (see app.ts). */
   demoAsk?(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
@@ -144,6 +150,7 @@ interface AnswerInput {
   images(): Promise<TourImage[]>;
   signal?: AbortSignal;
   demo?: boolean;
+  purpose?: 'reading';
 }
 
 export class DocumentService implements Library {
@@ -728,6 +735,52 @@ export class DocumentService implements Library {
   /** Where demo papers are read from (demo/ in the repository); tests point it at a temporary folder. */
   demoRoot = DEMO_ROOT;
   /** A question about one of the owner's documents, answered as a short micro-tour (harness/ask.ts). */
+  private readingCache?: ReadingSpeechCache;
+  async readingPassage(owner: string, id: string, request: ReadingPassageRequest, signal?: AbortSignal): Promise<ReadingPassage> {
+    const document = await this.owned(owner, id);
+    const { rows: [analysis] } = await this.db.query<{ doc: Doc }>(
+      "select doc from analyses where id=$1 and document_id=$2 and status in ('ready','limited')",
+      [request.analysisId, id],
+    );
+    if (!analysis?.doc) throw new HttpError(409, 'analysis_not_ready', 'The selected document analysis is unavailable.');
+    const doc = analysis.doc;
+    const block = readingObject(doc, request.targetId);
+    const page = doc.pages.find((p) => p.n === block.page)!;
+    const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
+    const settings = this.askSettings();
+    const { config } = await settings.resolveMuse(owner, model);
+    const cache = this.readingCache ??= new ReadingSpeechCache(this.db.pool);
+    return cache.serve({ owner, documentId: id, analysisId: request.analysisId, sha256: doc.source.sha256,
+      targetId: block.id, removeCitations: request.removeCitations ?? true, model, provider: config.baseUrl,
+      language: config.language, visualVersion: block.kind === 'prose' ? undefined : READING_VISUAL_VERSION }, async (readingSignal) => {
+      if (block.kind === 'prose') return prepareReadingPassage({ client: new MuseClient(config, settings.transport), doc,
+        targetId: block.id, language: config.language, removeCitations: request.removeCitations, signal: readingSignal });
+      const selection = { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
+        block.bbox[2] / page.width, block.bbox[3] / page.height] as [number, number, number, number] };
+      const answer = await this.answer(owner, { documentId: id, analysisId: request.analysisId, doc, model, purpose: 'reading',
+        request: { question: readingExplanationQuestion(block.kind, block.id, readingCaption(doc, block.id), readingContinuity(doc, block.id)), analysisId: request.analysisId,
+          selection, page: block.page }, muse: async () => config, image: async () => undefined,
+        images: () => selectionImages(this.storage, document.upload_path, doc, selection, readingSignal), signal: readingSignal });
+      const stored = await persistAnswerVisuals(this.db, this.visualArtifacts, owner, id, request.analysisId, answer);
+      readingSignal.throwIfAborted();
+      return readingAnswerPassage(block.id, stored);
+    }, signal);
+  }
+
+  async demoReadingPassage(paper: string, targetId: string, signal?: AbortSignal, removeCitations?: boolean): Promise<ReadingPassage> {
+    const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
+    const block = readingObject(demo.doc, targetId);
+    const page = demo.doc.pages.find((p) => p.n === block.page)!;
+    const settings = this.askSettings();
+    const config = settings.base;
+    if (block.kind === 'prose') return prepareReadingPassage({ client: new MuseClient(config, settings.transport),
+      doc: demo.doc, targetId, language: config.language, removeCitations, signal });
+    const answer = await this.demoAsk(paper, { question: readingExplanationQuestion(block.kind, block.id, readingCaption(demo.doc, block.id), readingContinuity(demo.doc, block.id)),
+      selection: { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
+        block.bbox[2] / page.width, block.bbox[3] / page.height] } }, signal, 'reading');
+    return readingAnswerPassage(targetId, answer);
+  }
+
   async ask(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
     const settings = this.askSettings();
     const asked = askedRequest(request);
@@ -881,7 +934,7 @@ export class DocumentService implements Library {
    * A question about a demo paper (demo/<paper>/) without an account, on the server's own Meta key and model. Only
    * local development exposes it (app.ts).
    */
-  async demoAsk(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
+  async demoAsk(paper: string, request: AskRequest, signal?: AbortSignal, purpose?: 'reading'): Promise<AskAnswer> {
     const settings = this.askSettings();
     const asked = askedRequest(request);
     const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
@@ -902,6 +955,7 @@ export class DocumentService implements Library {
           : Promise.resolve([]),
       signal,
       demo: true,
+      purpose,
     });
   }
   /** Terms and language of the documents asked about by voice, by analysis; a few, since each is read once. */
@@ -975,7 +1029,7 @@ export class DocumentService implements Library {
   readonly answers = new AnswerCache();
   private async answer(key: string, input: AnswerInput): Promise<AskAnswer> {
     const cacheKey = answerKey({
-      scope: key,
+      scope: input.purpose === 'reading' ? `${key}:reading` : key,
       documentId: input.documentId,
       version: input.analysisId ?? input.doc.source.sha256,
       request: input.request,
@@ -1018,6 +1072,7 @@ export class DocumentService implements Library {
         images,
         language: input.tour?.voices?.host?.lang ?? config.language,
         signal: input.signal,
+        purpose: input.purpose,
       });
       console.log(
         JSON.stringify({

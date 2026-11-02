@@ -21,7 +21,7 @@ import { paperBlock } from './paper-block';
 import { SHARED_RULES } from './prompts';
 import { ANSWERABLE, type Answerable, type AskAnswer, type AskRequest, type StepSink } from './ask-types';
 import { evidenceText, findStep, retrieve } from './ask-retrieval';
-import { answerSchema, askContext, askInstructions, checkedActiveVisual } from './ask-authoring';
+import { answerSchema, askContext, askInstructions, checkedActiveVisual, READING_NARRATION_RULES } from './ask-authoring';
 import { shownBoards } from './ask-boards';
 import {
   answerBoardProblems,
@@ -99,6 +99,8 @@ export interface AskInput {
   /** Full-page context and crop rendered from the original PDF for a region question. */
   images?: TourImage[];
   language: string;
+  /** Internal narration context; ordinary questions retain the standalone answer contract. */
+  purpose?: 'reading';
   signal?: AbortSignal;
   measureFigure?: typeof measuredFigureTargets;
   /**
@@ -135,9 +137,10 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
   ];
   const signature = request.activeVisual ? boardSignature(request.activeVisual) : null;
   const shown = shownBoards(input.tour, request.stepId).filter((board) => !signature || board.signature !== signature);
-  const task = `${askInstructions(language)}\n${authoringRules.join(' ')}\nKeep quotations in the original document language. Explain them in the answer language.\n\n${askContext(request, retrieval, doc, step, input.image, shown)}`;
+  const task = `${askInstructions(language, input.purpose)}\n${authoringRules.join(' ')}\nKeep quotations in the original document language. Explain them in the answer language.\n\n${askContext(request, retrieval, doc, step, input.image, shown)}`;
   const messages: MuseMessage[] = [
     { role: 'developer', content: SHARED_RULES },
+    ...(input.purpose === 'reading' ? [{ role: 'developer' as const, content: READING_NARRATION_RULES }] : []),
     { role: 'user', content: `<DOCUMENT>\n${paperBlock(doc)}\n</DOCUMENT>` },
     {
       role: 'user',
@@ -150,6 +153,7 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
   const schema = answerSchema(
     retrieval,
     input.image?.kind === 'figure' && !request.selection ? REGION_NAMES : ['whole'],
+    input.purpose,
   );
   const reasons = new Set<string>();
   const context: AnswerContext = {

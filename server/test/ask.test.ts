@@ -217,6 +217,7 @@ const ask = (
   request: AskRequest,
   model: (r: Request) => unknown,
   extra: {
+    purpose?: 'reading';
     tour?: Tour;
     image?: TourImage;
     images?: TourImage[];
@@ -234,6 +235,29 @@ const ask = (
   });
 const types = (step: Step) => step.actions.map((a) => a.type);
 const highlighted = (step: Step) => step.actions.flatMap((a) => (a.type === 'highlight' ? a.targets : []));
+
+test('inline reading uses continuation authoring and an empty follow-up schema while ordinary questions stay standalone', async () => {
+  for (const purpose of [undefined, 'reading'] as const) {
+    let calls = 0;
+    await ask({ question: 'Explain the scaling.' }, (request) => {
+      calls++;
+      if (purpose === 'reading') {
+        assert.match(request.task, /inline visual explanation/);
+        assert.match(request.task, /do not repeat its introduction/);
+        assert.doesNotMatch(request.task, /EXAMPLE OUTPUT for a different document/);
+        assert.equal(request.schema.properties.followups.maxItems, 0);
+        assert.match(JSON.stringify(request.messages.filter((message: any) => message.role === 'developer')), /only the additional explanation/);
+        assert.match(request.schema.properties.plan.description, /preceding prose already said/);
+      } else {
+        assert.match(request.task, /answer the learner's question as a short spoken micro-tour/);
+        assert.match(request.task, /EXAMPLE OUTPUT for a different document/);
+        assert.equal(request.schema.properties.followups.minItems, 2);
+      }
+      return { answerable: 'yes', steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }], followups: [] };
+    }, { purpose });
+    assert.equal(calls, 1);
+  }
+});
 
 test('retrieval ranks the passage that answers the question first', () => {
   assert.equal(retrieve(doc, { question: 'What BLEU score does the big model reach?' }).ranked[0].id, 'p3.s1');

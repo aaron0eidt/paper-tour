@@ -14,20 +14,16 @@ import { canonicalTimeline, timelineProblems } from '../../shared/timeline';
 import type { BoardItem, Color, FormulaTerm } from './types';
 
 const COLORS: readonly string[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
-/** Term colours in order, when the tour does not choose one: distinct and readable on the dark board. */
+/** Stable semantic colours; the active theme provides their actual ink. */
 export const BOARD_PALETTE: Color[] = ['blue', 'orange', 'green', 'pink', 'yellow'];
 
-/**
- * Ink for each colour on the dark board: lighter steps of the page colours, for glyphs and strokes.
- * Every pair stays apart under protanopia and deuteranopia (OKLab ΔE ≥ 8.9) and for full colour
- * vision (ΔE ≥ 15.9), and each clears 3:1 on the board.
- */
+/** CSS tokens keep SVGs, KaTeX terms and their legends in sync without rebuilding their data. */
 export const BOARD_INK: Record<Color, string> = {
-  blue: '#4c95ff',
-  orange: '#ff9a4d',
-  green: '#36c793',
-  pink: '#f497e0',
-  yellow: '#ecdc5c',
+  blue: 'var(--canvas-blue)',
+  orange: 'var(--canvas-orange)',
+  green: 'var(--canvas-green)',
+  pink: 'var(--canvas-pink)',
+  yellow: 'var(--canvas-yellow)',
 };
 
 export type FlowItem = Extract<BoardItem, { kind: 'flow' }>;

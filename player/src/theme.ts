@@ -13,6 +13,8 @@ export function resolvedTheme(preference: ThemePreference, systemLight: boolean)
 }
 
 let preference: ThemePreference = 'dark';
+let activeTheme: 'dark' | 'light' = 'dark';
+export const getResolvedTheme = () => activeTheme;
 const listeners = new Set<() => void>();
 export const getThemePreference = () => preference;
 export function subscribeTheme(listener: () => void) {
@@ -22,10 +24,11 @@ export function subscribeTheme(listener: () => void) {
   };
 }
 function applyTheme() {
-  document.documentElement.dataset.theme = resolvedTheme(
+  activeTheme = resolvedTheme(
     preference,
     matchMedia('(prefers-color-scheme: light)').matches,
   );
+  document.documentElement.dataset.theme = activeTheme;
   listeners.forEach((listener) => listener());
 }
 export function setThemePreference(value: ThemePreference) {

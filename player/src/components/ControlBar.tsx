@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import type { EngineState, FlatStep } from '../engine';
 import { formatTime } from '../tourClock';
 import type { TourClock } from '../tourClock';
@@ -22,6 +22,7 @@ interface Props {
   state: EngineState;
   /** The tour is still being written (or stopped being written); null for a finished one. */
   growth?: Growth | null;
+  readingSettings?: ReactNode;
   speed: number;
   muted: boolean;
   onToggle(): void;
@@ -48,6 +49,7 @@ export function ControlBar({
   clock,
   state,
   growth,
+  readingSettings,
   speed,
   muted,
   onToggle,
@@ -240,6 +242,7 @@ export function ControlBar({
           </summary>
           <div className="playback-panel">
             <h3>Audio settings</h3>
+            {readingSettings}
             {onVoiceChange && !current?.step.audio && (
               <label className="voice-setting">
                 <span>Voice</span>

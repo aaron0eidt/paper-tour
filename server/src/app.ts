@@ -1,3 +1,4 @@
+import type { ReadingPassageRequest } from '../../shared/reading';
 import type { TourModelSelection, UploadSelection } from '../../shared/contracts';
 import type { TourProfileDraft } from '../../shared/tourProfiles';
 import { TOUR_STRUCTURES, TOUR_DEPTHS, TOUR_AUDIENCES } from '../../shared/tourProfiles';
@@ -683,6 +684,14 @@ export async function createApp(options: Options) {
           );
         },
       );
+      api.post<{ Params: { id: string }; Body: ReadingPassageRequest }>(
+        '/documents/:id/reading-passage',
+        { schema: { params: documentParams, body: objectBody({ analysisId: uuid, targetId: text(200), removeCitations: { type: 'boolean' } }, ['analysisId', 'targetId']) } },
+        async (req, reply) => {
+          if (!service.readingPassage) throw new HttpError(503, 'reading_unavailable', 'Visual readings are unavailable.');
+          return whileConnected(reply, (signal) => service.readingPassage!(owner(req), req.params.id, req.body, signal));
+        },
+      );
       // A loose box dragged over a figure, answered with the outline of the object inside it (snap.ts).
       api.post<{ Params: { id: string }; Body: SnapRequest }>(
         '/documents/:id/snap',
@@ -741,6 +750,14 @@ export async function createApp(options: Options) {
             return whileConnected(reply, (signal) =>
               answerResponse(reply, req.headers.accept, () => ask(req.params.paper, req.body, signal)),
             );
+          },
+        );
+        demo.post<{ Params: { paper: string }; Body: { targetId: string; removeCitations?: boolean } }>(
+          '/:paper/reading-passage',
+          { schema: { params: objectBody({ paper: { type: 'string', pattern: DEMO_PAPER.source } }, ['paper']), body: objectBody({ targetId: text(200), removeCitations: { type: 'boolean' } }, ['targetId']) } },
+          async (req, reply) => {
+            if (!options.service.demoReadingPassage) throw new HttpError(503, 'reading_unavailable', 'Visual readings are unavailable.');
+            return whileConnected(reply, (signal) => options.service.demoReadingPassage!(req.params.paper, req.body.targetId, signal, req.body.removeCitations));
           },
         );
         demo.post<{ Params: { paper: string }; Body: SnapRequest }>(
