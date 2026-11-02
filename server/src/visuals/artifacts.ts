@@ -18,6 +18,8 @@ const artifact = (row: Row): VisualArtifact => ({
 });
 const checkedItem = (item: BoardItem) => {
   if (!item || !BOARD_KINDS.includes(item.kind)) throw new HttpError(400, 'invalid_visual', 'Unknown visual kind.');
+  if (item.kind !== 'program' && item.kind !== 'plotly')
+    throw new HttpError(400, 'invalid_visual', 'Native boards stay in their source tour; artifacts store authored visuals.');
   const check = checkBoard(item.kind as BoardKind, item, JSON.stringify(item));
   if (!check.item || check.problems.length) throw new HttpError(400, 'invalid_visual', check.problems.join('; '));
   return check.item;

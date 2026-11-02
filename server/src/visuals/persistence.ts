@@ -6,6 +6,7 @@ import type { AskAnswer } from '../harness/ask-types';
 import { Database, type Db } from '../db';
 import { HttpError } from '../errors';
 import { VisualArtifactService } from './artifacts';
+import { isAuthoredVisual } from './inspect';
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -75,6 +76,8 @@ export function persistTourVisuals(
   const stored = new Map<string, Promise<VisualArtifactRef>>();
   const write = serialWriter();
   return mapTourVisuals(tour, (item) => {
+    // Native boards were grounded against the paper during generation and stay inline.
+    if (!isAuthoredVisual(item)) return Promise.resolve(undefined);
     const key = JSON.stringify(item);
     let pending = stored.get(key);
     if (!pending) {
@@ -135,7 +138,8 @@ export async function persistAnswerVisuals(
           ...step,
           actions: await Promise.all(
             step.actions.map(async (action) =>
-              action.type === 'board' ? { ...action, artifact: await save(action.item) } : action,
+              action.type === 'board' && isAuthoredVisual(action.item)
+                ? { ...action, artifact: await save(action.item) } : action,
             ),
           ),
         })),

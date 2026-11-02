@@ -22,7 +22,7 @@ export interface VisualArtifactInput {
 /** Pure immutable traversal; storing a conversation variant never rewrites the source tour. */
 export async function mapTourVisuals(
   tour: Tour,
-  store: (item: BoardItem, stepId: string) => Promise<VisualArtifactRef>,
+  store: (item: BoardItem, stepId: string) => Promise<VisualArtifactRef | undefined>,
 ): Promise<Tour> {
   return {
     ...tour,
@@ -33,9 +33,11 @@ export async function mapTourVisuals(
           chapter.steps.map(async (step) => ({
             ...step,
             actions: await Promise.all(
-              step.actions.map(async (action) =>
-                action.type === 'board' ? { ...action, artifact: await store(action.item, step.id) } : action,
-              ),
+              step.actions.map(async (action) => {
+                if (action.type !== 'board') return action;
+                const artifact = await store(action.item, step.id);
+                return artifact ? { ...action, artifact } : action;
+              }),
             ),
           })),
         ),

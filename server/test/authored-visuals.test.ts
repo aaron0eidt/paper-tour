@@ -134,6 +134,21 @@ test('artifact mapping forks references while original tour remains byte-identic
   assert.equal(action.type === 'board' && action.artifact?.revision, 1);
 });
 
+test('Plotly rejects resource-loading commands and relayout keys while accepting ordinary data labels', () => {
+  const figure = JSON.parse(measured.figure);
+  const withLayout = (layout: object) => ({ ...measured, figure: JSON.stringify({ ...figure, layout }) });
+  for (const layout of [
+    { updatemenus: [{ type: 'buttons', buttons: [{ method: 'relayout', args: [{ 'images[0].source': '//attacker.example/pixel' }] }] }] },
+    { 'images[0].source': '//attacker.example/pixel' },
+    { sliders: [{ steps: [{ method: 'relayout', args: ['images[0].source', '//attacker.example/pixel'] }] }] },
+    { annotations: [{ text: '//attacker.example/pixel' }] },
+    { title: { text: 'url(https:\\attacker.example/pixel)' } },
+    { shapes: [{ source: 'https://attacker.example/pixel' }] },
+  ]) assert.ok(plotlyProblems(withLayout(layout)).length, JSON.stringify(layout));
+  assert.deepEqual(plotlyProblems(withLayout({ title: { text: 'Training data: WMT14' } })), []);
+  assert.ok(plotlyProblems({ ...measured, figure: JSON.stringify({ ...figure, frames: [] }) }).length);
+});
+
 test('document visual references are grounded deterministically before model review', () => {
   assert.deepEqual(sourceReferenceProblems(measured, ['table-results']), []);
   assert.match(sourceReferenceProblems(measured, ['other-table']).join(' '), /Unknown PDF source reference/);

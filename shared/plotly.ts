@@ -16,6 +16,26 @@ export interface PlotlyFigure {
   data: Record<string, unknown>[];
   layout?: Record<string, unknown>;
 }
+// Data-only plotting vocabulary. Interactive controls belong to the host, never figure-supplied commands.
+const FIGURE_KEYS = new Set(['data', 'layout']);
+const SAFE_KEYS = new Set(
+  `type x y z name mode text textposition textfont texttemplate hovertext hoverinfo hovertemplate
+  customdata meta marker line opacity visible showlegend legendgroup legendgrouptitle connectgaps fill fillcolor
+  color colors colorway colorscale autocolorscale reversescale showscale colorbar cmin cmax cmid cauto zmin zmax zmid zauto
+  size sizemode sizeref sizemin symbol width dash shape smoothing orientation offset base error_x error_y error_z
+  array arrayminus symmetric thickness value valueminus xaxis yaxis zaxis scene surfacecolor contours contour start end
+  coloring operation levels ncontours autocontour transpose x0 dx y0 dy zsmooth hoverongaps
+  title subtitle font family range autorange rangemode tickmode tickvals ticktext tickformat tickprefix ticksuffix
+  nticks dtick tick0 tickangle ticks ticklen tickwidth tickcolor showticklabels showgrid gridcolor gridwidth zeroline
+  zerolinecolor zerolinewidth showline linecolor linewidth mirror automargin fixedrange scaleanchor scaleratio
+  domain anchor overlaying side position matches exponentformat showexponent separatethousands
+  showlegend legend bgcolor bordercolor borderwidth traceorder xanchor yanchor orientation
+  margin l r t b pad autoexpand width height autosize paper_bgcolor plot_bgcolor hovermode dragmode barmode bargap bargroupgap
+  annotations shapes xref yref ax ay axref ayref showarrow arrowhead arrowsize arrowwidth arrowcolor standoff
+  align valign borderpad captureevents layer x0 x1 y0 y1 path fillrule
+  camera eye center up projection aspectmode aspectratio calendar categoryorder categoryarray
+  itemsizing itemwidth entrywidth entrywidthmode indentation tracegroupgap`.split(/\s+/),
+);
 const object = (properties: Record<string, unknown>) => ({
   type: 'object',
   additionalProperties: false,
@@ -95,6 +115,8 @@ export function plotlyProblems(raw: unknown): string[] {
     problems.push('Provide valid sourceRefs.');
   try {
     const f = JSON.parse(x.figure) as PlotlyFigure;
+    if (!f || typeof f !== 'object' || Object.keys(f).some((key) => !FIGURE_KEYS.has(key)))
+      throw Error('Plotly figures contain only data and layout.');
     if (!Array.isArray(f.data) || f.data.length < 1 || f.data.length > 12) throw Error('Use 1–12 Plotly traces.');
     for (const trace of f.data)
       if (!trace || !['scatter', 'bar', 'heatmap', 'contour', 'scatter3d', 'surface'].includes(String(trace.type)))
@@ -102,13 +124,16 @@ export function plotlyProblems(raw: unknown): string[] {
     let nodes = 0;
     const walk = (value: unknown, depth = 0): void => {
       if (++nodes > 30000 || depth > 16) throw Error('Plotly figure exceeds its complexity budget.');
-      if (typeof value === 'string' && (/[<>]|(?:https?:|file:|javascript:|data:)/i.test(value) || value.length > 1000))
+      if (
+        typeof value === 'string' &&
+        (/[<>]|\/\/|(?:https?:|file:|javascript:|url\s*\(|data:(?:[\w.+-]+\/|;))/i.test(value) || value.length > 1000)
+      )
         throw Error('Plotly text must be plain text without external resources.');
       if (typeof value === 'number' && !Number.isFinite(value)) throw Error('Plotly values must be finite.');
       if (Array.isArray(value)) value.forEach((v) => walk(v, depth + 1));
       else if (value && typeof value === 'object')
         for (const [key, v] of Object.entries(value)) {
-          if (['images', 'source', 'href', 'mapbox', 'geo', 'template'].includes(key))
+          if (!(depth === 0 ? FIGURE_KEYS : SAFE_KEYS).has(key) || /[.\[\]]/.test(key))
             throw Error(`Plotly ${key} is not supported.`);
           walk(v, depth + 1);
         }

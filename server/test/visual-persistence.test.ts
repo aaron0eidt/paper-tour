@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 import type { BoardItem, Doc, Step, Tour } from '../../shared/paper';
 import type { ProgramItem } from '../../shared/program';
 import type { AskAnswer, AskRequest } from '../src/harness/ask-types';
-import { activeBoard, withVisualParameters } from '../src/visuals/persistence';
+import { activeBoard, persistTourVisuals, withVisualParameters } from '../src/visuals/persistence';
+import { checkBoard } from '../src/harness/board';
 import { VisualArtifactService } from '../src/visuals/artifacts';
 import { Database } from '../src/db';
 import { DocumentService } from '../src/service';
@@ -47,6 +48,20 @@ const board = (step: Step) => {
   return action;
 };
 const status = (expected: number) => (error: unknown) => error instanceof HttpError && error.status === expected;
+
+test('grounded native timelines remain inline instead of being checked against their own JSON at save time', async () => {
+  const checked = checkBoard('timeline', {
+    kind: 'timeline', unit: 'month', source: 'document', anchor: { label: 'Term end' },
+    events: [{ label: 'Notice', after: 'Term end', offset: -3 }, { label: 'End', at: 0 }],
+  }, 'Notice is due three months before the end, at month 0.');
+  assert.deepEqual(checked.problems, []);
+  assert(checked.item);
+  const tour: Tour = { schema: 'paper-tour/tour@0.1', title: 'Notice period', paper: 'test',
+    chapters: [{ id: 'notice', title: 'Notice', steps: [boardStep('notice', checked.item)] }],
+  };
+  const artifacts = { create: async () => { throw new Error('Native board must stay inline'); } } as unknown as VisualArtifactService;
+  assert.deepEqual(await persistTourVisuals(artifacts, 'owner', 'doc', 'analysis', 'tour', tour, {} as never), tour);
+});
 
 test('live parameters use saved code, data and bounds while accepting only finite in-range numeric values', () => {
   const forged = {

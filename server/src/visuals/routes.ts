@@ -2,6 +2,18 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { BoardItem } from '../../../shared/paper';
 import type { VisualArtifactInput } from '../../../shared/visualArtifacts';
 import type { VisualArtifactService } from './artifacts';
+import { inspectAuthoredVisual, isAuthoredVisual } from './inspect';
+import { checkBoard } from '../harness/board';
+import { HttpError } from '../errors';
+
+async function inspectUpload(item: BoardItem) {
+  if (!item || !isAuthoredVisual(item))
+    throw new HttpError(400, 'invalid_visual', 'Upload an authored program or plot.');
+  const checked = checkBoard(item.kind, item);
+  if (checked.problems.length) throw new HttpError(400, 'invalid_visual', checked.problems.join('; '));
+  const review = await inspectAuthoredVisual(item, AbortSignal.timeout(10000));
+  if (review.problems.length) throw new HttpError(400, 'invalid_visual', review.problems.join('; '));
+}
 const uuid = { type: 'string', format: 'uuid' };
 const ref = {
   type: 'object',
@@ -43,7 +55,10 @@ export function visualArtifactRoutes(
         },
       },
     },
-    (request) => service.create(owner(request), request.params.id, request.body),
+    async (request) => {
+      await inspectUpload(request.body.item);
+      return service.create(owner(request), request.params.id, request.body);
+    },
   );
   app.post<{ Params: { id: string; visualId: string; revision: string }; Body: { item: BoardItem } }>(
     '/documents/:id/visuals/:visualId/:revision',
@@ -59,12 +74,14 @@ export function visualArtifactRoutes(
         },
       },
     },
-    (request) =>
-      service.revise(
+    async (request) => {
+      await inspectUpload(request.body.item);
+      return service.revise(
         owner(request),
         request.params.id,
         { id: request.params.visualId, revision: Number(request.params.revision) },
         request.body.item,
-      ),
+      );
+    },
   );
 }
