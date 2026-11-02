@@ -2,6 +2,7 @@ import { Camera, MIN_TEXT_PX, READ_TEXT_PX, clampView, fitWidthView, flightDurat
 import { layoutPages } from '../src/layout';
 import { Resolver } from '../src/resolve';
 import type { Doc } from '../src/types';
+import { parseMaxAutoZoom } from '../src/readerPreferences';
 
 // Page-width is the reading default; detail zoom must be deliberate and yield to a side explanation.
 {
@@ -25,7 +26,30 @@ import type { Doc } from '../src/types';
   if (besideBoard.s !== focus.s || besideBoard.cy !== focus.cy) throw new Error('A side explanation keeps source context at reading width');
   const overview = cameraView({ type: 'focus', target: 'page1' }, resolver, layout, vp)!;
   if (overview.s !== readingScale(page.width, vp)) throw new Error('Explicit page focus must remain an overview');
+  for (const width of [500, 1000, 2400]) for (const maxZoom of [1, 1.5, 2, 3]) {
+    for (const action of [{ type: 'zoom', target: 'eq1' }, { type: 'focus', target: 's1' }] as const) {
+      const frame = frameFor(action, resolver, layout, { width, height: 700 }, {
+        maxZoom, insets: { top: 0, left: 0, right: 0, bottom: 180 },
+      })!;
+      if (frame.view.s > maxZoom) throw new Error('Automatic framing exceeded the personal zoom ceiling');
+      const screen = project([page.x + 200, page.y + 300, page.x + 240, page.y + 314], frame.view, { width, height: 700 });
+      if (screen.left < 0 || screen.right > width || screen.top < 0 || screen.bottom > 520)
+        throw new Error('The limited zoom must keep its source visible above the question dock');
+    }
+  }
+  for (const invalid of [null, '', 'NaN', 'Infinity', '99', '401', '{bad}']) {
+    if (parseMaxAutoZoom(invalid) !== 200) throw new Error('Invalid zoom preference must use the safe default');
+  }
+  if (parseMaxAutoZoom('150') !== 150) throw new Error('The saved zoom preference must be respected');
+  const manual = new Camera();
+  manual.setLayout(layout);
+  manual.setViewport(vp);
+  manual.jumpTo({ ...focus, s: 1 });
+  manual.zoomAt(5, 400, 300);
+  if (manual.getView().s !== 5) throw new Error('The automatic ceiling must not restrict manual zoom');
+  manual.destroy();
   console.log('  ok    page-width reading and side explanations preserve deliberate detail zoom');
+  console.log('  ok    personal automatic zoom limits preserve source geometry and independent manual zoom');
 }
 
 // Opening/closing a side panel refits an old 400% crop without losing the reading anchor.

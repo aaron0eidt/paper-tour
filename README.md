@@ -332,6 +332,8 @@ OpenCV for measuring diagram components, which runs locally before figure cues a
 Uploading a PDF prepares it for reading. Open a new paper to choose its tour type, explanation depth and reader
 familiarity before creating the first tour, or choose **Read PDF first** to browse without starting generation.
 Existing tours remain available; **New tour** creates another version with its own profile.
+Under **Settings → Reading**, a browser-local automatic zoom ceiling keeps tours and answers from zooming in too far
+(200% by default). Manual PDF zoom remains independent.
 
 ```sh
 npm ci
