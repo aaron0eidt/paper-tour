@@ -273,3 +273,24 @@ test('authenticated model catalog and per-request model selections reach the ser
     await app.close();
   }
 });
+
+test('equation reading requires authentication, an analysis and a server-owned equation reference', async () => {
+  let calls = 0;
+  const app = await createApp({ authenticate: async (token) => token === 'valid' ? 'owner' : null,
+    service: service({ readingPassage: async (owner, documentId, request, signal) => {
+      assert.equal(owner, 'owner'); assert.equal(documentId, id);
+      assert.equal(request.analysisId, id); assert.equal(request.targetId, 'p1.b3');
+      assert.ok(signal); calls++;
+      return { targetId: request.targetId, speech: 'The output is a weighted average.', language: 'en-US' };
+    } }) });
+  try {
+    const url = `/api/documents/${id}/reading-passage`;
+    const payload = { analysisId: id, targetId: 'p1.b3' };
+    assert.equal((await app.inject({ method: 'POST', url, payload })).statusCode, 401);
+    assert.equal((await app.inject({ method: 'POST', url, headers: { authorization: 'Bearer valid' }, payload: { targetId: 'p1.b3' } })).statusCode, 400);
+    const result = await app.inject({ method: 'POST', url, headers: { authorization: 'Bearer valid' }, payload });
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.json().speech, 'The output is a weighted average.');
+    assert.equal(calls, 1);
+  } finally { await app.close(); }
+});

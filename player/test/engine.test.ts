@@ -171,6 +171,60 @@ await test('the first camera move starts before narration even in an older delay
   eq(delayed.chapters[0].steps[0].actions[0].at_word, 4, 'saved tour stays unchanged');
 });
 
+await test('lazy equation speech updates captions and words before speaking, without mutating the source', async () => {
+  const narrator = new FakeNarrator();
+  const original = structuredClone(tour);
+  const engine = new TourEngine(original, { narrator, prepareNarration: async () => 'The weights sum to one.' });
+  engine.play();
+  await Promise.resolve(); await Promise.resolve();
+  eq(narrator.last.req.text, 'The weights sum to one.');
+  eq(engine.steps[0].words, ['The', 'weights', 'sum', 'to', 'one.']);
+  eq(engine.tour.chapters[0].steps[0].say, 'The weights sum to one.');
+  eq(original.chapters[0].steps[0].say, tour.chapters[0].steps[0].say);
+  engine.destroy();
+});
+
+await test('pausing cancels lazy speech and a failed explanation never reads placeholder or raw symbols', async () => {
+  const narrator = new FakeNarrator();
+  let resolve!: (text: string) => void;
+  let signal!: AbortSignal;
+  const engine = new TourEngine(tour, { narrator, prepareNarration: (_step, cancellation) => {
+    signal = cancellation;
+    return new Promise<string>((done) => { resolve = done; });
+  } });
+  engine.play(); await Promise.resolve();
+  engine.pause();
+  eq(signal.aborted, true);
+  resolve('Do not speak this cancelled result.');
+  await Promise.resolve(); await Promise.resolve();
+  eq(narrator.calls.length, 0);
+  engine.destroy();
+  const failed = new TourEngine(tour, { narrator, prepareNarration: async () => { throw new Error('Unreadable equation'); } });
+  failed.play(); await Promise.resolve(); await Promise.resolve();
+  eq(failed.getState().status, 'paused');
+  eq(narrator.calls.length, 0);
+  failed.destroy();
+});
+
+await test('prepared visual annotations follow their spoken words and pause resumes the explanation in place', async () => {
+  const narrator = new FakeNarrator();
+  const prepared = { say: 'One two. Three four five.', actions: [
+    { type: 'focus' as const, target: 'fig1' },
+    { type: 'highlight' as const, targets: ['p1.s1'], at_word: 2 },
+  ] };
+  const engine = new TourEngine(tour, { narrator, prepareNarration: async () => prepared });
+  engine.play();
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  eq(narrator.last.req.text, prepared.say);
+  eq(engine.getState().overlays.length, 0);
+  narrator.last.cb.onWord(3);
+  eq(engine.getState().overlays.some((o) => o.action.type === 'highlight'), true);
+  engine.pause(); engine.play();
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  eq(narrator.last.req.startWord, 2, 'continue at the current sentence, not the start of the visual explanation');
+  engine.destroy();
+});
+
 await test('narration waits for the initial camera and pause cancels that wait', async () => {
   const narrator = new FakeNarrator();
   let ready!: () => void;

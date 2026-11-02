@@ -2,6 +2,8 @@ import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView, slideView } from './camera';
 import type { View } from './camera';
+import { readingTour, readingStepOnPage, readingStepForTarget, DEFAULT_READING_OPTIONS } from './readAloud';
+import { useReadingSpeech } from './useReadingSpeech';
 import { getMaxAutoZoom, subscribeReadingPreferences } from './readerPreferences';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
@@ -10,11 +12,11 @@ import { clampSlide, readerMode, stepSlides, stepsBySlide } from './deck';
 import { coverVisible, lengthLabel, readerTitle, recapVisible } from './tourSummary';
 import { loadManifest, loadPaper } from './load';
 import type { Loaded } from './load';
-import { createNarrator, SilentNarrator, useBrowserVoices } from './narration';
+import { createNarrator, SilentNarrator, useBrowserVoices, speechAvailable } from './narration';
 import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
-import type { BBox, Doc, Tour } from './types';
+import type { BBox, Doc, Tour, Step } from './types';
 import type { BoardItem } from '../../shared/paper';
 import { markPlayback } from './marks';
 import { keyBelongsTo, keyCommand } from './keys';
@@ -142,6 +144,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [muted, setMuted] = useState(false);
   const browserVoices = useBrowserVoices();
   const [speed, setSpeed] = useState(1);
+  const [readAloud, setReadAloud] = useState(false);
+  const [readingOptions, setReadingOptions] = useState(DEFAULT_READING_OPTIONS);
+  const playbackPlaces = useRef(new Map<string, string>());
+  const guidedCheckpoint = useRef<{ tourId: string | null; stepId: string | null }>({ tourId: null, stepId: null });
   const [debug, setDebug] = useState(false);
   const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
   const [engine, setEngine] = useState<TourEngine | null>(null);
@@ -162,6 +168,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     () => (documentId ? { documentId } : { paper: params.paper }),
     [documentId, params.paper],
   );
+  const readingSpeech = useReadingSpeech(askSource, loadedAnalysisId, readingOptions.removeCitations);
+  const prepareReading = useRef(readingSpeech.prepare);
+  prepareReading.current = readingSpeech.prepare;
   const selectionCheckpoint = useRef<{ engine: TourEngine | null; playing: boolean } | null>(null);
   useEffect(() => {
     setRegionSelection(null);
@@ -367,11 +376,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     () => (tourOnScreen ? null : playablePartial(follow.held, loaded?.doc ?? null)),
     [tourOnScreen, follow.held, loaded?.doc],
   );
-  const tourSource: Tour | null = finishedTour ?? partialTour;
-  const fromPartial = !finishedTour && !!partialTour;
+  const spokenDocument = useMemo(() => loaded?.doc ? readingTour(loaded.doc, readingOptions) : null, [loaded?.doc, readingOptions]);
+  const tourSource: Tour | null = readAloud ? spokenDocument : finishedTour ?? partialTour;
+  const fromPartial = !readAloud && !finishedTour && !!partialTour;
   const growth = fromPartial ? growthOf(follow.held, status) : null;
   const growing = !!growth && growth.phase !== 'stopped';
-  const sourceKey = tourSourceKey(manifest?.selectedTour?.id, !!finishedTour, generationId);
+  const sourceKey = readAloud ? `reading:${loadedAnalysisId ?? params.paper}|${readingOptions.removeCitations}|${readingOptions.includeReferences}` : tourSourceKey(manifest?.selectedTour?.id, !!finishedTour, generationId);
 
   // The tour says what the document is: a lecture plays as a deck, one slide at a time; anything else as a paper.
   const deck = useMemo(() => readerMode(tourSource, loaded?.sizes ?? []) === 'deck', [tourSource?.doc_type, loaded?.sizes]);
@@ -483,6 +493,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         narrator: new SilentNarrator(),
         fallbackNarrator: new SilentNarrator(),
         beforeNarration: (signal) => camera.whenSettled(signal),
+        ...(key.startsWith('reading:') ? { prepareNarration: (step: Step, signal: AbortSignal) => prepareReading.current(step, signal) } : {}),
         open,
       });
       // Dispatch camera commands synchronously, before narration waits for the flight.
@@ -496,8 +507,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       });
       if (held) {
         const was = held.engine.getState();
+        if (was.status !== 'idle') playbackPlaces.current.set(held.key.split('|')[0], held.engine.steps[was.index]?.step.id ?? '');
         carry.current =
-          held.partial && was.status !== 'idle'
+          held.partial && !key.startsWith('reading:') && was.status !== 'idle'
             ? {
                 stepId: held.engine.steps[was.index]?.step.id ?? '',
                 playing: was.status === 'playing',
@@ -607,7 +619,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     const board = visualEngine?.getState().board;
     const draft = visualDraft.current;
     return {
-      stepId: tour && tour.status !== 'idle' ? main?.steps[tour.index]?.step.id : undefined,
+      stepId: !readAloud && tour && tour.status !== 'idle' ? main?.steps[tour.index]?.step.id : undefined,
       figureId: !regionSelection && ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
       selection: regionSnap.region ?? undefined,
       analysisId: loadedAnalysisId,
@@ -615,7 +627,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       activeVisual: draft?.engine === visualEngine && draft?.key === board?.key ? draft?.item : board?.item ?? undefined,
       ...(board?.artifact ? { visualId: board.artifact.id, visualRevision: board.artifact.revision } : {}),
     };
-  }, [camera, regionSelection, regionSnap.region, loadedAnalysisId]);
+  }, [camera, regionSelection, regionSnap.region, loadedAnalysisId, readAloud]);
 
   // A question pauses whatever plays; the first one of a conversation remembers where the tour was.
   const setAside = useCallback(() => {
@@ -817,6 +829,18 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     }
     setAsked([]);
     let at: number | null = null;
+    const remembered = playbackPlaces.current.get(handle.current?.key.split('|')[0] ?? '');
+    if (remembered) {
+      const index = engine.steps.findIndex((s) => s.step.id === remembered);
+      if (index >= 0) { engine.goTo(index); setRestored(index); return; }
+    }
+    if (readAloud && loaded?.doc) {
+      const index = readingStepOnPage(engine.tour, loaded.doc, currentPageRef.current);
+      engine.goTo(index);
+      setCoverGone(true);
+      setRestored(index);
+      return;
+    }
     const saved = savedPosition.current;
     // A place saved in a tour still being written has no tour of its own yet.
     if (saved?.stepId && (saved.tourId === null || saved.tourId === (manifestRef.current?.selectedTour?.id ?? null))) {
@@ -876,10 +900,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     tourId: selectedTourId,
     stepId: mainState.status === 'idle' ? null : (engine?.steps[mainState.index]?.step.id ?? null),
   });
-  tourCheckpoint.current = {
+  if (!readAloud && !handle.current?.key.startsWith('reading:')) guidedCheckpoint.current = {
     tourId: selectedTourId,
     stepId: mainState.status === 'idle' ? null : (engine?.steps[mainState.index]?.step.id ?? null),
   };
+  tourCheckpoint.current = readAloud ? guidedCheckpoint.current : { ...guidedCheckpoint.current };
   useEffect(() => {
     if (!layout) return;
     const update = () => {
@@ -971,6 +996,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       if (!resolver || !layout) return;
       setNavigationOpen(false);
       active?.pause();
+      if (readAloud && loaded?.doc && engine) {
+        leaveAnswer();
+        const block = loaded.doc.sections.find((s) => s.id === id)?.block
+          ?? loaded.doc.sentences.find((s) => s.id === id)?.block ?? id;
+        const index = readingStepForTarget(engine.tour, loaded.doc, block);
+        if (index >= 0) engine.goTo(index);
+      }
       const action = { type: 'focus' as const, target: id };
       frame({ seq: 1, key: id, action }, false);
       const overlay =
@@ -979,7 +1011,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           : { type: 'box' as const, target: id, color: 'blue' as const };
       setSelection([{ key: `selection:${id}`, step: -1, action: overlay, persist: false }]);
     },
-    [resolver, layout, active, frame],
+    [resolver, layout, active, frame, readAloud, loaded?.doc, engine, leaveAnswer],
   );
 
   useEffect(() => {
@@ -1031,7 +1063,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // learner is asked to try, or while a question has set it aside. Opening it holds the tour on the step; Escape goes on
   // from there, and a choice asks about the step through the ask flow, so its answer plays as a short tour and "Back to
   // the tour" returns to the step.
-  const canUnclear = unclearOffered({
+  const canUnclear = !readAloud && unclearOffered({
     asking: !!loaded?.doc && !!engine,
     status: mainState.status,
     awaiting: mainState.awaiting,
@@ -1078,7 +1110,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     [],
   );
   const prefetchOn = prefetchWanted({
-    finished: !!loaded?.doc && !!engine && !growing && !fromPartial,
+    finished: !readAloud && !!loaded?.doc && !!engine && !growing && !fromPartial,
     steps: engine?.steps.length ?? 0,
     index: mainState.index,
     status: mainState.status,
@@ -1180,8 +1212,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   );
 
   const cardState = { hasTour: !!engine, status: mainState.status, index: mainState.index, preview: mainState.preview, restored, aside: !!answer || !!away };
-  const coverOpen = coverVisible({ ...cardState, dismissed: coverGone });
-  const endOpen = recapVisible({ ...cardState, dismissed: endGone });
+  const coverOpen = !readAloud && coverVisible({ ...cardState, dismissed: coverGone });
+  const endOpen = !readAloud && recapVisible({ ...cardState, dismissed: endGone });
   // A step that asks the learner to try first: its card shows while the tour waits.
   const coachStep = state.awaiting ? active?.steps[state.index] : undefined;
   const restoreConversationContext = useCallback(
@@ -1246,6 +1278,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   };
   const goPage = (page: number) => {
     if (!layout) return;
+    if (readAloud && engine && loaded?.doc) {
+      leaveAnswer();
+      engine.pause();
+      engine.goTo(readingStepOnPage(engine.tour, loaded.doc, page));
+      return;
+    }
     if (layout.deck) return pickSlide(page);
     const p = layout.pages[Math.max(0, Math.min(layout.pages.length - 1, page - 1))];
     if (!p) return;
@@ -1341,7 +1379,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             <TourGeneration
               documentId={documentId}
               generation={manifest.tourGeneration}
-              promptOnOpen={!manifest.tours.length}
+              promptOnOpen={!readAloud && !manifest.tours.length}
               activityRequest={activityRequest}
               canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
               onChanged={() => setManifestRefresh((value) => value + 1)}
@@ -1352,6 +1390,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                       engine?.pause();
                       setSelection([]);
                       if (tourId !== manifest.selectedTour?.id) picked.current = tourId;
+                      setReadAloud(false);
                       setActiveTour(tourId);
                       setTab('tour');
                     }
@@ -1411,12 +1450,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               <button
                 disabled={!prepared?.tour}
                 className={tab === 'tour' ? 'active' : ''}
-                onClick={() => setTab('tour')}
+                onClick={() => { setReadAloud(false); setTab('tour'); }}
               >
                 Tour
               </button>
             </div>
-            {(manifest?.tours.length ?? 0) > 1 && manifest && (
+            {!readAloud && (manifest?.tours.length ?? 0) > 1 && manifest && (
               <label className="reader-tour-picker">
                 Saved tour
                 <select
@@ -1428,6 +1467,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     setSelection([]);
                     savedPosition.current = null;
                     picked.current = event.target.value;
+                    setReadAloud(false);
                     setActiveTour(event.target.value);
                     setTab('tour');
                   }}
@@ -1575,6 +1615,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           >
             IDs
           </button>
+          <button className={`reader-reading-toggle${readAloud ? ' active' : ''}`} aria-pressed={readAloud}
+            disabled={!loaded?.doc} onClick={() => {
+              leaveAnswer(); engine?.pause(); setSelection([]);
+              setReadAloud((reading) => !reading); setTab('document');
+            }} title={readAloud ? 'Return to the guided tour' : 'Read the original paper aloud'}>
+            {readAloud ? 'Exit read aloud' : 'Read aloud'}
+          </button>
           {chip && (
             <div className="chapter-chip" key={`${chip.number}:${chip.title}`} role="status">
               <b>{chip.number}</b>
@@ -1604,6 +1651,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 onSelectRegion={acceptRegionSelection}
                 onCancelSelection={cancelRegionSelection}
               />
+              {readAloud && (readingSpeech.busy || readingSpeech.error) && (
+                <div className="reader-reading-notice" role="status">
+                  {readingSpeech.busy ? 'Preparing the spoken text… Pause to interrupt.'
+                    : `Reading paused: ${readingSpeech.error} Press play to retry or skip to the next passage.`}
+                </div>
+              )}
               {coverOpen && engine && clock && (
                 <TourCover
                   tour={engine.tour}
@@ -1639,7 +1692,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                   onClose={() => setEndGone(true)}
                 />
               )}
-              {loaded?.doc && (
+              {loaded?.doc && !readAloud && (
                 <div className="ask-lane">
                   {coachStep?.checkpoint && (
                     <CoachCard key={coachStep.step.id} checkpoint={coachStep.checkpoint} kind={checkpointKind(coachStep.step.id)} onSolve={() => active?.reveal()} />
@@ -1658,7 +1711,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                       />
                     }
                     source={askSource}
-                    tourId={documentId ? selectedTourId : null}
+                    tourId={documentId && !readAloud ? selectedTourId : null}
                     context={askContext}
                     onRestoreContext={restoreConversationContext}
                     suggestions={prepared?.tour.suggested_questions}
@@ -1671,7 +1724,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     answerPaused={!!answer && answerState.status === 'paused'}
                     onPauseAnswer={() => now.current.answer?.pause()}
                     onContinueAnswer={() => now.current.answer?.play()}
-                    resumeLabel={engine ? (answer ? 'Back to the tour' : 'Continue tour') : 'Back to the document'}
+                    resumeLabel={readAloud ? 'Continue reading' : engine ? (answer ? 'Back to the tour' : 'Continue tour') : 'Back to the document'}
                     selection={regionSnap.region}
                     selectionSnapped={regionSnap.phase === 'snapped'}
                     selecting={selectingRegion}
@@ -1734,6 +1787,21 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             clock={clock}
             state={state}
             growth={answer ? null : growth}
+            readingSettings={readAloud ? (
+              <div className="reader-reading-options">
+                <strong>Original paper text</strong>
+                <p>The model prepares the original prose word for word, cleaning layout and citation markers only. Equations, tables and figures receive detailed explanations and visual annotations using the PDF and context. Authors, affiliations and page metadata are skipped.</p>
+                {!speechAvailable() && <p role="alert">Speech synthesis is unavailable in this browser. Open this document in a browser with text-to-speech to hear it.</p>}
+                <label><input type="checkbox" checked={readingOptions.removeCitations}
+                  onChange={(e) => setReadingOptions((o) => ({ ...o, removeCitations: e.target.checked }))} /> Skip citation markers</label>
+                <label><input type="checkbox" checked={readingOptions.includeReferences}
+                  onChange={(e) => setReadingOptions((o) => ({ ...o, includeReferences: e.target.checked }))} /> Read bibliography</label>
+                <button onClick={() => {
+                  leaveAnswer();
+                  if (engine && loaded?.doc) { engine.goTo(readingStepOnPage(engine.tour, loaded.doc, currentPageRef.current)); engine.play(); }
+                }}>Read from this page</button>
+              </div>
+            ) : null}
             speed={speed}
             muted={muted || params.silent}
             onToggle={() => {
