@@ -7,6 +7,7 @@ import { useModelCatalog } from './useModelCatalog';
 import { selectedApiModel } from './modelChoices';
 import { ModelPicker } from '../components/ModelPicker';
 import { getThemePreference, setThemePreference, subscribeTheme, THEME_OPTIONS } from '../theme';
+import { getMaxAutoZoom, setMaxAutoZoom, subscribeReadingPreferences } from '../readerPreferences';
 import '../profileSettings.css';
 
 export function ProfileSettings({ email }: { email: string }) {
@@ -21,6 +22,7 @@ export function ProfileSettings({ email }: { email: string }) {
   const connectionHeading = useRef<HTMLHeadingElement>(null);
   const modelHeading = useRef<HTMLHeadingElement>(null);
   const theme = useSyncExternalStore(subscribeTheme, getThemePreference);
+  const maxAutoZoom = useSyncExternalStore(subscribeReadingPreferences, getMaxAutoZoom);
   useEffect(() => {
     if (profile.data) setModel(profile.data.defaultModel);
   }, [profile.data?.defaultModel]);
@@ -79,6 +81,7 @@ export function ProfileSettings({ email }: { email: string }) {
         </div>
         <nav className="profile-nav" aria-label="Settings sections">
           <a href="#appearance">Appearance</a>
+          <a href="#reading">Reading</a>
           <a href="#connection">Connection</a>
           <a href="#tour-model">Tour model</a>
         </nav>
@@ -124,6 +127,23 @@ export function ProfileSettings({ email }: { email: string }) {
               ))}
             </fieldset>
             <p className="profile-help">Saved automatically. System follows your device’s appearance.</p>
+          </section>
+          <section className="profile-card" id="reading" aria-labelledby="reading-heading">
+            <div className="profile-card-heading">
+              <h2 id="reading-heading">Reading</h2>
+              <p>Keep more of the paper in view during explanations.</p>
+            </div>
+            <label className="profile-field" htmlFor="max-auto-zoom">Maximum automatic zoom</label>
+            <div className="profile-zoom-setting">
+              <input id="max-auto-zoom" type="range" min={100} max={400} step={25}
+                value={maxAutoZoom} onChange={(event) => setMaxAutoZoom(Number(event.target.value))}
+                aria-describedby="max-auto-zoom-help" aria-valuetext={`${maxAutoZoom}%`} />
+              <output htmlFor="max-auto-zoom">{maxAutoZoom}%</output>
+            </div>
+            <p className="profile-help" id="max-auto-zoom-help">
+              Limits automatic zooms in tours and answers. Lower values show more context. Manual zoom stays independent.
+              Saved automatically on this browser.
+            </p>
           </section>
           {profile.loading && !data ? (
             <p role="status">Loading your settings…</p>

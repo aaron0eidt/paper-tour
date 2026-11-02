@@ -1,7 +1,7 @@
 import { TourProfileDialog } from './TourProfileDialog';
 import type { TourProfileSelection } from '../../../shared/tourProfiles';
 import { GenerationActivity } from './GenerationActivity';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TourGenerationSummary } from '../../../shared/contracts';
 import { apiRequest } from '../library/client';
 import { isTourGenerationActive, tourGenerationCopy } from '../library/tourGeneration';
@@ -19,6 +19,8 @@ export interface TourGenerationProps {
   compact?: boolean;
   toolbar?: boolean;
   activityRequest?: number;
+  /** Only the reader asks how to explain a new paper; library cards stay passive. */
+  promptOnOpen?: boolean;
 }
 
 /** Generation never owns playback: the reader explicitly opens the saved tour. */
@@ -31,6 +33,7 @@ export function TourGeneration({
   compact = false,
   toolbar = false,
   activityRequest,
+  promptOnOpen = false,
 }: TourGenerationProps) {
   const [requesting, setRequesting] = useState(false);
   const [creating, setCreating] = useState<null | { regenerate: boolean }>(null);
@@ -49,6 +52,13 @@ export function TourGeneration({
   const copy = tourGenerationCopy(current);
   const active = isTourGenerationActive(current);
   const validChoice = !!profile.data && canUseModel(models.catalog, model, allowTraining);
+  const prompted = useRef<string | null>(null);
+  useEffect(() => {
+    if (promptOnOpen && canGenerate && validChoice && !current && prompted.current !== documentId) {
+      prompted.current = documentId;
+      setCreating({ regenerate: false });
+    }
+  }, [promptOnOpen, canGenerate, validChoice, current, documentId]);
   if (!current && !canGenerate) return null;
 
   async function create(selection: TourProfileSelection, regenerate = false) {
@@ -162,6 +172,7 @@ export function TourGeneration({
           current={current?.profile}
           model={selected?.name ?? model}
           busy={requesting}
+          firstTour={!current}
           onCreate={(selection) => create(selection, creating.regenerate)}
           onClose={() => setCreating(null)}
         />

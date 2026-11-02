@@ -2,6 +2,7 @@ import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView, slideView } from './camera';
 import type { View } from './camera';
+import { getMaxAutoZoom, subscribeReadingPreferences } from './readerPreferences';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutDeck, layoutPages } from './layout';
@@ -145,6 +146,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
   const [engine, setEngine] = useState<TourEngine | null>(null);
   const camera = useMemo(() => new Camera(), []);
+  const maxAutoZoom = useSyncExternalStore(subscribeReadingPreferences, getMaxAutoZoom) / 100;
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
@@ -288,8 +290,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             !isPdfOpen(loadedRef.current?.pdf) ||
             current.document.fileStatus === 'uploading' ||
             ['queued', 'processing'].includes(current.analysis?.status ?? '') ||
-            isTourGenerationActive(current.tourGeneration) ||
-            (!!current.doc && !current.tours.length && !current.tourGeneration);
+            isTourGenerationActive(current.tourGeneration);
           if (!document.hidden && (working || needsRetry || Date.now() - lastPoll > 60_000)) void refresh();
         }, 4000)
       : undefined;
@@ -443,12 +444,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         // Targets are framed above the ask dock, together with the other marks the step shows meanwhile. In a deck a
         // target is framed as its whole slide.
         const target = cmd.action
-          ? frameFor(cmd.action, resolver, layout, vp, { fitWidth, insets: camera.insets, also: cmd.also, slide: layout.deck })
+          ? frameFor(cmd.action, resolver, layout, vp, { fitWidth, insets: camera.insets, also: cmd.also, slide: layout.deck, maxZoom: maxAutoZoom })
           : null;
         // Before any camera move a deck shows its first slide whole, a paper the top of its first page.
         const first = layout.pages[0];
         const rect: BBox | undefined = target?.rect ?? (layout.deck && first ? [first.x, first.y, first.x + first.width, first.y + first.height] : undefined);
-        const view = cmd.action ? target?.view : layout.deck && first ? slideView(first, layout, vp, camera.insets) : initialView(layout, vp, camera.insets);
+        const view = cmd.action ? target?.view : layout.deck && first ? slideView(first, layout, vp, camera.insets, maxAutoZoom) : initialView(layout, vp, camera.insets, maxAutoZoom);
         if (!view) return;
         if (layout.deck) {
           slideRef.current = cmd.action ? (target?.page ?? 1) : 1;
@@ -462,7 +463,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         console.warn('[camera] could not frame', cmd.action, err);
       }
     },
-    [camera, layout, resolver],
+    [camera, layout, resolver, maxAutoZoom],
   );
   // The engine plays the tour. While the tour is written it grows in place (TourEngine.extend), so the learner's place,
   // the camera and the board stay as they are. Only another tour (one written again with other steps, or one picked from
@@ -1340,6 +1341,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             <TourGeneration
               documentId={documentId}
               generation={manifest.tourGeneration}
+              promptOnOpen={!manifest.tours.length}
               activityRequest={activityRequest}
               canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
               onChanged={() => setManifestRefresh((value) => value + 1)}
