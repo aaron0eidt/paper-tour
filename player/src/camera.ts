@@ -124,6 +124,8 @@ function viewAt(point: { x: number; y: number }, s: number, layout: Layout, vp: 
 
 /** What shapes a frame besides the target itself. All of it is optional. */
 export interface FrameOptions {
+  /** Personal ceiling for automatic framing, in screen pixels per PDF point. */
+  maxZoom?: number;
   /** What floats over the viewport: the target is framed in what is left. */
   insets?: Insets;
   /** A text line's height in page points, from which a stage too small for the page's type zooms in. */
@@ -167,6 +169,7 @@ export function focusView(rect: BBox, page: PageBox, layout: Layout, vp: Viewpor
       if (zoomed) s = Math.min(s, hold);
     }
   }
+  s = Math.min(s, opts.maxZoom ?? MAX_ZOOM);
   const viewH = free.height / s;
   const h = box[3] - box[1];
   const y = h > viewH * 0.8 ? box[1] - viewH * 0.06 + viewH / 2 : (box[1] + box[3]) / 2;
@@ -199,7 +202,7 @@ export function zoomView(rect: BBox, padding: number, layout: Layout, vp: Viewpo
   const fitTo = (r: BBox) => {
     const w = Math.max(1, r[2] - r[0]);
     const h = Math.max(1, r[3] - r[1]);
-    return clamp(Math.min(free.width / (w * (1 + 2 * padding)), free.height / (h * (1 + 2 * padding))), MIN_ZOOM, MAX_ZOOM);
+    return clamp(Math.min(free.width / (w * (1 + 2 * padding)), free.height / (h * (1 + 2 * padding))), MIN_ZOOM, opts.maxZoom ?? MAX_ZOOM);
   };
   let box = rect;
   let s = fitTo(rect);
@@ -242,18 +245,18 @@ export function revealView(rect: BBox, view: View, layout: Layout, vp: Viewport,
  * A slide shown whole: the page fits the free area with a small margin, and centres in it. Slides are read as they are
  * printed, so a deck never zooms to a text column the way a paper does.
  */
-export function slideView(page: PageBox, layout: Layout, vp: Viewport, insets: Insets = NO_INSETS): View {
+export function slideView(page: PageBox, layout: Layout, vp: Viewport, insets: Insets = NO_INSETS, maxZoom = MAX_ZOOM): View {
   const free = freeArea(vp, insets);
   const margin = clamp(Math.min(free.width, free.height) * 0.025, 6, 24);
-  const s = clamp(Math.min((free.width - 2 * margin) / page.width, (free.height - 2 * margin) / page.height), MIN_ZOOM, MAX_ZOOM);
+  const s = clamp(Math.min((free.width - 2 * margin) / page.width, (free.height - 2 * margin) / page.height), MIN_ZOOM, maxZoom);
   return viewAt({ x: page.x + page.width / 2, y: page.y + page.height / 2 }, s, layout, vp, insets);
 }
 
 /** Top of the first page at reading zoom. */
-export function initialView(layout: Layout, vp: Viewport, insets: Insets = NO_INSETS): View {
+export function initialView(layout: Layout, vp: Viewport, insets: Insets = NO_INSETS, maxZoom = MAX_ZOOM): View {
   const p = layout.pages[0];
   if (!p) return { cx: layout.width / 2, cy: layout.height / 2, s: 1 };
-  return focusView([p.x, p.y, p.x + p.width, p.y + p.height], p, layout, vp, { insets });
+  return focusView([p.x, p.y, p.x + p.width, p.y + p.height], p, layout, vp, { insets, maxZoom });
 }
 
 const medianHeight = (rects: BBox[]) => {
@@ -270,6 +273,8 @@ export interface Frame {
 }
 
 export interface CameraOptions {
+  /** Personal ceiling for tour and answer zooms; manual zoom is independent. */
+  maxZoom?: number;
   /** A side explanation needs the full paper width. */
   fitWidth?: boolean;
   /** What floats over the viewport: targets are framed in what is left. */
@@ -296,6 +301,7 @@ export function frameFor(action: CameraAction, resolver: Resolver, layout: Layou
   const lines = text ? resolver.resolve(action.target, { lines: true })?.[0]?.rects : undefined;
   const column = text ? resolver.columnOf(action.target) : null;
   const opts: FrameOptions = {
+    maxZoom: options.maxZoom,
     insets: options.insets,
     also,
     ...(lines?.length ? { lineHeight: medianHeight(lines) } : {}),
@@ -304,7 +310,7 @@ export function frameFor(action: CameraAction, resolver: Resolver, layout: Layou
   const rect = also.length ? union([target.rect, ...also]) : target.rect;
   // A slide is framed whole, and the whole slide is what the card above it must not cover.
   if (options.slide && action.type === 'focus')
-    return { view: slideView(page, layout, vp, options.insets), rect: [page.x, page.y, page.x + page.width, page.y + page.height], page: target.page };
+    return { view: slideView(page, layout, vp, options.insets, options.maxZoom), rect: [page.x, page.y, page.x + page.width, page.y + page.height], page: target.page };
   // Text focus keeps the page legible in context. Deliberate zoom commands can
   // inspect detail, except while a side explanation needs the full paper width.
   const view =

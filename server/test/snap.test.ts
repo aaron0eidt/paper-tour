@@ -224,15 +224,22 @@ function fakeSam(answer: (shot: Shot, call: number) => Response | Promise<Respon
     shots.push(shot);
     const pending = answer(shot, shots.length);
     if (!init.signal) return pending;
-    // Like a real fetch, a request in flight stops with its signal.
-    return Promise.race([
-      pending,
-      new Promise<never>((_resolve, reject) => {
-        const stop = () => reject(init.signal!.reason);
-        if (init.signal!.aborted) stop();
-        else init.signal!.addEventListener('abort', stop, { once: true });
-      }),
-    ]);
+    // Like a real socket, a request keeps the loop alive until it answers or its signal stops it.
+    const keepAlive = setInterval(() => {}, 60_000);
+    let stop: (() => void) | undefined;
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<never>((_resolve, reject) => {
+          stop = () => reject(init.signal!.reason);
+          if (init.signal!.aborted) stop();
+          else init.signal!.addEventListener('abort', stop, { once: true });
+        }),
+      ]);
+    } finally {
+      clearInterval(keepAlive);
+      if (stop) init.signal.removeEventListener('abort', stop);
+    }
   }) as typeof fetch;
   return { fetcher, shots };
 }

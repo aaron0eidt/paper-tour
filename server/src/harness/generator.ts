@@ -1,6 +1,14 @@
 import { claimsNumericExample } from './example';
+import { randomUUID } from 'node:crypto';
+import { indexElements } from '../elements';
+import { isAuthoredVisual } from '../visuals/inspect';
+import { reviewAuthoredWithModel } from '../visuals/model-author';
+import type { TeachingPlan } from '../../../shared/teachingPlan';
+import { teachingEvidence, teachingTourPlan } from './teaching-plan';
+import { authorTeachingPlan } from './teaching-author';
+import { authorVisualPlan } from './visual-author';
 import { lossSentence } from '../../../shared/coverage';
-import { splitWords, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
+import { splitWords, type BoardItem, type Doc, type LossCause, type Step, type Tour } from '../../../shared/paper';
 import { tourDirection } from '../../../shared/tourDirection';
 import { tourProfileGuidance } from '../../../shared/tourProfiles';
 import type { MuseConfig } from '../config';
@@ -112,7 +120,7 @@ import {
   restatedShare,
 } from './insight';
 import { documentLanguage } from './language';
-import { PACE, limited, outlasting, type Pace } from './pace';
+import { PACE, generationPace, limited, outlasting, type Pace } from './pace';
 import { HARNESS_VERSION, SHARED_RULES, cardTask, directTask } from './prompts';
 import { measuredFigureTargets } from './measured-visuals';
 import { pythonVerifier, type LineCheck, type MathVerifier } from './verify';
@@ -239,10 +247,12 @@ export class HarnessTourGenerator implements TourGenerator {
       ).generate(input, onProgress, externalSignal);
     if (!this.configured)
       throw new ProcessingError('muse_not_configured', 'Tour creation needs a Muse API key on the server.');
+    const adaptive = Boolean(input.profile);
+    const pace = generationPace(this.pace, this.config.timeoutMs, adaptive);
     const siblings = new AbortController();
     const signal = AbortSignal.any([
       siblings.signal,
-      AbortSignal.timeout(this.config.timeoutMs),
+      ...(!adaptive ? [AbortSignal.timeout(this.config.timeoutMs)] : []),
       ...(externalSignal ? [externalSignal] : []),
     ]);
     checkImages(input);
@@ -262,13 +272,72 @@ export class HarnessTourGenerator implements TourGenerator {
       effort: Effort,
       signal: AbortSignal,
       task?: { id: string; label: string },
-      ms = this.pace.callMs(name, effort),
+      ms = pace.callMs(name, effort),
     ) =>
-      outlasting(signal, this.pace.outages, () =>
+      outlasting(signal, pace.outages, () =>
         limited(signal, ms, (within) => record(messages, name, schema, maxTokens, effort, within, task)),
       );
     const progress = (stage: TourProgress['stage'], done: number, total: number) =>
       onProgress?.({ stage, imagesDone: done, imagesTotal: total });
+    const elements = new Map(indexElements(doc).map((element) => [element.id, element]));
+    const inspectVisual = async (
+      item: BoardItem,
+      narration: string,
+      brief: string,
+      images: TourImage[],
+      beat: Beat,
+    ): Promise<BoardItem> => {
+      if (!isAuthoredVisual(item)) return item;
+      const callId = randomUUID(),
+        started = Date.now();
+      await input.onEvent?.('tool.started', {
+        callId,
+        name: 'render_visual',
+        arguments: { beat: beat.id, kind: item.kind },
+      });
+      try {
+        const reviewed = await reviewAuthoredWithModel(item, {
+          client: {
+            complete: (...args: Parameters<MuseClient['complete']>) => {
+              const [messages, name, schema, maxTokens, within] = args;
+              return call(messages, name, schema, maxTokens, 'low', within ?? signal, {
+                id: beat.id,
+                label:
+                  name === 'authored_visual_review'
+                    ? 'Check the rendered explanation'
+                    : 'Correct the rendered explanation',
+              });
+            },
+          },
+          narration,
+          evidence: [
+            brief,
+            ...item.sourceRefs.map((id) => `[${id}] ${elements.get(id)?.text ?? 'Unknown source'}`),
+          ].join('\n'),
+          sourceImages: images.map((image) => image.dataUrl),
+          allowedSourceRefs: [...elements.keys()],
+          signal,
+        });
+        await input.onEvent?.('tool.completed', {
+          callId,
+          name: 'render_visual',
+          beat: beat.id,
+          kind: reviewed.kind,
+          durationMs: Date.now() - started,
+        });
+        return reviewed;
+      } catch (error) {
+        await input.onEvent?.('tool.completed', {
+          callId,
+          name: 'render_visual',
+          beat: beat.id,
+          failed: true,
+          durationMs: Date.now() - started,
+          error: error instanceof Error ? error.message : 'Visual inspection failed.',
+        });
+        throw error;
+      }
+    };
     const prefix: MuseMessage[] = [
       { role: 'developer', content: SHARED_RULES },
       ...(tourProfileGuidance(input.profile)
@@ -330,7 +399,8 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       return found;
     };
-    const claimsContext = guessType(doc) === 'research_paper' ? claimContext(doc) : null;
+    const conceptLed = !adaptive;
+    const claimsContext = conceptLed && guessType(doc) === 'research_paper' ? claimContext(doc) : null;
     const early = claimsContext ? findClaims(claimsContext, AbortSignal.any([signal, speculation.signal])) : null;
     // A call nobody waits for must not fail the process; whoever uses its claims sees the error.
     early?.catch(() => {});
@@ -341,7 +411,14 @@ export class HarnessTourGenerator implements TourGenerator {
         try {
           // The first try reasons as little as the API allows: the card is read off the document, the schema holds every
           // ID to a listed one and the checks below hold the rest; a repair reasons more.
-          const completion = await call(messages, 'paper_card', schema, 12_000, attempt ? 'medium' : 'minimal', signal);
+          const completion = await call(
+            messages,
+            'paper_card',
+            schema,
+            12_000,
+            adaptive || attempt ? 'medium' : 'minimal',
+            signal,
+          );
           const problems = cardProblems(completion.value, looseSchema);
           if (!problems.length) card = cleanCard(completion.value as PaperCard, doc);
           else {
@@ -376,6 +453,30 @@ export class HarnessTourGenerator implements TourGenerator {
     const type: DocType = deck ? 'lecture' : card!.doc_type;
     const paper = !sheet && !deck && type === 'research_paper';
     if (!paper) speculation.abort();
+    // Interpret importance and reader-relative difficulty independently of the opening-claim extractor.
+    // This call overlaps claim planning; its verified objectives guide both the writer and visual planner.
+    const prepareTeaching = async (): Promise<TeachingPlan | null> => {
+      if (!paper || !input.profile) return null;
+      if (!teachingEvidence(doc).length)
+        throw new ProcessingError(
+          'missing_teaching_sources',
+          'This paper has no citable text, equations or figures. Check PDF extraction before generating a tour.',
+        );
+      return authorTeachingPlan({
+        doc,
+        preferences: input.profile,
+        language,
+        prefix,
+        signal,
+        call: (messages, schema) => call(messages, 'teaching_plan', schema, 12_000, 'medium', signal),
+        retryable: recoverable,
+        onProblems: async (problems, attempt) => {
+          await input.onEvent?.('validation.failed', { stage: 'teaching_plan', attempt, problems });
+        },
+      });
+    };
+    const preparingTeaching = prepareTeaching();
+    preparingTeaching.catch(() => {});
     /**
      * The visual of a paper's opening step, planned alone from the card while the claims are still being found, so that
      * the step the learner waits for does not wait for the plan of the whole tour (visual-plan.ts, openingPlanTask).
@@ -429,7 +530,7 @@ export class HarnessTourGenerator implements TourGenerator {
       return chosen;
     };
     const thesis: Beat | null =
-      paper && thesisBeat(card!).evidence.length ? { id: 'problem-1', ...thesisBeat(card!) } : null;
+      paper && conceptLed && thesisBeat(card!).evidence.length ? { id: 'problem-1', ...thesisBeat(card!) } : null;
     const opening = thesis ? planOpening(thesis).catch(() => null) : null;
     let plan: TourPlan;
     let planSource = 'code';
@@ -481,7 +582,7 @@ export class HarnessTourGenerator implements TourGenerator {
     } else if (type === 'research_paper') {
       // The paper's claims: what the authors state in at least two of the abstract, the introduction and the
       // conclusion, with the evidence for each. Without usable claims the tour follows the paper's argument instead.
-      const context = claimsContext ?? claimContext(doc);
+      const context = conceptLed ? (claimsContext ?? claimContext(doc)) : null;
       if (context) claims = await (early ?? findClaims(context, signal));
       const byClaims = claims ? claimPlan(claims, card!, doc, this.preset) : null;
       // A claim plan too thin to teach (no evidence to point at) is no plan.
@@ -522,6 +623,17 @@ export class HarnessTourGenerator implements TourGenerator {
       }
       planSource = arcs ? 'model' : 'fallback';
       plan = arcTourPlan(arcs ?? fallbackArcPlan(card!, arcType), arcType, card!, doc, this.preset, language);
+    }
+    const teachingPlan = await preparingTeaching;
+    if (teachingPlan && input.profile) {
+      plan = teachingTourPlan(teachingPlan, doc, input.profile, card!, plan);
+      planSource = `adaptive-${input.profile.structure}`;
+      await input.onEvent?.('teaching.ready', {
+        question: teachingPlan.question,
+        audienceAssumption: teachingPlan.audienceAssumption,
+        concepts: teachingPlan.concepts,
+        sections: teachingPlan.sections,
+      });
     }
     const { beats } = plan;
     if (!beats.length) throw new ProcessingError('invalid_tour', 'This document has no text a tour could explain.');
@@ -570,7 +682,11 @@ export class HarnessTourGenerator implements TourGenerator {
       if (!plannable.length) return;
       const decided = ahead ? await ahead : null;
       const settled: VisualPlan = decided ? new Map([[thesis!.id, decided]]) : new Map();
-      const options = { sheet: sheetTour, ...(settled.size ? { settled: true } : {}) };
+      const options = {
+        sheet: sheetTour,
+        ...(input.profile ? { adaptive: true } : {}),
+        ...(settled.size ? { settled: true } : {}),
+      };
       const rest = plannable.filter((beat) => !settled.has(beat.id));
       const task: MuseMessage[] = [
         ...prefix,
@@ -584,6 +700,23 @@ export class HarnessTourGenerator implements TourGenerator {
           ],
         },
       ];
+      if (adaptive) {
+        visuals = await authorVisualPlan({
+          doc,
+          card: card!,
+          beats: plannable,
+          settled,
+          sheet: sheetTour,
+          language,
+          prefix,
+          signal,
+          call: (messages, schema) => call(messages, 'visual_plan', schema, 8_000, 'medium', signal),
+          retryable: recoverable,
+          onProblems: async (problems, attempt) => {
+            await input.onEvent?.('validation.failed', { stage: 'visuals', problems, attempt });
+          },
+        });
+      }
       if (!rest.length) visuals = new Map(settled);
       for (let attempt = 0; attempt < 2 && !visuals; attempt++) {
         try {
@@ -609,7 +742,7 @@ export class HarnessTourGenerator implements TourGenerator {
       if (visuals) {
         // A results step on a table with ready boards draws the table's own numbers when the plan left them out.
         const kept = new Set(settled.keys());
-        const withData = withTableBoard(visuals, plannable, doc, kept);
+        const withData = withTableBoard(visuals, plannable, doc, kept, { adaptive });
         visuals = withData.plan;
         adjusted = [...adjusted, ...withData.adjusted];
         // A sheet's overview and takeaway have no visual of their own.
@@ -698,13 +831,19 @@ export class HarnessTourGenerator implements TourGenerator {
           if (!recoverable(error)) throw error;
           fault = faultOf(error);
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
-          else if (fault === 'slow') {
+          else if (fault === 'slow' && !adaptive) {
             effort = lower(effort);
             if (attempt < 1) await input.onEvent?.('beat.lean', { beat: beat.id, effort, attempt: attempt + 1 });
           }
         }
       }
       if (!best) {
+        if (adaptive && (fault === 'slow' || fault === 'unavailable'))
+          throw new ProcessingError(
+            'muse_unavailable',
+            'The planned explanation could not be completed after the bounded request attempts.',
+            true,
+          );
         await progress('writing', ++directed, beats.length);
         await input.onEvent?.('beat.fallback', { beat: beat.id, code: fault });
         return { steps: unitFallback(unit, doc), solved: false, checks: [], omission: { code: fault } };
@@ -758,6 +897,20 @@ export class HarnessTourGenerator implements TourGenerator {
           }
         }
       }
+      if (drawn)
+        drawn = {
+          ...drawn,
+          item: await inspectVisual(
+            drawn.item,
+            unitSteps(unit, best.solution, best.checks, language, drawn)
+              .filter((step) => step.actions.some((action) => action.type === 'board' && action.item === drawn!.item))
+              .map((step) => step.say)
+              .join('\n'),
+            unitBrief(unit, doc),
+            pages,
+            beat,
+          ),
+        };
       await progress('writing', ++directed, beats.length);
       return {
         steps: unitSteps(unit, best.solution, best.checks, language, drawn),
@@ -802,9 +955,11 @@ export class HarnessTourGenerator implements TourGenerator {
           durationMs: Date.now() - started,
         });
       }
-      const overviewIndex = beat.detail
-        ? beats.findIndex((b) => !b.detail && b.kind === beat.kind && b.target === beat.target)
-        : -1;
+      const overviewIndex = beat.overviewId
+        ? beats.findIndex((b) => b.id === beat.overviewId)
+        : beat.detail && beat.target
+          ? beats.findIndex((b) => !b.detail && b.kind === beat.kind && b.target === beat.target)
+          : -1;
       const overviewResult = results[overviewIndex];
       const overview = overviewResult && 'direction' in overviewResult ? overviewResult.direction?.say : undefined;
       const beatIndex = beats.indexOf(beat);
@@ -877,14 +1032,14 @@ export class HarnessTourGenerator implements TourGenerator {
       let attempt = 0;
       for (
         ;
-        attempt < tries && !(direction && !rewriting && (!faulty(direction) || spent() >= this.pace.stepMs));
+        attempt < tries && !(direction && !rewriting && (!faulty(direction) || spent() >= pace.stepMs));
         attempt++
       ) {
         // Reasoning shares the provider's output budget. Complex scenes exhausted
         // 6k tokens in reasoning alone and returned incomplete JSON on every retry.
         const detailed = !gave.size && (beat.detail || attempt > 0);
         const effort = atMost(detailed ? 'medium' : 'low', ceiling);
-        const own = this.pace.callMs('beat_direction', effort);
+        const own = pace.callMs('beat_direction', effort);
         hollow = false;
         // A faulty board, example or pen mark is being corrected by this try.
         const correcting = !!direction && faulty(direction);
@@ -900,7 +1055,7 @@ export class HarnessTourGenerator implements TourGenerator {
             effort,
             signal,
             { id: beat.id, label: beat.point },
-            repairing ? Math.min(own, Math.max(this.pace.repairMs, this.pace.stepMs - spent())) : own,
+            repairing ? Math.min(own, Math.max(pace.repairMs, pace.stepMs - spent())) : own,
           );
           const rawSay = (completion.value as { say?: unknown } | null)?.say;
           requireExample ||=
@@ -962,7 +1117,7 @@ export class HarnessTourGenerator implements TourGenerator {
             now.task.push(...repairTurn(completion.value, issues));
             continue;
           }
-          if (next && !rewrites && attempt < 2) {
+          if (next && (adaptive || (!rewrites && attempt < 2))) {
             // A step on slides is held against the slides' whole text, which the learner can read; any other against
             // the sentences it highlights.
             const highlighted = beat.slides
@@ -1005,7 +1160,9 @@ export class HarnessTourGenerator implements TourGenerator {
           if (!next)
             now.task.push(
               ...repairTurn(completion.value, [
-                `say must be 8-${sayLimit(beat)} spoken words.`,
+                beat.flexibleNarration
+                  ? 'Provide a complete explanation of the planned learning objective, with actual narration instead of empty or malformed text. Preserve necessary reasoning and qualifications; no word target applies.'
+                  : `say must be 8-${sayLimit(beat)} spoken words.`,
                 'Every cue needs an allowed action, a listed target and an anchor copied from say.',
               ]),
             );
@@ -1015,7 +1172,7 @@ export class HarnessTourGenerator implements TourGenerator {
           fault = faultOf(error);
           if (correcting) correction = fault;
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
-          else if (fault === 'slow') {
+          else if (fault === 'slow' && !adaptive) {
             slow++;
             ceiling = lower(effort);
             if (!direction) {
@@ -1035,6 +1192,21 @@ export class HarnessTourGenerator implements TourGenerator {
         }
       }
       await progress('writing', ++directed, beats.length);
+      if (adaptive && (!direction || rewriting || faulty(direction))) {
+        const problems = [
+          ...(direction?.boardProblems ?? []),
+          ...(direction?.exampleProblems ?? []),
+          ...(direction?.visualProblems ?? []),
+          ...(rewriting ? ['The requested narration correction has not been resolved.'] : []),
+        ];
+        await input.onEvent?.('validation.failed', { stage: 'direction', beat: beat.id, problems, exhausted: true });
+        const unavailable = !direction && (fault === 'slow' || fault === 'unavailable');
+        throw new ProcessingError(
+          unavailable ? 'muse_unavailable' : 'invalid_tour_direction',
+          `The planned explanation ${beat.id} could not be completed and validated after its repair attempts. ${problems.join(' ')} Saved completed work is preserved; no summary substitute or degraded visual was published.`,
+          unavailable,
+        );
+      }
       if (!direction) {
         // A step whose worked example was given up for the time, and whose narration alone is nothing without it, is left
         // out for that; any other, for what went wrong with its latest try.
@@ -1063,6 +1235,15 @@ export class HarnessTourGenerator implements TourGenerator {
       const settled = degradeDirection(direction);
       const filled = withReadyView(settled.direction, now.targets, now.visual);
       if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: now.visual!.visual });
+      const ready = filled ?? settled.direction;
+      if (ready.board)
+        ready.board = await inspectVisual(
+          ready.board,
+          ready.say,
+          beatBrief(beat, doc, now.targets, now.visual),
+          seen,
+          beat,
+        );
       // What was given up for the time went for that; what failed its checks after the corrections, for that.
       const dropped = [...new Set<DroppedPart>([...(lean?.dropped ?? []), ...(settled.degraded?.dropped ?? [])])];
       const degraded: Degraded | undefined =
@@ -1084,7 +1265,7 @@ export class HarnessTourGenerator implements TourGenerator {
           : undefined;
       return {
         targets: now.targets,
-        direction: filled ?? settled.direction,
+        direction: ready,
         ...(degraded ? { degraded } : {}),
       };
     };
@@ -1097,9 +1278,22 @@ export class HarnessTourGenerator implements TourGenerator {
     const siteAt = new Map(sites.map((site) => [site.beats.at(-1)!, site]));
     const ownSteps = (i: number, result: BeatResult): Step[] => {
       if ('steps' in result) return result.steps;
+      if (adaptive && !result.direction)
+        throw new ProcessingError(
+          'invalid_tour_direction',
+          `The planned explanation ${beats[i].id} is missing. Its summary cannot replace the completed explanation.`,
+        );
       if (beats[i].detail && !result.direction) return [];
       const step = beatStep(beats[i], result.targets, result.direction, doc);
-      return readsSource(step.say, doc) ? [] : [step];
+      if (readsSource(step.say, doc)) {
+        if (adaptive)
+          throw new ProcessingError(
+            'invalid_tour_direction',
+            `The planned explanation ${beats[i].id} only reads its source and has not been completed.`,
+          );
+        return [];
+      }
+      return [step];
     };
     const stepsOf = (i: number): Step[] => {
       const known = beatSteps.get(i);
@@ -1112,10 +1306,9 @@ export class HarnessTourGenerator implements TourGenerator {
     const buildTour = (count: number) => {
       const lists = beats.slice(0, count).map((_, i) => stepsOf(i));
       // A board that repeats an earlier step's data is dropped with its cues; the narration stays.
-      const repeats = dropRepeatedBoards(
-        lists,
-        new Set(beats.slice(0, count).flatMap((beat, i) => (beat.unit ? [i] : []))),
-      );
+      const repeats: ReturnType<typeof dropRepeatedBoards> = adaptive
+        ? { steps: lists, dropped: [] }
+        : dropRepeatedBoards(lists, new Set(beats.slice(0, count).flatMap((beat, i) => (beat.unit ? [i] : []))));
       const whole = count === beats.length;
       const tour = assembleTour(
         card!,
@@ -1144,7 +1337,7 @@ export class HarnessTourGenerator implements TourGenerator {
       let problems = check(tour);
       const late: { beat: string; dropped: ['board']; problems: string[]; causes: { board: 'checks' } }[] = [];
       const named = boardStepsOf(tour, problems);
-      if (named.size) {
+      if (named.size && !adaptive) {
         const bare = settleBoards(withoutBoards(tour, new Set(named.keys())));
         if (!check(bare).length) {
           tour = bare;
@@ -1390,6 +1583,7 @@ export class HarnessTourGenerator implements TourGenerator {
         promptVersion: HARNESS_VERSION,
         preset: this.preset,
         profile: input.profile ?? null,
+        ...(teachingPlan ? { teachingPlan } : {}),
         docType: plan.type,
         cardSource,
         planSource,

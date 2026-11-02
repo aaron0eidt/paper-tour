@@ -31,6 +31,11 @@ export function requestKey(source: AskSource, request: AskRequest): string {
     request.question.replace(/\s+/g, ' ').trim(),
     responseLanguage(request.responseLanguage) ? request.responseLanguage : '',
     request.tourId ?? '',
+    // Prefetch is stateless; asking attaches the cached answer to the chosen conversation on the server.
+    request.page ?? null,
+    request.activeVisual ?? null,
+    request.visualId ?? '',
+    request.visualRevision ?? null,
     request.analysisId ?? '',
     request.stepId ?? '',
     request.figureId ?? '',

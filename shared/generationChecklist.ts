@@ -139,7 +139,7 @@ export function generationChecklist(input: GenerationEvent[], status: string) {
       const name = String(data.name);
       phase('prepare').state = 'done';
       if (['paper_card', 'paper_context', 'context'].includes(name)) phase('understand').state = 'active';
-      if (name === 'tour_plan') {
+      if (['tour_plan', 'teaching_plan'].includes(name)) {
         phase('understand').state = 'done';
         phase('plan').state = 'active';
       }

@@ -20,16 +20,20 @@ const names: Record<string, string> = {
   set_tour_plan: 'Plan the tour',
   upsert_tour_chapter: 'Save a chapter',
   finish_tour: 'Check and publish the tour',
+  render_visual: 'Render and check the visual',
 };
 export const modelActivityNames: Record<string, string> = {
   paper_card: 'Understand the document',
   claims: 'Find the main claims',
   tour_plan: 'Plan the tour',
+  teaching_plan: 'Choose what to explain and visualize',
   opening_visual: 'Plan the first visual',
   visual_plan: 'Design the side visuals',
   beat_direction: 'Write narration and visual cues',
   exercise_solution: 'Work through an exercise',
   exercise_visual: 'Draw the method of an exercise',
+  authored_visual_review: 'Check the rendered explanation',
+  authored_visual_repair: 'Correct the rendered explanation',
 };
 /** Only public assistant text; structured JSON and private reasoning stay in the inspector. */
 export function readableAgentText(value: string): string {

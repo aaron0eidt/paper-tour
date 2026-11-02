@@ -1,3 +1,4 @@
+import { AUTHORED_VISUAL_GUIDANCE } from '../visuals/guidance';
 import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
 import { EXAMPLE_TASK } from './example';
 import type { BoardKind } from './board';
@@ -5,7 +6,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@33';
+export const HARNESS_VERSION = 'paper-tour-harness@35';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -50,6 +51,9 @@ const CUE_HELP: Record<string, string> = {
   spotlight: 'spotlight dims everything else.',
 };
 const FOCUS_HELP: Record<BoardKind, string> = {
+  program:
+    'The program animates using t at the words being spoken; board_focus target scene-1 names the complete live scene.',
+  plotly: 'The plot supports hover/zoom and parameter changes; board_focus target plot-1 names the chart.',
   scene:
     'board_focus lights up object-1, object-2 etc by its position in the scene objects array, while stable object IDs identify the same quantity across frames.',
   plot: 'board_focus lights up curve-1, curve-2 or curve-3 while you explain its behaviour, and mark-1, mark-2 and so on, the computed points, in the order you listed them (its guides to the axes draw in).',
@@ -289,6 +293,8 @@ export const BOARD_EXAMPLES = {
 const example = (value: unknown) => `EXAMPLE from another document: ${JSON.stringify(value)}`;
 
 export const BOARD_TASK: Record<BoardKind, string> = {
+  program: AUTHORED_VISUAL_GUIDANCE,
+  plotly: AUTHORED_VISUAL_GUIDANCE,
   scene: `BOARD: a native scene combines positioned text, math, rectangles, circles, arrows, vectors, numeric matrices and safe function plots. Keep objects stable across example frames so positions and values transform instead of replacing the whole illustration. Use normalized boxes x,y,w,h inside0..1; arrow/vector w,h are signed endpoint deltas. Keep text readable, avoid overlapping foreground content, and explicitly mark unlabeled axes/containers background:true. No executable code or media.`,
   plot: `BOARD: an illustrative function plot, never claimed as measured data, for a shape that matters (saturation, decay, periodicity, a crossover); curves that are all straight lines are rejected. Fill plot with kind plot, x/y increasing finite ranges, 1-3 curves with expression and a short LaTeX label. Expressions use x, optional parameter a, pi/e, + - * / ^, parentheses, sin, cos, tanh, exp, log, sqrt, abs, relu, sigmoid, min, max or softmax(x,0). No code, properties or unknown functions. Optional parameter {from,to} sweeps a; omit for fixed curves. Explain what changes and why, and use curve-1 etc for focus.
 - marks (at most 4) are facts about the curves that the code finds and draws as labelled points with guides to the axes: root (curve; where it crosses zero), extremum (curve and which, max or min, inside the range), crossing (curve and other; where two curves meet) or value (curve and at, the x the document states). root and crossing count from the left with nth (default 1; a crossing at the left edge of the range counts, so start the range after it to skip it). Ask for a mark when the point is a fact about the curves (the break-even, the peak, the zero, where one cost overtakes another) and never give a position or write its number: the code finds it, and a mark that does not exist is refused. label is optional, a few words. Focus a mark with mark-1 and so on. With marks, the plot may hold straight lines, since their crossing is the point.
@@ -365,6 +371,8 @@ export interface DirectOptions {
   actions: readonly string[];
   board?: BoardKind;
   words: number;
+  /** Teaching content determines explanation length; legacy word targets do not apply. */
+  flexibleNarration?: boolean;
   /** The fewest words a planned step aims for; 50 (90 for a detail) when unset. */
   fewest?: number;
   /** What the step does in a claim's argument, which adds that move's grammar to the rules. */
@@ -388,14 +396,16 @@ const SLIDE_VOICE = [
 export function directTask(
   language: string,
   brief: string,
-  { actions, board, words, fewest, move, slides, type, detail, bare }: DirectOptions,
+  { actions, board, words, fewest, move, slides, type, detail, bare, flexibleNarration }: DirectOptions,
 ) {
   const pen = actions.includes('arrow') || actions.includes('circle');
   const page = actions.filter((a) => CUE_HELP[a]);
   const help = page.map((a) => CUE_HELP[a]);
   if (board && actions.includes('board_focus')) help.push(FOCUS_HELP[board]);
   const rules = [
-    `"say" is ${fewest ?? (detail ? 90 : 50)}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
+    flexibleNarration
+      ? `Explain this planned learning objective at the natural length it needs, including the reasoning, necessary example and qualifications. Do not compress or omit necessary content to hit a word target. Keep this explanation coherent with the distinct concepts in the plan rather than replacing it with a summary. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`
+      : `"say" is ${fewest ?? (detail ? 90 : 50)}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
     'The highlight shows where the point is written, so never read it out or paraphrase it, and skip what a reader gets from it at a glance. State the point in one plain sentence, then explain what the text leaves implicit: why it holds, how it works, what it changes, what would happen without it. Add one concrete example or analogy only when it makes the idea click, labelled illustrative.',
     'No rhetorical questions, invented stories, hooks or suspense. Preserve the document’s qualifications and keep its statements apart from labelled illustrative explanations. Use the source outline for continuity without inventing a narrative arc.',
   ];
@@ -457,7 +467,7 @@ export function directTask(
     'LIVE PDF TUTORING: cue each important explanation at the exact spoken phrase that names its source element. Walk through the actual figure components, equation or table rows in narration order, using source highlights, measured outlines and concise explanatory labels. Use arrows only when their exact target is available and the renderer can keep their labels/strokes clear of printed content; never draw across table values. Do not point generically at an entire page while discussing a specific part. When source geometry cannot isolate an equation term reliably, copy that actual equation into a formula board and work through its terms rather than inventing coordinates. Use emphasis selectively so the current explanation remains obvious and readable.',
     'SOURCE ANCHORS: connect explanations to the actual equation, figure, table and sentences in the PDF. Combine precise source highlights/boxes with a live plot or transformation when the explanation concerns behavior the static source cannot show; do not require exhausting source annotations before choosing a useful side visual. If copying a formula alongside the paper, preserve the source equation and work with its actual terms: build/highlight the relevant subexpression, substitute values, or connect it to an informative plot/transformation. Do not replace source content with an unrelated generic diagram or copy the equation merely to repeat it.',
     'VISUAL PLAN FIRST: use plan to name the point of this step and what the page alone does not show, then the board kind that makes it visible, or none. Show separate quantities with their units and roles, never numbers squeezed into labels such as "Inputs -1.5 2". Coordinate each visual change with the explanation. Complexity helps only when it explains more: avoid a decorative picture and an empty three-box summary.',
-    `BE SELECTIVE: spend side-board space only on a point whose explanation gains from seeing a mechanism, relationship, trade-off, transformation or parameter effect. There is no visual quota, and no board is better than a weak one. Never repeat the same data twice, redraw what is on screen, or use a scene as a coloured text slide, a list of table rows or prose inside shapes. If the PDF already has the useful plot or table, teach its axes, baseline and important cases there with grounded cues. A glossary, trivial unit conversion, restated conclusion or recap is not a teaching contribution, and a recap needs no invented numerical case. Keep the PDF spacious when source cues suffice.${bare ? '' : ' This is not permission to omit a required worked example: render its actual quantities and transformation.'}`,
+    `BE SELECTIVE: spend side-board space only on a point whose explanation gains from seeing a mechanism, relationship, trade-off, transformation or parameter effect. There is no visual quota, and no board is better than a weak one. Never repeat the same data twice, redraw what is on screen, or use a scene as a coloured text slide, a list of table rows or prose inside shapes. If the PDF already has the useful plot or table, teach its axes, baseline and important cases there with grounded cues. A glossary, trivial unit conversion, restated conclusion or recap is not a teaching contribution, and a recap needs no invented numerical case. Keep the PDF spacious when source cues suffice.${bare ? '' : ' Repair required boards and examples; choose none only during planning.'}`,
     'SELF-CORRECTION: a validation reply lists every detected field/problem in your last direction. Return the complete corrected direction, preserving valid narration, assumptions, inputs and frames. Fix all listed problems together. Unused top-level boards must be omitted, including when example.frames supplies the visuals; never add dummy objects to satisfy a schema. A scene text/math object needs its actual nonempty text, and a matrix needs its actual values. If a chosen representation cannot express signed values, use a scene matrix or function plot instead. Do not remove a required example or replace it with prose to evade validation.',
     ...rules.map((rule, i) => `${i + 1}. ${rule}`),
     ...(pen ? [`${example(BOARD_EXAMPLES.pen)} (cues only)`] : []),

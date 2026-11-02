@@ -278,10 +278,11 @@ export class AnalysisWorker {
         p.tour,
       ]);
     else {
-      if (!this.enqueue) throw new Error('Tour job enqueue is required for analysis publication.');
       const {
         rows: [document],
-      } = await tx.query('select tour_model from documents where id=$1', [documentId]);
+      } = await tx.query('select tour_model,defer_tour from documents where id=$1', [documentId]);
+      if (document.defer_tour) return;
+      if (!this.enqueue) throw new Error('Tour job enqueue is required for analysis publication.');
       await ensureTourGeneration(
         tx,
         this.enqueue,

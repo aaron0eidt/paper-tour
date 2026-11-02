@@ -100,8 +100,8 @@ test(
       label: 'Page 1',
       dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
     };
-    const fixture = async (manual = false) => {
-      const reservation = await service.reserve(owner, `${randomUUID()}.pdf`, 8);
+    const fixture = async (manual = false, deferTour = false) => {
+      const reservation = await service.reserve(owner, `${randomUUID()}.pdf`, 8, { deferTour });
       const { analysisId } = await service.complete(owner, reservation.documentId);
       await db.transaction((tx) =>
         new AnalysisWorker(db, storage, c, enqueue).publish(
@@ -153,6 +153,24 @@ test(
     try {
       const f = await fixture();
       const g = await generation(f.analysisId);
+      await t.test('interactive uploads wait for the reader choice, including after worker reconciliation', async () => {
+        const deferred = await fixture(false, true);
+        assert.equal(await generation(deferred.analysisId), undefined);
+        await worker.reconcile(enqueue, deferred.documentId);
+        assert.equal(await generation(deferred.analysisId), undefined);
+        assert.equal(jobs.filter((job) => job.kind === 'generate_tour' && job.documentId === deferred.documentId).length, 0);
+        const manifest = await service.manifest(owner, deferred.documentId);
+        assert(manifest.doc);
+        assert.equal(manifest.tours?.length, 0);
+        const requested = await service.generateTour(owner, deferred.documentId, false, {
+          profileId: 'paper-order', depth: 'deep', audience: 'general',
+        });
+        assert.equal(requested.generation.profile?.id, 'paper-order');
+        assert.equal(requested.generation.profile?.depth, 'deep');
+        assert.equal(requested.generation.profile?.audience, 'general');
+        await worker.reconcile(enqueue, deferred.documentId);
+        assert.equal(jobs.filter((job) => job.kind === 'generate_tour' && job.documentId === deferred.documentId).length, 1);
+      });
       await t.test(
         'analysis publication creates exactly one automatic task; requests and startup are idempotent',
         async () => {
@@ -386,6 +404,41 @@ test(
           '0',
         );
       });
+      await t.test(
+        'profile jobs can outlast a provider request budget while legacy jobs and cancellation keep their bounds',
+        async () => {
+          const short = { ...c, muse: { ...c.muse, timeoutMs: 5 } };
+          const slow = {
+            ...generator,
+            generate: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 35));
+              return { tour, metadata: {} };
+            },
+          };
+          const patient = new TourWorker(db, storage, short, slow, async () => [image]);
+          const adaptive = await fixture();
+          const adaptiveTask = await generation(adaptive.analysisId);
+          assert(adaptiveTask.profile);
+          await patient.generate(adaptive.documentId, adaptive.analysisId, adaptiveTask.id);
+          assert.equal((await generation(adaptive.analysisId)).status, 'ready');
+          const legacy = await fixture();
+          const legacyTask = await generation(legacy.analysisId);
+          await db.query('update tour_generations set profile=null where id=$1', [legacyTask.id]);
+          await patient.generate(legacy.documentId, legacy.analysisId, legacyTask.id);
+          assert.equal((await generation(legacy.analysisId)).status, 'failed');
+          const cancelled = await fixture();
+          const cancelledTask = await generation(cancelled.analysisId);
+          const stop = new AbortController();
+          const timer = setTimeout(() => stop.abort(), 10);
+          try {
+            await patient.generate(cancelled.documentId, cancelled.analysisId, cancelledTask.id, true, stop.signal);
+          } finally {
+            clearTimeout(timer);
+          }
+          assert.equal((await generation(cancelled.analysisId)).status, 'failed');
+          assert.equal((await db.query('select id from tours where generation_id=$1', [cancelledTask.id])).rowCount, 0);
+        },
+      );
       await t.test(
         'progressive tours: partials are kept for the running generation, never regress, and end with the finished tour',
         async () => {

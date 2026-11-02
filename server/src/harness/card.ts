@@ -109,7 +109,10 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
         type: 'object',
         additionalProperties: false,
         required: [...ARCS],
-        properties: Object.fromEntries(ARCS.map((arc) => [arc, short])),
+        properties: Object.fromEntries(ARCS.map((arc) => [arc, {
+          ...short,
+          description: `A document-specific heading for the ${arc} chapter. Describe its content, not a greeting, placeholder or generation status.`,
+        }])),
       },
       problem: item,
       key_idea: item,
@@ -134,7 +137,13 @@ const ajv = new Ajv2020({ strict: false, allErrors: true });
 /** Schema problems as short messages for one repair turn, or [] when the card is valid. */
 export function cardProblems(value: unknown, schema: object): string[] {
   const check = ajv.compile(schema);
-  if (check(value)) return [];
+  if (check(value)) {
+    const headings = (value as PaperCard).chapter_titles;
+    const titles = ARCS.map((arc) => headings?.[arc]?.trim().toLowerCase());
+    if (titles.every((title) => typeof title === 'string') && new Set(titles).size === 1)
+      return ['chapter_titles: every chapter has the same heading. Write distinct, content-specific headings for the problem, idea, method, evidence, limits and takeaway.'];
+    return [];
+  }
   return (check.errors ?? []).slice(0, 8).map((e) => `${e.instancePath || '/'}: ${e.message}`);
 }
 

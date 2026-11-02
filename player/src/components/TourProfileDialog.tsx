@@ -18,11 +18,12 @@ interface Props {
   current?: TourProfileSnapshot | null;
   model: string;
   busy: boolean;
+  firstTour?: boolean;
   onCreate(selection: TourProfileSelection): Promise<void>;
   onClose(): void;
 }
 /** Creation and reusable instructions live here; the floating question dock stays focused on reading. */
-export function TourProfileDialog({ current, model, busy, onCreate, onClose }: Props) {
+export function TourProfileDialog({ current, model, busy, firstTour = false, onCreate, onClose }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [catalog, setCatalog] = useState<TourProfileCatalog | null>(null);
   const [selection, setSelection] = useState(current?.id ?? 'concept-led');
@@ -130,12 +131,14 @@ export function TourProfileDialog({ current, model, busy, onCreate, onClose }: P
       <header>
         <div>
           <h2 id="tour-profile-heading">
-            {editing ? (editing.id ? 'Edit profile' : 'Save a tour profile') : 'Create a tour'}
+            {editing ? (editing.id ? 'Edit profile' : 'Save a tour profile') : firstTour ? 'How would you like to explore this paper?' : 'Create a tour'}
           </h2>
           <p>
             {editing
               ? 'Reusable teaching instructions. Saving an edit creates a new revision.'
-              : 'Choose how this paper should be explained. Existing tours are kept.'}
+              : firstTour
+                ? 'Choose a tour type and explanation depth, or read the PDF first.'
+                : 'Choose how this paper should be explained. Existing tours are kept.'}
           </p>
         </div>
         <button type="button" disabled={locked} onClick={onClose}>
@@ -211,7 +214,7 @@ export function TourProfileDialog({ current, model, busy, onCreate, onClose }: P
       ) : (
         <form onSubmit={(event) => void create(event)}>
           <label>
-            Tour profile
+            Tour type
             <select
               autoFocus
               value={selection}
@@ -284,7 +287,7 @@ export function TourProfileDialog({ current, model, busy, onCreate, onClose }: P
           )}
           <footer>
             <button type="button" disabled={locked} onClick={onClose}>
-              Cancel
+              {firstTour ? 'Read PDF first' : 'Cancel'}
             </button>
             <button className="primary" disabled={locked || loading || !selected}>
               {busy ? 'Starting…' : 'Create tour'}

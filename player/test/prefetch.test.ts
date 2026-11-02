@@ -79,11 +79,14 @@ await test('a request is the same question whatever the earlier exchanges, spaci
     request('Why this?', { figureId: 'fig1' }),
     request('Why this?', { tourId: 't2' }),
     request('Why this?', { analysisId: 'a1' }),
+    request('Why this?', { page: 2 }),
+    request('Why this?', { visualId: 'visual-1', visualRevision: 2 }),
     request('Why this?', { responseLanguage: 'de-DE' }),
     request('Why this?', { selection: { page: 1, rect: [0, 0, 1, 1] } }),
     request('Why that?'),
   ])
     if (requestKey(source, other) === base) throw new Error(`the same key for ${JSON.stringify(other)}`);
+  eq(requestKey(source, request('Why this?', { conversationId: 'thread-1' })), base, 'first-turn prefetch attaches to the chosen thread');
   eq(requestKey({ paper: 'other' }, request('Why this?')) === base, false, 'another document');
   eq(requestKey({ documentId: 'demo' }, request('Why this?')) === base, false, 'a library document is not a demo');
 });

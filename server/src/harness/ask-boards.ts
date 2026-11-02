@@ -1,3 +1,4 @@
+import { AUTHORED_VISUAL_GUIDANCE } from '../visuals/guidance';
 import type { BoardItem, Tour } from '../../../shared/paper';
 import { boardSignature } from './assemble';
 import { BOARD_KINDS, BOARD_LIMITS, FLOW_NODE_IDS, boardPartIds, boardSchema, type BoardKind } from './board';
@@ -98,6 +99,8 @@ export function boardKindOf(raw: Record<string, unknown>): string {
 
 /** When to reach for each kind in an answer; the fields of each are described by its schema. */
 const KIND_HELP: Record<BoardKind, string> = {
+  program: 'a freely authored live mathematical construction with real numerical intermediate states, vectors, matrices, geometry or a computational graph; host time follows the narration',
+  plotly: 'interactive measured-data comparisons or genuine mathematical functions with labeled axes and units',
   heatmap:
     'how items relate to each other (weights, attention, alignment, similarity, correlation, a confusion matrix, a mask), a grid of results over two settings, or a formula’s value over two indices',
   scatter:
@@ -113,7 +116,7 @@ const KIND_HELP: Record<BoardKind, string> = {
   scene: 'vectors or geometry with actual values, when geometry is the point',
 };
 /** Kinds in the order the guidance lists them: the ones that show relationships first. */
-const HELP_ORDER: BoardKind[] = [
+const HELP_ORDER: BoardKind[] = ['program', 'plotly',
   'heatmap',
   'scatter',
   'shapes',
@@ -132,6 +135,7 @@ export function boardGuidance(): string {
 ${HELP_ORDER.map((kind) => `   - ${kind}: ${KIND_HELP[kind]}.`).join('\n')}
    The board is a single item written under the name of its kind (board.heatmap, board.timeline, board.formula ...) with that kind's own fields (a heatmap has rows, cols and values; a timeline has events and spans). A step without a board has board {}.
    Numbers: source "document" values are copied exactly as printed in the document (its text, captions, equations and the table cells above), never rounded, converted or worked out from other numbers. A made-up case is source "illustrative" (a plot is illustrative unless it says document), and the title and say call it illustrative. A question about the document's results gets the document's own numbers, never illustrative ones. Name rows, bars and points after real items, never "item 1".
+${AUTHORED_VISUAL_GUIDANCE}
    Light up each part while you explain it: a formula term, flow node or bar through its own anchor, any other kind through the "focus" of its item, one entry for each part you speak about (part such as row-2, point-1, mark-1, dist-2, and the words of say where the voice reaches it).`;
 }
 
@@ -182,7 +186,7 @@ const SAYS_ILLUSTRATIVE = /\b(?:illustrati\w*|invented|made[- ]up|toy|hypothetic
 export const isIllustrative = (item: BoardItem): boolean =>
   item.kind === 'plot'
     ? item.source !== 'document'
-    : (item.kind === 'heatmap' ||
+    : (item.kind === 'program' || item.kind === 'plotly' || item.kind === 'heatmap' ||
         item.kind === 'scatter' ||
         item.kind === 'timeline' ||
         item.kind === 'distribution') &&

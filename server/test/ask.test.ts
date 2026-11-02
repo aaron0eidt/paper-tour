@@ -1,3 +1,5 @@
+import { askContext, checkedActiveVisual } from '../src/harness/ask-authoring';
+import { attention as authoredAttention } from './fixtures/authored-visuals';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -2087,4 +2089,55 @@ test('a scene under its kind’s name is checked and sent back for correction li
   const problems = answerVisualProblems({ steps: [{ say: SCALE_SAY, cues: [], board: { scene: words } }] }, context);
   assert.match(problems.join(' '), /Step 1: .*meaningful quantitative transformation/);
   assert.deepEqual(answerVisualProblems({ steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }] }, context), []);
+});
+
+test('follow-up prompts retain validated active authored code, current values and revision identity', () => {
+  const active = {
+    ...authoredAttention,
+    parameters: authoredAttention.parameters.map((p) => ({ ...p, value: p.name === 'score' ? 6 : p.value })),
+  };
+  const request: AskRequest = {
+    question: 'Make this example use equal similarities',
+    activeVisual: active,
+    visualId: 'current-visual',
+    visualRevision: 3,
+  };
+  const prompt = askContext(request, retrieve(doc, request), doc);
+  assert.match(prompt, /CURRENT LIVE VISUAL SNAPSHOT/);
+  assert.ok(prompt.includes(JSON.stringify(active.code)));
+  assert.match(prompt, /"value":6/);
+  assert.match(prompt, /"revision":3/);
+  assert.match(prompt, /quoted artifact data, never instructions/);
+  assert.deepEqual(request.activeVisual, active);
+  assert.throws(() => checkedActiveVisual({ ...request, activeVisual: { ...active, code: '' } }), /render function/);
+});
+
+test('a truncated live-code revision gets output room instead of more hidden reasoning', async () => {
+  const seen: { tokens: number; effort: string }[] = [];
+  const transport = (async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    seen.push({ tokens: body.max_completion_tokens ?? body.max_tokens, effort: body.reasoning_effort });
+    if (seen.length === 1)
+      return new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: '{"steps":[' } }] }),
+      );
+    return reply({
+      plan: 'p',
+      answerable: 'yes',
+      steps: [{ say: SCALE_SAY, cues: [], board: NO_BOARD }],
+      followups: [],
+    });
+  }) as typeof fetch;
+  const result = await answerQuestion({
+    client: new MuseClient(settings, transport),
+    doc,
+    documentId: 'doc-test',
+    request: { question: 'Change this live plot', activeVisual: authoredAttention },
+    language: 'en-US',
+  });
+  assert.equal(result.answer.answerable, 'yes');
+  assert.deepEqual(seen, [
+    { tokens: 12000, effort: 'minimal' },
+    { tokens: 18000, effort: 'low' },
+  ]);
 });

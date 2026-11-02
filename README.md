@@ -13,13 +13,13 @@ never by coordinates.
 PDF ─▶ ingestion ─▶ doc.json: sentences, blocks, figures, panels, equations, exercise tasks
                     every element has an ID and exact coordinates
                               │
-      plan (Muse Spark):      claims of a paper · slide groups of a deck · parts of an exercise sheet
+      plan (Muse Spark):      source-grounded concepts · slide groups of a deck · parts of an exercise sheet
                               │
-      visual plan (Spark):    one call decides the board for every step of the whole tour, diversity first
+      visual plan (Spark):    choose source annotations or a useful live construction for each explanation
                               │
       direct (Spark):         one small call per step, in parallel, choosing only from the IDs listed for it
                               │
-      checks in code ───────▶ repair once, otherwise drop the failing part and keep the step
+      checks and review ────▶ targeted repair; incomplete profile explanations cannot publish as complete
                               │
                     tour.json: chapters of steps made of IDs and board data
                               │
@@ -30,12 +30,12 @@ PDF ─▶ ingestion ─▶ doc.json: sentences, blocks, figures, panels, equati
    table, panel and equation gets an ID and exact coordinates, and exercise sheets also get task and part IDs. Before a
    figure is taught, local OCR and OpenCV (`ingest/visual_targets.py`) measure the modules inside it, so a pen mark can
    enclose one part of a diagram instead of guessing a box.
-2. **Planning.** One call reads the document and names its type, key figures and chapter titles, and code detects its
-   language. The plan then depends on the type. A paper is taught by its claims, the two to four statements the authors
-   make in at least two of the abstract, introduction and conclusion, each with its evidence and, where the authors
-   state one, its catch. A slide deck skips title, agenda and licence slides and merges trivial neighbours. An exercise
-   sheet is taught task by task. A second call then plans the board of the whole tour at once, asked to make the
-   visuals differ from each other and to give about half the steps one.
+2. **Planning.** The model reads the document and names its type, key figures and chapter titles; code detects its
+   language. Profile-based paper tours then build a complete, source-grounded teaching map before narration starts:
+   contribution, prerequisites, mechanisms, evidence and limitations. The chosen profile determines the organization
+   and emphasis. Complexity determines the number of explanations, with no fixed concept count. Large plans span
+   multiple responses without losing content. A slide deck follows slides; an exercise sheet follows tasks. Visual
+   planning chooses source annotations or new constructions by explanatory value, without a required board share.
 3. **Directing.** Each step is written by its own small call, run in parallel. The output is constrained to a JSON
    schema whose targets are enums of the IDs listed for that step, so the model picks a sentence, a figure or a panel
    but never writes a coordinate. A detail step waits for the overview it builds on and is told not to repeat it.
@@ -45,12 +45,12 @@ PDF ─▶ ingestion ─▶ doc.json: sentences, blocks, figures, panels, equati
    - **Arithmetic.** Plot, heatmap and formula expressions go through a safe expression grammar, never `eval`. Solution
      lines of an exercise are evaluated numerically (`ok`, `failed` or `unknown`) and a line that cannot be checked is
      marked unverified.
-   - **Repetition.** A board that repeats an earlier board's data is dropped. A step that repeats the overview it builds
-     on is written again.
+   - **Repetition.** A step that repeats the overview it builds on is written again. Profile tours can reuse a valid
+     formula or construction with a different focus; the host does not silently remove it for repeating a board kind.
    - **Paraphrase.** A step that mostly restates the sentences it highlights is sent back once, to explain why instead.
-   - **Degrading.** A board, worked example or set of pen marks that still fails after its repair is dropped and
-     recorded, and the step keeps its narration and page cues. A visual that fails costs that step its visual, not the
-     tour.
+   - **Publication.** Profile tours must complete their planned explanations and selected visuals. A persistent fault
+     leaves completed work saved and reports an interrupted generation, rather than substituting a brief summary or
+     stripping the failed visual. Older profileless jobs retain their recorded degradation behavior.
 5. **The reader** (`player/`, React and pdf.js) plays the tour. The camera flies between targets, pen marks are drawn
    as the narration reaches them, highlights follow the sentence being spoken, and the board animates a formula built
    term by term, bars, plots, heatmaps and the rest. Narration is the browser's speech synthesis, since Meta's API has
@@ -72,8 +72,8 @@ stays the planner. Muse Image is not used.
 
 ## What it is not
 
-- **Not a chat with a PDF.** There is no chat transcript. An answer is a short tour on the page that points, draws and
-  can use the board.
+- **More than a chat with a PDF.** Questions have saved document conversations, and each answer can play as an
+  explanation on the page that points, draws and changes a live mathematical construction.
 - **Not a basic RAG app.** Tours are not retrieved from chunks. The whole document is planned, every step is tied to
   IDs and geometry, and the model's visuals are checked by code. Questions do retrieve passages from the one open
   document, but what comes back is pointing and drawing, not a paragraph.
@@ -212,8 +212,9 @@ cd ../player && npm run dev     # open http://localhost:5174/?paper=mydoc
 
 `run-tour.ts <preset> <out> [folder] [document id] [language]` writes `tour.json`, `metadata.json` (model calls, tokens,
 degraded steps, checked exercise lines) and `events.json` (what every stage did, and when) into `<out>`. Presets are
-`quick` (about 6 steps), `standard` (10 to 12 for papers and decks) and `deep` (up to 22); a tour never has more than
-30. `demo/*/doc.json`, figures and PDFs are gitignored; commit a `tour.json` only when it is meant as a demo.
+`quick`, `standard` and `deep`. The legacy planner targets about 6, 10–12 and up to 22 steps respectively, with a
+30-step ceiling. Profile-based teaching plans adapt coverage to the document without a fixed concept or step cap.
+`demo/*/doc.json`, figures and PDFs are gitignored; commit a `tour.json` only when it is meant as a demo.
 
 Checks:
 
@@ -329,6 +330,12 @@ The library app adds private uploads, analysis in a worker, model selection with
 **Profile & Settings**. It needs Node.js 22.12+ and Python 3.12. Install Tesseract as above. Python requirements include
 OpenCV for measuring diagram components, which runs locally before figure cues are authored.
 
+Uploading a PDF prepares it for reading. Open a new paper to choose its tour type, explanation depth and reader
+familiarity before creating the first tour, or choose **Read PDF first** to browse without starting generation.
+Existing tours remain available; **New tour** creates another version with its own profile.
+Under **Settings → Reading**, a browser-local automatic zoom ceiling keeps tours and answers from zooming in too far
+(200% by default). Manual PDF zoom remains independent.
+
 ```sh
 npm ci
 npm --prefix server ci
@@ -399,6 +406,16 @@ reader asks SAM 3.1 to snap your drag to the object inside it and shows the obje
 unsure or finds nothing, your rectangle is used and asking never waits. The server sends the crop and the full page from
 the original PDF, alongside document text and conversation context. Pause and continue keep the current narration
 position; stopping a pending question aborts it.
+
+Questions are saved in **document conversations**, independently of saved tours. Use the conversation button to reopen
+questions or replay an explanation. A live visual can be changed by a follow-up question; its previous revision remains
+available. Returning to the tour keeps its playback position paused.
+
+For an explanation that benefits from a mathematical construction, the agent can author a live SVG program or an
+interactive Plotly figure, with sliders and host-computed functions. Execution, rendered review and targeted repair
+happen before publication. The existing native visualizations remain available. Architecture, extension points and
+verification are documented in [LIVE-VISUALS.md](notes/LIVE-VISUALS.md) and
+[ADAPTIVE-TEACHING.md](notes/ADAPTIVE-TEACHING.md).
 
 ## Provenance and team
 

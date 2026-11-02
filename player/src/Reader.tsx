@@ -2,6 +2,7 @@ import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView, slideView } from './camera';
 import type { View } from './camera';
+import { getMaxAutoZoom, subscribeReadingPreferences } from './readerPreferences';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutDeck, layoutPages } from './layout';
@@ -14,6 +15,7 @@ import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
 import type { BBox, Doc, Tour } from './types';
+import type { BoardItem } from '../../shared/paper';
 import { markPlayback } from './marks';
 import { keyBelongsTo, keyCommand } from './keys';
 import type { KeyTarget } from './keys';
@@ -49,6 +51,7 @@ import type { OverlayEntry } from './engine';
 import { positionFromView, viewFromPosition } from './readerState';
 import { AskPanel } from './ask/AskPanel';
 import type { AskContext } from './ask/AskPanel';
+import type { ConversationContext } from '../../shared/conversations';
 import { answerTour, openQuestions, visualShown } from './ask/answer';
 import type { AskAnswer, AskSource } from './ask/api';
 import { prefetchWanted } from './ask/prefetch';
@@ -143,6 +146,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
   const [engine, setEngine] = useState<TourEngine | null>(null);
   const camera = useMemo(() => new Camera(), []);
+  const maxAutoZoom = useSyncExternalStore(subscribeReadingPreferences, getMaxAutoZoom) / 100;
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
@@ -286,8 +290,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             !isPdfOpen(loadedRef.current?.pdf) ||
             current.document.fileStatus === 'uploading' ||
             ['queued', 'processing'].includes(current.analysis?.status ?? '') ||
-            isTourGenerationActive(current.tourGeneration) ||
-            (!!current.doc && !current.tours.length && !current.tourGeneration);
+            isTourGenerationActive(current.tourGeneration);
           if (!document.hidden && (working || needsRetry || Date.now() - lastPoll > 60_000)) void refresh();
         }, 4000)
       : undefined;
@@ -441,12 +444,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         // Targets are framed above the ask dock, together with the other marks the step shows meanwhile. In a deck a
         // target is framed as its whole slide.
         const target = cmd.action
-          ? frameFor(cmd.action, resolver, layout, vp, { fitWidth, insets: camera.insets, also: cmd.also, slide: layout.deck })
+          ? frameFor(cmd.action, resolver, layout, vp, { fitWidth, insets: camera.insets, also: cmd.also, slide: layout.deck, maxZoom: maxAutoZoom })
           : null;
         // Before any camera move a deck shows its first slide whole, a paper the top of its first page.
         const first = layout.pages[0];
         const rect: BBox | undefined = target?.rect ?? (layout.deck && first ? [first.x, first.y, first.x + first.width, first.y + first.height] : undefined);
-        const view = cmd.action ? target?.view : layout.deck && first ? slideView(first, layout, vp, camera.insets) : initialView(layout, vp, camera.insets);
+        const view = cmd.action ? target?.view : layout.deck && first ? slideView(first, layout, vp, camera.insets, maxAutoZoom) : initialView(layout, vp, camera.insets, maxAutoZoom);
         if (!view) return;
         if (layout.deck) {
           slideRef.current = cmd.action ? (target?.page ?? 1) : 1;
@@ -460,7 +463,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         console.warn('[camera] could not frame', cmd.action, err);
       }
     },
-    [camera, layout, resolver],
+    [camera, layout, resolver, maxAutoZoom],
   );
   // The engine plays the tour. While the tour is written it grows in place (TourEngine.extend), so the learner's place,
   // the camera and the board stay as they are. Only another tour (one written again with other steps, or one picked from
@@ -567,6 +570,18 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
   // The answer that is still being written, so that its next steps join the engine that plays it.
   const writing = useRef<{ question: string; engine: TourEngine } | null>(null);
+  const visualDraft = useRef<{ engine: TourEngine; key: string | null; item: BoardItem } | null>(null);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const current = now.current.answer ?? now.current.engine;
+      const board = current?.getState().board;
+      const item = (event as CustomEvent<{ item?: BoardItem }>).detail?.item;
+      if (current && board?.item && item?.kind === board.item.kind)
+        visualDraft.current = { engine: current, key: board.key, item };
+    };
+    window.addEventListener('paper-tour:visual-revision', changed);
+    return () => window.removeEventListener('paper-tour:visual-revision', changed);
+  }, []);
   const dropAnswer = useCallback(() => {
     now.current.answer?.destroy();
     now.current.answer = null;
@@ -588,11 +603,17 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     const tour = main?.getState();
     const last = framed.current;
     const shown = last && camera.targetView === last.view ? last.cmd.action : null;
+    const visualEngine = now.current.answer ?? main;
+    const board = visualEngine?.getState().board;
+    const draft = visualDraft.current;
     return {
       stepId: tour && tour.status !== 'idle' ? main?.steps[tour.index]?.step.id : undefined,
       figureId: !regionSelection && ids ? visualShown(shown, (id) => ids.kind(id)) : undefined,
       selection: regionSnap.region ?? undefined,
       analysisId: loadedAnalysisId,
+      page: currentPageRef.current,
+      activeVisual: draft?.engine === visualEngine && draft?.key === board?.key ? draft?.item : board?.item ?? undefined,
+      ...(board?.artifact ? { visualId: board.artifact.id, visualRevision: board.artifact.revision } : {}),
     };
   }, [camera, regionSelection, regionSnap.region, loadedAnalysisId]);
 
@@ -665,7 +686,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const onAnswer = useCallback((reply: AskAnswer, question: string) => playAnswer(reply, question, false), [playAnswer]);
 
   // Back to the tour: the answer goes, and the tour returns as it was: its marks and board (it only paused), the
-  // camera on what it showed, and playing again if it was.
+  // camera on what it showed. The explicit return button resumes a tour that was playing before the question.
   const backToTour = useCallback(() => {
     const { engine: main, away: was, frame: show } = now.current;
     dropAnswer();
@@ -673,12 +694,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     now.current.away = null;
     setAway(null);
     if (!was) return;
-    if (was.playing && main) main.play();
-    else if (was.framed) show(was.framed.cmd, false);
+    if (was.framed) show(was.framed.cmd, false);
     else {
       framed.current = null;
       camera.animateTo(was.view);
     }
+    if (was.playing) main?.play();
   }, [camera, dropAnswer]);
   // Leaving the answer for somewhere else in the tour: no need to restore the view first.
   const leaveAnswer = useCallback(() => {
@@ -1163,6 +1184,33 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const endOpen = recapVisible({ ...cardState, dismissed: endGone });
   // A step that asks the learner to try first: its card shows while the tour waits.
   const coachStep = state.awaiting ? active?.steps[state.index] : undefined;
+  const restoreConversationContext = useCallback(
+    (context: ConversationContext) => {
+      if (context.analysisId && context.analysisId !== loadedAnalysisId)
+        throw new ApiRequestError(
+          'This conversation uses another document analysis. Open its original saved tour before replaying the explanation.',
+          409,
+          'conversation_analysis_mismatch',
+        );
+      setAside();
+      setRegionSelection(context.selection ?? null);
+      setSelection([]);
+      const page = context.page ?? context.selection?.page;
+      if (page && layout) {
+        framed.current = null;
+        camera.jumpTo(
+          viewFromPosition(
+            layout,
+            camera.viewport,
+            { page: clampSlide(page, layout.pages.length), pageOffset: 0, zoom: null, tourId: null, stepId: null },
+            camera.insets,
+          ),
+        );
+      }
+    },
+    [loadedAnalysisId, setAside, layout, camera],
+  );
+
   const onAsked = useCallback(
     (question: string) => {
       if (question) setAsked((list) => [...list, question]);
@@ -1293,6 +1341,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             <TourGeneration
               documentId={documentId}
               generation={manifest.tourGeneration}
+              promptOnOpen={!manifest.tours.length}
               activityRequest={activityRequest}
               canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
               onChanged={() => setManifestRefresh((value) => value + 1)}
@@ -1611,6 +1660,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                     source={askSource}
                     tourId={documentId ? selectedTourId : null}
                     context={askContext}
+                    onRestoreContext={restoreConversationContext}
                     suggestions={prepared?.tour.suggested_questions}
                     ended={mainState.status === 'ended' && !endOpen}
                     request={askRequest}

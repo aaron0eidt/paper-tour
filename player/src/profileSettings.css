@@ -7,9 +7,26 @@
 .profile-nav {
   display: flex;
   gap: 24px;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
   padding-bottom: 18px;
   margin: -8px 0 28px;
+}
+.profile-zoom-setting {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: 440px;
+  margin-bottom: 14px;
+}
+.profile-zoom-setting input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.profile-zoom-setting output {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
 }
 .profile-nav a {
   color: var(--muted);

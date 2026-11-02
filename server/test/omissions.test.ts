@@ -29,6 +29,19 @@ const boardsLost = (tour: Tour) => (tour.left_out ?? []).filter((item) => item.p
 // (shared/coverage.ts): in the events, in the generation's provenance and in the tour, with scripted models (no network).
 
 type Seen = { type: string; data: Record<string, any> };
+/** Fake network calls need a referenced handle, like a real socket, until their abort settles them. */
+function hangUntilAbort(signal: AbortSignal): Promise<Response> {
+  return new Promise((_, reject) => {
+    const keepAlive = setInterval(() => {}, 60_000);
+    const abort = () => {
+      clearInterval(keepAlive);
+      reject(new Error('aborted'));
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
 const steps = (tour: Tour) => tour.chapters.flatMap((c) => c.steps);
 const stepOf = (tour: Tour, id: string): Step | undefined => steps(tour).find((s) => s.id === id);
 const detailOf = (kind: string) => (task: string) => task.includes(`STEP KIND: ${kind} (a closer look`);
@@ -61,9 +74,7 @@ function hangFirst(inner: typeof globalThis.fetch, matches: (task: string) => bo
     if (body.response_format.json_schema.name === 'beat_direction' && matches(JSON.stringify(body.messages))) {
       const n = asked++;
       if (n >= after && n < after + hangs)
-        return new Promise<Response>((_, reject) =>
-          init!.signal!.addEventListener('abort', () => reject(new Error('aborted'))),
-        );
+        return hangUntilAbort(init!.signal!);
     }
     return inner(url as never, init);
   }) as typeof globalThis.fetch;
@@ -100,9 +111,7 @@ function script(
     if (body.response_format.json_schema.name === 'beat_direction' && matches(JSON.stringify(body.messages))) {
       const call = calls[asked++] ?? 'ok';
       if (call === 'hang')
-        return new Promise<Response>((_, reject) =>
-          init!.signal!.addEventListener('abort', () => reject(new Error('aborted'))),
-        );
+        return hangUntilAbort(init!.signal!);
       if (call === 'garbage')
         return new Response(
           JSON.stringify({

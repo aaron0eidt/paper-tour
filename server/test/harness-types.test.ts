@@ -168,6 +168,19 @@ function suggestedBoard(r: Request): 'bars' | 'flow' | 'formula' | undefined {
   if (suggestion.includes('use a formula board')) return 'formula';
   return undefined;
 }
+/** Fake network calls need a referenced handle, like a real socket, until their abort settles them. */
+function hangUntilAbort(signal: AbortSignal): Promise<Response> {
+  return new Promise((_, reject) => {
+    const keepAlive = setInterval(() => {}, 60_000);
+    const abort = () => {
+      clearInterval(keepAlive);
+      reject(new Error('aborted'));
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
 const steps = (tour: Tour) => tour.chapters.flatMap((c) => c.steps);
 const types = (step: Step) => step.actions.map((a: Action) => a.type);
 
@@ -813,9 +826,7 @@ test('a solution that outlives its time is asked again at less reasoning effort,
         JSON.stringify(body.messages).includes('part b)') &&
         asked++ < hangs
       )
-        return new Promise<Response>((_, reject) =>
-          init!.signal!.addEventListener('abort', () => reject(new Error('aborted'))),
-        );
+        return hangUntilAbort(init!.signal!);
       return inner(url as never, init);
     }) as typeof globalThis.fetch;
     events.length = 0;

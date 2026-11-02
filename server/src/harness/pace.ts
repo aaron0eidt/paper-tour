@@ -48,6 +48,12 @@ export const PACE: Pace = {
   outages: [2_000, 4_000, 8_000],
 };
 
+/** Profiles choose teaching scope, not a wall-clock budget for understanding or completing a valid explanation.
+ * The provider request still has its configured network timeout; cancellation, retries and sandbox bounds remain. */
+export function generationPace(base: Pace, requestTimeoutMs: number, adaptive: boolean): Pace {
+  return adaptive ? { ...base, callMs: () => requestTimeoutMs, stepMs: Infinity, repairMs: requestTimeoutMs } : base;
+}
+
 /**
  * Runs a model call, waiting out a provider that could not take it (a transient error: a 5xx or a 429) with the given
  * waits, one per retry, while `again` allows. Any other failure, and the last transient one, goes to the caller.

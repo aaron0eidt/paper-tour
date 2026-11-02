@@ -1,6 +1,8 @@
 import { TourProfileStore } from './tour-profiles';
 import { sameTourProfile } from '../../shared/tourProfiles';
 import type { TourProfileCatalog, TourProfileDraft, TourProfile } from '../../shared/tourProfiles';
+import { ConversationStore } from './conversations';
+import type { Conversation, ConversationSummary, CreateConversation } from '../../shared/conversations';
 import { transcribe } from './muse/transcribe';
 import { voiceHints, type VoiceHints } from './muse/voice-hints';
 import { AnswerCache, answerKey } from './ask-cache';
@@ -23,6 +25,7 @@ import type {
   UploadReservation,
   TourGenerationSummary,
   TourModelSelection,
+  UploadSelection,
 } from '../../shared/contracts';
 import type { Doc, Tour } from '../../shared/paper';
 import type { ModelCatalog } from '../../shared/models';
@@ -38,6 +41,8 @@ import type { MuseConfig } from './config';
 import type { SettingsService } from './settings';
 import {
   answerQuestion,
+  currentSink,
+  withSink,
   askError,
   askModel,
   findStep,
@@ -50,6 +55,9 @@ import {
   type AskRequest,
 } from './harness/ask';
 import { MuseClient } from './muse/client';
+import type { VisualArtifact } from '../../shared/visualArtifacts';
+import { VisualArtifactService } from './visuals/artifacts';
+import { activeBoard, persistAnswerVisuals, withVisualParameters } from './visuals/persistence';
 
 export type Enqueue = (
   kind: 'analyze' | 'delete' | 'generate_tour' | 'agent_turn',
@@ -74,6 +82,10 @@ export interface Library {
     expectedRevision: number,
     draft: TourProfileDraft,
   ): Promise<TourProfile>;
+  conversations?(owner: string, documentId: string): Promise<ConversationSummary[]>;
+  conversation?(owner: string, documentId: string, id: string): Promise<Conversation>;
+  createConversation?(owner: string, documentId: string, input: CreateConversation): Promise<Conversation>;
+  renameConversation?(owner: string, documentId: string, id: string, title: string): Promise<Conversation>;
   transcribe?(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   demoTranscribe?(paper: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   agentRun?(owner: string, id: string, runId: string): Promise<AgentRun>;
@@ -89,7 +101,7 @@ export interface Library {
     held?: { after: number; attempt: string },
   ): Promise<TourPartialView>;
   resumeConfigured?(owner: string): Promise<void>;
-  reserve(owner: string, filename: string, size: number, selection?: TourModelSelection): Promise<UploadReservation>;
+  reserve(owner: string, filename: string, size: number, selection?: UploadSelection): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
   generateTour(
     owner: string,
@@ -144,6 +156,7 @@ export class DocumentService implements Library {
     readonly catalog?: Pick<MetaModelCatalog, 'get' | 'validateSelection'>,
     readonly settings?: SettingsService,
     readonly agentEnabled = false,
+    readonly visualArtifacts = new VisualArtifactService(db),
   ) {}
   tourProfiles(owner: string) {
     return new TourProfileStore(this.db).list(owner);
@@ -153,6 +166,21 @@ export class DocumentService implements Library {
   }
   reviseTourProfile(owner: string, id: string, expectedRevision: number, draft: TourProfileDraft) {
     return new TourProfileStore(this.db).revise(owner, id, expectedRevision, draft);
+  }
+  private get conversationStore() {
+    return new ConversationStore(this.db);
+  }
+  conversations(owner: string, documentId: string) {
+    return this.conversationStore.list(owner, documentId);
+  }
+  conversation(owner: string, documentId: string, id: string) {
+    return this.conversationStore.get(owner, documentId, id);
+  }
+  createConversation(owner: string, documentId: string, input: CreateConversation) {
+    return this.conversationStore.create(owner, documentId, input);
+  }
+  renameConversation(owner: string, documentId: string, id: string, title: string) {
+    return this.conversationStore.rename(owner, documentId, id, title);
   }
   async models(owner?: string): Promise<ModelCatalog> {
     if (this.settings && owner) return this.settings.models(owner);
@@ -322,7 +350,7 @@ export class DocumentService implements Library {
     );
     return Promise.all(rows.map((row) => this.summary(row)));
   }
-  async reserve(owner: string, filename: string, size: number, selection: TourModelSelection = {}) {
+  async reserve(owner: string, filename: string, size: number, selection: UploadSelection = {}) {
     if (!filename.toLowerCase().endsWith('.pdf') || !Number.isSafeInteger(size) || size < 1 || size > this.maxBytes)
       throw new HttpError(400, 'invalid_upload', 'Choose a PDF up to 25 MiB.');
     const allowTraining = selection.allowTraining === true;
@@ -337,8 +365,8 @@ export class DocumentService implements Library {
     const title = safeName.replace(/\.pdf$/i, '').slice(0, 300) || 'Untitled document';
     const path = `${owner}/${id}/original.pdf`;
     await this.db.query(
-      `insert into documents(id,owner_id,title,original_filename,upload_size,upload_path,tour_model,tour_allow_training) values($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [id, owner, title, safeName, size, path, model, allowTraining],
+      `insert into documents(id,owner_id,title,original_filename,upload_size,upload_path,tour_model,tour_allow_training,defer_tour) values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, owner, title, safeName, size, path, model, allowTraining, selection.deferTour === true],
     );
     return { documentId: id, bucket: BUCKET, path };
   }
@@ -704,6 +732,19 @@ export class DocumentService implements Library {
     const settings = this.askSettings();
     const asked = askedRequest(request);
     const document = await this.owned(owner, id);
+    const conversation = asked.conversationId
+      ? await this.conversationStore.get(owner, id, asked.conversationId)
+      : null;
+    if (conversation) {
+      if (asked.analysisId && asked.analysisId !== conversation.context.analysisId)
+        throw new HttpError(
+          409,
+          'conversation_analysis_mismatch',
+          'Open this conversation with its original document analysis, or start a new conversation.',
+        );
+      asked.analysisId = conversation.context.analysisId;
+      asked.history = []; // Filled atomically from completed server-owned turns below.
+    }
     let analysisId: string | null = asked.analysisId ?? document.current_analysis_id;
     let tour: Tour | undefined;
     if (request.tourId) {
@@ -730,26 +771,111 @@ export class DocumentService implements Library {
       : { rows: [] };
     if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
     const doc = analysis.doc as Doc;
+    asked.analysisId = analysis.id;
     validateAskedSelection(asked, doc);
+    if ((asked.visualId === undefined) !== (asked.visualRevision === undefined))
+      throw new HttpError(400, 'invalid_visual_reference', 'Choose a saved visual and its revision together.');
+    let visual: VisualArtifact | undefined;
+    if (!asked.visualId && asked.activeVisual) {
+      const previous = conversation
+        ? [...conversation.messages].reverse().find((message) => message.status === 'completed' && message.answer)
+            ?.answer
+        : undefined;
+      const tourSteps = tour?.chapters.flatMap((chapter) => chapter.steps) ?? [];
+      const baseline =
+        previous && (!asked.stepId || previous.steps.some((step) => step.id === asked.stepId))
+          ? activeBoard(previous.steps, asked.stepId)
+          : activeBoard(tourSteps, asked.stepId);
+      asked.activeVisual = baseline ? withVisualParameters(baseline.item, asked.activeVisual) : undefined;
+      if (baseline?.artifact) {
+        asked.visualId = baseline.artifact.id;
+        asked.visualRevision = baseline.artifact.revision;
+      }
+    }
+    if (asked.visualId) {
+      visual = await this.visualArtifacts.get(owner, id, { id: asked.visualId, revision: asked.visualRevision! });
+      if (visual.analysisId !== analysis.id)
+        throw new HttpError(
+          409,
+          'visual_analysis_mismatch',
+          'This visual belongs to another document analysis. Open its original conversation or start a new visual.',
+        );
+      asked.activeVisual = withVisualParameters(visual.item, asked.activeVisual);
+    }
     const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
-    return this.answer(owner, {
-      documentId: id,
-      analysisId: analysis.id,
-      doc,
-      tour,
-      request: asked,
-      model,
-      muse: async () => (await settings.resolveMuse(owner, model)).config,
-      image: () =>
-        asked.selection
-          ? Promise.resolve(undefined)
-          : figureImage(this.db.pool, this.storage, analysis.id, doc, asked.figureId),
-      images: () =>
-        asked.selection
-          ? selectionImages(this.storage, document.upload_path, doc, asked.selection, signal)
-          : Promise.resolve([]),
-      signal,
-    });
+    const run = () =>
+      this.answer(owner, {
+        documentId: id,
+        analysisId: analysis.id,
+        doc,
+        tour,
+        request: asked,
+        model,
+        muse: async () => (await settings.resolveMuse(owner, model)).config,
+        image: () =>
+          asked.selection
+            ? Promise.resolve(undefined)
+            : figureImage(this.db.pool, this.storage, analysis.id, doc, asked.figureId),
+        images: () =>
+          asked.selection
+            ? selectionImages(this.storage, document.upload_path, doc, asked.selection, signal)
+            : Promise.resolve([]),
+        signal,
+      });
+    if (!conversation) {
+      const answer = await run();
+      signal?.throwIfAborted();
+      const stored = await persistAnswerVisuals(
+        this.db,
+        this.visualArtifacts,
+        owner,
+        id,
+        analysis.id,
+        answer,
+        undefined,
+        visual,
+      );
+      signal?.throwIfAborted();
+      return stored;
+    }
+    const { messageId, history } = await this.conversationStore.begin(owner, id, conversation.id, asked);
+    asked.history = history;
+    const parentSink = currentSink();
+    let partial: AskAnswer | null = null;
+    try {
+      const answer = await withSink((answerable, step, language) => {
+        partial ??= { answerable, language, steps: [], followups: [], conversationId: conversation.id, messageId };
+        partial.steps.push(structuredClone(step));
+        parentSink?.(answerable, step, language);
+      }, run);
+      signal?.throwIfAborted();
+      const stored = await persistAnswerVisuals(
+        this.db,
+        this.visualArtifacts,
+        owner,
+        id,
+        analysis.id,
+        answer,
+        conversation.id,
+        visual,
+      );
+      signal?.throwIfAborted();
+      const saved = { ...stored, conversationId: conversation.id, messageId };
+      await this.conversationStore.finish(owner, id, conversation.id, messageId, 'completed', saved);
+      return saved;
+    } catch (error) {
+      const cancelled = signal?.aborted === true;
+      await this.conversationStore.finish(
+        owner,
+        id,
+        conversation.id,
+        messageId,
+        cancelled ? 'cancelled' : 'failed',
+        partial,
+        cancelled ? 'Answer stopped.' : 'The answer could not be completed. You can ask again.',
+      );
+      throw error;
+    }
   }
   /**
    * A question about a demo paper (demo/<paper>/) without an account, on the server's own Meta key and model. Only

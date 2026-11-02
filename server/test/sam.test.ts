@@ -130,11 +130,15 @@ function transport(answer: (request: Request, call: number) => Response | Promis
   }) as typeof fetch;
   return { fetcher, calls };
 }
-/** A request that waits until its signal aborts, as a real fetch does. */
+/** A request keeps a referenced handle like a real socket until its signal aborts. */
 const hanging = (): typeof fetch =>
   ((_url: unknown, init: RequestInit = {}) =>
     new Promise((_resolve, reject) => {
-      const stop = () => reject(init.signal?.reason ?? new Error('aborted'));
+      const keepAlive = setInterval(() => {}, 60_000);
+      const stop = () => {
+        clearInterval(keepAlive);
+        reject(init.signal?.reason ?? new Error('aborted'));
+      };
       if (init.signal?.aborted) stop();
       else init.signal?.addEventListener('abort', stop, { once: true });
     })) as typeof fetch;

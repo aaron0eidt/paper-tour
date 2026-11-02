@@ -1,0 +1,47 @@
+import type { BoardItem, Tour } from './paper';
+export interface VisualArtifactRef {
+  id: string;
+  revision: number;
+}
+export interface VisualArtifact extends VisualArtifactRef {
+  documentId: string;
+  analysisId: string;
+  conversationId?: string;
+  tourId?: string;
+  parent?: VisualArtifactRef;
+  item: BoardItem;
+  createdAt: string;
+}
+export interface VisualArtifactInput {
+  analysisId: string;
+  item: BoardItem;
+  conversationId?: string;
+  tourId?: string;
+  parent?: VisualArtifactRef;
+}
+/** Pure immutable traversal; storing a conversation variant never rewrites the source tour. */
+export async function mapTourVisuals(
+  tour: Tour,
+  store: (item: BoardItem, stepId: string) => Promise<VisualArtifactRef | undefined>,
+): Promise<Tour> {
+  return {
+    ...tour,
+    chapters: await Promise.all(
+      tour.chapters.map(async (chapter) => ({
+        ...chapter,
+        steps: await Promise.all(
+          chapter.steps.map(async (step) => ({
+            ...step,
+            actions: await Promise.all(
+              step.actions.map(async (action) => {
+                if (action.type !== 'board') return action;
+                const artifact = await store(action.item, step.id);
+                return artifact ? { ...action, artifact } : action;
+              }),
+            ),
+          })),
+        ),
+      })),
+    ),
+  };
+}

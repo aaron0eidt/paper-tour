@@ -148,10 +148,7 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument, onOpenDemo }: 
             item.analysisStatus === 'queued' ||
             item.analysisStatus === 'processing' ||
             item.fileStatus === 'uploading' ||
-            isTourGenerationActive(item.tourGeneration) ||
-            ((item.analysisStatus === 'ready' || item.analysisStatus === 'limited') &&
-              !item.tourCount &&
-              !item.tourGeneration),
+            isTourGenerationActive(item.tourGeneration),
         );
         if (processing) timer = setTimeout(() => void load(), 3000);
       } catch (cause) {
@@ -286,7 +283,7 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument, onOpenDemo }: 
           onChanged={refreshDocuments}
           onUploaded={(documentId) => {
             setNotice({
-              text: 'PDF saved. We’ll prepare its contents, then write a guided tour; its first steps can play while the rest is still being written.',
+              text: 'PDF saved. Open it to read or choose how you’d like its tour explained.',
               open: documentId,
             });
             refreshDocuments();
@@ -534,7 +531,7 @@ function DocumentCard({
         {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
         {canOpen &&
           item.tourGeneration?.status !== 'ready' &&
-          (item.tourGeneration || (analysisReady && !item.tourCount)) && (
+          item.tourGeneration && (
             <TourGeneration
               documentId={item.id}
               generation={item.tourGeneration}

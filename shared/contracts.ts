@@ -52,6 +52,10 @@ export interface TourModelSelection extends TourProfileSelection {
   model?: string;
   allowTraining?: boolean;
 }
+/** Upload first; let the reader choose a teaching profile before starting a model run. */
+export interface UploadSelection extends TourModelSelection {
+  deferTour?: boolean;
+}
 export interface ElementRef {
   documentId: string;
   analysisId: string;

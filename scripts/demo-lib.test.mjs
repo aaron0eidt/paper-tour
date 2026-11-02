@@ -99,7 +99,16 @@ test('a request never throws: a refusal, a timeout and a bad body all come back 
   assert.equal(refused.status, 0);
   assert.match(refused.error, /refused/);
   const slow = await call(
-    (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))),
+    (url, init) => new Promise((_, reject) => {
+      // Match a real socket's lifetime while the request waits for its timeout signal.
+      const keepAlive = setInterval(() => {}, 60_000);
+      const stop = () => {
+        clearInterval(keepAlive);
+        reject(init.signal.reason);
+      };
+      if (init.signal.aborted) stop();
+      else init.signal.addEventListener('abort', stop, { once: true });
+    }),
     'http://x',
     {},
     20,

@@ -7,11 +7,13 @@ import { createQueue } from './queue';
 import { createApp } from './app';
 import { MetaModelCatalog } from './muse/models';
 import { SettingsService } from './settings';
+import { VisualArtifactService } from './visuals/artifacts';
 const c = config();
 const db = new Database(c.databaseUrl);
 const { storage, authenticate } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const settings = new SettingsService(db, c.muse);
+const visualArtifacts = new VisualArtifactService(db);
 const app = await createApp({
   service: new DocumentService(
     db,
@@ -22,8 +24,10 @@ const app = await createApp({
     new MetaModelCatalog(c.muse),
     settings,
     c.agent?.enabled,
+    visualArtifacts,
   ),
   settings,
+  visualArtifacts,
   authenticate,
   origins: c.origins,
   spaDir: resolve(ROOT, 'player/dist'),
