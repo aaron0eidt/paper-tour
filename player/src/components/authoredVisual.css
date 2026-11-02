@@ -7,7 +7,7 @@
   gap: 1.25rem;
 }
 .program-frame {
-  background: #10131b;
+  background: var(--canvas-bg);
   border-radius: 10px;
   display: block;
   width: 100%;
@@ -43,7 +43,7 @@
 }
 .authored-visual-error {
   padding: 1rem;
-  border: 1px solid #bd7f86;
+  border: 1px solid var(--error-border);
   border-radius: 10px;
   line-height: 1.5;
 }

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderProgramFrame, programRuntime } from '../src/visuals/program-runtime';
 import { reviewProgram } from '../src/visuals/program-review';
-import { inspectProgramSvg } from '../../shared/programRuntime';
+import { inspectProgramSvg, renderProgramFrame as renderWithTheme, PROGRAM_THEME } from '../../shared/programRuntime';
 import { programProblems } from '../../shared/program';
 import { plotlyFigure, plotlyProblems } from '../../shared/plotly';
 import { computePlotlyPython } from '../src/visuals/plotly-compute';
@@ -11,6 +11,15 @@ import { authorAndInspectVisual } from '../src/visuals/inspect';
 import { mapTourVisuals } from '../../shared/visualArtifacts';
 import type { Tour } from '../../shared/paper';
 import { attention, backprop, measured } from './fixtures/authored-visuals';
+
+test('isolated scene rendering accepts the active theme without changing computed quantities', async () => {
+  const light = { ...PROGRAM_THEME, text: '#202735', panel: '#f0f3f8', blue: '#245bb9' };
+  const frame = await renderWithTheme(attention, 1, programRuntime, {}, 100, light);
+  const original = await renderProgramFrame(attention, 1);
+  assert.deepEqual(frame.calculations, original.calculations);
+  assert.ok(frame.svg.includes(light.text));
+  assert.notEqual(frame.svg, original.svg);
+});
 
 test('attention program computes real softmax and updates its numerical example without mutating its source', async () => {
   const before = JSON.stringify(attention),

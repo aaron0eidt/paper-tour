@@ -178,7 +178,7 @@ test('bars keep their unit and direction and drop values that are not numbers', 
 test('term colours: their own, else the palette in order, cycling past its end', () => {
   eq(termColor({ latex: 'x', label: 'x', color: 'pink' }, 0), 'pink');
   eq([0, 1, 5].map((i) => termColor({ latex: 'x', label: 'x' }, i)), ['blue', 'orange', 'blue']);
-  eq(BOARD_PALETTE.every((c) => /^#[0-9a-f]{6}$/.test(BOARD_INK[c])), true, 'an ink for every colour');
+  eq(BOARD_PALETTE.every((c) => BOARD_INK[c] === `var(--canvas-${c})`), true, 'theme ink for every semantic colour');
 });
 
 // ------------------------------------------------------------------- flows

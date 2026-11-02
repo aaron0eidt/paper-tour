@@ -26,17 +26,11 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 /** The two distributions' colours: the first, and where it morphs to. */
 export const DISTRIBUTION_INK = [BOARD_INK.blue, BOARD_INK.orange];
 
-/** The colour part-way between the two inks, as a hex colour. */
+/** Interpolate semantic inks in CSS so a theme change also updates an in-flight morph. */
 export function mixInk(t: number): string {
-  const channel = (hex: string, at: number) => parseInt(hex.slice(1 + 2 * at, 3 + 2 * at), 16);
   const [a, b] = DISTRIBUTION_INK;
-  return `#${[0, 1, 2]
-    .map((c) =>
-      Math.round(lerp(channel(a, c), channel(b, c), clamp(t, 0, 1)))
-        .toString(16)
-        .padStart(2, '0'),
-    )
-    .join('')}`;
+  const progress = clamp(t, 0, 1);
+  return progress === 0 ? a : progress === 1 ? b : `color-mix(in srgb, ${a} ${(1 - progress) * 100}%, ${b})`;
 }
 
 // ------------------------------------------------------------------- words

@@ -40,6 +40,7 @@ export const PROGRAM_THEME = Object.freeze({
   orange: '#ffb96f',
   yellow: '#e7d86b',
 });
+export type ProgramTheme = Readonly<Record<keyof typeof PROGRAM_THEME, string>>;
 
 const TAGS = new Set([
   'svg',
@@ -228,6 +229,7 @@ export async function renderProgramFrame(
   adapter: ProgramRuntimeAdapter,
   overrides: Record<string, number> = {},
   milliseconds = 100,
+  theme: ProgramTheme = PROGRAM_THEME,
 ): Promise<ProgramFrame> {
   const problems = programProblems(item);
   if (problems.length) throw new Error(problems.join('; '));
@@ -239,7 +241,7 @@ export async function renderProgramFrame(
     ]),
   );
   const data = Object.fromEntries(item.data.map((d) => [d.name, d.values]));
-  const input = JSON.stringify({ t: Math.max(0, Math.min(1, t)), params, data, theme: PROGRAM_THEME });
+  const input = JSON.stringify({ t: Math.max(0, Math.min(1, t)), params, data, theme });
   const script = `(()=>{const {t,params,data,theme}=${input};${PROGRAM_HELPERS}\nconst render=(${item.code});if(typeof render!=='function')throw Error('Code must be a function expression');const output=render({t,params,data,theme,math,svg});if(typeof output!=='string')throw Error('Render must return an SVG string');return JSON.stringify({svg:output,calculations:trace});})()`;
   const json = await adapter.evaluate(script, milliseconds);
   if (json.length > PROGRAM_LIMITS.svg * 2) throw new Error('Scene output exceeds the render budget.');

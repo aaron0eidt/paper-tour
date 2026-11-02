@@ -1,5 +1,7 @@
 import type { ProgramItem } from '../../../shared/program';
 import type { ReadingPassage } from '../../../shared/reading';
+import type { ProgramTheme } from '../../../shared/programRuntime';
+import { readVisualTheme } from './theme';
 
 const frames = new Map<string, string>();
 let plotly: Promise<typeof import('plotly.js-dist-min')> | undefined;
@@ -9,14 +11,14 @@ export function loadPlotly() {
   return plotly ??= import('plotly.js-dist-min').catch((error) => { plotly = undefined; throw error; });
 }
 
-export function preparedProgramFrame(item: ProgramItem): string | undefined {
-  return frames.get(JSON.stringify(item));
+export function preparedProgramFrame(item: ProgramItem, theme = readVisualTheme()): string | undefined {
+  return frames.get(JSON.stringify([item, theme]));
 }
 
 /** Evaluate only the first frame, in the same isolated worker used for live playback. */
-async function prepareProgram(item: ProgramItem, signal: AbortSignal): Promise<void> {
+async function prepareProgram(item: ProgramItem, signal: AbortSignal, theme: ProgramTheme): Promise<void> {
   signal.throwIfAborted();
-  const key = JSON.stringify(item);
+  const key = JSON.stringify([item, theme]);
   if (frames.has(key) || typeof Worker === 'undefined') return;
   await new Promise<void>((resolve, reject) => {
     const worker = new Worker(new URL('./program.worker.ts', import.meta.url), { type: 'module' });
@@ -40,16 +42,16 @@ async function prepareProgram(item: ProgramItem, signal: AbortSignal): Promise<v
       if (frames.size > 24) frames.delete(frames.keys().next().value!);
       finish();
     };
-    worker.postMessage({ id: 0, item, t: 0, parameters: {} });
+    worker.postMessage({ id: 0, item, t: 0, parameters: {}, theme });
   });
 }
 
 /** Native boards already carry their data. Authored scenes also warm a preview and their rendering assets. */
-export async function prepareReadingVisuals(passage: ReadingPassage, signal: AbortSignal): Promise<void> {
+export async function prepareReadingVisuals(passage: ReadingPassage, signal: AbortSignal, theme = readVisualTheme()): Promise<void> {
   for (const action of passage.actions ?? []) {
     signal.throwIfAborted();
     if (action.type !== 'board') continue;
-    if (action.item.kind === 'program') await prepareProgram(action.item, signal);
+    if (action.item.kind === 'program') await prepareProgram(action.item, signal, theme);
     if (action.item.kind === 'plotly') await loadPlotly();
   }
   signal.throwIfAborted();

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { plotlyFigure, plotlyProblems, type PlotlyItem } from '../../../shared/plotly';
 import { loadPlotly } from '../visuals/preparation';
+import { themedPlotlyLayout, useVisualTheme } from '../visuals/theme';
 import './authoredVisual.css';
 
 export function PlotlyBoard({ item }: { item: PlotlyItem }) {
+  const theme = useVisualTheme();
   const element = useRef<HTMLDivElement>(null),
     [parameter, setParameter] = useState(item.parameter?.value ?? 1),
     [error, setError] = useState('');
@@ -40,12 +42,8 @@ export function PlotlyBoard({ item }: { item: PlotlyItem }) {
           node,
           figure.data,
           {
-            ...figure.layout,
+            ...themedPlotlyLayout(figure.layout, theme),
             autosize: true,
-            paper_bgcolor: 'transparent',
-            plot_bgcolor: 'transparent',
-            font: { family: 'Arial, sans-serif', size: 15, color: '#dce2ee' },
-            colorway: ['#7ea6ff', '#ef8ac9', '#6fd3b1', '#ffb96f'],
             margin: { l: 60, r: 25, t: 35, b: 60 },
             uirevision: item.title ?? 'live-plot',
           },
@@ -64,7 +62,7 @@ export function PlotlyBoard({ item }: { item: PlotlyItem }) {
     return () => {
       cancelled = true;
     };
-  }, [item, parameter]);
+  }, [item, parameter, theme]);
   const change = (value: number) => {
     setParameter(value);
     window.dispatchEvent(

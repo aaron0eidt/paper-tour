@@ -986,7 +986,7 @@ test('the morph follows the cues: dist-1 and dist-2 choose their own state, the 
   ok(morphEase(0.25) < 0.25 && morphEase(0.75) > 0.75, 'a shape settles slowly at both ends');
   ok(MORPH_MS > 600 && MORPH_MS < 2000, 'a morph is slow enough to follow');
   eq([mixInk(0), mixInk(1)], DISTRIBUTION_INK, 'the colour runs from the first ink to the second');
-  ok(/^#[0-9a-f]{6}$/.test(mixInk(0.5)), mixInk(0.5));
+  eq(mixInk(0.5), `color-mix(in srgb, ${DISTRIBUTION_INK[0]} 50%, ${DISTRIBUTION_INK[1]})`, 'morph ink follows the active theme');
 });
 
 test('the readouts are the shared computation at the state on show: the tail counts down and the spread narrows', () => {

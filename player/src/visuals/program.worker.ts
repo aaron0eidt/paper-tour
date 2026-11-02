@@ -1,7 +1,7 @@
 import { newQuickJSWASMModule, newVariant, RELEASE_SYNC } from 'quickjs-emscripten';
 import wasmLocation from '@jitl/quickjs-wasmfile-release-sync/wasm?url';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import { renderProgramFrame, type ProgramRuntimeAdapter } from '../../../shared/programRuntime';
+import { renderProgramFrame, type ProgramRuntimeAdapter, type ProgramTheme } from '../../../shared/programRuntime';
 import type { ProgramItem } from '../../../shared/program';
 
 // A dedicated worker is also terminable by the UI; even engine initialization cannot block it.
@@ -44,11 +44,11 @@ const adapter: ProgramRuntimeAdapter = {
   },
 };
 self.onmessage = async (
-  event: MessageEvent<{ id: number; item: ProgramItem; t: number; parameters: Record<string, number> }>,
+  event: MessageEvent<{ id: number; item: ProgramItem; t: number; parameters: Record<string, number>; theme?: ProgramTheme }>,
 ) => {
-  const { id, item, t, parameters } = event.data;
+  const { id, item, t, parameters, theme } = event.data;
   try {
-    self.postMessage({ id, frame: await renderProgramFrame(item, t, adapter, parameters) });
+    self.postMessage({ id, frame: await renderProgramFrame(item, t, adapter, parameters, 100, theme) });
   } catch (error) {
     self.postMessage({ id, error: error instanceof Error ? error.message : 'Scene rendering failed' });
   }

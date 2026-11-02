@@ -10,12 +10,15 @@ const assert = {
 import {
   THEME_KEY,
   getThemePreference,
+  getResolvedTheme,
   initializeTheme,
   parseTheme,
   resolvedTheme,
   setThemePreference,
   subscribeTheme,
 } from '../src/theme';
+import { readVisualTheme, themedPlotlyLayout } from '../src/visuals/theme';
+import { PROGRAM_THEME } from '../../shared/programRuntime';
 
 test('theme defaults to the existing dark style and resolves the optional system choice', () => {
   assert.equal(parseTheme(null), 'dark');
@@ -61,9 +64,11 @@ test('theme applies before mount, persists, follows system changes, syncs tabs a
     setThemePreference('system');
     assert.equal(storage.get(THEME_KEY), 'system');
     assert.equal(root.dataset.theme, 'dark');
+    assert.equal(getResolvedTheme(), 'dark');
     media.matches = true;
     handlers.get('media')?.();
     assert.equal(root.dataset.theme, 'light');
+    assert.equal(getResolvedTheme(), 'light');
     handlers.get('storage')?.({ key: 'another-setting', newValue: 'dark' });
     assert.equal(getThemePreference(), 'system');
     handlers.get('storage')?.({ key: THEME_KEY, newValue: 'dark' });
@@ -92,5 +97,34 @@ test('theme applies before mount, persists, follows system changes, syncs tabs a
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
     }
+  }
+});
+
+test('worker colours come from CSS and Plotly chrome follows them without changing ranges or cameras', () => {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const originalStyle = Object.getOwnPropertyDescriptor(globalThis, 'getComputedStyle');
+  try {
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: { documentElement: {} } });
+    Object.defineProperty(globalThis, 'getComputedStyle', { configurable: true, value: () => ({
+      getPropertyValue: (name: string) => name === '--canvas-text' ? '#202735' : name === '--canvas-raised' ? '#f0f3f8' : '',
+    }) });
+    const theme = readVisualTheme();
+    assert.equal(theme.text, '#202735'); assert.equal(theme.panel, '#f0f3f8');
+    assert.equal(theme.blue, PROGRAM_THEME.blue);
+    const layout = { xaxis: { range: [0, 10] }, yaxis2: { range: [1, 8] }, scene: { camera: { eye: { x: 1 } } },
+      annotations: [{ text: 'Source label', font: { color: '#ffffff' }, bgcolor: '#11141b' }] };
+    const before = JSON.stringify(layout);
+    const themed = themedPlotlyLayout(layout, theme) as any;
+    assert.equal(JSON.stringify(themed.xaxis.range), '[0,10]');
+    assert.equal(JSON.stringify(themed.yaxis2.range), '[1,8]');
+    assert.equal(themed.scene.camera.eye.x, 1);
+    assert.equal(themed.font.color, '#202735');
+    assert.equal(themed.scene.xaxis.gridcolor, '#f0f3f8');
+    assert.equal(themed.annotations[0].font.color, '#202735');
+    assert.equal(themed.annotations[0].bgcolor, 'transparent');
+    assert.equal(JSON.stringify(layout), before);
+  } finally {
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument); else Reflect.deleteProperty(globalThis, 'document');
+    if (originalStyle) Object.defineProperty(globalThis, 'getComputedStyle', originalStyle); else Reflect.deleteProperty(globalThis, 'getComputedStyle');
   }
 });

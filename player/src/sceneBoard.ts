@@ -19,8 +19,8 @@ export function sceneObjects(item: SceneItem): DrawnSceneObject[] {
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-const colorAt = (a: string, b: string, t: number) => `#${[1, 3, 5].map(start =>
-  Math.round(lerp(parseInt(a.slice(start, start + 2), 16), parseInt(b.slice(start, start + 2), 16), t)).toString(16).padStart(2, '0')).join('')}`;
+const colorAt = (a: string, b: string, t: number) => a === b ? a
+  : `color-mix(in srgb, ${a} ${(1 - t) * 100}%, ${b})`;
 
 /** A domain or coordinate-system change is an exact cut, not a numerical
  * transformation. Interpolating coordinates in different units invents a path

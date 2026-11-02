@@ -1,4 +1,4 @@
-/* Theme palettes. Components consume semantic tokens; artwork uses the independent canvas palette. */
+/* Theme palettes. Controls and mathematical artwork both consume semantic tokens. */
 :root {
   color-scheme: dark;
   --bg: #0d0f14;
@@ -50,6 +50,12 @@
   --canvas-bar: #4a5366;
   --canvas-text: #e7e9f0;
   --canvas-muted: #8a90a2;
+  --canvas-outline: #333a4a;
+  --canvas-blue: #4c95ff;
+  --canvas-orange: #ff9a4d;
+  --canvas-green: #36c793;
+  --canvas-pink: #f497e0;
+  --canvas-yellow: #ecdc5c;
 }
 
 :root[data-theme='light'] {
@@ -96,4 +102,17 @@
   --success-border: #8fb9a9;
   --timeline-track: #d5ddeb;
   --timeline-stripe: rgba(71, 91, 130, 0.25);
+  --canvas-bg: #ffffff;
+  --canvas-raised: #f0f3f8;
+  --canvas-rule: #d8dde8;
+  --canvas-edge: #606d81;
+  --canvas-bar: #69788e;
+  --canvas-text: #202735;
+  --canvas-muted: #596579;
+  --canvas-outline: #b8c4d6;
+  --canvas-blue: #245bb9;
+  --canvas-orange: #9a4b0c;
+  --canvas-green: #13714f;
+  --canvas-pink: #993783;
+  --canvas-yellow: #796000;
 }

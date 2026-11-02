@@ -14,9 +14,18 @@ To add a theme:
 3. Verify text, muted text, links, primary buttons and status messages on each surface; extend the palette contrast test.
 4. Check library, connection/model settings, collapsed/expanded ask dock, language menu, tour cover, activity and timeline.
 
-PDF pages and annotations retain their source colors. Mathematical live canvases have an independent --canvas-*
-palette so semantic illustration colors retain their tested contrast. A theme can override those canvas tokens as a
-coherent set; do not change a canvas background alone while leaving its text or authored colors unchanged.
+PDF pages and annotations retain their source colors. Each theme defines the complete --canvas-* palette for
+mathematical live canvases: surfaces, text, rules and semantic blue/orange/green/pink/yellow inks. Native SVG/KaTeX
+renderers consume CSS tokens directly, including color interpolation during scene and distribution transitions.
+Do not change a canvas background alone while leaving its labels or authored colors unchanged.
+
+player/src/visuals/theme.ts resolves these same CSS tokens for Plotly and isolated program workers. System-theme
+changes notify React through the resolved theme, even when the preference remains System. Plotly re-renders its
+chrome without resetting scientific ranges, cameras or parameters. Program workers receive the active palette;
+their parameter state survives a theme change. Prepared program previews include the palette in their cache key,
+so a dark preview is never reused for a light scene. Full model-authored visual definitions remain theme-independent
+and require no new model request on theme changes. New authored code should use its supplied theme object for
+surfaces, labels and semantic inks; explicit scientific colour encodings remain part of the authored content.
 
 Theme selection is local to the browser, applied before React mounts, synchronized between tabs, and follows OS
 changes only when System is selected. Storage failure still allows changing appearance for the current visit.

@@ -1,4 +1,4 @@
-/* The side board: a dark panel beside the stage that builds formulas, flows and bars. */
+/* The side board follows the active canvas palette for formulas, flows and bars. */
 
 /* ------------------------------------------------------------------ layout */
 
@@ -433,7 +433,7 @@ code.formula-symbol {
 
 .flow-box {
   fill: var(--board-raised);
-  stroke: #333a4a;
+  stroke: var(--canvas-outline);
   stroke-width: 1.25;
   transition:
     fill 360ms ease,

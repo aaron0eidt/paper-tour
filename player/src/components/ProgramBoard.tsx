@@ -3,22 +3,27 @@ import type { ProgramItem } from '../../../shared/program';
 import type { BoardPlayback } from '../engine';
 import { useSpokenProgress } from './Plot';
 import { preparedProgramFrame } from '../visuals/preparation';
+import { useVisualTheme } from '../visuals/theme';
 import './authoredVisual.css';
 
 /** Host narration owns time. Slider edits create a local draft; saved tour objects are never mutated. */
 export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: BoardPlayback }) {
   const progress = useSpokenProgress(playback.progress, playback.playing);
+  const theme = useVisualTheme();
   const [parameters, setParameters] = useState<Record<string, number>>({});
-  const [image, setImage] = useState(() => preparedProgramFrame(item) ?? '');
+  const parameterValues = useRef(parameters);
+  parameterValues.current = parameters;
+  const [image, setImage] = useState(() => preparedProgramFrame(item, theme) ?? '');
   const [error, setError] = useState('');
   const worker = useRef<Worker>();
   const request = useRef(0);
   const pending = useRef<{ t: number; parameters: Record<string, number> }>();
   const busy = useRef(false);
   const send = useRef<() => void>(() => {});
+  useEffect(() => setParameters({}), [item]);
   useEffect(() => {
-    setParameters({});
-    setImage(preparedProgramFrame(item) ?? '');
+    // A warmed default frame must not briefly replace an edited numerical example on theme changes.
+    setImage(Object.keys(parameterValues.current).length ? '' : preparedProgramFrame(item, theme) ?? '');
     setError('');
     busy.current = false;
     const instance = new Worker(new URL('../visuals/program.worker.ts', import.meta.url), { type: 'module' });
@@ -36,7 +41,7 @@ export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: 
       const next = pending.current;
       pending.current = undefined;
       busy.current = true;
-      instance.postMessage({ id: ++request.current, item, ...next });
+      instance.postMessage({ id: ++request.current, item, ...next, theme });
       // Engine loading and frame evaluation are both bounded outside the UI thread.
       timer = setTimeout(() => fail('This scene exceeded its render budget. Try a simpler expression.'), 5_000);
     };
@@ -60,11 +65,11 @@ export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: 
       instance.terminate();
       worker.current = undefined;
     };
-  }, [item]);
+  }, [item, theme]);
   useEffect(() => {
     pending.current = { t: progress, parameters };
     send.current();
-  }, [progress, parameters, item]);
+  }, [progress, parameters, item, theme]);
   const change = (name: string, value: number) => {
     const next = { ...parameters, [name]: value };
     setParameters(next);

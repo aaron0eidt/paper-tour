@@ -2,6 +2,7 @@ import { ReadingPreparation } from '../src/readingPreparation';
 import type { Step } from '../src/types';
 import type { ReadingPassage } from '../../shared/reading';
 import type { ProgramItem } from '../../shared/program';
+import { PROGRAM_THEME } from '../../shared/programRuntime';
 import { prepareReadingVisuals, preparedProgramFrame } from '../src/visuals/preparation';
 const eq = (a: unknown, b: unknown) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`Expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`); };
 const step = (id: string): Step => ({ id, say: id, actions: [] });
@@ -114,12 +115,17 @@ try {
   eq(preparedProgramFrame(structuredClone(item)), 'data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C%2Fsvg%3E');
   await prepareReadingVisuals(structuredClone(visual), new AbortController().signal);
   eq(workers, 1); eq(terminated, 1);
+  const light = { ...PROGRAM_THEME, text: '#202735', panel: '#f0f3f8' };
+  eq(preparedProgramFrame(item, light), undefined);
+  await prepareReadingVisuals(visual, new AbortController().signal, light);
+  eq(workers, 2); eq(terminated, 2);
+  eq(preparedProgramFrame(item, light), preparedProgramFrame(item, PROGRAM_THEME));
   respond = false;
   const cancelled = new AbortController();
   const other = { ...item, objective: 'Cancelled preview' };
   const pending = prepareReadingVisuals({ ...result('other'), actions: [{ type: 'board', item: other }] }, cancelled.signal);
   await flush(); cancelled.abort();
   await pending.catch(() => undefined);
-  eq(terminated, 2); eq(preparedProgramFrame(other), undefined);
+  eq(terminated, 3); eq(preparedProgramFrame(other), undefined);
 } finally { globalThis.Worker = originalWorker; }
 console.log('Reading ahead: mode-entry preparation, complete queue, visual previews and foreground priority passed');
