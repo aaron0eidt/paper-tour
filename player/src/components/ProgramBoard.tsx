@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { ProgramItem } from '../../../shared/program';
 import type { BoardPlayback } from '../engine';
 import { useSpokenProgress } from './Plot';
+import { preparedProgramFrame } from '../visuals/preparation';
 import './authoredVisual.css';
 
 /** Host narration owns time. Slider edits create a local draft; saved tour objects are never mutated. */
 export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: BoardPlayback }) {
   const progress = useSpokenProgress(playback.progress, playback.playing);
   const [parameters, setParameters] = useState<Record<string, number>>({});
-  const [image, setImage] = useState('');
+  const [image, setImage] = useState(() => preparedProgramFrame(item) ?? '');
   const [error, setError] = useState('');
   const worker = useRef<Worker>();
   const request = useRef(0);
@@ -17,7 +18,7 @@ export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: 
   const send = useRef<() => void>(() => {});
   useEffect(() => {
     setParameters({});
-    setImage('');
+    setImage(preparedProgramFrame(item) ?? '');
     setError('');
     busy.current = false;
     const instance = new Worker(new URL('../visuals/program.worker.ts', import.meta.url), { type: 'module' });

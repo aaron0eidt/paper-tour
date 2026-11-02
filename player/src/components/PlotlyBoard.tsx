@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { plotlyFigure, plotlyProblems, type PlotlyItem } from '../../../shared/plotly';
+import { loadPlotly } from '../visuals/preparation';
 import './authoredVisual.css';
 
 export function PlotlyBoard({ item }: { item: PlotlyItem }) {
@@ -30,7 +31,7 @@ export function PlotlyBoard({ item }: { item: PlotlyItem }) {
       rendered.current?.purge(node);
       return;
     }
-    import('plotly.js-dist-min')
+    loadPlotly()
       .then(async ({ default: Plotly }) => {
         if (cancelled) return;
         rendered.current = Plotly;

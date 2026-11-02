@@ -418,14 +418,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
   const state = answer ? answerState : mainState;
   const active = answer ?? engine;
-  const readingIsSpeaking = mainState.status === 'playing' && mainState.word >= 0;
-  useEffect(() => {
-    const playing = readAloud && !answer && engine && mainState.status === 'playing';
-    // Two upcoming natural units are a lookahead window, not a limit on tour length or concepts.
-    readingSpeech.plan(playing ? engine.steps[mainState.index]?.step ?? null : null,
-      playing ? engine.steps.slice(mainState.index + 1, mainState.index + 3).map((s) => s.step) : [], readingIsSpeaking);
-  }, [readAloud, answer, engine, mainState.index, mainState.status, readingIsSpeaking, readingSpeech.plan]);
-
 
   const scene = useMemo(
     () =>
@@ -860,6 +852,14 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     }
     setRestored(at);
   }, [engine]);
+  // Run after restoring the reading position. Entering the mode is enough; speech need not have started.
+  useEffect(() => {
+    const preparing = readAloud && !answer && engine && handle.current?.engine === engine
+      && handle.current.key === sourceKey && engine.getState().status !== 'ended';
+    const index = engine?.getState().index ?? 0;
+    readingSpeech.plan(preparing ? engine.steps[index]?.step ?? null : null,
+      preparing ? engine.steps.slice(index + 1).map((s) => s.step) : [], !!preparing);
+  }, [readAloud, answer, engine, sourceKey, mainState.index, mainState.status, readingSpeech.plan]);
   // The first steps of a tour still being written open the tour's side of the reader, unless the learner is searching.
   const openedGrowing = useRef(false);
   useEffect(() => {

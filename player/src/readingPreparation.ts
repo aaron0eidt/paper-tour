@@ -8,7 +8,7 @@ interface Flight {
   background: boolean;
 }
 
-/** Foreground and lookahead share one request. A small scheduling window never limits document content. */
+/** Prepare the remaining reading in order; playback shares requests and takes priority over background work. */
 export class ReadingPreparation {
   private readonly cache = new Map<string, ReadingPassage>();
   private readonly flights = new Map<string, Flight>();
@@ -17,7 +17,10 @@ export class ReadingPreparation {
   private readonly failed = new Set<string>();
   private canStart = false;
   private disposed = false;
-  constructor(private readonly request: (step: Step, signal: AbortSignal) => Promise<ReadingPassage>) {}
+  private blocked = false;
+  private consecutiveFailures = 0;
+  constructor(private readonly request: (step: Step, signal: AbortSignal) => Promise<ReadingPassage>,
+    private readonly suspendOnError: (error: unknown) => boolean = () => true) {}
 
   /** React StrictMode replays effect setup after cleanup on the same memoized instance. */
   activate(): void { this.disposed = false; }
@@ -28,6 +31,8 @@ export class ReadingPreparation {
     const stored = this.cache.get(step.id);
     if (stored) return structuredClone(stored);
     this.failed.delete(step.id);
+    this.blocked = false;
+    this.consecutiveFailures = 0;
     const flight = this.flights.get(step.id) ?? this.start(step, false);
     flight.users++;
     let abort: (() => void) | undefined;
@@ -45,11 +50,21 @@ export class ReadingPreparation {
 
   /** Retain an approaching passage even during its camera move, before speech joins its prefetched request. */
   plan(current: Step | null, following: Step[], canStart: boolean): void {
+    if (current && canStart && !this.canStart) this.blocked = false;
     this.canStart = !!current && canStart;
     this.wanted = new Set(current ? [current.id, ...following.map((s) => s.id)] : []);
-    this.queue = current ? following : [];
+    this.queue = current ? [current, ...following] : [];
     for (const id of this.failed) if (!this.wanted.has(id)) this.failed.delete(id);
     for (const [id, flight] of this.flights) this.cancelUnused(id, flight);
+    // A backward seek may leave a far-future preparation wanted, but the new current passage comes first.
+    if (this.canStart && current && !this.cache.has(current.id) && !this.flights.has(current.id)) {
+      for (const [id, flight] of this.flights) {
+        if (flight.background && !flight.users) {
+          this.flights.delete(id);
+          flight.controller.abort();
+        }
+      }
+    }
     this.pump();
   }
 
@@ -76,11 +91,16 @@ export class ReadingPreparation {
       return this.request(step, controller.signal);
     }).then((result) => {
       controller.signal.throwIfAborted();
+      this.consecutiveFailures = 0;
       this.cache.set(step.id, result);
       return result;
     }).catch((error) => {
       // A failed foreground retry must not immediately restart as background work either.
-      if (!controller.signal.aborted) this.failed.add(step.id);
+      if (!controller.signal.aborted) {
+        this.failed.add(step.id);
+        // An isolated content error may leave later units usable; outages and consecutive failures stop the queue.
+        this.blocked = this.suspendOnError(error) || ++this.consecutiveFailures >= 2;
+      }
       throw error;
     }).finally(() => {
       if (this.flights.get(step.id) === flight) this.flights.delete(step.id);
@@ -92,7 +112,7 @@ export class ReadingPreparation {
   }
 
   private pump(): void {
-    if (this.disposed || !this.canStart || [...this.flights.values()].some((f) => f.background)) return;
+    if (this.disposed || this.blocked || !this.canStart || [...this.flights.values()].some((f) => f.background)) return;
     const next = this.queue.find((s) => !this.cache.has(s.id) && !this.flights.has(s.id) && !this.failed.has(s.id));
     if (next) this.start(next, true);
   }

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Step } from './types';
 import { READING_VISUAL_VERSION, type ReadingPassage } from '../../shared/reading';
 import type { AskSource } from './ask/api';
-import { apiRequest } from './library/client';
+import { apiRequest, ApiRequestError } from './library/client';
 import { ReadingPreparation } from './readingPreparation';
+import { prepareReadingVisuals } from './visuals/preparation';
 
 /** Lazy source-checked speech, with shared foreground/background preparation and durable server caching. */
 export function useReadingSpeech(source: AskSource, analysisId: string | undefined, removeCitations: boolean) {
@@ -16,8 +17,11 @@ export function useReadingSpeech(source: AskSource, analysisId: string | undefin
       body: JSON.stringify({ targetId, removeCitations, ...('documentId' in source ? { analysisId } : {}) }),
       signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) });
     if (result.targetId !== targetId || !result.speech.trim()) throw new Error('No reliable spoken passage returned.');
+    await prepareReadingVisuals(result, signal);
     return result;
-  }), [source, analysisId, removeCitations, READING_VISUAL_VERSION]);
+  }, (error) => !(error instanceof ApiRequestError &&
+    ['reading_text_changed', 'reading_unclear', 'answer_failed'].includes(error.code))),
+  [source, analysisId, removeCitations, READING_VISUAL_VERSION]);
   useEffect(() => { loader.activate(); return () => loader.dispose(); }, [loader]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
