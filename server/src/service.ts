@@ -23,6 +23,7 @@ import type {
   UploadReservation,
   TourGenerationSummary,
   TourModelSelection,
+  UploadSelection,
 } from '../../shared/contracts';
 import type { Doc, Tour } from '../../shared/paper';
 import type { ModelCatalog } from '../../shared/models';
@@ -89,7 +90,7 @@ export interface Library {
     held?: { after: number; attempt: string },
   ): Promise<TourPartialView>;
   resumeConfigured?(owner: string): Promise<void>;
-  reserve(owner: string, filename: string, size: number, selection?: TourModelSelection): Promise<UploadReservation>;
+  reserve(owner: string, filename: string, size: number, selection?: UploadSelection): Promise<UploadReservation>;
   complete(owner: string, id: string): Promise<{ analysisId: string }>;
   generateTour(
     owner: string,
@@ -322,7 +323,7 @@ export class DocumentService implements Library {
     );
     return Promise.all(rows.map((row) => this.summary(row)));
   }
-  async reserve(owner: string, filename: string, size: number, selection: TourModelSelection = {}) {
+  async reserve(owner: string, filename: string, size: number, selection: UploadSelection = {}) {
     if (!filename.toLowerCase().endsWith('.pdf') || !Number.isSafeInteger(size) || size < 1 || size > this.maxBytes)
       throw new HttpError(400, 'invalid_upload', 'Choose a PDF up to 25 MiB.');
     const allowTraining = selection.allowTraining === true;
@@ -337,8 +338,8 @@ export class DocumentService implements Library {
     const title = safeName.replace(/\.pdf$/i, '').slice(0, 300) || 'Untitled document';
     const path = `${owner}/${id}/original.pdf`;
     await this.db.query(
-      `insert into documents(id,owner_id,title,original_filename,upload_size,upload_path,tour_model,tour_allow_training) values($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [id, owner, title, safeName, size, path, model, allowTraining],
+      `insert into documents(id,owner_id,title,original_filename,upload_size,upload_path,tour_model,tour_allow_training,defer_tour) values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, owner, title, safeName, size, path, model, allowTraining, selection.deferTour === true],
     );
     return { documentId: id, bucket: BUCKET, path };
   }

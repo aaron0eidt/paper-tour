@@ -484,6 +484,7 @@ export class TourWorker {
       `select d.id,d.tour_model,a.id as analysis_id from documents d join analyses a on a.id=d.current_analysis_id
        left join lateral(select status from tour_generations where analysis_id=a.id order by created_at desc,id desc limit 1) g on true
        where d.deleted_at is null and a.status in ('ready','limited')
+       and (not d.defer_tour or g.status is not null)
        and (not exists(select 1 from tours t where t.analysis_id=a.id) or g.status='needs_configuration')
        and ($1::uuid is null or d.id=$1)`,
       [documentId ?? null],
@@ -493,7 +494,7 @@ export class TourWorker {
         const {
           rows: [live],
         } = await tx.query(
-          'select current_analysis_id,tour_model from documents where id=$1 and deleted_at is null for update',
+          'select current_analysis_id,tour_model,defer_tour from documents where id=$1 and deleted_at is null for update',
           [document.id],
         );
         if (!live || live.current_analysis_id !== document.analysis_id) return;
@@ -504,6 +505,7 @@ export class TourWorker {
           [document.analysis_id],
         );
         if (generation?.engine === 'agent' || generation?.status === 'failed') return;
+        if (live.defer_tour && !generation) return;
         const {
           rows: [hasTour],
         } = await tx.query('select id from tours where analysis_id=$1 limit 1', [document.analysis_id]);

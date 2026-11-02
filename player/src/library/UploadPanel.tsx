@@ -86,6 +86,7 @@ export function UploadPanel({
             size: file.size,
             model: upload.model,
             allowTraining: upload.allowTraining,
+            deferTour: true,
           }),
         });
         if (!active()) {

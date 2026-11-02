@@ -286,8 +286,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             !isPdfOpen(loadedRef.current?.pdf) ||
             current.document.fileStatus === 'uploading' ||
             ['queued', 'processing'].includes(current.analysis?.status ?? '') ||
-            isTourGenerationActive(current.tourGeneration) ||
-            (!!current.doc && !current.tours.length && !current.tourGeneration);
+            isTourGenerationActive(current.tourGeneration);
           if (!document.hidden && (working || needsRetry || Date.now() - lastPoll > 60_000)) void refresh();
         }, 4000)
       : undefined;
@@ -1293,6 +1292,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             <TourGeneration
               documentId={documentId}
               generation={manifest.tourGeneration}
+              promptOnOpen={!manifest.tours.length}
               activityRequest={activityRequest}
               canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
               onChanged={() => setManifestRefresh((value) => value + 1)}

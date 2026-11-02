@@ -100,8 +100,8 @@ test(
       label: 'Page 1',
       dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
     };
-    const fixture = async (manual = false) => {
-      const reservation = await service.reserve(owner, `${randomUUID()}.pdf`, 8);
+    const fixture = async (manual = false, deferTour = false) => {
+      const reservation = await service.reserve(owner, `${randomUUID()}.pdf`, 8, { deferTour });
       const { analysisId } = await service.complete(owner, reservation.documentId);
       await db.transaction((tx) =>
         new AnalysisWorker(db, storage, c, enqueue).publish(
@@ -153,6 +153,24 @@ test(
     try {
       const f = await fixture();
       const g = await generation(f.analysisId);
+      await t.test('interactive uploads wait for the reader choice, including after worker reconciliation', async () => {
+        const deferred = await fixture(false, true);
+        assert.equal(await generation(deferred.analysisId), undefined);
+        await worker.reconcile(enqueue, deferred.documentId);
+        assert.equal(await generation(deferred.analysisId), undefined);
+        assert.equal(jobs.filter((job) => job.kind === 'generate_tour' && job.documentId === deferred.documentId).length, 0);
+        const manifest = await service.manifest(owner, deferred.documentId);
+        assert(manifest.doc);
+        assert.equal(manifest.tours?.length, 0);
+        const requested = await service.generateTour(owner, deferred.documentId, false, {
+          profileId: 'paper-order', depth: 'deep', audience: 'general',
+        });
+        assert.equal(requested.generation.profile?.id, 'paper-order');
+        assert.equal(requested.generation.profile?.depth, 'deep');
+        assert.equal(requested.generation.profile?.audience, 'general');
+        await worker.reconcile(enqueue, deferred.documentId);
+        assert.equal(jobs.filter((job) => job.kind === 'generate_tour' && job.documentId === deferred.documentId).length, 1);
+      });
       await t.test(
         'analysis publication creates exactly one automatic task; requests and startup are idempotent',
         async () => {

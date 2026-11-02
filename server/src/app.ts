@@ -1,4 +1,4 @@
-import type { TourModelSelection } from '../../shared/contracts';
+import type { TourModelSelection, UploadSelection } from '../../shared/contracts';
 import type { TourProfileDraft } from '../../shared/tourProfiles';
 import { TOUR_STRUCTURES, TOUR_DEPTHS, TOUR_AUDIENCES } from '../../shared/tourProfiles';
 import { pipeUIMessageStreamToResponse } from 'ai';
@@ -398,7 +398,7 @@ export async function createApp(options: Options) {
       api.get('/documents', async (req) => ({
         documents: await service.list(owner(req)),
       }));
-      api.post<{ Body: { filename: string; size: number; model?: string; allowTraining?: boolean } }>(
+      api.post<{ Body: { filename: string; size: number } & UploadSelection }>(
         '/documents',
         {
           schema: {
@@ -408,6 +408,7 @@ export async function createApp(options: Options) {
                 size: { type: 'integer', minimum: 1, maximum: 26214400 },
                 model: { type: 'string', minLength: 1, maxLength: 200 },
                 allowTraining: { type: 'boolean' },
+                deferTour: { type: 'boolean' },
               },
               ['filename', 'size'],
             ),
@@ -418,6 +419,7 @@ export async function createApp(options: Options) {
             await service.reserve(owner(req), req.body.filename, req.body.size, {
               model: req.body.model,
               allowTraining: req.body.allowTraining,
+              deferTour: req.body.deferTour,
             }),
           ),
       );

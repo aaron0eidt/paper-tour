@@ -329,6 +329,10 @@ The library app adds private uploads, analysis in a worker, model selection with
 **Profile & Settings**. It needs Node.js 22.12+ and Python 3.12. Install Tesseract as above. Python requirements include
 OpenCV for measuring diagram components, which runs locally before figure cues are authored.
 
+Uploading a PDF prepares it for reading. Open a new paper to choose its tour type, explanation depth and reader
+familiarity before creating the first tour, or choose **Read PDF first** to browse without starting generation.
+Existing tours remain available; **New tour** creates another version with its own profile.
+
 ```sh
 npm ci
 npm --prefix server ci

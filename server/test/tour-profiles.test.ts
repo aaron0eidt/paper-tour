@@ -72,6 +72,10 @@ test('tour-profile APIs authenticate, validate and forward only the verified own
       calls.push(args);
       return { generation: { profile: value } };
     },
+    reserve: async (...args: unknown[]) => {
+      calls.push(args);
+      return { documentId: id, bucket: 'papers', path: 'test.pdf' };
+    },
   } as unknown as Library;
   const app = await createApp({
     service,
@@ -79,6 +83,15 @@ test('tour-profile APIs authenticate, validate and forward only the verified own
   });
   const headers = { authorization: 'Bearer valid' };
   try {
+    assert.equal((await app.inject({ headers, method: 'POST', url: '/api/documents',
+      payload: { filename: 'paper.pdf', size: 8, deferTour: true },
+    })).statusCode, 201);
+    assert.deepEqual(calls.pop(), ['verified-owner', 'paper.pdf', 8, {
+      model: undefined, allowTraining: undefined, deferTour: true,
+    }]);
+    assert.equal((await app.inject({ headers, method: 'POST', url: '/api/documents',
+      payload: { filename: 'paper.pdf', size: 8, deferTour: 'yes' },
+    })).statusCode, 400);
     for (const [method, url, payload] of [
       ['GET', '/api/tour-profiles', undefined],
       ['POST', '/api/tour-profiles', draft],
