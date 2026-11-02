@@ -418,6 +418,14 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
   const state = answer ? answerState : mainState;
   const active = answer ?? engine;
+  const readingIsSpeaking = mainState.status === 'playing' && mainState.word >= 0;
+  useEffect(() => {
+    const playing = readAloud && !answer && engine && mainState.status === 'playing';
+    // Two upcoming natural units are a lookahead window, not a limit on tour length or concepts.
+    readingSpeech.plan(playing ? engine.steps[mainState.index]?.step ?? null : null,
+      playing ? engine.steps.slice(mainState.index + 1, mainState.index + 3).map((s) => s.step) : [], readingIsSpeaking);
+  }, [readAloud, answer, engine, mainState.index, mainState.status, readingIsSpeaking, readingSpeech.plan]);
+
 
   const scene = useMemo(
     () =>
