@@ -13,10 +13,13 @@ export interface ReadingCacheKey {
   model: string;
   provider: string;
   language: string;
+  visualVersion?: string;
 }
 export function readingCacheKey(input: ReadingCacheKey): string {
-  return createHash('sha256').update(JSON.stringify([READING_VERSION, input.owner, input.documentId,
-    input.analysisId, input.sha256, input.targetId, input.removeCitations, input.model, input.provider, input.language])).digest('hex');
+  const parts = [READING_VERSION, input.owner, input.documentId, input.analysisId, input.sha256, input.targetId,
+    input.removeCitations, input.model, input.provider, input.language];
+  if (input.visualVersion) parts.push(input.visualVersion);
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }
 interface Flight {
   controller: AbortController;

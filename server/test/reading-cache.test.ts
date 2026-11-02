@@ -22,7 +22,7 @@ test('validated speech and visual actions survive a fresh cache instance and key
   assert.deepEqual(await new ReadingSpeechCache(db).serve(input, compute), result);
   assert.equal(calls, 1);
   for (const changed of [{ owner: 'other' }, { analysisId: 'new' }, { sha256: 'new' }, { targetId: 'new' },
-    { removeCitations: false }, { model: 'other' }, { provider: 'other' }, { language: 'de-DE' }])
+    { removeCitations: false }, { model: 'other' }, { provider: 'other' }, { language: 'de-DE' }, { visualVersion: 'caption-reading@1' }])
     assert.notEqual(readingCacheKey({ ...input, ...changed }), readingCacheKey(input));
 });
 

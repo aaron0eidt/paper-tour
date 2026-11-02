@@ -81,3 +81,27 @@ test('headings and the following paragraph share one model call and one exact so
   assert.equal(calls, 1);
   assert.equal(result.speech, `Experiments. Setups. ${doc.blocks[0].text}`);
 });
+
+test('a visual explanation integrates its caption and preserves continuity instead of reading the caption twice', async () => {
+  const { readingExplanationQuestion, readingContinuity } = await import('../src/reading-speech');
+  const withFigure: Doc = { ...doc, blocks: [doc.blocks[0],
+    { ...doc.blocks[0], id: 'cap', type: 'caption', text: 'Figure 1: A qualified comparison under fixed conditions.' },
+    { ...doc.blocks[0], id: 'after', text: 'Next we study the consequence.' },
+  ], figures: [{ id: 'fig1', kind: 'figure', page: 1, number: '1', bbox: [40, 100, 560, 200], caption_block: 'cap',
+    caption: 'Figure 1: A qualified comparison under fixed conditions.', image: 'f.png', panels: [], referenced_by: [] }] };
+  const context = readingContinuity(withFigure, 'fig1');
+  const question = readingExplanationQuestion('figure', 'fig1', withFigure.figures[0].caption, context);
+  assert.match(question, /caption will not be read separately/);
+  assert.match(question, /definitions, units, scope, qualifications and conclusions/);
+  assert.match(question, /A qualified comparison under fixed conditions/);
+  assert.match(question, /Next we study the consequence/);
+  assert.match(question, /already read/);
+});
+
+test('linked caption source survives incomplete figure metadata', async () => {
+  const { readingCaption } = await import('../src/reading-speech');
+  const input: Doc = { ...doc, blocks: [doc.blocks[0], { ...doc.blocks[0], id: 'linked-caption', type: 'caption', text: 'The update happens after each training step.' }],
+    figures: [{ id: 'legacy', kind: 'figure', number: '1', page: 1, bbox: [40, 100, 560, 200],
+      caption: '', caption_block: 'linked-caption', image: 'legacy.png', panels: [], referenced_by: [] }] };
+  assert.equal(readingCaption(input, 'legacy'), 'The update happens after each training step.');
+});

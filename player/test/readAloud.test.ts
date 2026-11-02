@@ -93,3 +93,40 @@ assert.ok(grouped.chapters[0].steps[0].actions.some((a) => a.type === 'highlight
 const { readingStepForTarget } = await import('../src/readAloud');
 assert.equal(readingStepForTarget(grouped, groupedDoc, 'left-bottom'), 0);
 assert.equal(cleanReadingText('Use the interval [1, 2] and vector [3, 4].', true, new Set([1, 2, 3, 4])), 'Use the interval [1, 2] and vector [3, 4].');
+
+// Captions belong to their image/table explanation, including linked and split legacy captions.
+const captionDoc: Doc = { ...doc, blocks: [
+  doc.blocks[0],
+  { id: 'caption-a', type: 'caption', page: 1, bbox: [50, 260, 550, 280], text: 'Figure 1: Left panel shows input.', sentences: [] },
+  { id: 'caption-b', type: 'caption', page: 1, bbox: [50, 280, 550, 300], text: 'Right panel shows output.', sentences: [] },
+  { id: 'unmatched-caption', type: 'caption', page: 1, bbox: [50, 350, 550, 370], text: 'A separate caption without a known figure.', sentences: [] },
+], figures: [{ id: 'fig1', kind: 'figure', page: 1, number: '1', bbox: [50, 100, 550, 250],
+  caption: 'Figure 1: Left panel shows input. Right panel shows output.', caption_block: 'caption-a', image: 'figure.png', panels: [], referenced_by: [] }] };
+const captionTour = readingTour(captionDoc);
+const captionSteps = captionTour.chapters.flatMap((c) => c.steps);
+assert.equal(captionSteps.filter((s) => s.id === 'reading-fig1').length, 1);
+assert.equal(captionSteps.some((s) => s.id === 'reading-caption-a' || s.id === 'reading-caption-b'), false);
+assert.ok(captionSteps.some((s) => s.id === 'reading-unmatched-caption'));
+assert.equal(readingStepForTarget(captionTour, captionDoc, 'caption-a'), captionSteps.findIndex((s) => s.id === 'reading-fig1'));
+
+// A sum, limits, cases and OCR words inside a display are one formula, not separate concepts.
+const mathDoc: Doc = { ...doc, figures: [], equations: [], blocks: [
+  { id: 'intro', type: 'paragraph', page: 1, bbox: [40, 60, 550, 80], text: 'The output is defined as follows.', sentences: [] },
+  { id: 'sum', type: 'equation', page: 1, bbox: [200, 100, 214, 120], text: 'sum N', sentences: [] },
+  { id: 'right', type: 'equation', page: 1, bbox: [215, 108, 280, 122], text: 'a_i x_i', sentences: [] },
+  { id: 'cases', type: 'equation', page: 1, bbox: [150, 108, 240, 170], text: 'y = x + ...', sentences: [] },
+  { id: 'limits', type: 'equation', page: 1, bbox: [201, 125, 215, 134], text: 'i=1', sentences: [] },
+  { id: 'case-word', type: 'paragraph', page: 1, bbox: [220, 147, 265, 158], text: 'otherwise,', sentences: [] },
+  { id: 'definition', type: 'paragraph', page: 1, bbox: [40, 185, 550, 210], text: 'Here the weights sum to one.', sentences: [] },
+], sentences: [{ id: 'definition-s', block: 'definition', page: 1, text: 'Here the weights sum to one.', rects: [[40, 185, 550, 197]] }] };
+const mathTour = readingTour(mathDoc);
+const mathSteps = mathTour.chapters.flatMap((c) => c.steps);
+assert.equal(mathSteps.filter((s) => s.speaker === 'explanation').length, 1);
+assert.equal(mathSteps.some((s) => /reading-(?:sum|right|cases|limits|case-word)$/.test(s.id)), false);
+const mathResolver = new Resolver(mathDoc, mathDoc.pages);
+const mathTarget = mathSteps.find((s) => s.speaker === 'explanation')!.actions[0];
+if (mathTarget.type !== 'focus') throw new Error('Math must start on the complete source display');
+const rects = mathResolver.resolve(mathTarget.target)!;
+const { unionRect } = await import('../src/resolve');
+assert.deepEqual(unionRect(rects[0].rects), [150, 100, 280, 170]);
+assert.deepEqual(prepareTour(mathTour, mathResolver).problems, []);

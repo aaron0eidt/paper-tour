@@ -44,9 +44,7 @@ export function readingTour(doc: Doc, options: ReadingOptions = DEFAULT_READING_
     }
     const step: Step = object
       ? { id: `reading-${unit.id}`, speaker: 'explanation', say: `Preparing a description of this ${object.kind}.`, hold_ms: 0,
-          actions: [{ type: 'focus', target: object.id }, object.kind !== 'equation'
-            ? { type: 'box', target: object.id, color: 'blue' }
-            : { type: 'highlight', targets: [object.id], color: 'blue' }] }
+          actions: [{ type: 'focus', target: object.id }, { type: 'box', target: object.id, color: 'blue' }] }
       : { id: `reading-${unit.id}`, speaker: 'reader', say, hold_ms: 0, actions };
     chapters.at(-1)!.steps.push(step);
   }

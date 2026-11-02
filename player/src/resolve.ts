@@ -3,6 +3,7 @@
 
 import { checkBoardItem } from './board';
 import { exerciseTargets } from '../../shared/exercises';
+import { readingObjects } from '../../shared/reading';
 import { clipsTableRow, isTableTarget } from '../../shared/tableTargets';
 import { DEFAULT_COLOR, DEFAULT_ZOOM_PADDING, splitWords } from './types';
 import type { Action, BBox, Doc, DocBlock, DocEquation, DocFigure, DocPanel, DocSentence, Region, Tour } from './types';
@@ -84,12 +85,14 @@ export class Resolver {
   private panels = new Map<string, DocPanel & { page: number }>();
   private equations = new Map<string, DocEquation>();
   private exercises = new Map<string, string[]>();
+  private readingMath = new Map<string, string[]>();
 
   constructor(doc: Doc | null, pageSizes: PageSize[]) {
     this.doc = doc;
     this.pageSizes = pageSizes;
     if (!doc) return;
     this.exercises = exerciseTargets(doc);
+    this.readingMath = new Map(readingObjects(doc).filter((o) => o.id.startsWith('reading-math:')).map((o) => [o.id, o.blocks]));
     for (const b of doc.blocks) this.blocks.set(b.id, b);
     for (const s of doc.sentences) this.sentences.set(s.id, s);
     for (const s of doc.sections) this.sections.set(s.id, s.block);
@@ -101,6 +104,7 @@ export class Resolver {
   }
 
   kind(id: string): TargetKind | null {
+    if (this.readingMath.has(id)) return 'equation';
     if (this.exercises.has(id)) return 'exercise';
     if (this.sentences.has(id)) return 'sentence';
     if (this.blocks.has(id)) return 'block';
@@ -127,7 +131,7 @@ export class Resolver {
     const sentence = this.sentences.get(id);
     if (sentence) return one(sentence.page, sentence.rects);
 
-    const task = this.exercises.get(id);
+    const task = this.exercises.get(id) ?? this.readingMath.get(id);
     if (task) {
       const pages = new Map<number, BBox[]>();
       for (const block of task)

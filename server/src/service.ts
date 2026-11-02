@@ -1,5 +1,6 @@
+import { READING_VISUAL_VERSION } from '../../shared/reading';
 import { ReadingSpeechCache } from './reading-cache';
-import { prepareReadingPassage, readingObject, readingExplanationQuestion, readingAnswerPassage } from './reading-speech';
+import { prepareReadingPassage, readingObject, readingExplanationQuestion, readingAnswerPassage, readingContinuity, readingCaption } from './reading-speech';
 import type { ReadingPassageRequest, ReadingPassage } from '../../shared/reading';
 import { TourProfileStore } from './tour-profiles';
 import { sameTourProfile } from '../../shared/tourProfiles';
@@ -750,13 +751,13 @@ export class DocumentService implements Library {
     const cache = this.readingCache ??= new ReadingSpeechCache(this.db.pool);
     return cache.serve({ owner, documentId: id, analysisId: request.analysisId, sha256: doc.source.sha256,
       targetId: block.id, removeCitations: request.removeCitations ?? true, model, provider: config.baseUrl,
-      language: config.language }, async (readingSignal) => {
+      language: config.language, visualVersion: block.kind === 'prose' ? undefined : READING_VISUAL_VERSION }, async (readingSignal) => {
       if (block.kind === 'prose') return prepareReadingPassage({ client: new MuseClient(config, settings.transport), doc,
         targetId: block.id, language: config.language, removeCitations: request.removeCitations, signal: readingSignal });
       const selection = { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
         block.bbox[2] / page.width, block.bbox[3] / page.height] as [number, number, number, number] };
       const answer = await this.answer(owner, { documentId: id, analysisId: request.analysisId, doc, model,
-        request: { question: readingExplanationQuestion(block.kind, block.id), analysisId: request.analysisId,
+        request: { question: readingExplanationQuestion(block.kind, block.id, readingCaption(doc, block.id), readingContinuity(doc, block.id)), analysisId: request.analysisId,
           selection, page: block.page }, muse: async () => config, image: async () => undefined,
         images: () => selectionImages(this.storage, document.upload_path, doc, selection, readingSignal), signal: readingSignal });
       const stored = await persistAnswerVisuals(this.db, this.visualArtifacts, owner, id, request.analysisId, answer);
@@ -773,7 +774,7 @@ export class DocumentService implements Library {
     const config = settings.base;
     if (block.kind === 'prose') return prepareReadingPassage({ client: new MuseClient(config, settings.transport),
       doc: demo.doc, targetId, language: config.language, removeCitations, signal });
-    const answer = await this.demoAsk(paper, { question: readingExplanationQuestion(block.kind, block.id),
+    const answer = await this.demoAsk(paper, { question: readingExplanationQuestion(block.kind, block.id, readingCaption(demo.doc, block.id), readingContinuity(demo.doc, block.id)),
       selection: { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
         block.bbox[2] / page.width, block.bbox[3] / page.height] } }, signal);
     return readingAnswerPassage(targetId, answer);
