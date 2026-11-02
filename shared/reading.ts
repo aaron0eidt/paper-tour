@@ -4,7 +4,7 @@ import { sourceOrder } from './readingOrder';
 export { readingObjects } from './readingObjects';
 
 /** Only visual readings change; existing cached prose remains reusable. */
-export const READING_VISUAL_VERSION = 'contextual-visual-reading@6';
+export const READING_VISUAL_VERSION = 'contextual-visual-reading@7';
 
 export interface ReadingPassageRequest {
   analysisId: string;
