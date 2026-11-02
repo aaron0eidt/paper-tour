@@ -2,6 +2,7 @@ import type { BBox, Doc, DocBlock } from './paper';
 import type { ReadingObject } from './reading';
 import { sourceOrder } from './readingOrder';
 import { tableTextBlocks } from './tableTargets';
+import { readingProcedures } from './readingProcedures';
 
 const normalized = (text: string) => text.normalize('NFKC').replace(/\u00ad/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 const union = (boxes: BBox[]): BBox => [Math.min(...boxes.map((b) => b[0])), Math.min(...boxes.map((b) => b[1])),
@@ -61,5 +62,7 @@ export function readingObjects(doc: Doc): ReadingObject[] {
   const covered = new Set(visuals.flatMap((v) => [...v.blocks, ...(v.captionBlocks ?? [])]));
   const standaloneTables: ReadingObject[] = doc.blocks.filter((b) => b.type === 'table_text' && !covered.has(b.id))
     .map((b) => ({ id: b.id, kind: 'table', page: b.page, bbox: b.bbox, blocks: [b.id] }));
-  return [...visuals, ...standaloneTables, ...equations(doc, covered)];
+  const procedures = readingProcedures(doc, new Set([...covered, ...standaloneTables.flatMap((o) => o.blocks)]));
+  const structured = new Set([...covered, ...procedures.flatMap((o) => o.blocks)]);
+  return [...visuals, ...standaloneTables, ...procedures, ...equations(doc, structured)];
 }

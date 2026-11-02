@@ -133,3 +133,23 @@ const rects = mathResolver.resolve(mathTarget.target)!;
 const { unionRect } = await import('../src/resolve');
 assert.deepEqual(unionRect(rects[0].rects), [150, 100, 280, 170]);
 assert.deepEqual(prepareTour(mathTour, mathResolver).problems, []);
+
+// OCR procedure fragments stay together, including a standalone update expression, end and output.
+const procedureDoc: Doc = { ...doc, figures: [], equations: [], sentences: [], blocks: [
+  { id: 'procedure', type: 'paragraph', page: 1, bbox: [80, 100, 450, 180],
+    text: 'Algorithm 7: Input: x. 1. Initialize x = 0; for each sample do', sentences: [] },
+  { id: 'update', type: 'equation', page: 1, bbox: [100, 183, 400, 195], text: '2. Update x = x + delta;', sentences: [] },
+  { id: 'end', type: 'paragraph', page: 1, bbox: [80, 198, 110, 210], text: 'end', sentences: [] },
+  { id: 'output', type: 'paragraph', page: 1, bbox: [80, 213, 350, 225], text: 'Output: state x', sentences: [] },
+  { id: 'following', type: 'paragraph', page: 1, bbox: [40, 250, 550, 270], text: 'The experiment uses this state.', sentences: [] },
+] };
+const procedureTour = readingTour(procedureDoc);
+const procedureSteps = procedureTour.chapters.flatMap((c) => c.steps);
+assert.equal(procedureSteps.length, 2);
+assert.equal(procedureSteps[0].speaker, 'explanation');
+assert.equal(procedureSteps[1].say, 'The experiment uses this state.');
+const procedureResolver = new Resolver(procedureDoc, procedureDoc.pages);
+assert.deepEqual(unionRect(procedureResolver.resolve('reading-procedure:procedure')![0].rects), [80, 100, 450, 225]);
+assert.equal(procedureResolver.pageOf('reading-procedure:procedure'), 1);
+assert.deepEqual(prepareTour(procedureTour, procedureResolver).problems, []);
+assert.equal(readingStepForTarget(procedureTour, procedureDoc, 'update'), 0);

@@ -38,6 +38,12 @@ Visual explanations continue the surrounding reading rather than restart it as a
 
 The shared answer workflow has an internal reading purpose: continuation instructions, a planning field separating already-read/reserved/new material, and an empty follow-up schema. Its developer policy is separate from the untrusted source evidence. Public Q&A retains its standalone answer instructions and follow-ups; answer caches distinguish the two purposes. Reading uses the same grounding, visual authoring and validation path.
 
+## Structured procedures
+
+Procedural source material also uses the explanation route. Generic control-flow, assignment, input/output and numbered-operation cues identify candidates; same-page, same-column layout joins their adjacent OCR blocks, including embedded equations, closing lines and outputs. Titles or incidental algorithm mentions alone do not change ordinary prose into an explanation. Existing figure/table ownership takes precedence, and narrative paragraphs, section/column/page boundaries stop grouping. No paper titles, variable names, algorithm numbers or source coordinates are built into the recognition.
+
+The model receives the full original region and page context and chooses a natural explanation of purpose, initialization, dependencies, repetition/branching, updates and result, preserving signs and timing without reciting syntax. This remains structural recognition plus model interpretation, not a guarantee of detecting every possible abstract passage. Synthetic source targets resolve to all component rectangles; search and navigation to any component return to the same explanation. The Loss-Free PDF's algorithm (`p4.b3`–`p4.b6`) now forms one procedural unit instead of literal prose, a separate update expression, `end` and `Output` readings. Ordinary text remains source-faithful.
+
 The actual Loss-Free PDF was checked against its reading plan: page 3's 17 mathematical/OCR fragment passages become two complete expression units, and `p2.b2` is part of `fig1`, not a later caption-only unit. Fresh generated speech for the figure and both mathematical displays was compared with the source page. The routing/update loop and complete MoE/loss relationships are described together; native annotations and live boards remain available. This check does not establish perfect model explanation quality on every paper.
 
 ## Lookahead preparation

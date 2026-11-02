@@ -85,14 +85,15 @@ export class Resolver {
   private panels = new Map<string, DocPanel & { page: number }>();
   private equations = new Map<string, DocEquation>();
   private exercises = new Map<string, string[]>();
-  private readingMath = new Map<string, string[]>();
+  private readingGroups = new Map<string, { blocks: string[]; kind: TargetKind }>();
 
   constructor(doc: Doc | null, pageSizes: PageSize[]) {
     this.doc = doc;
     this.pageSizes = pageSizes;
     if (!doc) return;
     this.exercises = exerciseTargets(doc);
-    this.readingMath = new Map(readingObjects(doc).filter((o) => o.id.startsWith('reading-math:')).map((o) => [o.id, o.blocks]));
+    this.readingGroups = new Map(readingObjects(doc).filter((o) => o.id.startsWith('reading-math:') || o.kind === 'procedure')
+      .map((o) => [o.id, { blocks: o.blocks, kind: o.kind === 'equation' ? 'equation' : 'block' }]));
     for (const b of doc.blocks) this.blocks.set(b.id, b);
     for (const s of doc.sentences) this.sentences.set(s.id, s);
     for (const s of doc.sections) this.sections.set(s.id, s.block);
@@ -104,7 +105,7 @@ export class Resolver {
   }
 
   kind(id: string): TargetKind | null {
-    if (this.readingMath.has(id)) return 'equation';
+    if (this.readingGroups.has(id)) return this.readingGroups.get(id)!.kind;
     if (this.exercises.has(id)) return 'exercise';
     if (this.sentences.has(id)) return 'sentence';
     if (this.blocks.has(id)) return 'block';
@@ -131,7 +132,7 @@ export class Resolver {
     const sentence = this.sentences.get(id);
     if (sentence) return one(sentence.page, sentence.rects);
 
-    const task = this.exercises.get(id) ?? this.readingMath.get(id);
+    const task = this.exercises.get(id) ?? this.readingGroups.get(id)?.blocks;
     if (task) {
       const pages = new Map<number, BBox[]>();
       for (const block of task)
@@ -177,7 +178,7 @@ export class Resolver {
 
   /** The page an element is on according to doc.json, whether or not the loaded PDF has it. */
   pageOf(id: string): number | null {
-    const task = this.exercises.get(id);
+    const task = this.exercises.get(id) ?? this.readingGroups.get(id)?.blocks;
     if (task) return this.blocks.get(task[0])?.page ?? null;
     const el =
       this.sentences.get(id) ??

@@ -4,7 +4,7 @@ import { sourceOrder } from './readingOrder';
 export { readingObjects } from './readingObjects';
 
 /** Only visual readings change; existing cached prose remains reusable. */
-export const READING_VISUAL_VERSION = 'contextual-visual-reading@4';
+export const READING_VISUAL_VERSION = 'contextual-visual-reading@6';
 
 export interface ReadingPassageRequest {
   analysisId: string;
@@ -24,7 +24,7 @@ export function readingMetadata(block: DocBlock): boolean {
 
 export interface ReadingObject {
   id: string;
-  kind: 'equation' | 'table' | 'figure';
+  kind: 'equation' | 'table' | 'figure' | 'procedure';
   page: number;
   bbox: BBox;
   /** Original extracted blocks replaced by this one visual reading. */
