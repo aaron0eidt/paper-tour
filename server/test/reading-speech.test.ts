@@ -13,6 +13,23 @@ const doc: Doc = {
 };
 const usage = { promptTokens: 10, completionTokens: 10, totalTokens: 20 };
 
+test('footnotes are not reading targets but remain available as source context', async () => {
+  const note = 'This result assumes independent samples.';
+  const withFootnote: Doc = { ...doc,
+    blocks: [...doc.blocks, { id: 'note', page: 1, type: 'footnote', bbox: [40, 720, 560, 740], text: note, sentences: ['note-sentence'] }],
+    sentences: [...doc.sentences, { id: 'note-sentence', page: 1, block: 'note', text: note, rects: [[40, 720, 560, 740]] }],
+  };
+  assert.throws(() => readingObject(withFootnote, 'note'), /Choose a passage/);
+  const { paperBlock } = await import('../src/harness/paper-block');
+  assert.ok(paperBlock(withFootnote).includes(note));
+  const result = await prepareReadingPassage({ doc: withFootnote, targetId: 'definition', language: 'en-US',
+    client: { complete: async (messages) => {
+      assert.ok(JSON.stringify(messages).includes(note));
+      return { value: { supported: true, speech: doc.blocks[0].text }, usage, requestId: null };
+    } } });
+  assert.equal(result.speech, doc.blocks[0].text);
+});
+
 test('reading targets preserve equation geometry and reject unknown source IDs', () => {
   assert.equal(readingObject(doc, 'formula').kind, 'equation');
   assert.equal(readingObject(doc, 'definition').kind, 'prose');

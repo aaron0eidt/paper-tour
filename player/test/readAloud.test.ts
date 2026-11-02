@@ -77,9 +77,12 @@ assert.equal(sameReadingWords('Use x-y here.', 'Use xy here.'), false);
 const withAuthors: Doc = { ...doc, blocks: [
   { id: 'authors', page: 1, type: 'authors', bbox: [30, 20, 570, 60], text: 'A. Researcher, Example University', sentences: [] },
   { id: 'contact', page: 1, type: 'footnote', bbox: [30, 700, 570, 720], text: 'Corresponding author: author@example.test', sentences: [] },
+  { id: 'note', page: 1, type: 'footnote', bbox: [30, 725, 570, 745], text: 'This result assumes independent samples.', sentences: ['note-sentence'] },
   ...doc.blocks,
 ] };
-assert.equal(readingTour(withAuthors).chapters.flatMap((c) => c.steps).some((s) => /Researcher|Corresponding author/.test(s.say)), false);
+assert.deepEqual(readingTour(withAuthors).chapters, tour.chapters);
+assert.deepEqual(readingTour(withAuthors, { ...DEFAULT_READING_OPTIONS, includeReferences: true }).chapters,
+  readingTour(doc, { ...DEFAULT_READING_OPTIONS, includeReferences: true }).chapters);
 
 // Consecutive section/subsection headings and the following paragraph are spoken together.
 const groupedDoc: Doc = { ...doc, blocks: [

@@ -19,8 +19,7 @@ export interface ReadingPassage {
 }
 
 export function readingMetadata(block: DocBlock): boolean {
-  return block.type === 'authors' || block.type === 'header_footer' ||
-    (block.type === 'footnote' && /^(?:©|copyright\b|correspond(?:ing|ence)\b|e-?mail\s*:|orcid\b)/i.test(block.text.trim()));
+  return block.type === 'authors' || block.type === 'header_footer' || block.type === 'footnote';
 }
 
 export interface ReadingObject {
