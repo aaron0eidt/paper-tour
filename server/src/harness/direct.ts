@@ -1,5 +1,6 @@
 import { checkExample, claimsNumericExample, exampleSchema, type WorkedExample } from './example';
 import { tableTextBlocks, tableLines } from '../../../shared/tableTargets';
+import { sourceOrder } from '../../../shared/readingOrder';
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { BoardItem, Doc, DocFigure, Region } from '../../../shared/paper';
 import type { Beat } from './beats';
@@ -443,8 +444,9 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
 /** The beat's task text: the point to make, its planned visual and the local evidence, quoted from the document. */
 export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: StepVisual): string {
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
+  const readingOrder = sourceOrder(doc);
   const quote = (ids: string[]) =>
-    ids
+    [...ids].sort((a, b) => (readingOrder.get(a) ?? Infinity) - (readingOrder.get(b) ?? Infinity))
       .map((id) => sentences.get(id))
       .filter(Boolean)
       .map((s) => `[${s!.id}] ${s!.text}`);
@@ -536,7 +538,8 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
     const table = doc.figures.find((f) => f.id === targets.table);
     if (table) lines.push(...cells(table));
   } else {
-    lines.push('EVIDENCE:', ...quote(beat.evidence));
+    lines.push('EVIDENCE IN PDF READING ORDER (not importance order):', ...quote(beat.evidence),
+      'Plan narration and anchors together along these passages: premises above before their consequence below. Do not highlight a bottom conclusion and then jump upward to its premises. Announce any useful return for a comparison.');
     const more = (beat.boardEvidence ?? []).filter((id) => !beat.evidence.includes(id));
     if (more.length) lines.push('MORE NUMBERS FOR THE BARS ONLY (other steps speak about them):', ...quote(more));
     const data = (targets.visualEvidence ?? []).filter((id) => !more.includes(id));

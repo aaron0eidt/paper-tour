@@ -101,7 +101,12 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
   const board = direction?.board;
   const example = direction?.example;
   // A slide without a sentence to point at is shown whole.
-  const first = beat.evidence[0] ?? (beat.page ? `page${beat.page}` : '');
+  // Relevance-ranked evidence is not narration order. Frame what the voice names
+  // first, keeping later marks in the same frame through the player's schedule.
+  const firstCue = !beat.slides ? direction?.cues
+    .filter((cue) => cue.action === 'highlight' && findAnchor(say, cue.anchor) !== null && targets.sentences.includes(cue.target))
+    .sort((a, b) => findAnchor(say, a.anchor)! - findAnchor(say, b.anchor)!)[0] : undefined;
+  const first = firstCue?.target ?? beat.evidence[0] ?? (beat.page ? `page${beat.page}` : '');
   const actions: Action[] = [beat.target ? { type: 'zoom', target: beat.target } : { type: 'focus', target: first }];
   // A step on several slides moves the camera when a highlight is on another slide than the one on screen.
   const pageOf = new Map(beat.slides ? doc.sentences.map((s) => [s.id, s.page]) : []);

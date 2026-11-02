@@ -6,7 +6,7 @@ import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@35';
+export const HARNESS_VERSION = 'paper-tour-harness@36';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -408,6 +408,7 @@ export function directTask(
       : `"say" is ${fewest ?? (detail ? 90 : 50)}-${words} spoken words. ${TONE[type ?? 'research_paper']} Do not start with "In this step".`,
     'The highlight shows where the point is written, so never read it out or paraphrase it, and skip what a reader gets from it at a glance. State the point in one plain sentence, then explain what the text leaves implicit: why it holds, how it works, what it changes, what would happen without it. Add one concrete example or analogy only when it makes the idea click, labelled illustrative.',
     'No rhetorical questions, invented stories, hooks or suspense. Preserve the document’s qualifications and keep its statements apart from labelled illustrative explanations. Use the source outline for continuity without inventing a narrative arc.',
+    'Prose: narrate and cue in PDF order, premises first. Announce returns. Maths follows operation order.',
   ];
   if (move) rules.push(MOVE_RULES);
   if (slides) rules.push(...SLIDE_VOICE);
