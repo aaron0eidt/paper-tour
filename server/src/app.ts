@@ -439,7 +439,7 @@ export async function createApp(options: Options) {
             await service.reserve(owner(req), req.body.filename, req.body.size, {
               model: req.body.model,
               allowTraining: req.body.allowTraining,
-              deferTour: req.body.deferTour,
+              ...(req.body.deferTour === undefined ? {} : { deferTour: req.body.deferTour }),
             }),
           ),
       );
