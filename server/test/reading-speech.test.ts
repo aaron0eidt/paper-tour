@@ -122,3 +122,35 @@ test('linked caption source survives incomplete figure metadata', async () => {
       caption: '', caption_block: 'linked-caption', image: 'legacy.png', panels: [], referenced_by: [] }] };
   assert.equal(readingCaption(input, 'legacy'), 'The update happens after each training step.');
 });
+
+test('formula transitions distinguish the spoken introduction from definitions still to be read', async () => {
+  const { readingContinuity, readingExplanationQuestion } = await import('../src/reading-speech');
+  const input: Doc = { ...doc, blocks: [
+    { ...doc.blocks[0], text: 'For a sequence of length T, the auxiliary loss is defined as:' },
+    doc.blocks[1],
+    { ...doc.blocks[0], id: 'terms', bbox: [40, 150, 560, 190], text: 'where N is the number of experts and alpha controls the strength of the auxiliary loss.' },
+  ] };
+  const context = readingContinuity(input, 'formula');
+  assert.match(context, /PRECEDING ORIGINAL PROSE \(definition; already read verbatim/);
+  assert.match(context, /FOLLOWING ORIGINAL PROSE \(terms; will be read verbatim next/);
+  assert.ok(context.includes(input.blocks[0].text));
+  assert.ok(context.includes(input.blocks[2].text));
+  assert.ok(!context.includes(input.blocks[1].text));
+  const question = readingExplanationQuestion('equation', 'formula', undefined, context);
+  assert.match(question, /inline continuation/);
+  assert.match(question, /Reserve definitions, symbol glossaries/);
+  assert.match(question, /Do not remove original text/);
+  assert.match(question, /rather than re-highlighting the introductory paragraph/);
+});
+
+test('adjacent visual evidence is never presented as a verbatim spoken transcript', async () => {
+  const { readingContinuity } = await import('../src/reading-speech');
+  const input: Doc = { ...doc, blocks: [doc.blocks[1],
+    { ...doc.blocks[1], id: 'next-formula', bbox: [40, 250, 560, 280], text: 'y = x + 1' },
+  ] };
+  const context = readingContinuity(input, 'next-formula');
+  assert.match(context, /PRECEDING VISUAL \(formula, equation; already explained\)/);
+  assert.match(context, /Source evidence, not its spoken transcript/);
+  assert.match(context, /FOLLOWING: document boundary/);
+  assert.equal(readingContinuity(input, 'missing'), '');
+});

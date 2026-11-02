@@ -150,6 +150,7 @@ interface AnswerInput {
   images(): Promise<TourImage[]>;
   signal?: AbortSignal;
   demo?: boolean;
+  purpose?: 'reading';
 }
 
 export class DocumentService implements Library {
@@ -756,7 +757,7 @@ export class DocumentService implements Library {
         targetId: block.id, language: config.language, removeCitations: request.removeCitations, signal: readingSignal });
       const selection = { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
         block.bbox[2] / page.width, block.bbox[3] / page.height] as [number, number, number, number] };
-      const answer = await this.answer(owner, { documentId: id, analysisId: request.analysisId, doc, model,
+      const answer = await this.answer(owner, { documentId: id, analysisId: request.analysisId, doc, model, purpose: 'reading',
         request: { question: readingExplanationQuestion(block.kind, block.id, readingCaption(doc, block.id), readingContinuity(doc, block.id)), analysisId: request.analysisId,
           selection, page: block.page }, muse: async () => config, image: async () => undefined,
         images: () => selectionImages(this.storage, document.upload_path, doc, selection, readingSignal), signal: readingSignal });
@@ -776,7 +777,7 @@ export class DocumentService implements Library {
       doc: demo.doc, targetId, language: config.language, removeCitations, signal });
     const answer = await this.demoAsk(paper, { question: readingExplanationQuestion(block.kind, block.id, readingCaption(demo.doc, block.id), readingContinuity(demo.doc, block.id)),
       selection: { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
-        block.bbox[2] / page.width, block.bbox[3] / page.height] } }, signal);
+        block.bbox[2] / page.width, block.bbox[3] / page.height] } }, signal, 'reading');
     return readingAnswerPassage(targetId, answer);
   }
 
@@ -933,7 +934,7 @@ export class DocumentService implements Library {
    * A question about a demo paper (demo/<paper>/) without an account, on the server's own Meta key and model. Only
    * local development exposes it (app.ts).
    */
-  async demoAsk(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
+  async demoAsk(paper: string, request: AskRequest, signal?: AbortSignal, purpose?: 'reading'): Promise<AskAnswer> {
     const settings = this.askSettings();
     const asked = askedRequest(request);
     const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
@@ -954,6 +955,7 @@ export class DocumentService implements Library {
           : Promise.resolve([]),
       signal,
       demo: true,
+      purpose,
     });
   }
   /** Terms and language of the documents asked about by voice, by analysis; a few, since each is read once. */
@@ -1027,7 +1029,7 @@ export class DocumentService implements Library {
   readonly answers = new AnswerCache();
   private async answer(key: string, input: AnswerInput): Promise<AskAnswer> {
     const cacheKey = answerKey({
-      scope: key,
+      scope: input.purpose === 'reading' ? `${key}:reading` : key,
       documentId: input.documentId,
       version: input.analysisId ?? input.doc.source.sha256,
       request: input.request,
@@ -1070,6 +1072,7 @@ export class DocumentService implements Library {
         images,
         language: input.tour?.voices?.host?.lang ?? config.language,
         signal: input.signal,
+        purpose: input.purpose,
       });
       console.log(
         JSON.stringify({
