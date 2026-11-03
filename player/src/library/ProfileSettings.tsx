@@ -16,6 +16,7 @@ import {
   NARRATION_DISPLAY_OPTIONS,
 } from '../readerPreferences';
 import '../profileSettings.css';
+import { SpeechSettings } from '../narration/SpeechSettings';
 
 export function ProfileSettings({ email }: { email: string }) {
   const profile = useSettings();
@@ -109,6 +110,7 @@ export function ProfileSettings({ email }: { email: string }) {
           </p>
         )}
         <div className="profile-grid">
+          <SpeechSettings />
           <section className="profile-card" id="appearance" aria-labelledby="appearance-heading">
             <div className="profile-card-heading">
               <h2 id="appearance-heading">Appearance</h2>

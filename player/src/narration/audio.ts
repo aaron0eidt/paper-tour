@@ -47,6 +47,7 @@ export class AudioNarrator implements Narrator {
     };
     const fallback = (reason: unknown) => {
       if (done || stopFallback) return;
+      if (cb.onError) { done = true; cleanup(); cb.onError(new Error('This audio file could not be played. Retry playback.')); return; }
       console.warn('[audio] falling back to timed narration:', reason);
       cleanup();
       stopFallback = runTimeline(last + 1, n, msPerWord(rate), emit, finish);

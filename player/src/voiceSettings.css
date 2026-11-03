@@ -139,3 +139,17 @@
 .playback-panel .speed .speed-heading, .playback-panel .speed .speed-scale { display: flex; align-items: center; justify-content: space-between; }
 .speed-heading output { color: var(--text); font-variant-numeric: tabular-nums; }
 .playback-panel .speed .speed-scale { font-size: 10px; color: var(--faint); margin-top: -5px; }
+
+.speech-error { grid-column: 1 / -1; margin: 0; color: var(--danger, #b9584f); font-size: 12px; line-height: 1.5; }
+.speech-generation { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.profile-card#speech .profile-field { display: grid; gap: 7px; margin-block: 12px; }
+.profile-card#speech select, .profile-card#speech input:not([type="checkbox"]) { width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.profile-card#speech .profile-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.profile-card#speech .profile-help { line-height: 1.6; overflow-wrap: anywhere; }
+
+.audio-provider-voice { display: grid; gap: 7px; }
+.playback-panel .voice-setting input { width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.audio-voice-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; }
+.audio-voice-actions button { padding: 5px 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; }
+.audio-voice-actions button:disabled { opacity: .5; cursor: default; }
+.audio-provider-voice > small { color: var(--faint); font-size: 11px; }

@@ -20,6 +20,8 @@ import type { VisualArtifactService } from './visuals/artifacts';
 import { visualArtifactRoutes } from './visuals/routes';
 import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
+import type { SpeechService } from './speech/service';
+import { speechRoutes } from './speech/routes';
 import { DEMO_PAPER, answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
 import { snapService, type SnapRequest, type SnapResult, type SnapService } from './snap';
 
@@ -97,6 +99,7 @@ interface Options {
   spaDir?: string;
   logger?: boolean;
   settings?: SettingsService;
+  speech?: SpeechService;
   /** Questions about demo papers without signing in; defaults to demoAllowed() for this process. */
   demo?: boolean;
   /** Region snapping (snap.ts); defaults to one built from the service and settings when they can provide it. */
@@ -168,7 +171,7 @@ export async function createApp(options: Options) {
         },
       });
     }
-    if (request.url.startsWith('/api/settings')) request.log.error({ event: 'settings_request_failed' });
+    if (request.url.startsWith('/api/settings') || request.url.startsWith('/api/speech')) request.log.error({ event: 'settings_request_failed' });
     else request.log.error(error);
     return reply.code(500).send({
       error: {
@@ -188,6 +191,7 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
+      if (options.speech) speechRoutes(api, options.speech, owner);
       documentActivityRoutes(api, service, owner);
       if (options.visualArtifacts) visualArtifactRoutes(api, options.visualArtifacts, owner);
       api.post<{ Params: { id: string }; Body: Buffer }>(

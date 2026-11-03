@@ -23,6 +23,7 @@ interface Props {
   /** The tour is still being written (or stopped being written); null for a finished one. */
   growth?: Growth | null;
   readingSettings?: ReactNode;
+  speechSettings?: ReactNode;
   showNarration?: boolean;
   speed: number;
   muted: boolean;
@@ -51,6 +52,7 @@ export function ControlBar({
   state,
   growth,
   readingSettings,
+  speechSettings,
   showNarration = true,
   speed,
   muted,
@@ -143,6 +145,8 @@ export function ControlBar({
 
   return (
     <footer className={`controls${showNarration ? '' : ' without-captions'}`}>
+      {state.speechError && <p className="speech-error" role="alert">{state.speechError}</p>}
+      {playing && state.speechStatus === 'generating' && <span className="speech-generation" role="status">Generating speech…</span>}
       <Timeline
         steps={steps}
         chapters={chapters}
@@ -252,6 +256,7 @@ export function ControlBar({
           <div className="playback-panel">
             <h3>Audio settings</h3>
             {readingSettings}
+            {speechSettings}
             {onVoiceChange && !current?.step.audio && (
               <label className="voice-setting">
                 <span>Voice</span>

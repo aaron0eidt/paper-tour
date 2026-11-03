@@ -7,6 +7,8 @@ import { createQueue } from './queue';
 import { createApp } from './app';
 import { MetaModelCatalog } from './muse/models';
 import { SettingsService } from './settings';
+import { SpeechService } from './speech/service';
+import { speechConfig } from './speech/config';
 import { VisualArtifactService } from './visuals/artifacts';
 const c = config();
 const db = new Database(c.databaseUrl);
@@ -29,6 +31,7 @@ await service.documentActivity.interruptOrphans();
 const app = await createApp({
   service,
   settings,
+  speech: new SpeechService(db, speechConfig()),
   visualArtifacts,
   authenticate,
   origins: c.origins,

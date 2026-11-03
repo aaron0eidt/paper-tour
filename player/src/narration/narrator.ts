@@ -15,6 +15,10 @@ export interface SpeakRequest {
 }
 
 export interface SpeakCallbacks {
+  /** A provider/playback error pauses the engine; no silent provider substitution. */
+  onError?(error: Error): void;
+  onState?(state: 'generating' | 'playing'): void;
+  onTiming?(source: 'provider' | 'estimated'): void;
   /** Narration has reached word `index` (monotonic, may skip words). */
   onWord(index: number): void;
   /** Narration finished. Called exactly once unless the handle was cancelled first. */
@@ -29,11 +33,11 @@ export interface NarrationHandle {
 }
 
 /**
- * A narrator must never stall: on any internal error it falls back to time-based word
- * progress and still calls onEnd.
+ * A narrator reports provider errors through onError. Timed narration is an explicit mute mode.
  */
 export interface Narrator {
   readonly name: string;
+  preload?(req: SpeakRequest): Promise<void>;
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle;
 }
 
