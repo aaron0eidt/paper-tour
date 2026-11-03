@@ -12,8 +12,6 @@ export interface SpeakRequest {
   audio?: StepAudio;
   /** Speak from this word on (a pause resumes at its sentence; a seek lands on one). Default 0. */
   startWord?: number;
-  /** Visual cue boundaries: audio providers can start a fresh clip at these exact words. */
-  cueWords?: readonly number[];
 }
 
 export interface SpeakCallbacks {

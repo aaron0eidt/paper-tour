@@ -10,12 +10,21 @@ const assert = {
     if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Values differ');
   },
 };
-import { activityEvents } from '../src/components/activityEvents';
+import { activityEvents, modelOutput } from '../src/components/activityEvents';
 import type { GenerationEvent } from '../../shared/activity';
 import type { ActivityRun } from '../../shared/agentActivity';
 import { companionPresence, currentActivity, spokenSentence } from '../src/activity/presence';
 import { companionPlacement } from '../src/activity/placement';
 const event = (id: string, type: string): GenerationEvent => ({ id, type, at: '2026-10-30T00:00:00Z', data: {} });
+
+test('failed or stopped model calls never keep showing a waiting placeholder', () => {
+  assert.equal(modelOutput([event('1', 'model.started')]), 'Waiting for model output…');
+  assert.equal(modelOutput([event('1', 'model.failed')]), 'The model request failed before producing any output.');
+  assert.equal(modelOutput([event('1', 'model.started')], true), 'This request ended without recorded output.');
+  const draft = { ...event('1', 'model.delta'), data: { delta: '{"partial":' } };
+  assert.equal(modelOutput([draft, event('2', 'model.failed')]), '{"partial":');
+  assert.deepEqual(modelOutput([{ ...event('1', 'model.completed'), data: { output: { ok: true } } }]), { ok: true });
+});
 
 test('current attempt excludes older failed drafts without deleting their history', () => {
   const events = [

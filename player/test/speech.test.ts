@@ -94,7 +94,7 @@ await test('Siri classic and expressive voices reuse prepared clips with native 
     })));
     const timings: string[] = [];
     let ended = 0;
-    const firstHandle = narrator.speak({ ...request, cueWords: [1] }, {
+    const firstHandle = narrator.speak(request, {
       onWord() {}, onEnd() { ended++; }, onTiming(value) { timings.push(value); },
     });
     await tick();
@@ -214,8 +214,8 @@ await test('seek uses returned timestamps; live speed changes and resume reuse c
   resumed.cancel();
 });
 await test('highlights follow audio timestamps through pauses and speed changes, including leading silence', async () => {
-  const narrator = new ProviderNarrator(settings('openai'), new SpeechAudioCache(async () => ({
-    ...audio, provider: 'openai', wordTimesMs: [180, 400, 850],
+  const narrator = new ProviderNarrator(settings('siri'), new SpeechAudioCache(async () => ({
+    ...audio, provider: 'siri', wordTimesMs: [180, 400, 850],
   })));
   const words: number[] = [];
   const handle = narrator.speak(request, { onWord: (word) => words.push(word), onEnd() {} });
@@ -235,46 +235,6 @@ await test('highlights follow audio timestamps through pauses and speed changes,
   await new Promise((resolve) => setTimeout(resolve, 60));
   deepEqual(words, [0, 2]);
   handle.cancel();
-});
-await test('OpenAI clips split at visual cues and highlights wait for their clip to play', async () => {
-  const calls: string[] = [];
-  const narrator = new ProviderNarrator(settings('openai'), new SpeechAudioCache(async (input) => {
-    calls.push(input.text);
-    return { ...audio, provider: 'openai', wordTimesMs: undefined, timing: 'estimated' };
-  }));
-  const tour: Tour = { schema: 'paper-tour/tour@0.1', paper: 'test', title: 'Test', chapters: [{
-    id: 'c', title: 'C', steps: [{ id: 's', say: 'First input then output', actions: [
-      { type: 'focus', target: 'p1.s1', at_word: 0 },
-      { type: 'highlight', targets: ['p1.s1'], at_word: 0 },
-      { type: 'highlight', targets: ['p1.s2'], at_word: 2 },
-    ] }],
-  }] };
-  const engine = new TourEngine(tour, { narrator });
-  engine.play();
-  await tick();
-  deepEqual(calls, ['First input', 'then output']);
-  equal(engine.getState().overlays.length, 0);
-  equal(engine.getState().camera.action?.type, 'focus');
-  const first = currentAudio();
-  first.ready();
-  await tick();
-  equal(engine.getState().overlays.length, 1);
-  first.onended!();
-  await tick();
-  equal(engine.getState().overlays.length, 1);
-  const second = currentAudio();
-  second.ready();
-  await tick();
-  equal(engine.getState().overlays.length, 2);
-  equal(engine.getState().word, 2);
-  equal(calls.length, 2); // TTS only; no transcription or second pass over audio.
-  engine.destroy();
-});
-await test('forced visual boundaries survive short-sentence merging without changing source words', () => {
-  const words = 'It works. Why now? Follow the input then inspect the output.'.split(' ');
-  const chunks = audioChunks(words, 300, [1, 4, 7, 7]);
-  assert([1, 4, 7].every((at) => chunks.some((chunk) => chunk.start === at)));
-  deepEqual(chunks.flatMap((chunk) => chunk.text.split(' ')), words);
 });
 await test('API lookahead is always enabled after playback chooses the provider and failures pause visibly', async () => {
   let calls = 0;
@@ -419,11 +379,12 @@ await test('Play starts current and one following sentence concurrently, then ro
 
 await test('the following clip is already playable at handoff, with no new element or generating flash', async () => {
   const before = TestAudio.instances.length, states: string[] = [], words: number[] = [];
-  const narrator = new ProviderNarrator(settings('openai'), new SpeechAudioCache(async () => ({
-    ...audio, wordTimesMs: undefined, timing: 'estimated',
+  const narrator = new ProviderNarrator(settings('siri'), new SpeechAudioCache(async () => ({
+    ...audio, provider: 'siri', wordTimesMs: undefined, timing: 'estimated',
   })));
-  const handle = narrator.speak({ ...request, text: 'First input then output',
-    words: ['First', 'input', 'then', 'output'], cueWords: [2] }, {
+  const sentences = ['The first passage explains the source carefully and preserves every original word before the following idea.', 'The second passage continues the explanation naturally and is prepared while the first passage is playing.'];
+  const text = sentences.join(' '), boundary = sentences[0].split(' ').length;
+  const handle = narrator.speak({ ...request, text, words: text.split(' ') }, {
     onWord: (word) => words.push(word), onEnd() {}, onState: (state) => states.push(state),
   });
   await tick();
@@ -443,7 +404,7 @@ await test('the following clip is already playable at handoff, with no new eleme
   equal(following.playbackRate, 2.4);
   equal(TestAudio.instances.length - before, 2);
   deepEqual(states, ['generating', 'playing', 'playing']);
-  deepEqual(words, [0, 1, 2]);
+  deepEqual(words, [0, boundary - 1, boundary]);
   handle.cancel();
   assert(first.released && following.released);
 });

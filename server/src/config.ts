@@ -62,7 +62,7 @@ export function config(): Config {
       preset: choice('TOUR_PRESET', ['quick', 'standard', 'deep'], 'standard'),
     },
     agent: {
-      enabled: process.env.PAPER_AGENT_ENABLED === 'true',
+      enabled: process.env.PAPER_AGENT_ENABLED !== 'false',
       maxTurns: budget('PAPER_AGENT_MAX_TURNS', 64),
       maxOutputTokens: budget('PAPER_AGENT_MAX_OUTPUT_TOKENS', 128000),
       maxRuntimeMs: budget('PAPER_AGENT_MAX_RUNTIME_MS', 1200000),

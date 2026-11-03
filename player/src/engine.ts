@@ -678,7 +678,6 @@ export class TourEngine {
       rate: this.rate,
       audio: fs.step.audio,
       startWord: from,
-      cueWords: fs.schedule.map((item) => item.at),
     };
     for (const narrator of [this.narrator, this.fallback]) {
       if (token !== this.token || this.narrationDone) return;

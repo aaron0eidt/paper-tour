@@ -11,9 +11,8 @@ import {
 } from './narrator';
 
 /** Bounded sentence groups keep first-audio latency bounded; global PDF word indexes stay intact. */
-export function audioChunks(words: readonly string[], limit = 300, cueWords: readonly number[] = []): { text: string; start: number; count: number }[] {
-  const boundaries = new Set(cueWords.filter((word) => Number.isInteger(word) && word > 0 && word < words.length));
-  const starts = [...new Set([...sentenceStarts(words), ...boundaries])].sort((a, b) => a - b),
+export function audioChunks(words: readonly string[], limit = 300): { text: string; start: number; count: number }[] {
+  const starts = sentenceStarts(words),
     chunks: { text: string; start: number; count: number }[] = [];
   for (let sentence = 0; sentence < starts.length; sentence++) {
     const end = starts[sentence + 1] ?? words.length;
@@ -25,7 +24,7 @@ export function audioChunks(words: readonly string[], limit = 300, cueWords: rea
         length += words[next++].length + 1;
       const previous = chunks.at(-1),
         text = words.slice(at, next).join(' ');
-      if (previous && !boundaries.has(at) && previous.text.length < 80 && previous.text.length + text.length + 1 <= limit) {
+      if (previous && previous.text.length < 80 && previous.text.length + text.length + 1 <= limit) {
         previous.text += ` ${text}`;
         previous.count += next - at;
       } else chunks.push({ text, start: at, count: next - at });
@@ -96,7 +95,7 @@ export class ProviderNarrator implements Narrator {
     this.name = settings.preferences.provider;
   }
   private chunks(req: SpeakRequest) {
-    return audioChunks(req.words, 300, this.settings.preferences.provider === 'openai' ? req.cueWords : []);
+    return audioChunks(req.words);
   }
   async preload(req: SpeakRequest): Promise<void> {
     const chunk = this.chunks(req)[0];

@@ -43,6 +43,8 @@ import { replayHistory, historyCoversCheckpoint } from './history';
 import { checkProgress } from './progress';
 import { workflowDirective } from './workflow';
 import { strictVisualObservationTool, shallowChapterTool } from './strict-tools';
+import { agentPartial } from './partial';
+import { savePartial, clearPartial, type TourPartial } from '../tour-partial';
 const WIRE_TOOLS = AGENT_TOOLS.map(strictVisualObservationTool).map(shallowChapterTool);
 
 export class PaperAgent {
@@ -964,6 +966,7 @@ export class PaperAgent {
       if ((await tx.query('select 1 from agent_tool_calls where run_id=$1 and call_id=$2', [run.id, callId])).rowCount)
         return false;
       let result: Awaited<ReturnType<typeof executeTool>>;
+      let partial: TourPartial | null = null;
       try {
         if (preflightError) throw preflightError;
         if (name === 'finish_tour') assertReviewedState(scope, current.state, audits);
@@ -972,6 +975,8 @@ export class PaperAgent {
           : await executeTool(scope, current.state, name, preparedArgs);
         if (name === 'upsert_tour_chapter' && reviewedVisuals.length)
           result.output = { ...(result.output as Record<string, unknown>), reviewedVisuals };
+        if (name === 'upsert_tour_chapter' && !(result.output as { error?: unknown })?.error)
+          partial = agentPartial(result.state, scope, new Set([...audits, ...reviewedVisuals]));
       } catch (error) {
         result = {
           state: current.state,
@@ -994,6 +999,8 @@ export class PaperAgent {
         JSON.stringify(output),
       ]);
       await tx.query('update agent_runs set state=$2 where id=$1', [run.id, JSON.stringify(result.state)]);
+      if (partial && await savePartial(tx, run.generation_id, partial))
+        await generationRecorder(tx, run.generation_id, '', run.id)('tour.partial', { ready: partial.ready, planned: partial.planned });
       if (name === 'record_visual_observations' && !(result.output as any)?.error) {
         for (const [id, observation] of Object.entries(result.state.observations)) {
           const source = scope.visuals.find((v) => v.targetId === id)!;
@@ -1065,6 +1072,7 @@ export class PaperAgent {
         await tx.query("update agent_steps set status='done' where run_id=$1 and step=$2", [run.id, run.turn_index]);
         await generationRecorder(tx, run.generation_id, '', run.id)('tour.direction', tourDirection(published));
         await generationRecorder(tx, run.generation_id, '', run.id)('run.completed', { tourId: tour.id });
+        await clearPartial(tx, run.generation_id);
         await tx.query('update documents set updated_at=now() where id=$1', [scope.documentId]);
         return true;
       }

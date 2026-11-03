@@ -445,7 +445,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (!active || state.status !== 'playing' || state.speechStatus !== 'playing' || !narrator.preload) return;
     // Prime the next passage during the penultimate clip, giving short final phrases
     // enough lead time. At most two upcoming clips are prepared across the step boundary.
-    const chunks = audioChunks(active.steps[state.index]?.words ?? [], 300, narrator.name === 'openai' ? active.steps[state.index]?.schedule.map((item) => item.at) : []);
+    const chunks = audioChunks(active.steps[state.index]?.words ?? []);
     const lookahead = chunks.at(-2) ?? chunks[0];
     if (lookahead && state.word < lookahead.start) return;
     const next = active.steps[state.index + 1];
@@ -455,7 +455,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (readAloud && !answer && !prepared) return;
     const text = prepared?.speech ?? next.step.say;
     void narrator.preload({ text, words: text.trim().split(/\s+/), speaker: next.step.speaker ?? 'host',
-      voice: prepared?.language ? { ...active.tour.voices?.[next.step.speaker ?? 'host'], lang: prepared.language } : active.tour.voices?.[next.step.speaker ?? 'host'], rate: speed * params.rate, cueWords: next.schedule.map((item) => item.at) }).catch(() => {});
+      voice: prepared?.language ? { ...active.tour.voices?.[next.step.speaker ?? 'host'], lang: prepared.language } : active.tour.voices?.[next.step.speaker ?? 'host'], rate: speed * params.rate }).catch(() => {});
   }, [active, answer, narrator, readAloud, readingSpeech.cached, state.status, state.speechStatus, state.index, state.word, speed, params.rate]);
 
   const scene = useMemo(

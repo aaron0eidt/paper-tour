@@ -243,7 +243,7 @@ test(
       other,
       other + '@test.example',
     ]);
-    const fixture = async () => {
+    const fixture = async (engine: 'agent' | 'legacy' = 'agent') => {
       const id = randomUUID(),
         analysis = randomUUID();
       await db.query(
@@ -253,7 +253,7 @@ test(
       await db.query("insert into analyses(id,document_id,status,doc) values($1,$2,'ready',$3)", [analysis, id, doc]);
       await db.query('update documents set current_analysis_id=$2 where id=$1', [id, analysis]);
       const g = await db.transaction((tx) =>
-        ensureTourGeneration(tx, enqueue, id, analysis, muse.model, false, false, 'agent'),
+        ensureTourGeneration(tx, enqueue, id, analysis, muse.model, false, false, engine),
       );
       return { id, analysis, g, run: g.agent_run_id as string };
     };
@@ -339,9 +339,17 @@ test(
         'one paper upload supports incremental image tools, chronological publishing and a shared root',
         async () => {
           const f = await fixture();
+          await agent.turn(f.run);
+          await agent.turn(f.run);
+          await agent.turn(f.run);
+          const partial = (await db.query('select ready,tour from tour_generation_partials where generation_id=$1', [f.g.id])).rows[0];
+          assert.equal(partial.ready, 1, 'a validated chapter is playable before finish_tour');
+          assert.equal(partial.tour.doc_sha256, doc.source.sha256);
+          assert.equal((await db.query('select count(*) from tours where generation_id=$1', [f.g.id])).rows[0].count, '0');
           const done = await drive(f.run);
           assert.equal(done.status, 'completed', done.reason);
           assert.equal(requests.length, 4);
+          assert.equal((await db.query('select count(*) from tour_generation_partials where generation_id=$1', [f.g.id])).rows[0].count, '0', 'final publication removes the temporary partial');
           assert.match(JSON.stringify(requests[0]), /PAPER SOURCE/);
           assert(requests.slice(1).every((r) => !JSON.stringify(r.input).includes('PAPER SOURCE')));
           assert.match(JSON.stringify(requests[2].input), /data:image\/(jpeg|png);base64/);
@@ -362,6 +370,15 @@ test(
           await assert.rejects(() => service.controlAgent(other, f.id, f.run, 'cancel'), /not found/i);
         },
       );
+      await t.test('retrying a failed harness tour switches to the requested SDK agent and preserves history', async () => {
+        const f = await fixture('legacy');
+        await db.query("update tour_generations set status='failed',error_code='muse_invalid_response' where id=$1", [f.g.id]);
+        const next = await db.transaction((tx) => ensureTourGeneration(tx, enqueue, f.id, f.analysis, muse.model, true, true, 'agent'));
+        assert.notEqual(next.id, f.g.id);
+        assert.equal(next.engine, 'agent');
+        assert.ok(next.agent_run_id);
+        assert.equal((await db.query('select status from tour_generations where id=$1', [f.g.id])).rows[0].status, 'failed');
+      });
       await t.test(
         'pause and cancel preserve checkpoints, and known response IDs recover without a second POST',
         async () => {

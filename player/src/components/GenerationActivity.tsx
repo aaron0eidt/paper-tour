@@ -1,5 +1,5 @@
 import { TokenCounts } from './TokenCounts';
-import { activityEvents } from './activityEvents';
+import { activityEvents, modelOutput } from './activityEvents';
 import { AgentOrb, AgentStream } from './AgentStream';
 import { reportedUsage, type TokenUsage } from '../../../shared/activity';
 import { generationProgress } from '../../../shared/generationProgress';
@@ -249,14 +249,7 @@ export function GenerationActivity({
     : undefined;
   const isTool = selected?.type === 'tool.started';
   const isModel = selected?.type === 'model.started';
-  const output =
-    completion?.data.output ??
-    failure?.data.output ??
-    (selectedCall
-      .filter((event) => event.type === 'model.delta')
-      .map((event) => String(event.data.delta))
-      .join('') ||
-      'Waiting for model output…');
+  const output = modelOutput(selectedCall, !working);
   const payload = selected
     ? !isModel && !isTool
       ? selected.data
