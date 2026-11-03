@@ -101,6 +101,9 @@ export interface EngineState {
   waiting?: boolean;
   /** Counts the times the tour grew, so what is derived from its steps (a clock, a list) is built again. */
   revision?: number;
+  speechError?: string;
+  speechStatus?: 'generating' | 'playing';
+  speechTiming?: 'provider' | 'estimated';
 }
 
 /** Progress over the current board's narrated interval, not a separate wall clock. */
@@ -133,7 +136,7 @@ export interface EngineOptions {
   /** Wait for the initial camera move; later word-synchronized moves do not delay speech. */
   beforeNarration?: (signal: AbortSignal) => Promise<void>;
   /** Resolve lazy speech before speaking it (e.g. a grounded equation reading). Rejection pauses, never reads raw text. */
-  prepareNarration?: (step: Step, signal: AbortSignal) => Promise<string | { say: string; actions?: Action[] }>;
+  prepareNarration?: (step: Step, signal: AbortSignal) => Promise<string | { say: string; actions?: Action[]; language?: string }>;
   /** The tour is still being written: at its last step it waits for more (see `extend`) instead of ending. */
   open?: boolean;
 }
@@ -249,6 +252,9 @@ export class TourEngine {
   /** At the last step written, played to its end, until the next one arrives. */
   private waiting = false;
   private revision = 0;
+  private speechError: string | undefined;
+  private speechStatus: 'generating' | 'playing' | undefined;
+  private speechTiming: 'provider' | 'estimated' | undefined;
 
   constructor(tour: Tour, opts: EngineOptions) {
     this.whole = tour;
@@ -452,6 +458,9 @@ export class TourEngine {
       awaiting: this.awaiting,
       waiting: this.waiting,
       revision: this.revision,
+      speechError: this.speechError,
+      speechStatus: this.speechStatus,
+      speechTiming: this.speechTiming,
     };
   }
 
@@ -462,6 +471,7 @@ export class TourEngine {
 
   private stopRun(): void {
     this.token++;
+    this.speechStatus = undefined;
     this.awaiting = false;
     this.waiting = false;
     this.preparation?.abort();
@@ -605,6 +615,10 @@ export class TourEngine {
   }
 
   private async speakStep(fs: FlatStep, token: number, from: number): Promise<void> {
+    this.speechError = undefined;
+    this.speechStatus = undefined;
+    this.speechTiming = undefined;
+    let preparedLanguage: string | undefined;
     if (this.beforeNarration || this.prepareNarration) {
       const preparation = new AbortController();
       this.preparation = preparation;
@@ -614,6 +628,7 @@ export class TourEngine {
         if (this.prepareNarration) {
           const prepared = await this.prepareNarration(fs.step, preparation.signal);
           const say = typeof prepared === 'string' ? prepared : prepared.say;
+          preparedLanguage = typeof prepared === 'string' ? undefined : prepared.language;
           const actions = typeof prepared === 'string' ? undefined : prepared.actions;
           if (token !== this.token || preparation.signal.aborted) return;
           const changedActions = actions && JSON.stringify(actions) !== JSON.stringify(fs.step.actions);
@@ -653,7 +668,7 @@ export class TourEngine {
       text: fs.step.say,
       words: fs.words,
       speaker,
-      voice: this.tour.voices?.[speaker],
+      voice: preparedLanguage ? { ...this.tour.voices?.[speaker], lang: preparedLanguage } : this.tour.voices?.[speaker],
       rate: this.rate,
       audio: fs.step.audio,
       startWord: from,
@@ -665,6 +680,9 @@ export class TourEngine {
       // including the fallback, without changing the current step's identity.
       let active = true;
       const cb: SpeakCallbacks = {
+        onError: (error) => { if (active && token === this.token) { this.speechError = error.message; this.speechStatus = undefined; this.pause(); } },
+        onState: (state) => { if (active && token === this.token) { this.speechStatus = state; this.emit(); } },
+        onTiming: (source) => { if (active && token === this.token) { this.speechTiming = source; this.emit(); } },
         onWord: (w) => {
           if (active && token === this.token) this.onWord(w);
         },
@@ -696,6 +714,7 @@ export class TourEngine {
   }
 
   private onNarrationEnd(token: number): void {
+    this.speechStatus = undefined;
     if (this.narrationDone) return;
     this.narrationDone = true;
     this.handle = null;

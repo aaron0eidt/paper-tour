@@ -111,6 +111,12 @@ export class WebSpeechNarrator implements Narrator {
     // On any speech failure, finish the remaining words on a timer so the tour keeps going.
     const fallback = (reason: unknown) => {
       if (cancelled || finished || stopFallback) return;
+      if (cb.onError) {
+        finished = true; detach();
+        if (synth.speaking || synth.pending) synth.cancel();
+        cb.onError(new Error('Browser speech failed. Press Play to retry or choose another speech provider in Settings.'));
+        return;
+      }
       if (!this.worked && FATAL.has(String(reason))) {
         this.available = false;
         console.warn('[speech] speech does not work here, using timed narration from now on (toggle mute to retry):', reason);

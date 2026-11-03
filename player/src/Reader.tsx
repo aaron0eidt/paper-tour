@@ -14,6 +14,8 @@ import { coverVisible, lengthLabel, readerTitle, recapVisible } from './tourSumm
 import { loadManifest, loadPaper } from './load';
 import type { Loaded } from './load';
 import { createNarrator, SilentNarrator, useBrowserVoices, speechAvailable } from './narration';
+import { useSpeechSettings } from './narration/useSpeechSettings';
+import { SpeechProviderSelect } from './narration/SpeechSettings';
 import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
@@ -142,6 +144,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const browserVoices = useBrowserVoices();
+  const speech = useSpeechSettings(Boolean(documentId));
+  const [speechUpdateError, setSpeechUpdateError] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
   const [readAloud, setReadAloud] = useState(false);
   const [readingOptions, setReadingOptions] = useState(DEFAULT_READING_OPTIONS);
@@ -404,8 +408,9 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   // One narrator for the tour and its answers, so both speak with the same voice.
   const baseUrl = loaded?.baseUrl ?? '/';
   const narrator = useMemo(
-    () => createNarrator({ baseUrl, muted, forceSilent: params.silent, voiceId: browserVoices.selectedVoiceId }),
-    [baseUrl, muted, params.silent, browserVoices.selectedVoiceId],
+    () => createNarrator({ baseUrl, muted, forceSilent: params.silent, voiceId: browserVoices.selectedVoiceId, speech: speech.data, cache: speech.cache,
+      settingsError: documentId ? speech.error ?? (speech.loading && !speech.data ? 'Speech settings are loading. Press Play again when ready.' : undefined) : undefined }),
+    [baseUrl, muted, params.silent, browserVoices.selectedVoiceId, documentId, speech.data, speech.cache, speech.error, speech.loading],
   );
 
   // A question sets the tour aside and its answer plays as a second tour on the same narrator, camera, pen and board;
@@ -419,6 +424,19 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
   const state = answer ? answerState : mainState;
   const active = answer ?? engine;
+  useEffect(() => {
+    if (!active || state.status !== 'playing' || state.speechStatus !== 'playing' || !narrator.preload) return;
+    // Longer current passages precompute their own next audio chunk first.
+    if (active.steps[state.index]?.step.say.length > 600) return;
+    const next = active.steps[state.index + 1];
+    if (!next) return;
+    // Reuse a prepared read-aloud script, never start a language-model call for audio lookahead.
+    const prepared = readAloud && !answer ? readingSpeech.cached(next.step) : undefined;
+    if (readAloud && !answer && !prepared) return;
+    const text = prepared?.speech ?? next.step.say;
+    void narrator.preload({ text, words: text.trim().split(/\s+/), speaker: next.step.speaker ?? 'host',
+      voice: prepared?.language ? { ...active.tour.voices?.[next.step.speaker ?? 'host'], lang: prepared.language } : active.tour.voices?.[next.step.speaker ?? 'host'], rate: speed * params.rate }).catch(() => {});
+  }, [active, answer, narrator, readAloud, readingSpeech.cached, state.status, state.speechStatus, state.index, state.word, speed, params.rate]);
 
   const scene = useMemo(
     () =>
@@ -1806,11 +1824,23 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             clock={clock}
             state={state}
             growth={answer ? null : growth}
+            speechSettings={documentId ? <div className="voice-setting">
+              <span>Speech provider</span>
+              <SpeechProviderSelect value={speech.data?.preferences.provider ?? 'browser'} disabled={!speech.data || speech.loading} onChange={(provider) => {
+                active.pause(); setSpeechUpdateError(null);
+                if (speech.data) void speech.update({ ...speech.data.preferences, provider }).catch((error) => setSpeechUpdateError(error instanceof Error ? error.message : 'Could not select the speech provider.'));
+              }} />
+              {speech.data && speech.data.preferences.provider !== 'browser' && <small>{speech.data.providers[speech.data.preferences.provider].message}</small>}
+              {state.speechTiming === 'estimated' && <small>Word highlighting and word seeking use estimated audio timing.</small>}
+              {state.speechTiming === 'provider' && <small>Word highlighting follows provider timestamps.</small>}
+              {(speech.error || speechUpdateError) && <small role="alert">{speechUpdateError ?? speech.error}</small>}
+              <a href={`${import.meta.env.BASE_URL}?settings=profile#speech`}>Configure voices and keys</a>
+            </div> : undefined}
             readingSettings={readAloud ? (
               <div className="reader-reading-options">
                 <strong>Original paper text</strong>
                 <p>The model prepares the original prose word for word, cleaning layout and citation markers only. Equations, tables and figures receive detailed explanations and visual annotations using the PDF and context. Authors, affiliations and page metadata are skipped.</p>
-                {!speechAvailable() && <p role="alert">Speech synthesis is unavailable in this browser. Open this document in a browser with text-to-speech to hear it.</p>}
+                {!speechAvailable() && (!speech.data || speech.data.preferences.provider === 'browser') && <p role="alert">Speech synthesis is unavailable in this browser. Open this document in a browser with text-to-speech to hear it.</p>}
                 <label><input type="checkbox" checked={readingOptions.removeCitations}
                   onChange={(e) => setReadingOptions((o) => ({ ...o, removeCitations: e.target.checked }))} /> Skip citation markers</label>
                 <label><input type="checkbox" checked={readingOptions.includeReferences}
@@ -1841,7 +1871,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             voices={browserVoices.voices}
             voicesLoading={browserVoices.loading}
             selectedVoiceId={browserVoices.selectedVoiceId}
-            onVoiceChange={browserVoices.setSelectedVoiceId}
+            onVoiceChange={!speech.data || speech.data.preferences.provider === 'browser' ? browserVoices.setSelectedVoiceId : undefined}
             voiceConfig={active.tour.voices?.[active.steps[state.index]?.step.speaker ?? 'host']}
             unclear={
               canUnclear ? { open: unclearAt !== null, onOpen: openUnclear, onClose: closeUnclear, onChoose: chooseUnclear } : null

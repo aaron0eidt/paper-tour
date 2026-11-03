@@ -82,6 +82,12 @@ export class ReadingPreparation {
     private readonly suspendOnError: (error: unknown) => boolean = () => true,
   ) {}
 
+  /** Inspect an already prepared script without causing another model request. */
+  peek(step: Step): ReadingPassage | undefined {
+    const result = this.cache.get(step.id);
+    return result ? structuredClone(result) : undefined;
+  }
+
   /** React StrictMode replays effect setup after cleanup on the same memoized instance. */
   activate(): void {
     this.disposed = false;

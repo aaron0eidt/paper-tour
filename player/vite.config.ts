@@ -27,7 +27,7 @@ export default defineConfig(({ command, mode }) => {
     ],
     worker: { format: 'es' },
     publicDir: command === 'serve' ? '../demo' : false,
-    server: { port: 5174, strictPort: true, proxy: { '/api': 'http://127.0.0.1:3001' } },
+    server: { port: 5174, strictPort: true, proxy: { '/api': process.env.PAPER_TOUR_API_PROXY ?? 'http://127.0.0.1:3001' } },
     // pdf.js 4 uses modern syntax (top-level await, private methods) and is a large chunk by itself.
     build: { target: 'es2022', chunkSizeWarningLimit: 1500 },
     optimizeDeps: { esbuildOptions: { target: 'es2022' } },

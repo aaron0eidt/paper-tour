@@ -63,14 +63,14 @@ export function useReadingSpeech(source: AskSource, analysisId: string | undefin
   const [error, setError] = useState<string | null>(null);
   const latest = useRef<symbol>();
   const prepare = useCallback(
-    async (step: Step, signal: AbortSignal): Promise<{ say: string; actions?: ReadingPassage['actions'] }> => {
+    async (step: Step, signal: AbortSignal): Promise<{ say: string; actions?: ReadingPassage['actions']; language: string }> => {
       const request = Symbol();
       latest.current = request;
       setBusy(true);
       setError(null);
       try {
         const result = await loader.get(step, signal);
-        return { say: result.speech, actions: result.actions };
+        return { say: result.speech, actions: result.actions, language: result.language };
       } catch (cause) {
         if (!signal.aborted && latest.current === request)
           setError(cause instanceof Error ? cause.message : 'The passage could not be prepared.');
@@ -85,5 +85,6 @@ export function useReadingSpeech(source: AskSource, analysisId: string | undefin
     (current: Step | null, following: Step[], canStart: boolean) => loader.plan(current, following, canStart),
     [loader],
   );
-  return { prepare, plan, busy, error };
+  const cached = useCallback((step: Step) => loader.peek(step), [loader]);
+  return { prepare, plan, busy, error, cached };
 }
