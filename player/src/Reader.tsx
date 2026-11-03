@@ -16,6 +16,8 @@ import type { Loaded } from './load';
 import { createNarrator, SilentNarrator, useBrowserVoices, speechAvailable } from './narration';
 import { useSpeechSettings } from './narration/useSpeechSettings';
 import { SpeechProviderSelect } from './narration/SpeechSettings';
+import { AudioVoiceControl } from './narration/SpeechVoiceControl';
+import type { SpeechPreferences } from '../../shared/speech';
 import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
 import type { Scene } from './scene';
@@ -146,6 +148,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const browserVoices = useBrowserVoices();
   const speech = useSpeechSettings(Boolean(documentId));
   const [speechUpdateError, setSpeechUpdateError] = useState<string | null>(null);
+  const [speechUpdatePending, setSpeechUpdatePending] = useState(false);
+  const speechUpdating = useRef(false);
   const [speed, setSpeed] = useState(1);
   const [readAloud, setReadAloud] = useState(false);
   const [readingOptions, setReadingOptions] = useState(DEFAULT_READING_OPTIONS);
@@ -424,6 +428,16 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
   const state = answer ? answerState : mainState;
   const active = answer ?? engine;
+  const applySpeechPreferences = useCallback(async (preferences: SpeechPreferences) => {
+    if (speechUpdating.current) return;
+    speechUpdating.current = true;
+    active?.pause(); setSpeechUpdateError(null); setSpeechUpdatePending(true);
+    try { await speech.update(preferences); }
+    catch (error) {
+      setSpeechUpdateError(error instanceof Error ? error.message : 'Could not save speech settings.');
+      throw error;
+    } finally { speechUpdating.current = false; setSpeechUpdatePending(false); }
+  }, [active, speech.update]);
   useEffect(() => {
     if (!active || state.status !== 'playing' || state.speechStatus !== 'playing' || !narrator.preload) return;
     // Longer current passages precompute their own next audio chunk first.
@@ -1826,10 +1840,15 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             growth={answer ? null : growth}
             speechSettings={documentId ? <div className="voice-setting">
               <span>Speech provider</span>
-              <SpeechProviderSelect value={speech.data?.preferences.provider ?? 'browser'} disabled={!speech.data || speech.loading} onChange={(provider) => {
-                active.pause(); setSpeechUpdateError(null);
-                if (speech.data) void speech.update({ ...speech.data.preferences, provider }).catch((error) => setSpeechUpdateError(error instanceof Error ? error.message : 'Could not select the speech provider.'));
+              <SpeechProviderSelect value={speech.data?.preferences.provider ?? 'browser'} disabled={!speech.data || speech.loading || speechUpdatePending} onChange={(provider) => {
+                if (speech.data) void applySpeechPreferences({ ...speech.data.preferences, provider }).catch(() => {});
               }} />
+              {speech.data && <AudioVoiceControl settings={speech.data} pending={speechUpdatePending || speech.loading} onSave={async (voice) => {
+                const preferences = speech.data!.preferences;
+                if (preferences.provider === 'browser') return;
+                await applySpeechPreferences({ ...preferences, connections: { ...preferences.connections,
+                  [preferences.provider]: { ...preferences.connections[preferences.provider], voice } } });
+              }} />}
               {speech.data && speech.data.preferences.provider !== 'browser' && <small>{speech.data.providers[speech.data.preferences.provider].message}</small>}
               {state.speechTiming === 'estimated' && <small>Word highlighting and word seeking use estimated audio timing.</small>}
               {state.speechTiming === 'provider' && <small>Word highlighting follows provider timestamps.</small>}

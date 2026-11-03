@@ -2,7 +2,7 @@
 
 Speech selection now applies to guided tours, source-text read-aloud and answers. Script preparation and its durable cache remain independent of speech generation. No language-model calls are added by audio generation or lookahead. Browser voices remain an explicit selection; mute remains intentional timed narration. Failed audio generation pauses with an actionable error and never changes providers.
 
-Choose a provider under **Profile & Settings → Speech**, save its voice/connection, then preview it. The player's **Audio** menu can select a provider too. Both local Qwen and ElevenLabs can speak English and German; read-aloud carries the prepared passage's actual language through to synthesis, and answers use their response language.
+Choose a provider under **Profile & Settings → Speech**, save its voice/connection, then preview it. The player's **Audio** menu selects providers and voices directly: local/OpenAI dropdowns save without generating audio, and ElevenLabs has an editable voice ID with an explicit Save button. Voice changes pause playback and invalidate the audio version; credentials and model configuration remain in Profile settings. Both local Qwen and ElevenLabs can speak English and German; read-aloud carries the prepared passage's actual language through to synthesis, and answers use their response language.
 
 ## Local Qwen3-TTS
 

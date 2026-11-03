@@ -8,6 +8,7 @@ import {
 import { apiRequest } from '../library/client';
 import { settingsChanged } from '../library/useSettings';
 import { useSpeechSettings } from './useSpeechSettings';
+import { SpeechVoiceControl } from './SpeechVoiceControl';
 
 export const SPEECH_LABELS: Record<SpeechProvider, string> = {
   browser: 'Browser voices',
@@ -150,18 +151,14 @@ export function SpeechSettings() {
               <p className="profile-help">{status?.message}</p>
               {provider === 'local' ? (
                 <>
-                  <label className="profile-field">
-                    Voice
-                    <select
-                      value={connection!.voice}
-                      disabled={pending}
-                      onChange={(event) => setConnection({ voice: event.target.value })}
-                    >
-                      {['Ryan', 'Aiden', 'Serena', 'Vivian'].map((voice) => (
-                        <option key={voice}>{voice}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <SpeechVoiceControl
+                    provider="local"
+                    model={connection!.model}
+                    value={connection!.voice}
+                    disabled={pending}
+                    className="profile-field"
+                    onChange={(voice) => setConnection({ voice })}
+                  />
                   {!status?.reachable && (
                     <p className="profile-help">
                       Start the local service with <code>~/.omlx/bin/omlx-python scripts/local-tts.py</code>.{' '}
@@ -198,44 +195,19 @@ export function SpeechSettings() {
                       ))}
                     </select>
                   </label>
-                  <label className="profile-field">
-                    {provider === 'elevenlabs' ? 'Voice ID from your ElevenLabs account' : 'Voice'}
-                    {provider === 'openai' ? (
-                      <select
-                        value={connection!.voice}
-                        disabled={pending}
-                        onChange={(event) => setConnection({ voice: event.target.value })}
-                      >
-                        {(connection!.model === 'gpt-4o-mini-tts'
-                          ? [
-                              'cedar',
-                              'marin',
-                              'alloy',
-                              'ash',
-                              'ballad',
-                              'coral',
-                              'echo',
-                              'fable',
-                              'nova',
-                              'onyx',
-                              'sage',
-                              'shimmer',
-                              'verse',
-                            ]
-                          : ['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer']
-                        ).map((voice) => (
-                          <option key={voice}>{voice}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        value={connection!.voice}
-                        autoComplete="off"
-                        disabled={pending}
-                        onChange={(event) => setConnection({ voice: event.target.value })}
-                      />
-                    )}
-                  </label>
+                  <SpeechVoiceControl
+                    provider={provider}
+                    model={connection!.model}
+                    value={connection!.voice}
+                    disabled={pending}
+                    className="profile-field"
+                    onChange={(voice) => setConnection({ voice })}
+                  />
+                  {provider === 'elevenlabs' && (
+                    <a className="profile-help" href="https://elevenlabs.io/app" target="_blank" rel="noreferrer">
+                      Open ElevenLabs to find your voice ID
+                    </a>
+                  )}
                   <label className="profile-field">
                     Connection
                     <select
