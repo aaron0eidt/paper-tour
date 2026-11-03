@@ -28,8 +28,8 @@ export async function* activityFrames(
 }
 
 /** Reconcile the current data part by ID; the durable event journal remains the history. */
-export function activityUIStream(frames: AsyncIterable<ActivityFrame>, messageId: string) {
-  return createUIMessageStream<UIMessage<unknown, { activity: ActivityFrame }>>({
+export function activityUIStream<T = ActivityFrame>(frames: AsyncIterable<T>, messageId: string) {
+  return createUIMessageStream<UIMessage<unknown, { activity: T }>>({
     execute: async ({ writer }) => {
       writer.write({ type: 'start', messageId });
       for await (const frame of frames) writer.write({ type: 'data-activity', id: 'activity', data: frame });

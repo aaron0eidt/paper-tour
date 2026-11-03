@@ -8,6 +8,7 @@ export interface AskTurn {
 }
 /** A learner's question, with where they are in the tour and what they are looking at. */
 export interface AskRequest {
+  activityRunId?: string;
   question: string;
   conversationId?: string;
   page?: number;

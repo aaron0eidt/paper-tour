@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { Doc, Step, Tour } from '../../../shared/paper';
 import { validateSelection } from '../../../shared/selection';
 import { responseLanguage } from '../../../shared/languages';
-import { HttpError, ProcessingError } from '../errors';
+import { HttpError, ProcessingError, VisualValidationError } from '../errors';
 import type { Completion, MuseClient, MuseMessage } from '../muse/client';
 import { isContributorModel } from '../muse/models';
 import { OFFICIAL_MODELS } from '../muse/pricing';
@@ -21,7 +21,13 @@ import { paperBlock } from './paper-block';
 import { SHARED_RULES } from './prompts';
 import { ANSWERABLE, type Answerable, type AskAnswer, type AskRequest, type StepSink } from './ask-types';
 import { evidenceText, findStep, retrieve } from './ask-retrieval';
-import { answerSchema, askContext, askInstructions, checkedActiveVisual, READING_NARRATION_RULES } from './ask-authoring';
+import {
+  answerSchema,
+  askContext,
+  askInstructions,
+  checkedActiveVisual,
+  READING_NARRATION_RULES,
+} from './ask-authoring';
 import { shownBoards } from './ask-boards';
 import {
   answerBoardProblems,
@@ -32,6 +38,7 @@ import {
   type AnswerContext,
 } from './ask-answer';
 import { currentSink, StepScanner } from './ask-stream';
+import { activityTask, currentActivity } from '../ai/activity-context';
 
 // Preserve the existing Q&A API while keeping search and source I/O independent of authoring.
 export { ANSWERABLE } from './ask-types';
@@ -122,7 +129,12 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
   const started = Date.now();
   if (request.selection) validateSelection(request.selection, doc);
   const step = findStep(input.tour, request.stepId);
-  const retrieval = retrieve(doc, request, step);
+  const retrieval = await activityTask(
+    'Find supporting passages',
+    'source',
+    async () => retrieve(doc, request, step),
+    (result) => result.focus.map((passage) => passage.id),
+  );
   const signal = AbortSignal.any([AbortSignal.timeout(ASK_TIMEOUT_MS), ...(input.signal ? [input.signal] : [])]);
   if (input.image?.kind === 'figure' && !request.selection) {
     retrieval.measured = await (input.measureFigure ?? measuredFigureTargets)(input.image, signal);
@@ -263,8 +275,10 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       continue;
     }
     context.requireExample ||= hasWorkedExample(value);
+    const validation = currentActivity()?.start('Check explanation and source references', 'validation');
     const visualProblems = answerVisualProblems(value, context);
     if (visualProblems.length) {
+      await validation?.finish('failed', 'Preparing a correction to visual references');
       console.warn(
         JSON.stringify({
           event: 'answer_visual_repair',
@@ -281,6 +295,7 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
     }
     const candidate = buildAnswer(value, context);
     if (candidate?.steps.some((step) => readsSource(step.say, doc))) {
+      await validation?.finish('failed', 'Preparing a clearer explanation');
       correct(
         value,
         'Explain the mechanism, consequence or intuition in your own words. Do not read the source aloud; retain its facts and exact quotations only when needed.',
@@ -289,6 +304,7 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
     }
     const narrationProblems = candidate ? answerNarrationProblems(candidate.steps, authoringRules) : [];
     if (narrationProblems.length) {
+      await validation?.finish('failed', 'Correcting the narration');
       console.warn(
         JSON.stringify({ event: 'answer_narration_repair', documentId: input.documentId, problems: narrationProblems }),
       );
@@ -304,6 +320,7 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
     const boardProblems =
       attempt === 0 && shownSteps.length ? answerBoardProblems(value, context, shownSteps.length) : [];
     if (boardProblems.length) {
+      await validation?.finish('failed', 'Correcting the visualization');
       console.warn(
         JSON.stringify({ event: 'answer_board_repair', documentId: input.documentId, problems: boardProblems }),
       );
@@ -314,6 +331,7 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       );
       continue;
     }
+    await validation?.finish(answer && answer.answerable !== 'no' ? 'completed' : 'failed');
     if (answer && answer.answerable !== 'no') break;
   }
   // A step already spoken is never taken back: it opens the answer, and the answer is only what the learner has if the
@@ -329,15 +347,18 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
   for (const step of answer.steps) {
     for (const action of step.actions) {
       if (action.type !== 'board' || !isAuthoredVisual(action.item)) continue;
-      action.item = await reviewAuthoredWithModel(action.item, {
-        client,
-        narration: step.say,
-        evidence: context.evidence,
-        signal,
-        allowedSourceRefs: indexElements(doc).map((element) => element.id),
-        sourceImages: [...(input.images ?? []), ...(input.image ? [input.image] : [])].map((image) => image.dataUrl),
-        onCompletion: (completion) => completions.push(completion),
-      });
+      const authored = action.item;
+      action.item = await activityTask('Render and review the visualization', 'validation', () =>
+        reviewAuthoredWithModel(authored, {
+          client,
+          narration: step.say,
+          evidence: context.evidence,
+          signal,
+          allowedSourceRefs: indexElements(doc).map((element) => element.id),
+          sourceImages: [...(input.images ?? []), ...(input.image ? [input.image] : [])].map((image) => image.dataUrl),
+          onCompletion: (completion) => completions.push(completion),
+        }),
+      );
     }
   }
   console.log(
@@ -372,6 +393,7 @@ export function askModel(model: unknown, allowTraining: boolean, fallback: strin
 
 /** Model failures in plain words for the learner; a key problem points to the settings, or for demos to the .env. */
 export function askError(error: unknown, demo = false): unknown {
+  if (error instanceof VisualValidationError) return new HttpError(422, error.code, error.publicMessage);
   if (!(error instanceof ProcessingError)) return error;
   if (['muse_not_configured', 'muse_auth_failed'].includes(error.code))
     return new HttpError(

@@ -1,6 +1,8 @@
 import { generateText, streamText, Output, jsonSchema } from 'ai';
 import { ProcessingError } from '../errors';
 import type { MuseConfig } from '../config';
+import { currentActivity } from '../ai/activity-context';
+import { modelActivityNames } from '../../../shared/generationTimeline';
 import {
   modelBaseUrl,
   museChatModel,
@@ -52,6 +54,7 @@ export class MuseClient {
   ): Promise<Completion> {
     if (!this.config.apiKey.trim())
       throw new ProcessingError('muse_not_configured', 'Connect Meta in Profile & Settings.');
+    const operation = currentActivity()?.start(modelActivityNames[name] ?? 'Prepare the explanation', 'model');
     const abort = AbortSignal.any([AbortSignal.timeout(this.config.timeoutMs), ...(signal ? [signal] : [])]);
     const options = {
       model: museChatModel(this.config, this.transport),
@@ -77,26 +80,40 @@ export class MuseClient {
     };
     try {
       const result =
-        onDelta || onNarration ? streamText({ ...options, onError: () => {} }) : await generateText(options);
+        onDelta || onNarration || operation
+          ? streamText({ ...options, onError: () => {} })
+          : await generateText(options);
       if ('stream' in result) {
         // SDK parses incomplete structured output. Only the public `say` field
         // becomes a narration snapshot; raw JSON remains in technical activity.
         const narration = async () => {
-          if (!onNarration) return;
+          if (!onNarration && !operation) return;
           let sent = '',
             latest = '',
             last = 0;
           for await (const partial of result.partialOutputStream) {
-            const value = partial as { say?: unknown } | undefined;
-            if (typeof value?.say !== 'string' || value.say === sent) continue;
-            latest = value.say;
+            const value = partial as { say?: unknown; speech?: unknown; steps?: { say?: unknown }[] } | undefined;
+            const speech =
+              typeof value?.say === 'string'
+                ? value.say
+                : name === 'reading_passage' && typeof value?.speech === 'string'
+                  ? value.speech
+                  : name === 'ask_answer' && Array.isArray(value?.steps)
+                    ? value.steps.flatMap((step) => (typeof step?.say === 'string' ? [step.say] : [])).join('\n\n')
+                    : '';
+            if (!speech || speech === sent) continue;
+            latest = speech;
             if (Date.now() - last >= 250) {
-              await onNarration(latest);
+              await onNarration?.(latest);
+              await operation?.draft(latest);
               sent = latest;
               last = Date.now();
             }
           }
-          if (latest !== sent) await onNarration(latest);
+          if (latest !== sent) {
+            await onNarration?.(latest);
+            await operation?.draft(latest);
+          }
         };
         const diagnostics = async () => {
           let pending = '',
@@ -129,8 +146,10 @@ export class MuseClient {
       const value = await result.output;
       const usage = modelUsage(await result.totalUsage);
       await onUsage?.(usage);
+      await operation?.finish();
       return { value, usage, requestId: (await result.response).headers?.['x-request-id']?.slice(0, 200) ?? null };
     } catch (error) {
+      await operation?.finish(signal?.aborted ? 'cancelled' : 'failed');
       throw modelError(error, abort);
     }
   }

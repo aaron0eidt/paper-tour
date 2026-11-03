@@ -7,6 +7,7 @@ export { readingObjects } from './readingObjects';
 export const READING_VISUAL_VERSION = 'contextual-visual-reading@7';
 
 export interface ReadingPassageRequest {
+  activityRunId?: string;
   analysisId: string;
   targetId: string;
   removeCitations?: boolean;

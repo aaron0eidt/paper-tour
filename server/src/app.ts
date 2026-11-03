@@ -4,6 +4,7 @@ import type { TourProfileDraft } from '../../shared/tourProfiles';
 import { TOUR_STRUCTURES, TOUR_DEPTHS, TOUR_AUDIENCES } from '../../shared/tourProfiles';
 import { pipeUIMessageStreamToResponse } from 'ai';
 import { activityFrames, activityUIStream } from './ai/activity-stream';
+import { documentActivityRoutes } from './activity-routes';
 import { RESPONSE_LANGUAGES } from '../../shared/languages';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type { Readable } from 'node:stream';
@@ -46,6 +47,7 @@ const askBody = objectBody(
     tourId: uuid,
     analysisId: uuid,
     conversationId: uuid,
+    activityRunId: uuid,
     page: { type: 'integer', minimum: 1 },
     activeVisual: { type: 'object' },
     visualId: uuid,
@@ -186,6 +188,7 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
+      documentActivityRoutes(api, service, owner);
       if (options.visualArtifacts) visualArtifactRoutes(api, options.visualArtifacts, owner);
       api.post<{ Params: { id: string }; Body: Buffer }>(
         '/documents/:id/transcribe',
@@ -686,10 +689,21 @@ export async function createApp(options: Options) {
       );
       api.post<{ Params: { id: string }; Body: ReadingPassageRequest }>(
         '/documents/:id/reading-passage',
-        { schema: { params: documentParams, body: objectBody({ analysisId: uuid, targetId: text(200), removeCitations: { type: 'boolean' } }, ['analysisId', 'targetId']) } },
+        {
+          schema: {
+            params: documentParams,
+            body: objectBody(
+              { analysisId: uuid, targetId: text(200), removeCitations: { type: 'boolean' }, activityRunId: uuid },
+              ['analysisId', 'targetId'],
+            ),
+          },
+        },
         async (req, reply) => {
-          if (!service.readingPassage) throw new HttpError(503, 'reading_unavailable', 'Visual readings are unavailable.');
-          return whileConnected(reply, (signal) => service.readingPassage!(owner(req), req.params.id, req.body, signal));
+          if (!service.readingPassage)
+            throw new HttpError(503, 'reading_unavailable', 'Visual readings are unavailable.');
+          return whileConnected(reply, (signal) =>
+            service.readingPassage!(owner(req), req.params.id, req.body, signal),
+          );
         },
       );
       // A loose box dragged over a figure, answered with the outline of the object inside it (snap.ts).
@@ -754,10 +768,23 @@ export async function createApp(options: Options) {
         );
         demo.post<{ Params: { paper: string }; Body: { targetId: string; removeCitations?: boolean } }>(
           '/:paper/reading-passage',
-          { schema: { params: objectBody({ paper: { type: 'string', pattern: DEMO_PAPER.source } }, ['paper']), body: objectBody({ targetId: text(200), removeCitations: { type: 'boolean' } }, ['targetId']) } },
+          {
+            schema: {
+              params: objectBody({ paper: { type: 'string', pattern: DEMO_PAPER.source } }, ['paper']),
+              body: objectBody({ targetId: text(200), removeCitations: { type: 'boolean' } }, ['targetId']),
+            },
+          },
           async (req, reply) => {
-            if (!options.service.demoReadingPassage) throw new HttpError(503, 'reading_unavailable', 'Visual readings are unavailable.');
-            return whileConnected(reply, (signal) => options.service.demoReadingPassage!(req.params.paper, req.body.targetId, signal, req.body.removeCitations));
+            if (!options.service.demoReadingPassage)
+              throw new HttpError(503, 'reading_unavailable', 'Visual readings are unavailable.');
+            return whileConnected(reply, (signal) =>
+              options.service.demoReadingPassage!(
+                req.params.paper,
+                req.body.targetId,
+                signal,
+                req.body.removeCitations,
+              ),
+            );
           },
         );
         demo.post<{ Params: { paper: string }; Body: SnapRequest }>(

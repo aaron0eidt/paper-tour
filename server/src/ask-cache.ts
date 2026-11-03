@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { Step } from '../../shared/paper';
 import type { AskAnswer, AskRequest } from './harness/ask-types';
+import { ActivityChannel, activityTask, currentActivityObserver, withActivity } from './ai/activity-context';
 
 /** Where a served answer came from: a new model call, the stored answer, or a call another request had already begun. */
 export type AnswerSource = 'model' | 'cache' | 'flight';
 
 interface Flight {
+  activity: ActivityChannel;
   promise: Promise<AskAnswer>;
   stop: AbortController;
   waiting: number;
@@ -44,31 +46,46 @@ export class AnswerCache {
       // Most recently used last, so the oldest entry is the one that goes when the store is full.
       this.answers.delete(key);
       this.answers.set(key, stored);
+      await activityTask('Use saved answer', 'cache', async () => {});
       return { answer: structuredClone(stored.answer), source: 'cache' };
     }
     this.answers.delete(key);
     let flight = this.flights.get(key);
     const source: AnswerSource = flight ? 'flight' : 'model';
     if (!flight) flight = this.start(key, compute);
-    return { answer: structuredClone(await this.wait(key, flight, signal)), source };
+    const detach = flight.activity.subscribe(currentActivityObserver());
+    try {
+      if (source === 'flight') await activityTask('Join the ongoing answer', 'cache', async () => {});
+      return { answer: structuredClone(await this.wait(key, flight, signal)), source };
+    } finally {
+      detach();
+    }
   }
 
   private start(key: string, compute: (signal: AbortSignal) => Promise<AskAnswer>): Flight {
     const stop = new AbortController();
-    const flight: Flight = { promise: undefined as unknown as Promise<AskAnswer>, stop, waiting: 0, settled: false };
-    flight.promise = new Promise<AskAnswer>((resolve) => resolve(compute(stop.signal))).then(
-      (answer) => {
-        flight.settled = true;
-        if (this.flights.get(key) === flight) this.flights.delete(key);
-        if (answer.answerable !== 'no') this.store(key, answer);
-        return answer;
-      },
-      (error) => {
-        flight.settled = true;
-        if (this.flights.get(key) === flight) this.flights.delete(key);
-        throw error;
-      },
-    );
+    const flight: Flight = {
+      activity: new ActivityChannel(),
+      promise: undefined as unknown as Promise<AskAnswer>,
+      stop,
+      waiting: 0,
+      settled: false,
+    };
+    flight.promise = Promise.resolve()
+      .then(() => withActivity(flight.activity, () => compute(stop.signal)))
+      .then(
+        (answer) => {
+          flight.settled = true;
+          if (this.flights.get(key) === flight) this.flights.delete(key);
+          if (answer.answerable !== 'no') this.store(key, answer);
+          return answer;
+        },
+        (error) => {
+          flight.settled = true;
+          if (this.flights.get(key) === flight) this.flights.delete(key);
+          throw error;
+        },
+      );
     this.flights.set(key, flight);
     return flight;
   }
