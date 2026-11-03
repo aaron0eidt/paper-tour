@@ -88,6 +88,18 @@ test('preparation state cannot label actual speech as paused or failed', () => {
   assert.equal(companionPresence(paused, 'reading', { ...playback, speaking: false }, true).mood, 'working');
 });
 
+test('foreground speech generation belongs to the companion, including between spoken chunks', () => {
+  const playback = { playing: true, speaking: false, generating: true, canPlay: true, page: 3, words: ['Ready.'], word: 0 };
+  const paused = run('reading', 'reading', 'paused', '2026-11-03T12:00:00Z');
+  for (const activity of [undefined, paused, { ...paused, status: 'failed' as const }]) {
+    const presence = companionPresence(activity, 'reading', playback);
+    assert.equal(presence.mood, 'working');
+    assert.equal(presence.label, 'Generating speech…');
+  }
+  assert.equal(companionPresence(paused, 'reading', { ...playback, playing: false }).mood, 'paused');
+  assert.equal(companionPresence(paused, 'reading', { ...playback, generating: false, speaking: true }).mood, 'speaking');
+});
+
 test('expanding a composer keeps the sphere stationary when there is room beside it', () => {
   const frame = { left: 0, right: 1000, top: 0, bottom: 800, width: 1000 };
   const composer = { left: 200, right: 800, top: 720, bottom: 780, width: 600 };

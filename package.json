@@ -13,6 +13,7 @@
     "supabase:stop": "node scripts/supabase-local.mjs stop",
     "supabase:status": "node scripts/supabase-local.mjs status",
     "setup:local": "node scripts/setup-local.mjs",
+    "setup:siri": "npm --prefix server run setup:siri --",
     "test:smoke": "node scripts/smoke-local.mjs",
     "test:smoke:muse": "node scripts/smoke-muse.mjs",
     "test:integration": "node scripts/test-integration.mjs",

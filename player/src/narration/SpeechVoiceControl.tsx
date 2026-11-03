@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { AudioSpeechProvider, SpeechSettings } from '../../../shared/speech';
-
-const OPENAI_VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
-const OPENAI_MINI_VOICES = ['cedar', 'marin', ...OPENAI_VOICES, 'ballad', 'verse'];
+import { SiriVoiceControl } from './SiriSetup';
+import { ChoicePicker } from '../components/ChoicePicker';
+import { openaiVoiceChoices } from './voiceChoices';
 
 /** Shared field for the account form and the compact Audio menu. It never generates audio. */
 export function SpeechVoiceControl({
@@ -12,6 +12,9 @@ export function SpeechVoiceControl({
   onChange,
   disabled,
   className = 'voice-setting',
+  local = false,
+  compact = false,
+  order = [],
 }: {
   provider: AudioSpeechProvider;
   model: string;
@@ -19,8 +22,11 @@ export function SpeechVoiceControl({
   onChange(value: string): void;
   disabled?: boolean;
   className?: string;
+  local?: boolean;
+  compact?: boolean;
+  order?: readonly string[];
 }) {
-  const voices = model === 'gpt-4o-mini-tts' ? OPENAI_MINI_VOICES : OPENAI_VOICES;
+  if (provider === 'siri') return <SiriVoiceControl value={value} onChange={onChange} disabled={disabled} local={local} className={className} compact={compact} order={order} />;
   return (
     <label className={className}>
       <span>{provider === 'elevenlabs' ? 'Voice ID' : 'Voice'}</span>
@@ -34,18 +40,8 @@ export function SpeechVoiceControl({
           onChange={(event) => onChange(event.target.value)}
         />
       ) : (
-        <select
-          aria-label="Provider voice"
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          {voices.map((voice) => (
-            <option key={voice} value={voice}>
-              {voice}
-            </option>
-          ))}
-        </select>
+        <ChoicePicker label="Provider voice" value={value} disabled={disabled} onChange={onChange}
+          options={openaiVoiceChoices(model, order)} />
       )}
     </label>
   );
@@ -55,10 +51,12 @@ export function AudioVoiceControl({
   settings,
   pending,
   onSave,
+  local = false,
 }: {
   settings: SpeechSettings;
   pending: boolean;
   onSave(voice: string): Promise<void>;
+  local?: boolean;
 }) {
   const provider = settings.preferences.provider;
   const voice = provider === 'browser' ? '' : settings.preferences.connections[provider].voice;
@@ -73,6 +71,9 @@ export function AudioVoiceControl({
         model={connection.model}
         value={provider === 'elevenlabs' ? draft : voice}
         disabled={pending}
+        local={local}
+        compact
+        order={settings.preferences.voiceOrder?.[provider]}
         onChange={(value) => {
           if (provider === 'elevenlabs') setDraft(value);
           else void onSave(value).catch(() => {});

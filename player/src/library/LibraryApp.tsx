@@ -10,6 +10,7 @@ import { TourGeneration } from '../components/TourGeneration';
 import { useModelCatalog } from './useModelCatalog';
 import { useSettings } from './useSettings';
 import { ProfileSettings } from './ProfileSettings';
+import { VoiceSettings } from './VoiceSettings';
 import { canUseModel, modelDisplayName } from './modelChoices';
 import { LIBRARY_FILTERS, matchesLibraryFilter, selectLibraryPapers } from './libraryView';
 import type { LibraryView } from './libraryView';
@@ -81,6 +82,8 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
     );
   if (new URLSearchParams(location.search).get('settings') === 'profile')
     return <ProfileSettings key={auth.session.user.id} email={auth.session.user.email ?? 'Your account'} />;
+  if (new URLSearchParams(location.search).get('settings') === 'voices')
+    return <VoiceSettings key={auth.session.user.id} />;
   return (
     <AuthenticatedLibrary
       key={auth.session.user.id}

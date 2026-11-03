@@ -8,6 +8,8 @@ import {
   type SpeechSettings,
   type SpeechAudio,
   type SpeechInput,
+  type SpeechPreviewInput,
+  type SpeechProvider,
 } from '../../../shared/speech';
 import { Database, type Db } from '../db';
 import { HttpError } from '../errors';
@@ -16,7 +18,7 @@ import { SpeechProviders } from './providers';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const CLOUD = ['openai', 'elevenlabs'] as const;
-const PROVIDERS: AudioSpeechProvider[] = [...CLOUD];
+const PROVIDERS: AudioSpeechProvider[] = ['siri', ...CLOUD];
 export function speechPreferences(value: unknown): SpeechPreferences {
   const input = value as Partial<SpeechPreferences> | null;
   const defaults = structuredClone(DEFAULT_SPEECH_PREFERENCES);
@@ -29,10 +31,16 @@ export function speechPreferences(value: unknown): SpeechPreferences {
     throw new HttpError(
       400,
       'speech_settings_invalid',
-      'Choose Browser voices, ElevenLabs or OpenAI. Retired GPU model settings require the API-only speech migration.',
+      'Choose Browser voices, Siri, ElevenLabs or OpenAI.',
     );
   for (const provider of PROVIDERS) {
     const c = { ...defaults.connections[provider], ...input.connections?.[provider] };
+    if (provider === 'siri') {
+      if (typeof c.voice !== 'string' || !c.voice.trim() || c.voice.length > 200)
+        throw new HttpError(400, 'speech_settings_invalid', 'Choose an available Siri voice.');
+      c.model = 'automatic';
+      c.credentialSource = 'app';
+    }
     if (typeof c.model !== 'string' || typeof c.voice !== 'string' || !['app', 'personal'].includes(c.credentialSource))
       throw new HttpError(400, 'speech_settings_invalid', 'Choose a supported speech connection.');
     if (
@@ -68,6 +76,17 @@ export function speechPreferences(value: unknown): SpeechPreferences {
       );
     result.connections[provider] = c;
   }
+  if (input.voiceOrder !== undefined) {
+    if (!input.voiceOrder || typeof input.voiceOrder !== 'object' || Array.isArray(input.voiceOrder))
+      throw new HttpError(400, 'speech_settings_invalid', 'Voice favorites must be an ordered list for each provider.');
+    result.voiceOrder = {};
+    for (const [provider, ids] of Object.entries(input.voiceOrder)) {
+      if (!['browser', ...PROVIDERS].includes(provider) || !Array.isArray(ids) || ids.length > 512 ||
+        ids.some((id) => typeof id !== 'string' || !id.trim() || id.length > 200) || new Set(ids).size !== ids.length)
+        throw new HttpError(400, 'speech_settings_invalid', 'Choose unique voice favorites from the catalog.');
+      result.voiceOrder[provider as SpeechProvider] = [...ids];
+    }
+  }
   return result;
 }
 /** Owner identity and Vault keys are resolved on the server, never accepted from the request body. */
@@ -94,7 +113,7 @@ export class SpeechService {
       await this.db.query('select provider,secret_id,key_last4 from speech_credentials where owner_id=$1', [owner])
     ).rows;
     const providers = {} as SpeechSettings['providers'];
-    for (const provider of PROVIDERS) {
+    for (const provider of CLOUD) {
       const key = credentials.find((c) => c.provider === provider);
       const appKeyAvailable = Boolean(provider === 'openai' ? this.config.openaiKey : this.config.elevenlabsKey);
       const configured =
@@ -109,16 +128,36 @@ export class SpeechService {
             : 'Uses your ElevenLabs credits. The next sentence is prepared automatically during playback.',
       };
     }
+    const siri = await this.providers.siri.status();
+    providers.siri = {
+      configured: siri.cliReady && siri.installed > 0,
+      appKeyAvailable: siri.supported,
+      personalKey: { configured: false, masked: null },
+      message: siri.message,
+    };
     return { preferences, version: r.version, providers };
   }
   async update(owner: string, input: SpeechPreferences): Promise<SpeechSettings> {
-    const preferences = speechPreferences(input);
-    await this.row(owner);
+    const current = await this.row(owner);
+    const preferences = speechPreferences({ ...input, voiceOrder: input.voiceOrder ?? speechPreferences(current.preferences).voiceOrder });
     await this.db.query(
       'update speech_settings set preferences=$2,version=gen_random_uuid(),updated_at=now() where owner_id=$1',
       [owner, preferences],
     );
     return this.get(owner);
+  }
+  async rankVoices(owner: string, provider: SpeechProvider, voices: string[]): Promise<SpeechSettings> {
+    await this.db.transaction(async (tx) => {
+      const current = await this.row(owner, tx, true);
+      const preferences = speechPreferences(current.preferences);
+      const ranked = speechPreferences({ ...preferences, voiceOrder: { ...preferences.voiceOrder, [provider]: voices } });
+      // Reordering favorites changes neither the chosen voice nor the private audio cache version.
+      await tx.query('update speech_settings set preferences=$2,updated_at=now() where owner_id=$1', [owner, ranked]);
+    });
+    return this.get(owner);
+  }
+  async preview(owner: string, input: SpeechPreviewInput): Promise<SpeechAudio> {
+    return this.synthesize(owner, input, undefined, { provider: input.provider, voice: input.voice });
   }
   async saveKey(owner: string, provider: 'openai' | 'elevenlabs', raw: string): Promise<SpeechSettings> {
     const key = raw.trim();
@@ -171,14 +210,16 @@ export class SpeechService {
     });
     return this.get(owner);
   }
-  async synthesize(owner: string, input: SpeechInput, signal?: AbortSignal): Promise<SpeechAudio> {
+  async synthesize(owner: string, input: SpeechInput, signal?: AbortSignal, preview?: Pick<SpeechPreviewInput, 'provider' | 'voice'>): Promise<SpeechAudio> {
     const text = input.text.trim();
     if (!text || text.length > 2500 || !/^[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$/i.test(input.language))
       throw new HttpError(400, 'speech_input_invalid', 'Speech needs 1–2500 characters and a valid language.');
     const r = await this.row(owner);
     if (r.version !== input.version)
       throw new HttpError(409, 'speech_settings_changed', 'Speech settings changed. Reload the reader before playing.');
-    const preferences = speechPreferences(r.preferences),
+    const saved = speechPreferences(r.preferences);
+    const preferences = preview ? speechPreferences({ ...saved, provider: preview.provider,
+      connections: { ...saved.connections, [preview.provider]: { ...saved.connections[preview.provider], voice: preview.voice } } }) : saved,
       provider = preferences.provider;
     if (provider === 'browser')
       throw new HttpError(
@@ -187,15 +228,15 @@ export class SpeechService {
         'Browser speech runs on this device. Select an audio provider first.',
       );
     const connection = preferences.connections[provider];
-    let apiKey = provider === 'openai' ? this.config.openaiKey : this.config.elevenlabsKey;
-    if (connection.credentialSource === 'personal') {
+    let apiKey = provider === 'siri' ? '' : provider === 'openai' ? this.config.openaiKey : this.config.elevenlabsKey;
+    if (provider !== 'siri' && connection.credentialSource === 'personal') {
       const key = await this.db.query(
         'select v.decrypted_secret from speech_credentials c join vault.decrypted_secrets v on v.id=c.secret_id where c.owner_id=$1 and c.provider=$2',
         [owner, provider],
       );
       apiKey = key.rows[0]?.decrypted_secret ?? '';
     }
-    if (!apiKey)
+    if (provider !== 'siri' && !apiKey)
       throw new HttpError(
         503,
         'speech_not_configured',

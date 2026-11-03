@@ -64,8 +64,9 @@ export function AgentActivity({
   const local = activity.local.find((item) => item.run.id === run?.id);
   // Explicit foreground preparation still runs while lookahead is paused.
   const liveOperations = active || !!local?.foreground;
-  const speaking = !historical && playback.speaking;
-  const presence = companionPresence(run, mode, { ...playback, speaking }, !!local?.foreground);
+  const generating = !historical && playback.playing && !!playback.generating;
+  const speaking = !historical && playback.speaking && !generating;
+  const presence = companionPresence(run, mode, { ...playback, speaking, generating }, !!local?.foreground);
   const busy = presence.mood === 'working';
   const sentence =
     showNarration && !historical && !busy && presence.mood !== 'attention'
@@ -89,7 +90,7 @@ export function AgentActivity({
   }, [documentId, mode]);
   useEffect(() => {
     setQuiet(false);
-  }, [current?.id, playback.speaking]);
+  }, [current?.id, playback.speaking, playback.generating]);
   useEffect(() => {
     if (!open && !active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -152,6 +153,7 @@ export function AgentActivity({
 
   return (
     <div className="reader-agent" ref={root} data-mood={presence.mood} data-expanded={open || undefined}>
+      <span className="agent-generation-announcement" role="status" aria-live="polite">{generating ? 'Generating speech…' : ''}</span>
       <button
         className="reader-agent-trigger"
         ref={trigger}
@@ -184,10 +186,10 @@ export function AgentActivity({
           <span className="agent-peek-status">
             <span className="activity-status-dot" />
             {presence.label}
-            <span>{busy && run ? elapsed(now - Date.parse(run.startedAt)) : '···'}</span>
+            <span>{busy && run && !generating ? elapsed(now - Date.parse(run.startedAt)) : '···'}</span>
           </span>
           <span className="agent-peek-message">{speaking ? speech : presence.message}</span>
-          {busy && !!operations?.length && (
+          {busy && !generating && !!operations?.length && (
             <span className="agent-peek-steps">
               {operations.slice(-3).map((operation) => (
                 <span key={operation.id}>

@@ -176,9 +176,12 @@ export class ProviderNarrator implements Narrator {
               if (cancelled || finished || element !== el) return;
               cb.onState?.('playing');
               emit(chunk.start + from);
+              let lastAudioTime = el.currentTime, progressedAt = Date.now();
               poll = setInterval(() => {
                 const at = el.currentTime * 1000,
                   offsets = times();
+                if (el.currentTime > lastAudioTime) { lastAudioTime = el.currentTime; progressedAt = Date.now(); }
+                else if (Date.now() - progressedAt > 15_000) { fail(new Error('Audio stopped progressing. Press Play to retry the selected voice.')); return; }
                 let word = from;
                 while (word + 1 < chunk.count && offsets[word + 1] <= at) word++;
                 emit(chunk.start + word);

@@ -1,4 +1,14 @@
 /* The fluid orb is the character; everything around it uses the reader's existing theme. */
+.agent-generation-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 :where(.reader-agent) button {
   appearance: none;
   cursor: pointer;

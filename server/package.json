@@ -10,6 +10,7 @@
     "start": "node --import tsx src/main.ts",
     "worker": "node --import tsx src/worker-main.ts",
     "migrate": "node --import tsx src/migrate.ts",
+    "setup:siri": "node --import tsx scripts/setup-siri.ts",
     "import-demo": "node --import tsx src/import-demo.ts",
     "build": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",

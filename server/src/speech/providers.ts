@@ -1,6 +1,8 @@
 import type { AudioSpeechProvider, SpeechAudio } from '../../../shared/speech';
 import { HttpError } from '../errors';
 import type { SpeechConfig } from './config';
+import { resolve } from 'node:path';
+import { SiriRuntime } from './siri';
 
 export interface SynthesisRequest {
   provider: AudioSpeechProvider;
@@ -46,10 +48,13 @@ export function wavDurationMs(audio: Buffer): number | undefined {
   return bytesPerSecond && dataBytes ? (dataBytes / bytesPerSecond) * 1000 : undefined;
 }
 export class SpeechProviders {
+  readonly siri: SiriRuntime;
   constructor(
     readonly config: SpeechConfig,
     readonly transport: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.siri = new SiriRuntime(config.siri ?? { dataDir: resolve(config.cacheDir || '.data', 'siri'), allowInstall: false, autoSetup: false });
+  }
   async verifyKey(provider: 'openai' | 'elevenlabs', apiKey: string): Promise<void> {
     const url = provider === 'openai' ? 'https://api.openai.com/v1/models' : 'https://api.elevenlabs.io/v1/voices';
     const headers: Record<string, string> =
@@ -77,6 +82,7 @@ export class SpeechProviders {
       );
   }
   async synthesize(input: SynthesisRequest, signal?: AbortSignal): Promise<SynthesizedAudio> {
+    if (input.provider === 'siri') return this.siri.synthesize(input.text, input.language, input.voice, signal);
     if (!input.apiKey)
       throw new HttpError(
         503,

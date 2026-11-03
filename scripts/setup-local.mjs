@@ -44,3 +44,11 @@ for (const [path, value] of files) writeFileSync(path, value, { mode: 0o600 });
 console.log(
   'Local backend and frontend configuration saved. No keys were printed. Restart the frontend and run npm run db:migrate, then npm run dev.',
 );
+if (process.platform === 'darwin' && process.arch === 'arm64' && !process.argv.includes('--skip-siri')) {
+  console.log('Preparing Siri and downloading the missing Apple voices. You can pause and resume with npm run setup:siri.');
+  try {
+    execFileSync(process.execPath, ['--import', 'tsx', 'scripts/setup-siri.ts'], { cwd: resolve(root, 'server'), stdio: 'inherit' });
+  } catch {
+    console.error('Local configuration is saved. Siri setup is incomplete; resume with npm run setup:siri or from Audio settings.');
+  }
+}

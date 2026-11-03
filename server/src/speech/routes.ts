@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { SpeechInput, SpeechPreferences } from '../../../shared/speech';
+import type { SpeechInput, SpeechPreferences, SpeechPreviewInput, SpeechProvider } from '../../../shared/speech';
 import type { SpeechService } from './service';
 export function speechRoutes(api: FastifyInstance, speech: SpeechService, owner: (request: object) => string) {
   api.get('/speech/settings', async (request) => speech.get(owner(request)));
@@ -12,13 +12,15 @@ export function speechRoutes(api: FastifyInstance, speech: SpeechService, owner:
           additionalProperties: false,
           required: ['provider', 'connections'],
           properties: {
-            provider: { enum: ['browser', 'openai', 'elevenlabs'] },
+            provider: { enum: ['browser', 'siri', 'openai', 'elevenlabs'] },
+            voiceOrder: { type: 'object', additionalProperties: false, properties: Object.fromEntries(
+              ['browser', 'siri', 'openai', 'elevenlabs'].map((provider) => [provider, { type: 'array', maxItems: 512, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 200 } }])) },
             connections: {
               type: 'object',
               additionalProperties: false,
               required: ['openai', 'elevenlabs'],
               properties: Object.fromEntries(
-                ['openai', 'elevenlabs'].map((provider) => [
+                ['siri', 'openai', 'elevenlabs'].map((provider) => [
                   provider,
                   {
                     type: 'object',
@@ -26,7 +28,7 @@ export function speechRoutes(api: FastifyInstance, speech: SpeechService, owner:
                     required: ['model', 'voice', 'credentialSource'],
                     properties: {
                       model: { type: 'string', minLength: 1, maxLength: 200 },
-                      voice: { type: 'string', minLength: 1, maxLength: 100 },
+                      voice: { type: 'string', minLength: 1, maxLength: 200 },
                       credentialSource: { enum: ['app', 'personal'] },
                     },
                   },
@@ -39,6 +41,23 @@ export function speechRoutes(api: FastifyInstance, speech: SpeechService, owner:
     },
     async (request) => speech.update(owner(request), request.body),
   );
+  api.put<{ Params: { provider: SpeechProvider }; Body: { voices: string[] } }>('/speech/voice-order/:provider', {
+    schema: {
+      params: { type: 'object', additionalProperties: false, required: ['provider'], properties: { provider: { enum: ['browser', 'siri', 'openai', 'elevenlabs'] } } },
+      body: { type: 'object', additionalProperties: false, required: ['voices'], properties: {
+        voices: { type: 'array', maxItems: 512, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 200 } },
+      } },
+    },
+  }, async (request) => speech.rankVoices(owner(request), request.params.provider, request.body.voices));
+  api.post<{ Body: SpeechPreviewInput }>('/speech/preview', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['provider', 'voice', 'text', 'language', 'version'], properties: {
+      provider: { enum: ['siri', 'openai', 'elevenlabs'] }, voice: { type: 'string', minLength: 1, maxLength: 200 },
+      text: { type: 'string', minLength: 1, maxLength: 600 }, language: { type: 'string', minLength: 2, maxLength: 16 }, version: { type: 'string', format: 'uuid' },
+    } } },
+  }, async (request, reply) => {
+    reply.header('Cache-Control', 'private, no-store');
+    return speech.preview(owner(request), request.body);
+  });
   const params = {
     type: 'object',
     additionalProperties: false,

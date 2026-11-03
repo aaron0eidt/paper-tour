@@ -45,6 +45,36 @@ test('retired GPU settings cannot silently select any API; native Browser stays 
   assert(!('precompute' in normalized));
   assert(!('local' in normalized.connections));
 });
+test('voice favorites accept unique bounded IDs without changing default connections', () => {
+  const normalized = speechPreferences({ voiceOrder: { siri: ['native.siri.one', 'native.siri.two'] } });
+  assert.deepEqual(normalized.voiceOrder, { siri: ['native.siri.one', 'native.siri.two'] });
+  assert.deepEqual(normalized.connections, DEFAULT_SPEECH_PREFERENCES.connections);
+  for (const voiceOrder of [{ siri: ['same', 'same'] }, { siri: [42] }, { siri: [''] }, { siri: ['a'.repeat(201)] }, { siri: new Array(513).fill('a') }, { unknown: ['a'] }, []])
+    assert.throws(() => speechPreferences({ voiceOrder }), (error: any) => error.code === 'speech_settings_invalid');
+});
+test('preview and ranking routes require authentication and reject credential overrides', async () => {
+  const calls: object[] = [];
+  const speech = { preview: async (owner: string, input: object) => { calls.push({ owner, input }); return { ok: true }; },
+    rankVoices: async (owner: string, provider: string, voices: string[]) => { calls.push({ owner, provider, voices }); return { ok: true }; },
+  } as unknown as SpeechService;
+  const api = Fastify({ ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
+  api.addHook('preHandler', async (request, reply) => { if (request.headers.authorization !== 'Bearer test-owner') reply.code(401).send({ error: 'unauthorized' }); });
+  speechRoutes(api, speech, () => 'authenticated-owner');
+  const input = { provider: 'siri', voice: 'native.siri.one', text: 'One shared sample.', language: 'en-US', version: randomUUID() };
+  const headers = { authorization: 'Bearer test-owner' };
+  try {
+    assert.equal((await api.inject({ method: 'POST', url: '/speech/preview', payload: input })).statusCode, 401);
+    assert.equal((await api.inject({ method: 'POST', url: '/speech/preview', headers, payload: { ...input, provider: 'browser' } })).statusCode, 400);
+    assert.equal((await api.inject({ method: 'POST', url: '/speech/preview', headers, payload: { ...input, apiKey: 'arbitrary-key' } })).statusCode, 400);
+    assert.equal((await api.inject({ method: 'POST', url: '/speech/preview', headers, payload: { ...input, text: 'x'.repeat(601) } })).statusCode, 400);
+    assert.equal((await api.inject({ method: 'POST', url: '/speech/preview', headers, payload: input })).statusCode, 200);
+    assert.deepEqual(calls[0], { owner: 'authenticated-owner', input });
+    assert.equal((await api.inject({ method: 'PUT', url: '/speech/voice-order/siri', payload: { voices: [] } })).statusCode, 401);
+    assert.equal((await api.inject({ method: 'PUT', url: '/speech/voice-order/siri', headers, payload: { voices: ['a', 'a'] } })).statusCode, 400);
+    assert.equal((await api.inject({ method: 'PUT', url: '/speech/voice-order/siri', headers, payload: { voices: ['b', 'a'] } })).statusCode, 200);
+    assert.deepEqual(calls[1], { owner: 'authenticated-owner', provider: 'siri', voices: ['b', 'a'] });
+  } finally { await api.close(); }
+});
 test('alignment must preserve all original characters and have monotonic times', () => {
   const text = 'Für uns.',
     alignment = { characters: [...text], character_start_times_seconds: [...text].map((_, i) => i / 10) };
@@ -196,6 +226,20 @@ test(
         (error: any) => error.code === 'speech_not_configured',
       );
       assert.equal(seenKeys.at(-1), personalKey);
+      const ranked = await speech.rankVoices(owner, 'siri', ['native.siri.two', 'native.siri.one']);
+      assert.equal(ranked.version, removed.version, 'ranking must preserve the audio cache version');
+      assert.deepEqual(ranked.preferences.connections, removed.preferences.connections);
+      assert.equal(ranked.preferences.provider, removed.preferences.provider);
+      assert.deepEqual((await speech.get(owner)).preferences.voiceOrder?.siri, ['native.siri.two', 'native.siri.one']);
+      assert.equal((await speech.get(other)).preferences.voiceOrder?.siri, undefined, 'ranking belongs to its account');
+      const sample = { ...input, version: ranked.version, provider: 'openai' as const, voice: 'coral' };
+      const heard = await speech.preview(owner, sample);
+      assert.equal(heard.voice, 'coral');
+      assert.equal(heard.provider, 'openai');
+      assert.equal((await speech.preview(owner, sample)).cached, true, 'replaying a sample shares the private voice cache');
+      assert.deepEqual((await speech.get(owner)).preferences, ranked.preferences, 'a preview never changes playback selection or rankings');
+      await assert.rejects(speech.preview(owner, { ...sample, voice: 'unknown' }), (error: any) => error.code === 'speech_settings_invalid');
+      await assert.rejects(speech.preview(other, sample), (error: any) => error.code === 'speech_settings_changed');
       for (const dir of await readdir(folder))
         for (const file of await readdir(join(folder, dir)))
           assert(!(await readFile(join(folder, dir, file), 'utf8')).includes(personalKey));

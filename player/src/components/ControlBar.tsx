@@ -8,6 +8,7 @@ import { Timeline, elapsedAt } from './Timeline';
 import { DEFAULT_SPEAKER } from '../types';
 import type { Voice } from '../types';
 import { isGoogleVoice, pickVoice, voiceId } from '../narration/voices';
+import { rankVoiceChoices } from '../narration/voiceChoices';
 import { KEY_HELP } from '../keys';
 import { NotClear } from '../ask/NotClear';
 import type { NotClearProps } from '../ask/NotClear';
@@ -39,6 +40,7 @@ interface Props {
   voices?: SpeechSynthesisVoice[];
   voicesLoading?: boolean;
   selectedVoiceId?: string;
+  voiceOrder?: readonly string[];
   onVoiceChange?(id: string): void;
   voiceConfig?: Voice;
   /** "Not clear?" beside the audio settings; none while there is no step to ask about. */
@@ -68,6 +70,7 @@ export function ControlBar({
   voices = [],
   voicesLoading = false,
   selectedVoiceId = '',
+  voiceOrder = [],
   onVoiceChange,
   voiceConfig,
   unclear,
@@ -76,11 +79,22 @@ export function ControlBar({
   const current = steps[state.index];
   const playing = state.status === 'playing';
   const textRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLElement>(null);
   const audioPanel = useRef<HTMLDetailsElement>(null);
   const helpPanel = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const element = controlsRef.current;
+    if (!element) return;
+    const measure = () => element.style.setProperty('--audio-controls-height', `${element.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
-      if (audioPanel.current?.open && !audioPanel.current.contains(event.target as Node))
+      const inChoiceMenu = event.target instanceof Element && !!event.target.closest('.choice-popup');
+      if (audioPanel.current?.open && !audioPanel.current.contains(event.target as Node) && !inChoiceMenu)
         audioPanel.current.open = false;
       if (helpOpen && !helpPanel.current?.contains(event.target as Node)) onHelp(false);
     };
@@ -105,8 +119,11 @@ export function ControlBar({
   const language = (voiceConfig?.lang ?? automaticVoice?.lang ?? '').toLowerCase().replace(/_/g, '-').split('-')[0];
   const sameLanguage = voices.filter((voice) => voice.lang.toLowerCase().replace(/_/g, '-').split('-')[0] === language);
   const otherLanguages = voices.filter((voice) => !sameLanguage.includes(voice));
-  const sortedVoices = (available: SpeechSynthesisVoice[]) =>
-    [...available].sort((a, b) => Number(isGoogleVoice(b)) - Number(isGoogleVoice(a)) || a.name.localeCompare(b.name));
+  const sortedVoices = (available: SpeechSynthesisVoice[]) => {
+    const sorted = [...available].sort((a, b) => Number(isGoogleVoice(b)) - Number(isGoogleVoice(a)) || a.name.localeCompare(b.name));
+    return rankVoiceChoices(sorted.map((voice) => ({ value: voiceId(voice), label: voice.name })), voiceOrder)
+      .map((option) => sorted.find((voice) => voiceId(voice) === option.value)!);
+  };
   const voiceHint = voicesLoading
     ? 'Loading this browser’s voices…'
     : !voices.length
@@ -144,9 +161,8 @@ export function ControlBar({
   }, [state.index]);
 
   return (
-    <footer className={`controls${showNarration ? '' : ' without-captions'}`}>
+    <footer ref={controlsRef} className={`controls${showNarration ? '' : ' without-captions'}`}>
       {state.speechError && <p className="speech-error" role="alert">{state.speechError}</p>}
-      {playing && state.speechStatus === 'generating' && <span className="speech-generation" role="status">Generating speech…</span>}
       <Timeline
         steps={steps}
         chapters={chapters}
@@ -254,8 +270,15 @@ export function ControlBar({
             <span className="playback-speed">{speed}×</span>
           </summary>
           <div className="playback-panel">
-            <h3>Audio settings</h3>
-            {readingSettings}
+            <div className="playback-panel-heading">
+              <h3>Audio settings</h3>
+              <button type="button" className="playback-panel-close" aria-label="Close audio settings" onClick={() => {
+                if (audioPanel.current) audioPanel.current.open = false;
+                audioPanel.current?.querySelector('summary')?.focus();
+              }}>
+                <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+              </button>
+            </div>
             {speechSettings}
             {onVoiceChange && !current?.step.audio && (
               <label className="voice-setting">
@@ -310,6 +333,7 @@ export function ControlBar({
               <input type="range" aria-label="Narration speed" aria-valuetext={`${speed.toFixed(2)} times normal speed`} min={0.5} max={2} step={0.05} value={speed} onChange={(event) => onSpeed(Number(event.target.value))} disabled={disabled} />
               <span className="speed-scale" aria-hidden="true"><span>0.5×</span><span>2×</span></span>
             </label>
+            {readingSettings && <details className="audio-reading-settings"><summary>Reading options</summary>{readingSettings}</details>}
           </div>
         </details>
         <div className="key-help-wrap" ref={helpPanel}>

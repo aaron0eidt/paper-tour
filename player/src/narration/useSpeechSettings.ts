@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { SpeechPreferences, SpeechSettings } from '../../../shared/speech';
+import type { SpeechPreferences, SpeechSettings, SpeechProvider } from '../../../shared/speech';
 import { apiRequest } from '../library/client';
 import { SETTINGS_CHANGED, settingsChanged } from '../library/useSettings';
 import { SpeechAudioCache } from './remote';
-export function useSpeechSettings(enabled = true) {
+import { localSpeechRequest, localPreferences, saveLocalPreferences } from './localSpeech';
+export function useSpeechSettings(enabled = true, local = false) {
   const [data, setData] = useState<SpeechSettings | null>(null),
     [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(enabled),
@@ -16,7 +17,8 @@ export function useSpeechSettings(enabled = true) {
     }
     const controller = new AbortController();
     setLoading(true);
-    apiRequest<SpeechSettings>('/api/speech/settings', { signal: controller.signal })
+    (local ? localSpeechRequest<SpeechSettings>('/settings', { signal: controller.signal }).then(localPreferences)
+      : apiRequest<SpeechSettings>('/api/speech/settings', { signal: controller.signal }))
       .then((value) => {
         setData(value);
         setError(null);
@@ -29,12 +31,18 @@ export function useSpeechSettings(enabled = true) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [enabled, revision]);
+  }, [enabled, revision, local]);
   useEffect(() => {
     window.addEventListener(SETTINGS_CHANGED, refresh);
     return () => window.removeEventListener(SETTINGS_CHANGED, refresh);
   }, [refresh]);
   const update = useCallback(async (preferences: SpeechPreferences) => {
+    if (local) {
+      saveLocalPreferences(preferences);
+      setData((current) => current ? { ...current, preferences, version: crypto.randomUUID() } : current);
+      setError(null);
+      return;
+    }
     const value = await apiRequest<SpeechSettings>('/api/speech/settings', {
       method: 'PUT',
       body: JSON.stringify(preferences),
@@ -42,14 +50,22 @@ export function useSpeechSettings(enabled = true) {
     setData(value);
     setError(null);
     settingsChanged();
+  }, [local]);
+  const rankVoices = useCallback(async (provider: SpeechProvider, voices: string[]) => {
+    const value = await apiRequest<SpeechSettings>(`/api/speech/voice-order/${provider}`, {
+      method: 'PUT', body: JSON.stringify({ voices }),
+    });
+    setData(value);
+    settingsChanged();
   }, []);
   // A settings/credential version never reuses the previous version's audio.
   const cache = useMemo(
     () =>
       new SpeechAudioCache((input) =>
-        apiRequest('/api/speech/synthesize', { method: 'POST', body: JSON.stringify(input) }),
+        local ? localSpeechRequest('/synthesize', { method: 'POST', body: JSON.stringify({ ...input, voice: data?.preferences.connections.siri.voice ?? 'auto' }) }) :
+          apiRequest('/api/speech/synthesize', { method: 'POST', body: JSON.stringify(input) }),
       ),
-    [data?.version],
+    [data?.version, local],
   );
-  return { data, error, loading, refresh, update, cache };
+  return { data, error, loading, refresh, update, rankVoices, cache };
 }

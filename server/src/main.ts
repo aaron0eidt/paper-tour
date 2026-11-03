@@ -15,6 +15,7 @@ const db = new Database(c.databaseUrl);
 const { storage, authenticate } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const settings = new SettingsService(db, c.muse);
+const speech = new SpeechService(db, speechConfig());
 const visualArtifacts = new VisualArtifactService(db);
 const service = new DocumentService(
   db,
@@ -31,7 +32,7 @@ await service.documentActivity.interruptOrphans();
 const app = await createApp({
   service,
   settings,
-  speech: new SpeechService(db, speechConfig()),
+  speech,
   visualArtifacts,
   authenticate,
   origins: c.origins,
@@ -39,6 +40,7 @@ const app = await createApp({
   logger: true,
 });
 const shutdown = async () => {
+  await speech.providers.siri.close();
   await app.close();
   await boss.stop();
   await db.close();
@@ -46,3 +48,5 @@ const shutdown = async () => {
 process.once('SIGTERM', () => void shutdown());
 process.once('SIGINT', () => void shutdown());
 await app.listen({ host: c.host, port: c.port });
+if (speech.config.siri?.allowInstall && speech.config.siri.autoSetup && process.platform === 'darwin' && process.arch === 'arm64')
+  speech.providers.siri.start();

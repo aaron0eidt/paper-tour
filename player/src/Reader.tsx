@@ -147,7 +147,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const browserVoices = useBrowserVoices();
-  const speech = useSpeechSettings(Boolean(documentId));
+  const speech = useSpeechSettings(true, !documentId);
   const [speechUpdateError, setSpeechUpdateError] = useState<string | null>(null);
   const [speechUpdatePending, setSpeechUpdatePending] = useState(false);
   const speechUpdating = useRef(false);
@@ -1682,7 +1682,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               mode={answer || away ? 'answer' : readAloud ? 'reading' : 'tour'}
               playback={{
                 playing: state.status === 'playing',
-                speaking: state.status === 'playing' && state.word >= 0 && !state.preview,
+                generating: state.status === 'playing' && state.speechStatus === 'generating',
+                speaking: state.status === 'playing' && state.speechStatus !== 'generating' && state.word >= 0 && !state.preview,
                 canPlay: !!active?.steps.length && (!away || !!answer),
                 words: active?.steps[state.index]?.words ?? [],
                 word: state.word,
@@ -1842,23 +1843,24 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             clock={clock}
             state={state}
             growth={answer ? null : growth}
-            speechSettings={documentId ? <div className="voice-setting">
+            speechSettings={<div className="voice-setting">
               <span>Speech provider</span>
-              <SpeechProviderSelect value={speech.data?.preferences.provider ?? 'browser'} disabled={!speech.data || speech.loading || speechUpdatePending} onChange={(provider) => {
+              <SpeechProviderSelect local={!documentId} value={speech.data?.preferences.provider ?? 'browser'} disabled={!speech.data || speech.loading || speechUpdatePending} onChange={(provider) => {
                 if (speech.data) void applySpeechPreferences({ ...speech.data.preferences, provider }).catch(() => {});
               }} />
-              {speech.data && <AudioVoiceControl settings={speech.data} pending={speechUpdatePending || speech.loading} onSave={async (voice) => {
+              {speech.data && <AudioVoiceControl local={!documentId} settings={speech.data} pending={speechUpdatePending || speech.loading} onSave={async (voice) => {
                 const preferences = speech.data!.preferences;
                 if (preferences.provider === 'browser') return;
                 await applySpeechPreferences({ ...preferences, connections: { ...preferences.connections,
                   [preferences.provider]: { ...preferences.connections[preferences.provider], voice } } });
               }} />}
-              {speech.data && speech.data.preferences.provider !== 'browser' && <small>{speech.data.providers[speech.data.preferences.provider].message}</small>}
+              {speech.data && speech.data.preferences.provider !== 'browser' && speech.data.preferences.provider !== 'siri' && <small>{speech.data.providers[speech.data.preferences.provider].message}</small>}
               {state.speechTiming === 'estimated' && <small>Word highlighting and word seeking use estimated audio timing.</small>}
               {state.speechTiming === 'provider' && <small>Word highlighting follows provider timestamps.</small>}
               {(speech.error || speechUpdateError) && <small role="alert">{speechUpdateError ?? speech.error}</small>}
               <a href={`${import.meta.env.BASE_URL}?settings=profile#speech`}>Configure voices and keys</a>
-            </div> : undefined}
+              <a href={`${import.meta.env.BASE_URL}?settings=voices`}>Compare, rank and download voices</a>
+            </div>}
             readingSettings={readAloud ? (
               <div className="reader-reading-options">
                 <strong>Original paper text</strong>
@@ -1894,6 +1896,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             voices={browserVoices.voices}
             voicesLoading={browserVoices.loading}
             selectedVoiceId={browserVoices.selectedVoiceId}
+            voiceOrder={speech.data?.preferences.voiceOrder?.browser}
             onVoiceChange={!speech.data || speech.data.preferences.provider === 'browser' ? browserVoices.setSelectedVoiceId : undefined}
             voiceConfig={active.tour.voices?.[active.steps[state.index]?.step.speaker ?? 'host']}
             unclear={

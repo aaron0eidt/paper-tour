@@ -89,6 +89,7 @@ export function ProfileSettings({ email }: { email: string }) {
           </button>
         </div>
         <nav className="profile-nav" aria-label="Settings sections">
+          <a href={`${import.meta.env.BASE_URL}?settings=voices`}>Voices</a>
           <a href="#appearance">Appearance</a>
           <a href="#reading">Reading</a>
           <a href="#connection">Connection</a>

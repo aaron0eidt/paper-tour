@@ -4,6 +4,8 @@ import { sentenceStart, SENTENCE_END } from '../narration/narrator';
 export interface CompanionPlayback {
   playing: boolean;
   speaking: boolean;
+  /** Only foreground synthesis blocks playback; silent lookahead is not a speaking status. */
+  generating?: boolean;
   canPlay: boolean;
   words: readonly string[];
   word: number;
@@ -44,6 +46,8 @@ export function companionPresence(
   playback: CompanionPlayback,
   foreground = false,
 ) {
+  if (playback.playing && playback.generating)
+    return { mood: 'working' as const, label: 'Generating speech…', message: 'I’m preparing the voice for this passage.' };
   if (playback.speaking) return { mood: 'speaking' as const, label: 'Speaking', message: '' };
   if (run && (activeActivity(run.status) || foreground)) {
     const operation = [...run.operations].reverse().find((op) => op.state === 'running');

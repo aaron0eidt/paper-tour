@@ -22,6 +22,7 @@ import type { SettingsUpdate } from '../../shared/settings';
 import type { SettingsService } from './settings';
 import type { SpeechService } from './speech/service';
 import { speechRoutes } from './speech/routes';
+import { siriRoutes } from './speech/siri-routes';
 import { DEMO_PAPER, answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
 import { snapService, type SnapRequest, type SnapResult, type SnapService } from './snap';
 
@@ -191,7 +192,10 @@ export async function createApp(options: Options) {
       });
       const owner = (r: object) => owners.get(r)!;
       const service = options.service;
-      if (options.speech) speechRoutes(api, options.speech, owner);
+      if (options.speech) {
+        speechRoutes(api, options.speech, owner);
+        siriRoutes(api, options.speech.providers.siri, options.origins ?? []);
+      }
       documentActivityRoutes(api, service, owner);
       if (options.visualArtifacts) visualArtifactRoutes(api, options.visualArtifacts, owner);
       api.post<{ Params: { id: string }; Body: Buffer }>(
@@ -724,6 +728,10 @@ export async function createApp(options: Options) {
   );
   // Demo papers (demo/<paper>/) are not in anyone's library, so this route has no sign-in: it exists only in local
   // development, answers only this machine, and reads only folders under demo/ (harness/ask.ts, loadDemo).
+  if ((options.demo ?? demoAllowed()) && options.speech) {
+    const siri = options.speech.providers.siri;
+    await app.register(async (local) => { siriRoutes(local, siri, options.origins ?? [], true); }, { prefix: '/api/local' });
+  }
   if (options.demo ?? demoAllowed())
     await app.register(
       async (demo) => {

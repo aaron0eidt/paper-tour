@@ -9,9 +9,11 @@ import { apiRequest } from '../library/client';
 import { settingsChanged } from '../library/useSettings';
 import { useSpeechSettings } from './useSpeechSettings';
 import { SpeechVoiceControl } from './SpeechVoiceControl';
+import { ChoicePicker } from '../components/ChoicePicker';
 
 export const SPEECH_LABELS: Record<SpeechProvider, string> = {
   browser: 'Browser voices',
+  siri: 'Siri · local Mac',
   openai: 'OpenAI TTS',
   elevenlabs: 'ElevenLabs',
 };
@@ -19,25 +21,16 @@ export function SpeechProviderSelect({
   value,
   onChange,
   disabled = false,
+  local = false,
 }: {
   value: SpeechProvider;
   onChange(provider: SpeechProvider): void;
   disabled?: boolean;
+  local?: boolean;
 }) {
-  return (
-    <select
-      aria-label="Speech provider"
-      value={value}
-      disabled={disabled}
-      onChange={(event) => onChange(event.target.value as SpeechProvider)}
-    >
-      {Object.entries(SPEECH_LABELS).map(([id, label]) => (
-        <option key={id} value={id}>
-          {label}
-        </option>
-      ))}
-    </select>
-  );
+  return <ChoicePicker label="Speech provider" value={value} disabled={disabled} onChange={onChange}
+    options={Object.entries(SPEECH_LABELS).filter(([id]) => !local || ['browser', 'siri'].includes(id))
+      .map(([id, label]) => ({ value: id as SpeechProvider, label }))} />;
 }
 /** Account settings own credentials; the small reader menu only changes the selected provider. */
 export function SpeechSettings() {
@@ -123,6 +116,7 @@ export function SpeechSettings() {
       <div className="profile-card-heading">
         <h2 id="speech-heading">Speech</h2>
         <p>One voice connection for guided tours, reading aloud and answers. Generated voices are AI voices.</p>
+        <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=voices`}>Compare, rank and download voices</a>
       </div>
       {speech.loading && !speech.data ? (
         <p role="status">Loading speech settings…</p>
@@ -145,6 +139,9 @@ export function SpeechSettings() {
             <p className="profile-help">
               Uses this browser’s available voices. Choose a browser voice in the player’s Audio menu.
             </p>
+          ) : provider === 'siri' ? (
+            <SpeechVoiceControl provider="siri" model="automatic" value={connection!.voice} disabled={pending}
+              className="profile-field" order={draft.voiceOrder?.siri} onChange={(voice) => setConnection({ voice })} />
           ) : (
             <>
               <p className="profile-help">{status?.message}</p>
@@ -172,6 +169,7 @@ export function SpeechSettings() {
                 provider={provider}
                 model={connection!.model}
                 value={connection!.voice}
+                order={draft.voiceOrder?.[provider]}
                 disabled={pending}
                 className="profile-field"
                 onChange={(voice) => setConnection({ voice })}
