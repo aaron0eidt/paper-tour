@@ -418,6 +418,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     [baseUrl, muted, params.silent, browserVoices.selectedVoiceId, documentId, speech.data, speech.cache, speech.error, speech.loading],
   );
 
+  useEffect(() => () => narrator.dispose?.(), [narrator]);
+
   // A question sets the tour aside and its answer plays as a second tour on the same narrator, camera, pen and board;
   // the stage, the board and the control bar show whichever is playing, the sidebar always the tour.
   const [answer, setAnswer] = useState<TourEngine | null>(null);
@@ -441,10 +443,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   }, [active, speech.update]);
   useEffect(() => {
     if (!active || state.status !== 'playing' || state.speechStatus !== 'playing' || !narrator.preload) return;
-    // Only the current passage's final chunk preloads the following prepared passage.
-    // Earlier chunks already keep exactly one sentence ahead inside the narrator.
-    const lastChunk = audioChunks(active.steps[state.index]?.words ?? []).at(-1);
-    if (lastChunk && state.word < lastChunk.start) return;
+    // Prime the next passage during the penultimate clip, giving short final phrases
+    // enough lead time. At most two upcoming clips are prepared across the step boundary.
+    const chunks = audioChunks(active.steps[state.index]?.words ?? [], 300, narrator.name === 'openai' ? active.steps[state.index]?.schedule.map((item) => item.at) : []);
+    const lookahead = chunks.at(-2) ?? chunks[0];
+    if (lookahead && state.word < lookahead.start) return;
     const next = active.steps[state.index + 1];
     if (!next) return;
     // Reuse a prepared read-aloud script, never start a language-model call for audio lookahead.
@@ -452,7 +455,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     if (readAloud && !answer && !prepared) return;
     const text = prepared?.speech ?? next.step.say;
     void narrator.preload({ text, words: text.trim().split(/\s+/), speaker: next.step.speaker ?? 'host',
-      voice: prepared?.language ? { ...active.tour.voices?.[next.step.speaker ?? 'host'], lang: prepared.language } : active.tour.voices?.[next.step.speaker ?? 'host'], rate: speed * params.rate }).catch(() => {});
+      voice: prepared?.language ? { ...active.tour.voices?.[next.step.speaker ?? 'host'], lang: prepared.language } : active.tour.voices?.[next.step.speaker ?? 'host'], rate: speed * params.rate, cueWords: next.schedule.map((item) => item.at) }).catch(() => {});
   }, [active, answer, narrator, readAloud, readingSpeech.cached, state.status, state.speechStatus, state.index, state.word, speed, params.rate]);
 
   const scene = useMemo(

@@ -1,4 +1,5 @@
 import type { SpeechAudio, SpeechInput, SpeechSettings } from '../../../shared/speech';
+import { PreparedAudio } from './preparedAudio';
 import {
   clamp,
   sentenceStarts,
@@ -10,8 +11,9 @@ import {
 } from './narrator';
 
 /** Bounded sentence groups keep first-audio latency bounded; global PDF word indexes stay intact. */
-export function audioChunks(words: readonly string[], limit = 300): { text: string; start: number; count: number }[] {
-  const starts = sentenceStarts(words),
+export function audioChunks(words: readonly string[], limit = 300, cueWords: readonly number[] = []): { text: string; start: number; count: number }[] {
+  const boundaries = new Set(cueWords.filter((word) => Number.isInteger(word) && word > 0 && word < words.length));
+  const starts = [...new Set([...sentenceStarts(words), ...boundaries])].sort((a, b) => a - b),
     chunks: { text: string; start: number; count: number }[] = [];
   for (let sentence = 0; sentence < starts.length; sentence++) {
     const end = starts[sentence + 1] ?? words.length;
@@ -23,7 +25,7 @@ export function audioChunks(words: readonly string[], limit = 300): { text: stri
         length += words[next++].length + 1;
       const previous = chunks.at(-1),
         text = words.slice(at, next).join(' ');
-      if (previous && previous.text.length < 80 && previous.text.length + text.length + 1 <= limit) {
+      if (previous && !boundaries.has(at) && previous.text.length < 80 && previous.text.length + text.length + 1 <= limit) {
         previous.text += ` ${text}`;
         previous.count += next - at;
       } else chunks.push({ text, start: at, count: next - at });
@@ -39,6 +41,9 @@ export class SpeechAudioCache {
   private readonly pending = new Map<string, Promise<SpeechAudio>>();
   private bytes = 0;
   constructor(readonly transport: SpeechTransport) {}
+  has(input: SpeechInput): boolean {
+    return this.entries.has(JSON.stringify(input));
+  }
   get(input: SpeechInput): Promise<SpeechAudio> {
     const key = JSON.stringify(input),
       cached = this.entries.get(key);
@@ -68,57 +73,90 @@ export class SpeechAudioCache {
     return run;
   }
 }
-function audioUrl(audio: SpeechAudio): string {
-  const bytes = Uint8Array.from(atob(audio.audioBase64), (char) => char.charCodeAt(0));
-  return URL.createObjectURL(new Blob([bytes], { type: audio.mimeType }));
+interface PreparedEntry {
+  key: string;
+  promise: Promise<PreparedAudio | undefined>;
+  clip?: PreparedAudio;
+  cancelled: boolean;
+}
+function disposeEntry(entry: PreparedEntry): void {
+  entry.cancelled = true;
+  entry.clip?.dispose();
 }
 export class ProviderNarrator implements Narrator {
   readonly name: string;
+  readonly deferInitialCues = true;
   private readonly prefetched = new Set<string>();
+  // One following chunk and, near a step boundary, the next step's opening clip.
+  private readonly prepared = new Map<string, PreparedEntry>();
   constructor(
     readonly settings: SpeechSettings,
     readonly cache: SpeechAudioCache,
   ) {
     this.name = settings.preferences.provider;
   }
+  private chunks(req: SpeakRequest) {
+    return audioChunks(req.words, 300, this.settings.preferences.provider === 'openai' ? req.cueWords : []);
+  }
   async preload(req: SpeakRequest): Promise<void> {
-    const chunk = audioChunks(req.words)[0];
+    const chunk = this.chunks(req)[0];
     if (!chunk) return;
     await this.preloadInput({ text: chunk.text, language: req.voice?.lang ?? 'en-US', version: this.settings.version });
   }
+  private entry(input: SpeechInput): PreparedEntry {
+    const entry: PreparedEntry = { key: JSON.stringify(input), cancelled: false, promise: Promise.resolve(undefined) };
+    entry.promise = this.cache.get(input).then((data) => {
+      if (entry.cancelled) return;
+      return entry.clip = new PreparedAudio(data);
+    });
+    return entry;
+  }
+  private take(input: SpeechInput): PreparedEntry {
+    const key = JSON.stringify(input), ready = this.prepared.get(key);
+    if (ready) { this.prepared.delete(key); return ready; }
+    return this.entry(input);
+  }
   private async preloadInput(input: SpeechInput): Promise<void> {
     const key = JSON.stringify(input);
-    if (this.prefetched.has(key)) return;
+    const pending = this.prepared.get(key);
+    if (pending) { await pending.promise; return; }
+    if (this.prefetched.has(key) && !this.cache.has(input)) return;
     if (this.prefetched.size >= 256) this.prefetched.delete(this.prefetched.values().next().value!);
     this.prefetched.add(key);
-    // A failed background request waits for explicit foreground playback before retrying.
-    await this.cache.get(input);
+    while (this.prepared.size >= 2) {
+      const oldest = this.prepared.keys().next().value!;
+      disposeEntry(this.prepared.get(oldest)!);
+      this.prepared.delete(oldest);
+    }
+    const entry = this.entry(input);
+    this.prepared.set(key, entry);
+    try { await entry.promise; }
+    catch (error) {
+      if (this.prepared.get(key) === entry) this.prepared.delete(key);
+      throw error;
+    }
+  }
+  dispose(): void {
+    for (const entry of this.prepared.values()) disposeEntry(entry);
+    this.prepared.clear();
   }
 
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle {
-    const chunks = audioChunks(req.words),
+    const chunks = this.chunks(req),
       n = req.words.length;
     let rate = clamp(voiceRate(req), 0.5, 4),
       cancelled = false,
       finished = false,
       last = Math.max(0, req.startWord ?? 0) - 1;
-    let element: HTMLAudioElement | undefined, objectUrl: string | undefined;
+    let element: HTMLAudioElement | undefined, current: PreparedEntry | undefined;
     let poll: ReturnType<typeof setInterval> | undefined, watchdog: ReturnType<typeof setTimeout> | undefined;
     const language = req.voice?.lang ?? 'en-US';
     const clear = () => {
       clearInterval(poll);
       clearTimeout(watchdog);
-      if (element) {
-        element.onended = element.onerror = element.onloadedmetadata = null;
-        element.pause();
-        element.removeAttribute('src');
-        element.load();
-        element = undefined;
-      }
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-        objectUrl = undefined;
-      }
+      if (current) disposeEntry(current);
+      current = undefined;
+      element = undefined;
     };
     const emit = (word: number) => {
       if (!cancelled && !finished && word > last) {
@@ -130,6 +168,7 @@ export class ProviderNarrator implements Narrator {
       if (cancelled || finished) return;
       finished = true;
       clear();
+      this.dispose();
       cb.onError?.(
         error instanceof Error
           ? error
@@ -145,18 +184,17 @@ export class ProviderNarrator implements Narrator {
         return;
       }
       const chunk = chunks[index];
-      cb.onState?.('generating');
       try {
-        const current = this.cache.get({ text: chunk.text, language, version: this.settings.version });
-        // Play explicitly authorizes only current + ONE following chunk. Start them together,
-        // then roll forward one at a time; nothing runs on provider selection or page load.
+        current = this.take({ text: chunk.text, language, version: this.settings.version });
+        if (!current.clip?.playable) cb.onState?.('generating');
+        // Start current + one following chunk together; near a step boundary the reader
+        // may also prime the next step. Nothing runs on provider selection or page load.
         const next = chunks[index + 1];
         if (next) void this.preloadInput({ text: next.text, language, version: this.settings.version }).catch(() => {});
-        const audio = await current;
-        if (cancelled || finished) return;
-        clear();
-        objectUrl = audioUrl(audio);
-        const el = new Audio(objectUrl);
+        const clip = await current.promise;
+        if (cancelled || finished || !clip) return;
+        const audio = clip.data;
+        const el = clip.element;
         element = el;
         el.playbackRate = rate;
         cb.onTiming?.(audio.timing);
@@ -165,32 +203,6 @@ export class ProviderNarrator implements Narrator {
           given ??
           Array.from({ length: chunk.count }, (_, i) => i * ((audio.durationMs ?? el.duration * 1000) / chunk.count));
         const from = Math.min(chunk.count - 1, Math.max(0, (req.startWord ?? 0) - chunk.start));
-        let started = false;
-        const ready = () => {
-          if (started) return;
-          started = true;
-          if (cancelled || finished || element !== el) return;
-          if (from > 0) el.currentTime = times()[from] / 1000;
-          void el.play().then(
-            () => {
-              if (cancelled || finished || element !== el) return;
-              cb.onState?.('playing');
-              emit(chunk.start + from);
-              let lastAudioTime = el.currentTime, progressedAt = Date.now();
-              poll = setInterval(() => {
-                const at = el.currentTime * 1000,
-                  offsets = times();
-                if (el.currentTime > lastAudioTime) { lastAudioTime = el.currentTime; progressedAt = Date.now(); }
-                else if (Date.now() - progressedAt > 15_000) { fail(new Error('Audio stopped progressing. Press Play to retry the selected voice.')); return; }
-                let word = from;
-                while (word + 1 < chunk.count && offsets[word + 1] <= at) word++;
-                emit(chunk.start + word);
-              }, 40);
-            },
-            () => fail(new Error('Audio playback was blocked. Press Play to retry and allow audio in this browser.')),
-          );
-        };
-        el.onloadedmetadata = ready;
         el.onended = () => {
           emit(chunk.start + chunk.count - 1);
           clear();
@@ -198,18 +210,28 @@ export class ProviderNarrator implements Narrator {
         };
         el.onerror = () =>
           fail(new Error('The generated audio could not be played. Retry or choose another provider.'));
+        await clip.ready;
+        if (cancelled || finished || element !== el) return;
+        if (from > 0) el.currentTime = times()[from] / 1000;
         watchdog = setTimeout(
-          () => fail(new Error('Audio did not become playable. Retry the selected speech provider.')),
+          () => fail(new Error('Audio did not start. Retry the selected speech provider.')),
           20_000,
         );
-        el.addEventListener(
-          'playing',
-          () => {
-            clearTimeout(watchdog);
-          },
-          { once: true },
-        );
-        if (el.readyState >= 1) ready();
+        try { await el.play(); }
+        catch { throw new Error('Audio playback was blocked. Press Play to retry and allow audio in this browser.'); }
+        if (cancelled || finished || element !== el) return;
+        clearTimeout(watchdog);
+        cb.onState?.('playing');
+        if (times()[from] <= el.currentTime * 1000) emit(chunk.start + from);
+        let lastAudioTime = el.currentTime, progressedAt = Date.now();
+        poll = setInterval(() => {
+          const at = el.currentTime * 1000, offsets = times();
+          if (el.currentTime > lastAudioTime) { lastAudioTime = el.currentTime; progressedAt = Date.now(); }
+          else if (Date.now() - progressedAt > 15_000) { fail(new Error('Audio stopped progressing. Press Play to retry the selected voice.')); return; }
+          let word = from - 1;
+          while (word + 1 < chunk.count && offsets[word + 1] <= at) word++;
+          emit(chunk.start + word);
+        }, 40);
       } catch (error) {
         fail(error);
       }
@@ -220,9 +242,10 @@ export class ProviderNarrator implements Narrator {
     );
     void playChunk(first);
     return {
-      cancel() {
+      cancel: () => {
         cancelled = true;
         clear();
+        this.dispose();
       },
       setRate(value) {
         rate = clamp(value * (req.voice?.rate ?? 1), 0.5, 4);

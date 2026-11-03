@@ -83,6 +83,7 @@ test('preparation state cannot label actual speech as paused or failed', () => {
   const playback = { playing: true, speaking: true, canPlay: true, page: 3, words: ['Ready.'], word: 0 };
   const paused = run('reading', 'reading', 'paused', '2026-11-03T12:00:00Z');
   assert.equal(companionPresence(paused, 'reading', playback).mood, 'speaking');
+  assert.equal(companionPresence(paused, 'reading', { ...playback, generating: true }).label, 'Generating speech…');
   assert.equal(companionPresence({ ...paused, status: 'failed' }, 'reading', playback).mood, 'speaking');
   assert.equal(companionPresence(paused, 'reading', { ...playback, speaking: false }).mood, 'paused');
   assert.equal(companionPresence(paused, 'reading', { ...playback, speaking: false }, true).mood, 'working');

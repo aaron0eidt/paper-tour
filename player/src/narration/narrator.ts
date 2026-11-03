@@ -12,6 +12,8 @@ export interface SpeakRequest {
   audio?: StepAudio;
   /** Speak from this word on (a pause resumes at its sentence; a seek lands on one). Default 0. */
   startWord?: number;
+  /** Visual cue boundaries: audio providers can start a fresh clip at these exact words. */
+  cueWords?: readonly number[];
 }
 
 export interface SpeakCallbacks {
@@ -37,7 +39,11 @@ export interface NarrationHandle {
  */
 export interface Narrator {
   readonly name: string;
+  /** Prepare the camera now, but wait for audible words before applying initial visual cues. */
+  deferInitialCues?: boolean;
   preload?(req: SpeakRequest): Promise<void>;
+  /** Release prepared media when the reader or selected voice changes. */
+  dispose?(): void;
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle;
 }
 
