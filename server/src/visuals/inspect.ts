@@ -2,6 +2,7 @@ import type { BoardItem } from '../../../shared/paper';
 import { plotlyFigure } from '../../../shared/plotly';
 import { computePlotlyPython } from './plotly-compute';
 import { reviewProgram, type ProgramReview } from './program-review';
+import { VisualValidationError } from '../errors';
 export { AUTHORED_VISUAL_GUIDANCE } from './guidance';
 export type AuthoredVisual = Extract<BoardItem, { kind: 'program' | 'plotly' }>;
 export const isAuthoredVisual = (item: BoardItem): item is AuthoredVisual =>
@@ -57,7 +58,7 @@ export async function authorAndInspectVisual(
     const feedback = { ...inspection, item, narration: context.narration, evidence: context.evidence, attempt };
     if (!inspection.problems.length && context.review) feedback.problems.push(...(await context.review(feedback)));
     if (!feedback.problems.length) return item;
-    if (attempt === 2) throw new Error(`Authored visual failed inspection: ${feedback.problems.join('; ')}`);
+    if (attempt === 2) throw new VisualValidationError(feedback.problems);
     item = await context.repair(feedback);
   }
   throw new Error('Unreachable visual authoring state');

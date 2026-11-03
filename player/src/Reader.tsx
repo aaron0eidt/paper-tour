@@ -4,7 +4,8 @@ import { Camera, fitWidthView, frameFor, initialView, project, readingScale, rev
 import type { View } from './camera';
 import { readingTour, readingStepOnPage, readingStepForTarget, DEFAULT_READING_OPTIONS } from './readAloud';
 import { useReadingSpeech } from './useReadingSpeech';
-import { getMaxAutoZoom, subscribeReadingPreferences } from './readerPreferences';
+import { AgentActivity } from './activity/AgentActivity';
+import { getMaxAutoZoom, getNarrationDisplay, narrationSurfaces, subscribeReadingPreferences } from './readerPreferences';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutDeck, layoutPages } from './layout';
@@ -33,7 +34,6 @@ import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import { TourGeneration } from './components/TourGeneration';
 import { TourCover, TourEnd } from './components/TourCards';
-import { TourDockStatus } from './components/TourDockStatus';
 import { isTourGenerationActive } from './library/tourGeneration';
 import { apiRequest, ApiRequestError, getSupabase } from './library/client';
 import { usePartialTour } from './library/usePartialTour';
@@ -136,7 +136,6 @@ async function copyText(text: string): Promise<void> {
 
 export function Reader({ documentId, onBack }: { documentId?: string; onBack(): void }) {
   const params = useMemo(readParams, []);
-  const [activityRequest, setActivityRequest] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadedAnalysisId, setLoadedAnalysisId] = useState<string | undefined>();
   const [fatal, setFatal] = useState<string | null>(null);
@@ -153,6 +152,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [engine, setEngine] = useState<TourEngine | null>(null);
   const camera = useMemo(() => new Camera(), []);
   const maxAutoZoom = useSyncExternalStore(subscribeReadingPreferences, getMaxAutoZoom) / 100;
+  const narrationDisplay = useSyncExternalStore(subscribeReadingPreferences, getNarrationDisplay);
+  const captions = narrationSurfaces(narrationDisplay);
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
@@ -1388,7 +1389,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               documentId={documentId}
               generation={manifest.tourGeneration}
               promptOnOpen={!readAloud && !manifest.tours.length}
-              activityRequest={activityRequest}
               canGenerate={!!manifest.doc && manifest.document.fileStatus === 'uploaded'}
               onChanged={() => setManifestRefresh((value) => value + 1)}
               onOpenTour={
@@ -1639,7 +1639,28 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         </div>
         {layout ? (
           <>
-          <BoardSplit board={state.board} playback={boardPlayback(state, active?.steps ?? [])}>
+          <BoardSplit board={state.board} playback={boardPlayback(state, active?.steps ?? [])}
+            activity={documentId && (readAloud || tab === 'tour' || mainState.status === 'playing' || !!away || !!answer || isTourGenerationActive(manifest?.tourGeneration)) ? <AgentActivity
+              documentId={documentId}
+              showNarration={captions.agent}
+              mode={answer || away ? 'answer' : readAloud ? 'reading' : 'tour'}
+              playback={{
+                playing: state.status === 'playing',
+                speaking: state.status === 'playing' && state.word >= 0 && !state.preview,
+                canPlay: !!active?.steps.length && (!away || !!answer),
+                words: active?.steps[state.index]?.words ?? [],
+                word: state.word,
+                page: currentPage,
+                title: active?.tour.chapters[active.steps[state.index]?.chapterIndex ?? 0]?.title,
+                step: active?.steps.length ? { current: state.index + 1, total: active.steps.length } : undefined,
+              }}
+              onSource={navigateTo}
+              onTogglePlayback={() => active?.toggle()}
+              onAsk={() => {
+                setAside();
+                requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.ask-bar textarea')?.focus());
+              }}
+            /> : undefined}>
             <div className="ask-stage">
               <Stage
                 pdf={loaded?.pdf ?? null}
@@ -1700,24 +1721,13 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                   onClose={() => setEndGone(true)}
                 />
               )}
-              {loaded?.doc && !readAloud && (
+              {loaded?.doc && (!readAloud || !!away) && (
                 <div className="ask-lane">
                   {coachStep?.checkpoint && (
                     <CoachCard key={coachStep.step.id} checkpoint={coachStep.checkpoint} kind={checkpointKind(coachStep.step.id)} onSolve={() => active?.reveal()} />
                   )}
                   <AskPanel
                     className="ask-dock"
-                    tourStatus={
-                      <TourDockStatus
-                        documentId={documentId}
-                        generation={manifest?.tourGeneration}
-                        hasTour={!!engine?.steps.length}
-                        steps={playable ? { ready: playable.steps, planned: playable.planned } : null}
-                        onActivity={
-                          manifest?.tourGeneration ? () => setActivityRequest((request) => request + 1) : undefined
-                        }
-                      />
-                    }
                     source={askSource}
                     tourId={documentId && !readAloud ? selectedTourId : null}
                     context={askContext}
@@ -1790,6 +1800,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
         {active && clock && (
           <ControlBar
+            showNarration={captions.player || !documentId}
             steps={active.steps}
             chapters={active.tour.chapters.map((chapter) => chapter.title)}
             clock={clock}

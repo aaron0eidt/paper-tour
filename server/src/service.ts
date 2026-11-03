@@ -1,6 +1,13 @@
 import { READING_VISUAL_VERSION } from '../../shared/reading';
 import { ReadingSpeechCache } from './reading-cache';
-import { prepareReadingPassage, readingObject, readingExplanationQuestion, readingAnswerPassage, readingContinuity, readingCaption } from './reading-speech';
+import {
+  prepareReadingPassage,
+  readingObject,
+  readingExplanationQuestion,
+  readingAnswerPassage,
+  readingContinuity,
+  readingCaption,
+} from './reading-speech';
 import type { ReadingPassageRequest, ReadingPassage } from '../../shared/reading';
 import { TourProfileStore } from './tour-profiles';
 import { sameTourProfile } from '../../shared/tourProfiles';
@@ -62,6 +69,8 @@ import { MuseClient } from './muse/client';
 import type { VisualArtifact } from '../../shared/visualArtifacts';
 import { VisualArtifactService } from './visuals/artifacts';
 import { activeBoard, persistAnswerVisuals, withVisualParameters } from './visuals/persistence';
+import { DocumentActivityStore } from './document-activity';
+import { activityTask } from './ai/activity-context';
 
 export type Enqueue = (
   kind: 'analyze' | 'delete' | 'generate_tour' | 'agent_turn',
@@ -78,6 +87,13 @@ type Row = QueryResultRow;
 const iso = (date: Date | string) => new Date(date).toISOString();
 const ELEMENT_COLUMNS = 'element_id as id,kind,page,text,bbox,data';
 export interface Library {
+  controlDocumentActivity?(
+    owner: string,
+    id: string,
+    runId: string,
+    action: 'pause' | 'resume' | 'cancel',
+  ): Promise<void>;
+  documentActivity?: Pick<DocumentActivityStore, 'list' | 'changes' | 'control' | 'readingProgress'>;
   tourProfiles?(owner: string): Promise<TourProfileCatalog>;
   createTourProfile?(owner: string, draft: TourProfileDraft): Promise<TourProfile>;
   reviseTourProfile?(
@@ -130,8 +146,18 @@ export interface Library {
   }>;
   elements(owner: string, id: string, analysisId: string | undefined, ids: string[]): Promise<IndexedElement[]>;
   figure(owner: string, id: string, analysisId: string | undefined, elementId: string): Promise<FigureContext>;
-  readingPassage?(owner: string, id: string, request: ReadingPassageRequest, signal?: AbortSignal): Promise<ReadingPassage>;
-  demoReadingPassage?(paper: string, targetId: string, signal?: AbortSignal, removeCitations?: boolean): Promise<ReadingPassage>;
+  readingPassage?(
+    owner: string,
+    id: string,
+    request: ReadingPassageRequest,
+    signal?: AbortSignal,
+  ): Promise<ReadingPassage>;
+  demoReadingPassage?(
+    paper: string,
+    targetId: string,
+    signal?: AbortSignal,
+    removeCitations?: boolean,
+  ): Promise<ReadingPassage>;
   ask?(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
   /** Local development only: a question about demo/<paper>/ without an account (see app.ts). */
   demoAsk?(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
@@ -154,6 +180,7 @@ interface AnswerInput {
 }
 
 export class DocumentService implements Library {
+  readonly documentActivity: DocumentActivityStore;
   constructor(
     readonly db: Database,
     readonly storage: FileStorage,
@@ -164,7 +191,9 @@ export class DocumentService implements Library {
     readonly settings?: SettingsService,
     readonly agentEnabled = false,
     readonly visualArtifacts = new VisualArtifactService(db),
-  ) {}
+  ) {
+    this.documentActivity = new DocumentActivityStore(db);
+  }
   tourProfiles(owner: string) {
     return new TourProfileStore(this.db).list(owner);
   }
@@ -229,6 +258,21 @@ export class DocumentService implements Library {
       status: generation.status,
       events: rows.map((r) => ({ id: r.id, type: r.type, data: r.data, at: iso(r.created_at) })),
     };
+  }
+  async controlDocumentActivity(
+    owner: string,
+    id: string,
+    runId: string,
+    action: 'pause' | 'resume' | 'cancel',
+  ): Promise<void> {
+    await this.owned(owner, id);
+    const {
+      rows: [tour],
+    } = await this.db.query('select agent_run_id from tour_generations where id=$1 and document_id=$2', [runId, id]);
+    if (!tour) return this.documentActivity.control(owner, id, runId, action);
+    if (!tour.agent_run_id)
+      throw new HttpError(409, 'unsupported_control', 'Open tour activity to retry this older generation.');
+    await this.controlAgent(owner, id, tour.agent_run_id, action);
   }
   async partial(
     owner: string,
@@ -736,52 +780,177 @@ export class DocumentService implements Library {
   demoRoot = DEMO_ROOT;
   /** A question about one of the owner's documents, answered as a short micro-tour (harness/ask.ts). */
   private readingCache?: ReadingSpeechCache;
-  async readingPassage(owner: string, id: string, request: ReadingPassageRequest, signal?: AbortSignal): Promise<ReadingPassage> {
+  async readingPassage(
+    owner: string,
+    id: string,
+    request: ReadingPassageRequest,
+    signal?: AbortSignal,
+  ): Promise<ReadingPassage> {
+    return this.documentActivity.run(
+      owner,
+      id,
+      { id: request.activityRunId, kind: 'reading', title: 'Prepare read aloud', analysisId: request.analysisId },
+      signal,
+      (readingSignal) => this.prepareLibraryReading(owner, id, request, readingSignal),
+    );
+  }
+  private async prepareLibraryReading(
+    owner: string,
+    id: string,
+    request: ReadingPassageRequest,
+    signal?: AbortSignal,
+  ): Promise<ReadingPassage> {
     const document = await this.owned(owner, id);
-    const { rows: [analysis] } = await this.db.query<{ doc: Doc }>(
+    const {
+      rows: [analysis],
+    } = await this.db.query<{ doc: Doc }>(
       "select doc from analyses where id=$1 and document_id=$2 and status in ('ready','limited')",
       [request.analysisId, id],
     );
-    if (!analysis?.doc) throw new HttpError(409, 'analysis_not_ready', 'The selected document analysis is unavailable.');
+    if (!analysis?.doc)
+      throw new HttpError(409, 'analysis_not_ready', 'The selected document analysis is unavailable.');
     const doc = analysis.doc;
     const block = readingObject(doc, request.targetId);
+    await activityTask(`Read page ${block.page} context`, 'source', async () => {}, [block.id]);
     const page = doc.pages.find((p) => p.n === block.page)!;
     const model = askModel(document.tour_model, document.tour_allow_training === true, this.tourModel);
     const settings = this.askSettings();
     const { config } = await settings.resolveMuse(owner, model);
-    const cache = this.readingCache ??= new ReadingSpeechCache(this.db.pool);
-    return cache.serve({ owner, documentId: id, analysisId: request.analysisId, sha256: doc.source.sha256,
-      targetId: block.id, removeCitations: request.removeCitations ?? true, model, provider: config.baseUrl,
-      language: config.language, visualVersion: block.kind === 'prose' ? undefined : READING_VISUAL_VERSION }, async (readingSignal) => {
-      if (block.kind === 'prose') return prepareReadingPassage({ client: new MuseClient(config, settings.transport), doc,
-        targetId: block.id, language: config.language, removeCitations: request.removeCitations, signal: readingSignal });
-      const selection = { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
-        block.bbox[2] / page.width, block.bbox[3] / page.height] as [number, number, number, number] };
-      const answer = await this.answer(owner, { documentId: id, analysisId: request.analysisId, doc, model, purpose: 'reading',
-        request: { question: readingExplanationQuestion(block.kind, block.id, readingCaption(doc, block.id), readingContinuity(doc, block.id)), analysisId: request.analysisId,
-          selection, page: block.page }, muse: async () => config, image: async () => undefined,
-        images: () => selectionImages(this.storage, document.upload_path, doc, selection, readingSignal), signal: readingSignal });
-      const stored = await persistAnswerVisuals(this.db, this.visualArtifacts, owner, id, request.analysisId, answer);
-      readingSignal.throwIfAborted();
-      return readingAnswerPassage(block.id, stored);
-    }, signal);
+    const cache = (this.readingCache ??= new ReadingSpeechCache(this.db.pool));
+    return cache.serve(
+      {
+        owner,
+        documentId: id,
+        analysisId: request.analysisId,
+        sha256: doc.source.sha256,
+        targetId: block.id,
+        removeCitations: request.removeCitations ?? true,
+        model,
+        provider: config.baseUrl,
+        language: config.language,
+        visualVersion: block.kind === 'prose' ? undefined : READING_VISUAL_VERSION,
+      },
+      async (readingSignal) => {
+        if (block.kind === 'prose')
+          return prepareReadingPassage({
+            client: new MuseClient(config, settings.transport),
+            doc,
+            targetId: block.id,
+            language: config.language,
+            removeCitations: request.removeCitations,
+            signal: readingSignal,
+          });
+        const selection = {
+          page: block.page,
+          rect: [
+            block.bbox[0] / page.width,
+            block.bbox[1] / page.height,
+            block.bbox[2] / page.width,
+            block.bbox[3] / page.height,
+          ] as [number, number, number, number],
+        };
+        const answer = await this.answer(owner, {
+          documentId: id,
+          analysisId: request.analysisId,
+          doc,
+          model,
+          purpose: 'reading',
+          request: {
+            question: readingExplanationQuestion(
+              block.kind,
+              block.id,
+              readingCaption(doc, block.id),
+              readingContinuity(doc, block.id),
+            ),
+            analysisId: request.analysisId,
+            selection,
+            page: block.page,
+          },
+          muse: async () => config,
+          image: async () => undefined,
+          images: () => selectionImages(this.storage, document.upload_path, doc, selection, readingSignal),
+          signal: readingSignal,
+        });
+        const stored = await activityTask('Save checked speech and visuals', 'validation', () =>
+          persistAnswerVisuals(this.db, this.visualArtifacts, owner, id, request.analysisId, answer),
+        );
+        readingSignal.throwIfAborted();
+        return readingAnswerPassage(block.id, stored);
+      },
+      signal,
+    );
   }
 
-  async demoReadingPassage(paper: string, targetId: string, signal?: AbortSignal, removeCitations?: boolean): Promise<ReadingPassage> {
+  async demoReadingPassage(
+    paper: string,
+    targetId: string,
+    signal?: AbortSignal,
+    removeCitations?: boolean,
+  ): Promise<ReadingPassage> {
     const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
     const block = readingObject(demo.doc, targetId);
     const page = demo.doc.pages.find((p) => p.n === block.page)!;
     const settings = this.askSettings();
     const config = settings.base;
-    if (block.kind === 'prose') return prepareReadingPassage({ client: new MuseClient(config, settings.transport),
-      doc: demo.doc, targetId, language: config.language, removeCitations, signal });
-    const answer = await this.demoAsk(paper, { question: readingExplanationQuestion(block.kind, block.id, readingCaption(demo.doc, block.id), readingContinuity(demo.doc, block.id)),
-      selection: { page: block.page, rect: [block.bbox[0] / page.width, block.bbox[1] / page.height,
-        block.bbox[2] / page.width, block.bbox[3] / page.height] } }, signal, 'reading');
+    if (block.kind === 'prose')
+      return prepareReadingPassage({
+        client: new MuseClient(config, settings.transport),
+        doc: demo.doc,
+        targetId,
+        language: config.language,
+        removeCitations,
+        signal,
+      });
+    const answer = await this.demoAsk(
+      paper,
+      {
+        question: readingExplanationQuestion(
+          block.kind,
+          block.id,
+          readingCaption(demo.doc, block.id),
+          readingContinuity(demo.doc, block.id),
+        ),
+        selection: {
+          page: block.page,
+          rect: [
+            block.bbox[0] / page.width,
+            block.bbox[1] / page.height,
+            block.bbox[2] / page.width,
+            block.bbox[3] / page.height,
+          ],
+        },
+      },
+      signal,
+      'reading',
+    );
     return readingAnswerPassage(targetId, answer);
   }
 
   async ask(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
+    if (!request.activityRunId) return this.answerDocument(owner, id, request, signal);
+    const document = await this.owned(owner, id);
+    const analysisId = request.analysisId ?? document.current_analysis_id;
+    if (!analysisId) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
+    return this.documentActivity.run(
+      owner,
+      id,
+      {
+        id: request.activityRunId,
+        kind: 'answer',
+        title: request.question,
+        analysisId,
+        page: request.selection?.page ?? request.page,
+      },
+      signal,
+      (answerSignal) => this.answerDocument(owner, id, request, answerSignal),
+    );
+  }
+  private async answerDocument(
+    owner: string,
+    id: string,
+    request: AskRequest,
+    signal?: AbortSignal,
+  ): Promise<AskAnswer> {
     const settings = this.askSettings();
     const asked = askedRequest(request);
     const document = await this.owned(owner, id);
@@ -1060,7 +1229,9 @@ export class DocumentService implements Library {
     this.asking.set(key, active + 1);
     const started = Date.now();
     try {
-      const [config, image, images] = await Promise.all([input.muse(), input.image(), input.images()]);
+      const [config, image, images] = await activityTask('Load source context and images', 'source', () =>
+        Promise.all([input.muse(), input.image(), input.images()]),
+      );
       if (!config.apiKey) throw askError(new ProcessingError('muse_not_configured', 'No Meta API key.'), input.demo);
       const { answer, completions } = await answerQuestion({
         client: new MuseClient(config, this.askSettings().transport),

@@ -20,7 +20,10 @@ const contrast = (a: string, b: string) => {
 };
 
 test('secondary text and filenames stay readable in both interface themes', () => {
-  for (const [name, palette] of [['dark', dark], ['light', light]] as const)
+  for (const [name, palette] of [
+    ['dark', dark],
+    ['light', light],
+  ] as const)
     for (const ink of ['text', 'muted', 'faint', 'text-secondary'])
       for (const surface of ['bg', 'panel', 'panel-2'])
         assert.ok(
@@ -45,8 +48,11 @@ test('light theme text and feedback remain readable on their semantic surfaces',
       `${ink} on ${surface}: ${contrast(light[ink], light[surface]).toFixed(2)}`,
     );
 });
-test('the interface theme preserves the mathematical canvas contrast pair', () => {
-  assert.ok(contrast(light['canvas-text'], light['canvas-bg']) >= 7);
-  assert.ok(contrast(light['canvas-muted'], light['canvas-bg']) >= 4.5);
-  assert.equal(light['canvas-bg'], dark['canvas-bg']);
+test('each mathematical canvas follows its theme with readable text and semantic colors', () => {
+  assert.notEqual(light['canvas-bg'], dark['canvas-bg']);
+  for (const palette of [dark, light]) {
+    assert.ok(contrast(palette['canvas-text'], palette['canvas-bg']) >= 7);
+    for (const ink of ['canvas-muted', 'canvas-blue', 'canvas-orange', 'canvas-green', 'canvas-pink', 'canvas-yellow'])
+      assert.ok(contrast(palette[ink], palette['canvas-bg']) >= 4.5, ink);
+  }
 });

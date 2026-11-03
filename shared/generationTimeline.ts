@@ -23,6 +23,8 @@ const names: Record<string, string> = {
   render_visual: 'Render and check the visual',
 };
 export const modelActivityNames: Record<string, string> = {
+  ask_answer: 'Write explanation and visual cues',
+  reading_passage: 'Prepare source-faithful speech',
   paper_card: 'Understand the document',
   claims: 'Find the main claims',
   tour_plan: 'Plan the tour',

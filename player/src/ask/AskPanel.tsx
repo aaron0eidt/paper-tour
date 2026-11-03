@@ -5,6 +5,8 @@ import { latestAnswer, threadContext } from './conversations';
 import type { ConversationContext, ConversationMessage } from '../../../shared/conversations';
 import { isLibraryConfigured } from '../library/client';
 import { LanguagePicker } from './LanguagePicker';
+import { forgetLocalActivity, localActivity } from '../activity/client';
+import type { ActivityRun } from '../../../shared/agentActivity';
 // The ask bar: a field below the stage that opens into a tray with the tour's suggested questions
 // when it ends, a waiting state, the answer's verdict and follow-ups, and errors in plain words. It does not play
 // answers: the reader plays them as a second tour and sets the tour aside meanwhile ("Back to the tour").
@@ -80,8 +82,6 @@ export interface AskPanelProps {
   onClearRegion?(): void;
   onCancelSelection?(): void;
   className?: string;
-  /** Reader-owned live generation or playback status, kept within the floating card. */
-  tourStatus?: ReactNode;
 }
 
 type Phase =
@@ -118,6 +118,14 @@ export function AskPanel(props: AskPanelProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const request = useRef<AbortController | null>(null);
   const lastSent = useRef<AskRequest | null>(null);
+  const activityIds = useRef(new Set<string>());
+  useEffect(
+    () => () => {
+      if ('documentId' in source) for (const id of activityIds.current) forgetLocalActivity(source.documentId, id);
+      activityIds.current.clear();
+    },
+    [source],
+  );
   // An answer is playing while the rest of it is still written.
   const writing = useRef(false);
   // The reader's callbacks as of now, for an answer that arrives after it re-rendered.
@@ -250,9 +258,10 @@ export function AskPanel(props: AskPanelProps) {
       setDraft(question);
       setStreaming(true);
       // Where the learner is, read before the tour is set aside.
-      const sent = retryOriginal && lastSent.current?.question === question
-        ? structuredClone(lastSent.current)
-        : requestFor(question, latest.current.context?.() ?? {});
+      const sent =
+        retryOriginal && lastSent.current?.question === question
+          ? structuredClone(lastSent.current)
+          : requestFor(question, latest.current.context?.() ?? {});
       // A partial answer may move the camera or replace the visible board. A retry still refers to the original selection/visual.
       lastSent.current = sent;
       const early = persistent ? null : keeper.take(source, sent);
@@ -280,6 +289,29 @@ export function AskPanel(props: AskPanelProps) {
         latest.current.onAnswerPart?.(part, question, true);
       };
       let answer: AskAnswer;
+      const activityId = persistent ? crypto.randomUUID() : undefined;
+      if (activityId) activityIds.current.add(activityId);
+      const activityRun: ActivityRun | undefined = activityId
+        ? {
+            id: activityId,
+            kind: 'answer',
+            title: question,
+            startedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            status: 'running',
+            operations: [],
+            controllable: true,
+          }
+        : undefined;
+      const reportActivity = (status: ActivityRun['status']) => {
+        if (activityRun && 'documentId' in source)
+          localActivity(
+            source.documentId,
+            { ...activityRun, status, updatedAt: new Date().toISOString() },
+            { cancel: () => controller.abort(), retry: () => void ask(question, true) },
+          );
+      };
+      reportActivity('running');
       try {
         if (persistent) {
           const thread = await sessions.ensure(
@@ -301,9 +333,12 @@ export function AskPanel(props: AskPanelProps) {
             sent.analysisId = thread.context.analysisId;
           }
         }
+        if (activityId) sent.activityRunId = activityId;
         const transport = persistent ? askQuestion : keeper.answer.bind(keeper);
         answer = await transport(source, sent, controller.signal, latest.current.onAnswerPart ? progress : undefined);
+        reportActivity('completed');
       } catch (error) {
+        reportActivity(isCancelled(error) ? 'cancelled' : 'failed');
         if (request.current !== controller) return;
         request.current = null;
         setStreaming(false);
@@ -312,9 +347,11 @@ export function AskPanel(props: AskPanelProps) {
         if (begun) {
           finish(question, begun);
           setDraft(question);
-          setPhase(isCancelled(error)
-            ? { kind: 'stopped', question }
-            : { kind: 'failed', question, message: askErrorMessage(error) });
+          setPhase(
+            isCancelled(error)
+              ? { kind: 'stopped', question }
+              : { kind: 'failed', question, message: askErrorMessage(error) },
+          );
           return;
         }
         // Stopped by the learner: back to the question, ready to edit or send again.
@@ -341,14 +378,22 @@ export function AskPanel(props: AskPanelProps) {
   const prefetchKey = wanted ? `${wanted.stamp}\n${wanted.questions.join('\n')}` : '';
   useEffect(() => {
     const now = latest.current.prefetch;
-    if ((persistent && (sessions.loading || hasConversationHistory)) || !now?.questions.length || !prefetchPossible(source, import.meta.env)) {
+    if (
+      (persistent && (sessions.loading || hasConversationHistory)) ||
+      !now?.questions.length ||
+      !prefetchPossible(source, import.meta.env)
+    ) {
       keeper.hold();
       return;
     }
     const where = latest.current.context?.() ?? {};
     keeper.prefetch(
       source,
-      now.questions.map((question) => ({ ...requestFor(question, where), conversationId: undefined, history: undefined })),
+      now.questions.map((question) => ({
+        ...requestFor(question, where),
+        conversationId: undefined,
+        history: undefined,
+      })),
     );
   }, [prefetchKey, keeper, source, requestFor, persistent, sessions.loading, hasConversationHistory]);
 
@@ -394,8 +439,10 @@ export function AskPanel(props: AskPanelProps) {
   const asked = history.map((turn) => turn.question);
   const offered = openQuestions(suggestions, asked);
   // A suggested question whose answer is kept plays at once: its chip says so, and so does the tour's end card.
-  const ready = keeper.size && !(persistent && hasConversationHistory)
-    ? offered.filter((q) => keeper.has(source, requestFor(q, props.context?.() ?? {}))) : [];
+  const ready =
+    keeper.size && !(persistent && hasConversationHistory)
+      ? offered.filter((q) => keeper.has(source, requestFor(q, props.context?.() ?? {})))
+      : [];
   const readyKey = ready.join('\n');
   useEffect(() => {
     latest.current.onReady?.(readyKey ? readyKey.split('\n') : []);
@@ -488,7 +535,9 @@ export function AskPanel(props: AskPanelProps) {
         <span>{props.resumeLabel ?? 'Back to the tour'}</span>
       </button>,
     );
-  const open = !!status || !!questions.length || actions.length > 0 || !!voice.error || voiceBusy;
+  // Restoring a saved conversation must not open its old answer over an unrelated tour step.
+  const inactiveAnswer = phase.kind === 'answered' && !away && !focused && !typing;
+  const open = (!inactiveAnswer && (!!status || !!questions.length || actions.length > 0)) || !!voice.error || voiceBusy;
   // Keep the last content while the tray folds away, so it does not vanish before it closes.
   const tray = useRef<ReactNode>(null);
   const order = (i: number) => ({ '--i': i }) as CSSProperties;
@@ -568,7 +617,6 @@ export function AskPanel(props: AskPanelProps) {
       }}
     >
       <div className={`ask-card${focused ? ' focused' : ''}${busy ? ' busy' : ''}${away ? ' away' : ''}`}>
-        {props.tourStatus}
         <div className={`ask-tray${open ? ' open' : ''}`}>
           <div className="ask-tray-clip">{tray.current}</div>
         </div>
@@ -614,7 +662,7 @@ export function AskPanel(props: AskPanelProps) {
                 ? 'Select a region on the page…'
                 : props.selection
                   ? 'Ask about this region…'
-                  : phase.kind === 'answered'
+                  : phase.kind === 'answered' && !inactiveAnswer
                     ? 'Ask a follow-up…'
                     : 'Ask about this document…'
             }

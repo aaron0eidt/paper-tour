@@ -20,6 +20,7 @@
 }
 
 .board-frame {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;

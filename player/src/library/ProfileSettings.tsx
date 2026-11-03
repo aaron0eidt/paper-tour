@@ -7,7 +7,14 @@ import { useModelCatalog } from './useModelCatalog';
 import { selectedApiModel } from './modelChoices';
 import { ModelPicker } from '../components/ModelPicker';
 import { getThemePreference, setThemePreference, subscribeTheme, THEME_OPTIONS } from '../theme';
-import { getMaxAutoZoom, setMaxAutoZoom, subscribeReadingPreferences } from '../readerPreferences';
+import {
+  getMaxAutoZoom,
+  setMaxAutoZoom,
+  subscribeReadingPreferences,
+  getNarrationDisplay,
+  setNarrationDisplay,
+  NARRATION_DISPLAY_OPTIONS,
+} from '../readerPreferences';
 import '../profileSettings.css';
 
 export function ProfileSettings({ email }: { email: string }) {
@@ -23,6 +30,7 @@ export function ProfileSettings({ email }: { email: string }) {
   const modelHeading = useRef<HTMLHeadingElement>(null);
   const theme = useSyncExternalStore(subscribeTheme, getThemePreference);
   const maxAutoZoom = useSyncExternalStore(subscribeReadingPreferences, getMaxAutoZoom);
+  const narrationDisplay = useSyncExternalStore(subscribeReadingPreferences, getNarrationDisplay);
   useEffect(() => {
     if (profile.data) setModel(profile.data.defaultModel);
   }, [profile.data?.defaultModel]);
@@ -131,7 +139,7 @@ export function ProfileSettings({ email }: { email: string }) {
           <section className="profile-card" id="reading" aria-labelledby="reading-heading">
             <div className="profile-card-heading">
               <h2 id="reading-heading">Reading</h2>
-              <p>Keep more of the paper in view during explanations.</p>
+              <p>Choose how explanations appear while reading.</p>
             </div>
             <label className="profile-field" htmlFor="max-auto-zoom">Maximum automatic zoom</label>
             <div className="profile-zoom-setting">
@@ -142,6 +150,20 @@ export function ProfileSettings({ email }: { email: string }) {
             </div>
             <p className="profile-help" id="max-auto-zoom-help">
               Limits automatic zooms in tours and answers. Lower values show more context. Manual zoom stays independent.
+              Saved automatically on this browser.
+            </p>
+            <fieldset className="profile-sources profile-narration-display" aria-describedby="narration-display-help">
+              <legend className="profile-field">Spoken text</legend>
+              {NARRATION_DISPLAY_OPTIONS.map(({ id, label, description }) => (
+                <label key={id} className={narrationDisplay === id ? 'selected' : ''}>
+                  <input type="radio" name="narration-display" value={id} checked={narrationDisplay === id}
+                    onChange={() => setNarrationDisplay(id)} />
+                  <span><strong>{label}</strong><small>{description}</small></span>
+                </label>
+              ))}
+            </fieldset>
+            <p className="profile-help" id="narration-display-help">
+              Applies to tours, answers and Read aloud. Playback controls and agent activity stay available.
               Saved automatically on this browser.
             </p>
           </section>

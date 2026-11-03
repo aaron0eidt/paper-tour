@@ -14,18 +14,20 @@ const { storage, authenticate } = storageClient(c.supabaseUrl, c.serviceKey);
 const { boss, enqueue } = await createQueue(c.databaseUrl);
 const settings = new SettingsService(db, c.muse);
 const visualArtifacts = new VisualArtifactService(db);
+const service = new DocumentService(
+  db,
+  storage,
+  enqueue,
+  c.maxBytes,
+  c.muse.model,
+  new MetaModelCatalog(c.muse),
+  settings,
+  c.agent?.enabled,
+  visualArtifacts,
+);
+await service.documentActivity.interruptOrphans();
 const app = await createApp({
-  service: new DocumentService(
-    db,
-    storage,
-    enqueue,
-    c.maxBytes,
-    c.muse.model,
-    new MetaModelCatalog(c.muse),
-    settings,
-    c.agent?.enabled,
-    visualArtifacts,
-  ),
+  service,
   settings,
   visualArtifacts,
   authenticate,

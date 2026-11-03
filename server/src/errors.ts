@@ -16,6 +16,14 @@ export class ProcessingError extends Error {
     super(message);
   }
 }
+/** Retains render diagnostics for debugging while exposing a stable, safe retry message. */
+export class VisualValidationError extends ProcessingError {
+  readonly publicMessage =
+    'The generated illustration did not pass its rendering checks. Retry this passage or ask again.';
+  constructor(problems: string[]) {
+    super('visual_validation_failed', `Authored visual failed inspection: ${problems.join('; ')}`);
+  }
+}
 export function missing(): never {
   throw new HttpError(404, 'not_found', 'Document or element not found.');
 }

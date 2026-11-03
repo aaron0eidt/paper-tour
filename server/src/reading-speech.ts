@@ -6,6 +6,7 @@ import type { MuseClient, MuseMessage } from './muse/client';
 import { HttpError } from './errors';
 import { documentLanguage } from './harness/language';
 import { paperBlock } from './harness/paper-block';
+import { currentActivity } from './ai/activity-context';
 
 export function readingObject(doc: Doc, targetId: string): Omit<ReadingObject, 'kind'> & { kind: ReadingObject['kind'] | 'prose' } {
   const unit = readingUnits(doc).find((u) => u.id === targetId);
@@ -43,11 +44,13 @@ export async function prepareReadingPassage(input: {
       properties: { supported: { type: 'boolean' }, speech: { type: 'string' } },
     }, 4096, input.signal, undefined, undefined, 'low');
     input.signal?.throwIfAborted();
+    const validation = currentActivity()?.start('Check speech against the original text', 'validation', [object.id]);
     const value = result.value as { supported?: unknown; speech?: unknown } | null;
     if (value?.supported !== true || typeof value.speech !== 'string' || !value.speech.trim()
       || /�|\\(?:frac|sum|begin)|\$\$/.test(value.speech))
-      throw new HttpError(422, 'reading_unclear', 'This passage could not be reliably prepared.');
+      { await validation?.finish('failed'); throw new HttpError(422, 'reading_unclear', 'This passage could not be reliably prepared.'); }
     if (!sameReadingWords(source, value.speech)) {
+      await validation?.finish('failed', 'Preparing a correction to preserve the original words');
       if (attempt === 0) {
         messages.push({ role: 'assistant', content: JSON.stringify(result.value) },
           { role: 'user', content: `The speech changed source words, word order or word count beyond typography and broken-word cleanup. Correct your output using the ORIGINAL PASSAGE verbatim. Keep every number, operator and negation; do not add or omit words or questions. Original passage: ${source}` });
@@ -55,6 +58,7 @@ export async function prepareReadingPassage(input: {
       }
       throw new HttpError(422, 'reading_text_changed', 'The speech still differs from the original passage after correction.');
     }
+    await validation?.finish();
     return { targetId: object.id, speech: value.speech.replace(/\s+/g, ' ').trim(), language };
   }
   throw new HttpError(422, 'reading_text_changed', 'The speech could not be checked against the source.');
