@@ -1,0 +1,67 @@
+/* Locally rendered fluid ink orb. Its parent owns size and accessibility. */
+.agent-avatar {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.agent-fluid-surface {
+  position: absolute;
+  inset: 3%;
+  overflow: hidden;
+  border-radius: 50%;
+  isolation: isolate;
+  transform: scale(.88);
+  transition: transform 280ms cubic-bezier(.2, .7, .2, 1), opacity 240ms ease;
+}
+
+.agent-fluid-canvas,
+.agent-fluid-fallback {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+/* A static, quiet ink field remains available if WebGL2 cannot be initialized. */
+.agent-fluid-fallback {
+  background:
+    radial-gradient(ellipse at 55% 45%, #eee5e9 0%, transparent 50%),
+    radial-gradient(ellipse at 25% 80%, #e9b3d0 0%, transparent 58%),
+    linear-gradient(135deg, #a590d0 8%, #c1b5e5 45%, #b3ceee 90%);
+}
+
+.agent-fluid-canvas {
+  opacity: 0;
+}
+
+.agent-avatar[data-renderer='webgl'] .agent-fluid-canvas {
+  opacity: 1;
+}
+
+.agent-avatar[data-engaged='true'] .agent-fluid-surface,
+.agent-avatar[data-mood='working'] .agent-fluid-surface,
+.agent-avatar[data-mood='speaking'] .agent-fluid-surface,
+.reader-agent-trigger:hover .agent-fluid-surface,
+.reader-agent-trigger:focus-visible .agent-fluid-surface {
+  transform: scale(1);
+}
+
+.reader-agent-trigger:active .agent-fluid-surface {
+  transform: scale(.94);
+  transition-duration: 110ms;
+}
+
+.agent-avatar[data-mood='paused'] .agent-fluid-surface {
+  opacity: .83;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-fluid-surface {
+    transition: none;
+  }
+}

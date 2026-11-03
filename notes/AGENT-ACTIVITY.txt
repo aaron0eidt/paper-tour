@@ -1,12 +1,17 @@
 Document activity
 =================
 
-One fluid sphere accompanies tour creation, questions and read-aloud preparation.
+One fluid orb accompanies tour creation, questions and read-aloud preparation.
 Its speech bubble uses actual narration word callbacks or recorded work stages;
-there is no separate speech clock or simulated audio amplitude. It follows the
+there is no separate speech clock or simulated audio amplitude. Its soft ink colors
+flow slowly while idle and respond to actual work and speech. Reduced motion is static.
+The renderer pauses in hidden tabs and does not request remote assets. It follows the
 current mode and stays hidden during ordinary document browsing. Clicking the
 sphere opens real operations, public drafts and persisted history. Theme tokens,
 keyboard controls, reduced motion and the detailed tour inspector remain intact.
+When the bottom player is hidden, a centered white play/pause button controls the
+existing narrator. With the player visible, the orb only opens activity. Automatic
+speech bubbles yield to the audio-settings popover.
 With artwork open, a small footer holds the sphere and compact speech bubble
 without narrowing the PDF or covering the plot. Closing the card only hides it.
 When space permits, the sphere shares the question bar's baseline. Expanding the

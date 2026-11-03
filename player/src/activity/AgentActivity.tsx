@@ -27,6 +27,7 @@ export function AgentActivity({
   mode,
   playback,
   showNarration = true,
+  playerVisible = true,
   onSource,
   onAsk,
   onTogglePlayback,
@@ -35,6 +36,7 @@ export function AgentActivity({
   mode: ActivityKind;
   playback: CompanionPlayback;
   showNarration?: boolean;
+  playerVisible?: boolean;
   onSource?(id: string): void;
   onAsk(): void;
   onTogglePlayback(): void;
@@ -159,8 +161,19 @@ export function AgentActivity({
         aria-controls={panelId}
         onClick={() => (open ? close() : setOpen(true))}
       >
-        <AgentAvatar mood={presence.mood} word={playback.word} />
+        <AgentAvatar mood={presence.mood} word={playback.word} engaged={open} />
       </button>
+      {!playerVisible && !historical && playback.canPlay && (
+        <button
+          type="button"
+          className="agent-orb-playback"
+          aria-label={playback.playing ? 'Pause narration' : 'Play narration'}
+          title={playback.playing ? 'Pause narration' : 'Play narration'}
+          onClick={onTogglePlayback}
+        >
+          <span aria-hidden="true">{playback.playing ? <PauseIcon /> : <PlayIcon />}</span>
+        </button>
+      )}
       {!open && peek && (
         <button
           type="button"
