@@ -1678,6 +1678,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             activity={documentId && (readAloud || tab === 'tour' || mainState.status === 'playing' || !!away || !!answer || isTourGenerationActive(manifest?.tourGeneration)) ? <AgentActivity
               documentId={documentId}
               showNarration={captions.agent}
+              playerVisible={!!active && !!clock}
               mode={answer || away ? 'answer' : readAloud ? 'reading' : 'tour'}
               playback={{
                 playing: state.status === 'playing',

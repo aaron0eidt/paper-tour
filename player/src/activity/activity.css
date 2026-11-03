@@ -1,4 +1,4 @@
-/* The sphere is the character; everything around it uses the reader's existing theme. */
+/* The fluid orb is the character; everything around it uses the reader's existing theme. */
 :where(.reader-agent) button {
   appearance: none;
   cursor: pointer;
@@ -14,7 +14,7 @@
   cursor: default;
 }
 .reader-agent-anchor {
-  --agent-size: 82px;
+  --agent-size: 64px;
   --agent-edge: 18px;
   position: absolute;
   right: var(--agent-dock-right, var(--agent-edge));
@@ -49,63 +49,43 @@
   outline: 2px solid var(--accent);
   outline-offset: 5px;
 }
-.agent-avatar {
-  display: block;
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-.agent-avatar-sphere {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  filter: drop-shadow(0 8px 12px #1e5fcb35);
-  transform: translateY(-1px);
-  transition:
-    transform 220ms ease,
-    filter 300ms ease;
-}
-.agent-avatar-shadow {
+.agent-orb-playback,
+.agent-orb-playback:hover {
   position: absolute;
-  inset: 78% 16% -6%;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 5px;
+  transform: translate(-50%, -50%);
+  border: 0;
   border-radius: 50%;
-  background: radial-gradient(ellipse, #3484ee50, #3484ee00 72%);
-  filter: blur(6px);
+  background: transparent;
+  color: #25252b;
 }
-.agent-avatar-water {
-  transform-origin: 50px 60px;
-  animation: agent-water 10s ease-in-out infinite alternate;
+.agent-orb-playback > span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 5px #00000014;
+  transition: transform 160ms ease;
 }
-.agent-avatar-cloud {
-  transform-origin: 50px 50px;
-  animation: agent-cloud 9s ease-in-out infinite alternate;
+.agent-orb-playback svg {
+  display: block;
+  width: 13px;
+  height: 13px;
 }
-.agent-avatar[data-mood='working'] .agent-avatar-water {
-  animation-duration: 3s;
+.agent-orb-playback:hover > span {
+  transform: scale(1.05);
 }
-.agent-avatar[data-mood='working'] .agent-avatar-cloud {
-  animation-duration: 4s;
-}
-.agent-avatar[data-mood='speaking'] .agent-avatar-sphere {
-  transform: translateY(calc(-2px - var(--voice-step) * 0.7px))
-    scale(calc(1 + var(--voice-step) * 0.008), calc(1 - var(--voice-step) * 0.006));
-  filter: drop-shadow(0 10px 17px #2e85f75c);
-}
-.agent-avatar[data-mood='speaking'] .agent-avatar-water {
-  animation-duration: 2.5s;
-}
-.agent-avatar[data-mood='paused'] .agent-avatar-water,
-.agent-avatar[data-mood='paused'] .agent-avatar-cloud,
-.agent-avatar[data-mood='attention'] .agent-avatar-water,
-.agent-avatar[data-mood='attention'] .agent-avatar-cloud {
-  animation-play-state: paused;
-}
-.reader-agent-trigger:hover .agent-avatar-sphere {
-  transform: translateY(-4px) scale(1.04);
-}
-.reader-agent-trigger:active .agent-avatar-sphere {
-  transform: scale(0.96);
+.agent-orb-playback:active > span {
+  transform: scale(.94);
 }
 
 .agent-speech-peek,
@@ -142,6 +122,11 @@
 .agent-speech-peek:hover {
   background: var(--panel);
   border-color: var(--border-accent);
+}
+/* Keep the audio controls usable while the automatic transcript bubble is open. */
+.reader-app:has(.playback-options[open]) .agent-speech-peek {
+  visibility: hidden;
+  pointer-events: none;
 }
 .agent-peek-message {
   display: -webkit-box;
@@ -671,22 +656,6 @@
   width: min(292px, var(--agent-card-width));
   overflow: auto;
 }
-@keyframes agent-water {
-  from {
-    transform: translate(-6px, 4px) rotate(-8deg);
-  }
-  to {
-    transform: translate(5px, -7px) rotate(9deg);
-  }
-}
-@keyframes agent-cloud {
-  from {
-    transform: translate(5px, -2px) rotate(6deg);
-  }
-  to {
-    transform: translate(-4px, 6px) rotate(-5deg);
-  }
-}
 @keyframes activity-orbit {
   to {
     transform: rotate(360deg);
@@ -696,14 +665,10 @@
   .reader-agent-anchor {
     transition: none;
   }
-  .agent-avatar-water,
-  .agent-avatar-cloud,
+  .agent-orb-playback > span {
+    transition: none;
+  }
   .activity-spinner {
     animation: none !important;
-  }
-  .reader-agent .agent-avatar-sphere,
-  .reader-agent-trigger:hover .agent-avatar-sphere {
-    transform: none;
-    transition: none;
   }
 }
