@@ -39,6 +39,38 @@ await bad.get(b, new AbortController().signal).catch(() => undefined); await flu
 bad.dispose();
 console.log('Reading lookahead: shared flights, natural handoff, cancellation, caching, StrictMode and no retry loops passed');
 
+// Pausing preparation finishes the current request, blocks new lookahead, and permits an explicit foreground passage.
+const pausedCalls: { id: string; resolve(value: ReadingPassage): void }[] = [];
+const pausable = new ReadingPreparation(
+  (s) => new Promise<ReadingPassage>((resolve) => pausedCalls.push({ id: s.id, resolve })),
+);
+pausable.plan(a, [b, c], true);
+await flush();
+pausable.pauseBackground();
+pausedCalls[0].resolve(result('a'));
+await flush();
+eq(
+  pausedCalls.map((call) => call.id),
+  ['a'],
+);
+eq(pausable.getSnapshot().completed, 1);
+eq(pausable.getSnapshot().total, 3);
+const foreground = pausable.get(b, new AbortController().signal);
+await flush();
+eq(pausable.getSnapshot().foreground, true);
+pausedCalls[1].resolve(result('b'));
+await foreground;
+await flush();
+eq(pausedCalls.length, 2);
+pausable.resumeBackground();
+await flush();
+eq(pausedCalls[2].id, 'c');
+pausedCalls[2].resolve(result('c'));
+await flush();
+eq(pausable.getSnapshot().completed, 3);
+eq(pausable.getSnapshot().active, false);
+pausable.dispose();
+
 // Effect replay must reactivate new background work, not only serve old cache entries.
 const replayCalls: AbortSignal[] = [];
 const replay = new ReadingPreparation(async (_step, signal) => {
@@ -86,6 +118,8 @@ const isolated = new ReadingPreparation(async (s) => {
 }, () => false);
 isolated.plan(a, [b, c], true); for (let i = 0; i < 4; i++) await flush();
 eq(isolatedCalls, ['a', 'b', 'c']);
+eq(isolated.getSnapshot().completed, 2);
+eq(isolated.getSnapshot().active, false); // A failed unit must not leave an endless preparation spinner.
 isolated.plan(a, [b, c], true); await flush(); eq(isolatedCalls, ['a', 'b', 'c']);
 isolated.dispose();
 let consecutive = 0;

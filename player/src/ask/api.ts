@@ -13,6 +13,7 @@ export interface AskTurn {
 }
 
 export interface AskRequest {
+  activityRunId?: string;
   question: string;
   conversationId?: string;
   page?: number;
@@ -67,6 +68,7 @@ export async function askQuestion(
   onProgress?: (answer: AskAnswer) => void,
 ): Promise<AskAnswer> {
   const body: AskRequest = { question: request.question.trim() };
+  if (request.activityRunId) body.activityRunId = request.activityRunId;
   if (responseLanguage(request.responseLanguage)) body.responseLanguage = request.responseLanguage;
   if (request.conversationId) body.conversationId = request.conversationId;
   if (request.page) body.page = request.page;

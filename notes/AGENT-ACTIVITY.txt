@@ -1,0 +1,72 @@
+Document activity
+=================
+
+One fluid sphere accompanies tour creation, questions and read-aloud preparation.
+Its speech bubble uses actual narration word callbacks or recorded work stages;
+there is no separate speech clock or simulated audio amplitude. It follows the
+current mode and stays hidden during ordinary document browsing. Clicking the
+sphere opens real operations, public drafts and persisted history. Theme tokens,
+keyboard controls, reduced motion and the detailed tour inspector remain intact.
+With artwork open, a small footer holds the sphere and compact speech bubble
+without narrowing the PDF or covering the plot. Closing the card only hides it.
+Asking through the companion opens the existing document conversation, including
+from Read aloud, and keeps the reading checkpoint for the way back.
+
+Vercel AI SDK
+-------------
+The installed SDK owns transport and structured partial parsing:
+  createUIMessageStream / pipeUIMessageStreamToResponse on the server
+  parseJsonEventStream / readUIMessageStream in the player
+  streamText + Output.object partialOutputStream for public speech drafts
+
+The validated Q&A result transport stays independent. Activity drafts cannot
+drive narration, camera movements or unchecked authored code. Only public
+say/speech fields are projected. Requests, schemas, planning fields and provider
+reasoning are excluded. Progress messages require no additional model calls.
+
+Durability and controls
+-----------------------
+document_activity_runs stores document/analysis-scoped answer and reading runs,
+their status and operation snapshots. The existing agent_events journal carries
+their history; generation_events remains a tour-only compatibility view.
+Tour activity uses its original journal and durable controls. Endpoints check the
+document owner. Browser roles cannot read the underlying activity tables.
+
+GET  /api/documents/:id/activity[?before=runId]      history plus active runs
+GET  /api/documents/:id/activity/events?after=id    SDK data stream
+POST /api/documents/:id/activity/:runId/control    pause / resume / cancel
+POST /api/documents/:id/activity/:runId/progress   browser preparation facts
+
+Work requests accept optional activityRunId. The server creates an activity when
+the real request starts: no extra start round trip before the model. History is
+paginated. Stable run/operation IDs reconcile replay; reconnecting never starts
+generation. Public drafts are snapshotted at most once a second and on completion.
+
+Reading queues remain browser-owned. Pausing preparation stops new background
+requests; the current unit may finish validation and caching. An explicitly
+requested foreground passage can still prepare; TTS playback is independent.
+Reload preserves history and validated cached speech/visuals. Reopening Read
+aloud continues through that cache. There is no hidden worker after the browser
+leaves. API restart marks interrupted HTTP work as paused/stopped.
+
+Answers use the existing abort signal and retain validated conversation partials.
+Retry starts a new request instead of pretending to resume provider generation.
+Tour pause/resume/cancel keeps pg-boss and exactly-once journal execution.
+
+Shared cache flights own an ActivityChannel. All waiting runs subscribe to the
+same operation snapshots, with replay for late joiners. Cancelling one consumer
+does not cancel another. Cache hits are labelled as saved work. Failed units do
+not count as prepared. Browser visual-preview warming is also recorded.
+
+Extension points
+----------------
+Use activityTask(label, kind, asyncWork, sourceRefs) for actual operations, or
+currentActivity()?.start(label, kind, refs) for incremental drafts/lifecycles.
+Refs can be derived from the result. Finish records completion, failure or actual
+cancellation. Model labels live in shared/generationTimeline.ts. MuseClient
+projects approved public fields from SDK partials. Never send entire model
+outputs or arbitrary provider-error payloads to the public activity channel.
+
+Tests cover fragmented UTF-8 SDK streams, replay reconciliation, private-field
+exclusion, cache-flight fan-out/cancellation, owner isolation, durable history,
+controls, preview facts and preparation pause versus foreground reading.

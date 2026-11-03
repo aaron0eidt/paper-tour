@@ -102,7 +102,7 @@ for (const font of ['20px KaTeX_Main', 'italic 20px KaTeX_Math', '20px KaTeX_Siz
  * The stage (children) with the board beside it: right of it where the space is wide, below it
  * where it is tall or narrow. Renders only the stage while the engine's board is empty.
  */
-export function BoardSplit({ board, playback = { playing: false, progress: 1 }, children }: { board: BoardState; playback?: BoardPlayback; children: ReactNode }) {
+export function BoardSplit({ board, playback = { playing: false, progress: 1 }, children, activity }: { board: BoardState; playback?: BoardPlayback; children: ReactNode; activity?: ReactNode }) {
   const [dock, dispatch] = useReducer(dockReducer, { open: false, current: null, leaving: null });
 
   useEffect(() => {
@@ -129,8 +129,9 @@ export function BoardSplit({ board, playback = { playing: false, progress: 1 }, 
   // The split is the container its own shape is queried on (board.css); the frame inside it lays out.
   return (
     <div className="board-split">
-      <div className="board-frame">
+      <div className={`board-frame${activity && dock.open ? ' with-agent-board' : ''}`}>
         {children}
+        {activity && <div className="reader-agent-anchor">{activity}</div>}
         <div className="board-dock" data-open={dock.open ? '' : undefined}>
           {dock.current && (
             <aside className="board" aria-label="Board" aria-hidden={!dock.open}>
