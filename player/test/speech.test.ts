@@ -28,12 +28,12 @@ const audio: SpeechAudio = {
   durationMs: 1000,
   wordTimesMs: [0, 250, 650],
   timing: 'provider',
-  provider: 'local',
-  model: 'qwen3-tts-0.6b',
-  voice: 'Ryan',
+  provider: 'elevenlabs',
+  model: 'eleven_multilingual_v2',
+  voice: 'JBFqnCBsd6RMkjVDRZzb',
   cached: false,
 };
-function settings(provider: 'local' | 'elevenlabs' = 'local'): SpeechSettings {
+function settings(provider: 'openai' | 'elevenlabs' = 'elevenlabs'): SpeechSettings {
   return {
     version: 'one',
     preferences: { ...structuredClone(DEFAULT_SPEECH_PREFERENCES), provider },
@@ -82,7 +82,7 @@ const request = {
 await test('long source passages are split without truncating, reordering or changing any word', () => {
   const words = Array.from({ length: 2000 }, (_, i) => `source${i}${i % 20 === 19 ? '.' : ''}`);
   const chunks = audioChunks(words);
-  assert(chunks.every((chunk) => chunk.text.length <= 600));
+  assert(chunks.every((chunk) => chunk.text.length <= 300));
   deepEqual(
     chunks.flatMap((chunk) => chunk.text.split(' ')),
     words,
@@ -172,7 +172,7 @@ await test('seek uses returned timestamps; live speed changes and resume reuse c
   equal(calls, 1);
   resumed.cancel();
 });
-await test('cloud lookahead requires explicit opt-in and provider failures pause the engine visibly', async () => {
+await test('API lookahead is always enabled after playback chooses the provider and failures pause visibly', async () => {
   let calls = 0;
   const prefs = settings('elevenlabs');
   const cache = new SpeechAudioCache(async () => {
@@ -181,8 +181,7 @@ await test('cloud lookahead requires explicit opt-in and provider failures pause
   });
   const narrator = new ProviderNarrator(prefs, cache);
   await narrator.preload(request);
-  equal(calls, 0);
-  prefs.preferences.precompute = true;
+  equal(calls, 1);
   await narrator.preload(request);
   equal(calls, 1);
   const tour: Tour = {
@@ -270,6 +269,60 @@ await test('failed lookahead is not retried by word updates; foreground playback
   equal(calls, 2);
   equal(errors, 1);
   handle.cancel();
+});
+
+await test('Play starts current and one following sentence concurrently, then rolls only one chunk ahead', async () => {
+  const sentences = [
+    'The first sentence explains how the evidence supports the main claim while preserving every qualification.',
+    'The second sentence connects the observation to the method and carefully states the remaining limitations.',
+    'The third sentence describes the comparison and keeps the original numbers and conditions in their order.',
+  ];
+  const text = sentences.join(' '),
+    words = text.split(' '),
+    calls: string[] = [];
+  const releases = new Map<string, (value: SpeechAudio) => void>();
+  const narrator = new ProviderNarrator(
+    settings(),
+    new SpeechAudioCache((input) => {
+      calls.push(input.text);
+      return new Promise((resolve) => releases.set(input.text, resolve));
+    }),
+  );
+  equal(calls.length, 0);
+  const handle = narrator.speak({ ...request, text, words }, { onWord() {}, onEnd() {} });
+  deepEqual(calls, sentences.slice(0, 2)); // No current audio response or play event was needed.
+  const result = { ...audio, wordTimesMs: undefined, timing: 'estimated' as const };
+  releases.get(sentences[1])!(result);
+  releases.get(sentences[0])!(result);
+  await tick();
+  const first = TestAudio.instances.at(-1)!;
+  first.ready();
+  await tick();
+  deepEqual(calls, sentences.slice(0, 2)); // No whole-paragraph/paper generation.
+  first.onended!();
+  await tick();
+  deepEqual(calls, sentences); // Only now is the third requested; second reuses prefetched audio.
+  const second = TestAudio.instances.at(-1)!;
+  second.ready();
+  await tick();
+  handle.cancel();
+  releases.get(sentences[2])!(result);
+  await tick();
+  equal(second.playing, false);
+  equal(calls.length, 3);
+});
+
+await test('very short sentences share a natural bounded group without omitting words', () => {
+  const words =
+    'It works. Why now? We explain the result carefully, including each condition and its supporting evidence.'.split(
+      ' ',
+    );
+  const chunks = audioChunks(words);
+  assert(chunks[0].text.startsWith('It works. Why now?'));
+  deepEqual(
+    chunks.flatMap((chunk) => chunk.text.split(' ')),
+    words,
+  );
 });
 
 if (failures) throw new Error(`${failures} speech tests failed`);

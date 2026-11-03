@@ -10,16 +10,15 @@ export function speechRoutes(api: FastifyInstance, speech: SpeechService, owner:
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['provider', 'precompute', 'connections'],
+          required: ['provider', 'connections'],
           properties: {
-            provider: { enum: ['browser', 'local', 'openai', 'elevenlabs'] },
-            precompute: { type: 'boolean' },
+            provider: { enum: ['browser', 'openai', 'elevenlabs'] },
             connections: {
               type: 'object',
               additionalProperties: false,
-              required: ['local', 'openai', 'elevenlabs'],
+              required: ['openai', 'elevenlabs'],
               properties: Object.fromEntries(
-                ['local', 'openai', 'elevenlabs'].map((provider) => [
+                ['openai', 'elevenlabs'].map((provider) => [
                   provider,
                   {
                     type: 'object',

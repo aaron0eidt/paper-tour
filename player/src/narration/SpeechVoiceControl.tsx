@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AudioSpeechProvider, SpeechSettings } from '../../../shared/speech';
 
-const LOCAL_VOICES = ['Ryan', 'Aiden', 'Serena', 'Vivian'];
 const OPENAI_VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
 const OPENAI_MINI_VOICES = ['cedar', 'marin', ...OPENAI_VOICES, 'ballad', 'verse'];
 
@@ -21,7 +20,7 @@ export function SpeechVoiceControl({
   disabled?: boolean;
   className?: string;
 }) {
-  const voices = provider === 'local' ? LOCAL_VOICES : model === 'gpt-4o-mini-tts' ? OPENAI_MINI_VOICES : OPENAI_VOICES;
+  const voices = model === 'gpt-4o-mini-tts' ? OPENAI_MINI_VOICES : OPENAI_VOICES;
   return (
     <label className={className}>
       <span>{provider === 'elevenlabs' ? 'Voice ID' : 'Voice'}</span>

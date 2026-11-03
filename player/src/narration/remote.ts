@@ -9,8 +9,8 @@ import {
   type NarrationHandle,
 } from './narrator';
 
-/** Small sentence groups keep local first-audio latency bounded; global PDF word indexes stay intact. */
-export function audioChunks(words: readonly string[], limit = 600): { text: string; start: number; count: number }[] {
+/** Bounded sentence groups keep first-audio latency bounded; global PDF word indexes stay intact. */
+export function audioChunks(words: readonly string[], limit = 300): { text: string; start: number; count: number }[] {
   const starts = sentenceStarts(words),
     chunks: { text: string; start: number; count: number }[] = [];
   for (let sentence = 0; sentence < starts.length; sentence++) {
@@ -23,7 +23,7 @@ export function audioChunks(words: readonly string[], limit = 600): { text: stri
         length += words[next++].length + 1;
       const previous = chunks.at(-1),
         text = words.slice(at, next).join(' ');
-      if (previous && previous.text.length + text.length + 1 <= limit) {
+      if (previous && previous.text.length < 80 && previous.text.length + text.length + 1 <= limit) {
         previous.text += ` ${text}`;
         previous.count += next - at;
       } else chunks.push({ text, start: at, count: next - at });
@@ -82,17 +82,19 @@ export class ProviderNarrator implements Narrator {
     this.name = settings.preferences.provider;
   }
   async preload(req: SpeakRequest): Promise<void> {
-    if (this.settings.preferences.provider !== 'local' && !this.settings.preferences.precompute) return;
     const chunk = audioChunks(req.words)[0];
     if (!chunk) return;
-    const input = { text: chunk.text, language: req.voice?.lang ?? 'en-US', version: this.settings.version };
+    await this.preloadInput({ text: chunk.text, language: req.voice?.lang ?? 'en-US', version: this.settings.version });
+  }
+  private async preloadInput(input: SpeechInput): Promise<void> {
     const key = JSON.stringify(input);
     if (this.prefetched.has(key)) return;
     if (this.prefetched.size >= 256) this.prefetched.delete(this.prefetched.values().next().value!);
     this.prefetched.add(key);
-    // Word/camera updates cannot restart failed background calls. Foreground playback can retry.
+    // A failed background request waits for explicit foreground playback before retrying.
     await this.cache.get(input);
   }
+
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle {
     const chunks = audioChunks(req.words),
       n = req.words.length;
@@ -145,7 +147,12 @@ export class ProviderNarrator implements Narrator {
       const chunk = chunks[index];
       cb.onState?.('generating');
       try {
-        const audio = await this.cache.get({ text: chunk.text, language, version: this.settings.version });
+        const current = this.cache.get({ text: chunk.text, language, version: this.settings.version });
+        // Play explicitly authorizes only current + ONE following chunk. Start them together,
+        // then roll forward one at a time; nothing runs on provider selection or page load.
+        const next = chunks[index + 1];
+        if (next) void this.preloadInput({ text: next.text, language, version: this.settings.version }).catch(() => {});
+        const audio = await current;
         if (cancelled || finished) return;
         clear();
         objectUrl = audioUrl(audio);
@@ -176,14 +183,6 @@ export class ProviderNarrator implements Narrator {
                 while (word + 1 < chunk.count && offsets[word + 1] <= at) word++;
                 emit(chunk.start + word);
               }, 40);
-              // One real next-chunk request, only after this chunk is playing. Cloud precomputation is opt-in.
-              if (
-                (this.settings.preferences.provider === 'local' || this.settings.preferences.precompute) &&
-                chunks[index + 1]
-              )
-                void this.cache
-                  .get({ text: chunks[index + 1].text, language, version: this.settings.version })
-                  .catch(() => {});
             },
             () => fail(new Error('Audio playback was blocked. Press Play to retry and allow audio in this browser.')),
           );

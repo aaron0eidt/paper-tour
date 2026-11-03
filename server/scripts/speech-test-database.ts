@@ -27,7 +27,11 @@ try {
       await isolated.query(
         `create schema vault; create schema auth; create table auth.users(id uuid primary key,email text); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;`,
       );
-      for (const file of ['202610270005_user_settings.sql', '202611030002_speech_providers.sql'])
+      for (const file of [
+        '202610270005_user_settings.sql',
+        '202611030002_speech_providers.sql',
+        '202611030003_api_only_speech.sql',
+      ])
         await isolated.query(await readFile(resolve(ROOT, 'supabase/migrations', file), 'utf8'));
       await writeFile(path, JSON.stringify({ name, url: url.href }), { mode: 0o600 });
       console.log('Created isolated speech test database; configuration saved under .data.');

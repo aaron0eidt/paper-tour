@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import Fastify from 'fastify';
 import { DEFAULT_SPEECH_PREFERENCES } from '../../shared/speech';
 import { SpeechProviders, alignedWordTimes, wavDurationMs } from '../src/speech/providers';
-import { localSpeechUrl, type SpeechConfig } from '../src/speech/config';
-import { SpeechService } from '../src/speech/service';
+import type { SpeechConfig } from '../src/speech/config';
+import { SpeechService, speechPreferences } from '../src/speech/service';
 import { speechRoutes } from '../src/speech/routes';
 import { Database } from '../src/db';
 
@@ -29,24 +29,21 @@ function wav() {
   return buffer;
 }
 const config: SpeechConfig = {
-  localUrl: 'http://127.0.0.1:8045/v1',
-  localModel: 'qwen3-tts-0.6b',
-  openaiKey: '',
+  openaiKey: 'test-server-openai-key',
   elevenlabsKey: '',
   cacheDir: '',
   timeoutMs: 2000,
 };
 
-test('only loopback local endpoints are accepted; credentials and redirects cannot escape', () => {
-  assert.equal(localSpeechUrl('http://127.0.0.1:8045/v1/'), config.localUrl);
-  for (const url of [
-    'https://example.org',
-    'file:///etc/passwd',
-    'http://user:password@localhost/v1',
-    'http://localhost/v1?secret=x',
-    'http://127.0.0.1.evil/v1',
-  ])
-    assert.throws(() => localSpeechUrl(url));
+test('retired GPU settings cannot silently select any API; native Browser stays the default', () => {
+  assert.equal(speechPreferences({}).provider, 'browser');
+  assert.throws(
+    () => speechPreferences({ provider: 'local' }),
+    (error: any) => error.code === 'speech_settings_invalid',
+  );
+  const normalized = speechPreferences({ provider: 'browser', precompute: false, connections: { local: {} } });
+  assert(!('precompute' in normalized));
+  assert(!('local' in normalized.connections));
 });
 test('alignment must preserve all original characters and have monotonic times', () => {
   const text = 'Für uns.',
@@ -126,7 +123,6 @@ test(
     const seenKeys: string[] = [];
     const transport: typeof fetch = async (url, init) => {
       const path = String(url);
-      if (path.endsWith('/models')) return Response.json({ data: [{ id: config.localModel }] });
       if (path.endsWith('/voices'))
         return Response.json({ detail: { status: 'missing_permissions' } }, { status: 401 });
       syntheses++;
@@ -154,19 +150,19 @@ test(
         (await api.inject({ url: '/speech/settings', headers: { authorization: 'Bearer test-owner' } })).statusCode,
         200,
       );
-      const local = structuredClone(DEFAULT_SPEECH_PREFERENCES);
-      local.provider = 'local';
-      const settings = await speech.update(owner, local),
+      const selected = structuredClone(DEFAULT_SPEECH_PREFERENCES);
+      selected.provider = 'openai';
+      const settings = await speech.update(owner, selected),
         input = { text: 'Original paper words.', language: 'en-US', version: settings.version };
       const pair = await Promise.all([speech.synthesize(owner, input), speech.synthesize(owner, input)]);
       assert.equal(syntheses, 1);
       assert.equal(pair[0].audioBase64, pair[1].audioBase64);
       assert.equal((await speech.synthesize(owner, input)).cached, true);
       assert.equal(syntheses, 1);
-      const foreign = await speech.update(other, local);
+      const foreign = await speech.update(other, selected);
       await speech.synthesize(other, { ...input, version: foreign.version });
       assert.equal(syntheses, 2);
-      const changed = await speech.update(owner, local);
+      const changed = await speech.update(owner, selected);
       await assert.rejects(speech.synthesize(owner, input), (error: any) => error.code === 'speech_settings_changed');
       await speech.synthesize(owner, { ...input, version: changed.version });
       assert.equal(syntheses, 3);

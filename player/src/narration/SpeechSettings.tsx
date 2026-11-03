@@ -12,7 +12,6 @@ import { SpeechVoiceControl } from './SpeechVoiceControl';
 
 export const SPEECH_LABELS: Record<SpeechProvider, string> = {
   browser: 'Browser voices',
-  local: 'Local Qwen3-TTS',
   openai: 'OpenAI TTS',
   elevenlabs: 'ElevenLabs',
 };
@@ -55,7 +54,7 @@ export function SpeechSettings() {
     audioProvider = provider === 'browser' ? null : provider;
   const connection = audioProvider ? draft.connections[audioProvider] : null;
   const status = audioProvider ? speech.data?.providers[audioProvider] : null;
-  const setConnection = (update: Partial<SpeechPreferences['connections']['local']>) => {
+  const setConnection = (update: Partial<SpeechPreferences['connections']['elevenlabs']>) => {
     if (!audioProvider) return;
     setDraft((current) => ({
       ...current,
@@ -149,120 +148,82 @@ export function SpeechSettings() {
           ) : (
             <>
               <p className="profile-help">{status?.message}</p>
-              {provider === 'local' ? (
-                <>
-                  <SpeechVoiceControl
-                    provider="local"
-                    model={connection!.model}
-                    value={connection!.voice}
-                    disabled={pending}
-                    className="profile-field"
-                    onChange={(voice) => setConnection({ voice })}
-                  />
-                  {!status?.reachable && (
-                    <p className="profile-help">
-                      Start the local service with <code>~/.omlx/bin/omlx-python scripts/local-tts.py</code>.{' '}
-                      <button className="library-text-button" onClick={speech.refresh}>
-                        Check again
-                      </button>
-                    </p>
-                  )}
-                  <p className="profile-help">
-                    English and German. Local audio has estimated word timing; Ryan and Aiden are English preset voices.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <label className="profile-field">
-                    Model
-                    <select
-                      value={connection!.model}
-                      disabled={pending}
-                      onChange={(event) =>
-                        setConnection({
-                          model: event.target.value,
-                          ...(provider === 'openai' && event.target.value !== 'gpt-4o-mini-tts'
-                            ? { voice: 'alloy' }
-                            : {}),
-                        })
-                      }
-                    >
-                      {(provider === 'openai'
-                        ? ['gpt-4o-mini-tts', 'tts-1-hd', 'tts-1']
-                        : ['eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_v3']
-                      ).map((model) => (
-                        <option key={model}>{model}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <SpeechVoiceControl
-                    provider={provider}
-                    model={connection!.model}
-                    value={connection!.voice}
-                    disabled={pending}
-                    className="profile-field"
-                    onChange={(voice) => setConnection({ voice })}
-                  />
-                  {provider === 'elevenlabs' && (
-                    <a className="profile-help" href="https://elevenlabs.io/app" target="_blank" rel="noreferrer">
-                      Open ElevenLabs to find your voice ID
-                    </a>
-                  )}
-                  <label className="profile-field">
-                    Connection
-                    <select
-                      value={connection!.credentialSource}
-                      disabled={pending}
-                      onChange={(event) =>
-                        setConnection({ credentialSource: event.target.value as 'app' | 'personal' })
-                      }
-                    >
-                      <option value="app">Server key{status?.appKeyAvailable ? ' · configured' : ' · missing'}</option>
-                      <option value="personal">
-                        Personal key{status?.personalKey.configured ? ` · ${status.personalKey.masked}` : ' · missing'}
-                      </option>
-                    </select>
-                  </label>
-                  <label className="profile-field">
-                    Personal API key
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={key}
-                      disabled={pending}
-                      onChange={(event) => setKey(event.target.value)}
-                      placeholder={status?.personalKey.masked ?? 'Enter a speech API key'}
-                    />
-                  </label>
-                  <p className="profile-help">
-                    Stored encrypted on the server. Saving a key does not synthesize audio. Preview and playback use
-                    your account’s credits. Audio already requested can finish and be cached when playback is paused.
-                  </p>
-                  <div className="profile-actions">
-                    <button
-                      className="library-button"
-                      disabled={pending || key.trim().length < 16}
-                      onClick={() => void keyAction(false)}
-                    >
-                      Save encrypted key
-                    </button>
-                    {status?.personalKey.configured && (
-                      <button className="library-text-button" disabled={pending} onClick={() => void keyAction(true)}>
-                        Remove personal key
-                      </button>
-                    )}
-                  </div>
-                  <label className="profile-help">
-                    <input
-                      type="checkbox"
-                      checked={draft.precompute}
-                      disabled={pending}
-                      onChange={(event) => setDraft((current) => ({ ...current, precompute: event.target.checked }))}
-                    />{' '}
-                    Precompute upcoming audio using provider credits
-                  </label>
-                </>
+              <label className="profile-field">
+                Model
+                <select
+                  value={connection!.model}
+                  disabled={pending}
+                  onChange={(event) =>
+                    setConnection({
+                      model: event.target.value,
+                      ...(provider === 'openai' && event.target.value !== 'gpt-4o-mini-tts' ? { voice: 'alloy' } : {}),
+                    })
+                  }
+                >
+                  {(provider === 'openai'
+                    ? ['gpt-4o-mini-tts', 'tts-1-hd', 'tts-1']
+                    : ['eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_v3']
+                  ).map((model) => (
+                    <option key={model}>{model}</option>
+                  ))}
+                </select>
+              </label>
+              <SpeechVoiceControl
+                provider={provider}
+                model={connection!.model}
+                value={connection!.voice}
+                disabled={pending}
+                className="profile-field"
+                onChange={(voice) => setConnection({ voice })}
+              />
+              {provider === 'elevenlabs' && (
+                <a className="profile-help" href="https://elevenlabs.io/app" target="_blank" rel="noreferrer">
+                  Open ElevenLabs to find your voice ID
+                </a>
               )}
+              <label className="profile-field">
+                Connection
+                <select
+                  value={connection!.credentialSource}
+                  disabled={pending}
+                  onChange={(event) => setConnection({ credentialSource: event.target.value as 'app' | 'personal' })}
+                >
+                  <option value="app">Server key{status?.appKeyAvailable ? ' · configured' : ' · missing'}</option>
+                  <option value="personal">
+                    Personal key{status?.personalKey.configured ? ` · ${status.personalKey.masked}` : ' · missing'}
+                  </option>
+                </select>
+              </label>
+              <label className="profile-field">
+                Personal API key
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={key}
+                  disabled={pending}
+                  onChange={(event) => setKey(event.target.value)}
+                  placeholder={status?.personalKey.masked ?? 'Enter a speech API key'}
+                />
+              </label>
+              <p className="profile-help">
+                Stored encrypted on the server. Saving a key does not synthesize audio. Preview and playback use your
+                account’s credits. The next sentence is always prepared during playback. Audio already requested can
+                finish and be cached when playback is paused.
+              </p>
+              <div className="profile-actions">
+                <button
+                  className="library-button"
+                  disabled={pending || key.trim().length < 16}
+                  onClick={() => void keyAction(false)}
+                >
+                  Save encrypted key
+                </button>
+                {status?.personalKey.configured && (
+                  <button className="library-text-button" disabled={pending} onClick={() => void keyAction(true)}>
+                    Remove personal key
+                  </button>
+                )}
+              </div>
             </>
           )}
           <div className="profile-actions">

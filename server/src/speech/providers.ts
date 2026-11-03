@@ -1,6 +1,6 @@
 import type { AudioSpeechProvider, SpeechAudio } from '../../../shared/speech';
 import { HttpError } from '../errors';
-import { localSpeechUrl, type SpeechConfig } from './config';
+import type { SpeechConfig } from './config';
 
 export interface SynthesisRequest {
   provider: AudioSpeechProvider;
@@ -50,19 +50,6 @@ export class SpeechProviders {
     readonly config: SpeechConfig,
     readonly transport: typeof fetch = fetch,
   ) {}
-  async localAvailable(): Promise<boolean> {
-    try {
-      const response = await this.transport(`${localSpeechUrl(this.config.localUrl)}/models`, {
-        signal: AbortSignal.timeout(1800),
-        redirect: 'error',
-      });
-      if (!response.ok) return false;
-      const value = (await response.json()) as { data?: { id: string }[] };
-      return Boolean(value.data?.some((m) => m.id === this.config.localModel));
-    } catch {
-      return false;
-    }
-  }
   async verifyKey(provider: 'openai' | 'elevenlabs', apiKey: string): Promise<void> {
     const url = provider === 'openai' ? 'https://api.openai.com/v1/models' : 'https://api.elevenlabs.io/v1/voices';
     const headers: Record<string, string> =
@@ -90,24 +77,16 @@ export class SpeechProviders {
       );
   }
   async synthesize(input: SynthesisRequest, signal?: AbortSignal): Promise<SynthesizedAudio> {
-    if (input.provider !== 'local' && !input.apiKey)
+    if (!input.apiKey)
       throw new HttpError(
         503,
         'speech_not_configured',
-        'Add a speech API key in Settings, or select local or browser speech.',
-      );
-    if (input.provider === 'local' && !['en', 'de'].includes(input.language.split(/[-_]/)[0].toLowerCase()))
-      throw new HttpError(
-        400,
-        'speech_language_unsupported',
-        'This local voice is configured for English and German. Select another speech provider for this language.',
+        'Add a speech API key in Settings, or explicitly select Browser voices.',
       );
     const url =
-      input.provider === 'local'
-        ? `${localSpeechUrl(this.config.localUrl)}/audio/speech`
-        : input.provider === 'openai'
-          ? 'https://api.openai.com/v1/audio/speech'
-          : `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voice)}/with-timestamps?output_format=mp3_44100_128`;
+      input.provider === 'openai'
+        ? 'https://api.openai.com/v1/audio/speech'
+        : `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voice)}/with-timestamps?output_format=mp3_44100_128`;
     const body =
       input.provider === 'elevenlabs'
         ? { text: input.text, model_id: input.model, language_code: input.language.split(/[-_]/)[0].toLowerCase() }
@@ -116,7 +95,6 @@ export class SpeechProviders {
             model: input.model,
             voice: input.voice,
             response_format: 'wav',
-            ...(input.provider === 'local' ? { language: input.language } : {}),
           };
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (input.provider === 'openai') headers.Authorization = `Bearer ${input.apiKey}`;
@@ -137,9 +115,7 @@ export class SpeechProviders {
       throw new HttpError(
         503,
         'speech_unavailable',
-        input.provider === 'local'
-          ? 'Local speech is unavailable. Start scripts/local-tts.py on port 8045, then retry. No other provider was used.'
-          : 'The speech provider could not be reached or timed out. Retry or explicitly choose another provider.',
+        'The speech provider could not be reached or timed out. Retry or explicitly choose another provider.',
       );
     }
     if (!response.ok) {

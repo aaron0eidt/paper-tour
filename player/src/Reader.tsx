@@ -17,6 +17,7 @@ import { createNarrator, SilentNarrator, useBrowserVoices, speechAvailable } fro
 import { useSpeechSettings } from './narration/useSpeechSettings';
 import { SpeechProviderSelect } from './narration/SpeechSettings';
 import { AudioVoiceControl } from './narration/SpeechVoiceControl';
+import { audioChunks } from './narration/remote';
 import type { SpeechPreferences } from '../../shared/speech';
 import { prepareTour, Resolver } from './resolve';
 import { buildScene } from './scene';
@@ -440,8 +441,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   }, [active, speech.update]);
   useEffect(() => {
     if (!active || state.status !== 'playing' || state.speechStatus !== 'playing' || !narrator.preload) return;
-    // Longer current passages precompute their own next audio chunk first.
-    if (active.steps[state.index]?.step.say.length > 600) return;
+    // Only the current passage's final chunk preloads the following prepared passage.
+    // Earlier chunks already keep exactly one sentence ahead inside the narrator.
+    const lastChunk = audioChunks(active.steps[state.index]?.words ?? []).at(-1);
+    if (lastChunk && state.word < lastChunk.start) return;
     const next = active.steps[state.index + 1];
     if (!next) return;
     // Reuse a prepared read-aloud script, never start a language-model call for audio lookahead.

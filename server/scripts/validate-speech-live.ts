@@ -1,50 +1,49 @@
-/** Explicit live smoke check: local inference and optional configured ElevenLabs consume real resources. */
+/** Explicit real API smoke check. The required flag acknowledges use of configured ElevenLabs credits. */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { ROOT } from '../src/config';
 import { speechConfig } from '../src/speech/config';
 import { SpeechProviders } from '../src/speech/providers';
-const config = speechConfig();
-const providers = new SpeechProviders(config);
+if (!process.argv.includes('--elevenlabs')) throw new Error('Pass --elevenlabs to explicitly run real API generation.');
+const config = speechConfig(),
+  providers = new SpeechProviders(config);
+if (!config.elevenlabsKey) throw new Error('Configure the server-only ELEVENLABS_API_KEY first.');
 const folder = resolve(ROOT, '.data/tts-validation');
 await mkdir(folder, { recursive: true });
 const notes = [];
-for (const provider of ['local', ...(process.argv.includes('--elevenlabs') ? ['elevenlabs'] : [])] as (
-  | 'local'
-  | 'elevenlabs'
-)[]) {
-  for (const [language, text] of [
-    ['en-US', 'This paper explains how attention connects words in a sentence.'],
-    ['de-DE', 'Dieses Paper erklärt, wie Aufmerksamkeit die Wörter in einem Satz miteinander verbindet.'],
-  ]) {
-    const start = performance.now();
-    try {
-      const audio = await providers.synthesize({
-        provider,
-        text,
-        language,
-        model: provider === 'local' ? config.localModel : 'eleven_multilingual_v2',
-        voice: provider === 'local' ? 'Ryan' : 'JBFqnCBsd6RMkjVDRZzb',
-        apiKey: provider === 'local' ? '' : config.elevenlabsKey,
-      });
-      const bytes = Buffer.from(audio.audioBase64, 'base64');
-      const path = resolve(folder, `${provider}-${language}.${audio.mimeType === 'audio/wav' ? 'wav' : 'mp3'}`);
-      await writeFile(path, bytes);
-      notes.push({
-        provider,
-        language,
-        text,
-        generationMs: Math.round(performance.now() - start),
-        durationMs: audio.durationMs,
-        bytes: bytes.length,
-        timing: audio.timing,
-        wordTimesMs: audio.wordTimesMs,
-        path,
-      });
-    } catch (error) {
-      notes.push({ provider, language, error: error instanceof Error ? error.message : 'Generation failed.' });
-    }
+for (const [language, text] of [
+  ['en-US', 'This paper explains how attention connects words in a sentence.'],
+  ['de-DE', 'Dieses Paper erklärt, wie Aufmerksamkeit die Wörter in einem Satz miteinander verbindet.'],
+]) {
+  const start = performance.now();
+  try {
+    const audio = await providers.synthesize({
+      provider: 'elevenlabs',
+      text,
+      language,
+      model: 'eleven_multilingual_v2',
+      voice: 'JBFqnCBsd6RMkjVDRZzb',
+      apiKey: config.elevenlabsKey,
+    });
+    const bytes = Buffer.from(audio.audioBase64, 'base64'),
+      path = resolve(folder, `elevenlabs-${language}.${audio.mimeType === 'audio/wav' ? 'wav' : 'mp3'}`);
+    await writeFile(path, bytes);
+    notes.push({
+      provider: audio.provider,
+      language,
+      text,
+      generationMs: Math.round(performance.now() - start),
+      bytes: bytes.length,
+      timing: audio.timing,
+      wordTimesMs: audio.wordTimesMs,
+      path,
+    });
+  } catch (error) {
+    notes.push({ language, error: error instanceof Error ? error.message : 'Generation failed.' });
   }
 }
-await writeFile(resolve(folder, 'validation.json'), JSON.stringify({ date: new Date().toISOString(), notes }, null, 2));
+await writeFile(
+  resolve(folder, 'api-validation.json'),
+  JSON.stringify({ date: new Date().toISOString(), notes }, null, 2),
+);
 console.log(JSON.stringify(notes, null, 2));

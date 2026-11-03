@@ -16,25 +16,25 @@ import { SpeechProviders } from './providers';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const CLOUD = ['openai', 'elevenlabs'] as const;
-const PROVIDERS: AudioSpeechProvider[] = ['local', ...CLOUD];
-export function speechPreferences(value: unknown, localModel: string): SpeechPreferences {
+const PROVIDERS: AudioSpeechProvider[] = [...CLOUD];
+export function speechPreferences(value: unknown): SpeechPreferences {
   const input = value as Partial<SpeechPreferences> | null;
   const defaults = structuredClone(DEFAULT_SPEECH_PREFERENCES);
-  defaults.connections.local.model = localModel;
   if (!input || typeof input !== 'object') return defaults;
-  const result = { ...defaults, ...input, connections: { ...defaults.connections } };
-  if (!['browser', ...PROVIDERS].includes(result.provider) || typeof result.precompute !== 'boolean')
+  const result: SpeechPreferences = {
+    provider: input.provider ?? defaults.provider,
+    connections: { ...defaults.connections },
+  };
+  if (!['browser', ...PROVIDERS].includes(result.provider))
     throw new HttpError(
       400,
       'speech_settings_invalid',
-      'Choose a supported speech provider and precomputation setting.',
+      'Choose Browser voices, ElevenLabs or OpenAI. Retired GPU model settings require the API-only speech migration.',
     );
   for (const provider of PROVIDERS) {
     const c = { ...defaults.connections[provider], ...input.connections?.[provider] };
     if (typeof c.model !== 'string' || typeof c.voice !== 'string' || !['app', 'personal'].includes(c.credentialSource))
       throw new HttpError(400, 'speech_settings_invalid', 'Choose a supported speech connection.');
-    if (provider === 'local' && (c.model !== localModel || !['Ryan', 'Aiden', 'Serena', 'Vivian'].includes(c.voice)))
-      throw new HttpError(400, 'speech_settings_invalid', 'Choose one of the configured local voices.');
     if (
       provider === 'openai' &&
       (!['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'].includes(c.model) ||
@@ -89,41 +89,30 @@ export class SpeechService {
   }
   async get(owner: string): Promise<SpeechSettings> {
     const r = await this.row(owner);
-    const preferences = speechPreferences(r.preferences, this.config.localModel);
+    const preferences = speechPreferences(r.preferences);
     const credentials = (
       await this.db.query('select provider,secret_id,key_last4 from speech_credentials where owner_id=$1', [owner])
     ).rows;
-    const reachable = await this.providers.localAvailable();
     const providers = {} as SpeechSettings['providers'];
     for (const provider of PROVIDERS) {
       const key = credentials.find((c) => c.provider === provider);
-      const appKeyAvailable =
-        provider === 'local' || Boolean(provider === 'openai' ? this.config.openaiKey : this.config.elevenlabsKey);
+      const appKeyAvailable = Boolean(provider === 'openai' ? this.config.openaiKey : this.config.elevenlabsKey);
       const configured =
-        provider === 'local'
-          ? reachable
-          : preferences.connections[provider].credentialSource === 'personal'
-            ? Boolean(key?.secret_id)
-            : appKeyAvailable;
+        preferences.connections[provider].credentialSource === 'personal' ? Boolean(key?.secret_id) : appKeyAvailable;
       providers[provider] = {
         configured,
-        ...(provider === 'local' ? { reachable } : {}),
         appKeyAvailable,
         personalKey: { configured: Boolean(key?.secret_id), masked: key?.secret_id ? `••••${key.key_last4}` : null },
         message:
-          provider === 'local'
-            ? reachable
-              ? 'Local Qwen3-TTS · English and German · no API cost'
-              : 'Start scripts/local-tts.py on this computer (port 8045).'
-            : provider === 'openai'
-              ? 'Optional paid API. Speech API models shut down on 6 January 2027. No generation until selected.'
-              : 'Uses your ElevenLabs credits. Availability and free quota depend on your account.',
+          provider === 'openai'
+            ? 'Optional paid API. Speech API models shut down on 6 January 2027. No generation until selected.'
+            : 'Uses your ElevenLabs credits. The next sentence is prepared automatically during playback.',
       };
     }
     return { preferences, version: r.version, providers };
   }
   async update(owner: string, input: SpeechPreferences): Promise<SpeechSettings> {
-    const preferences = speechPreferences(input, this.config.localModel);
+    const preferences = speechPreferences(input);
     await this.row(owner);
     await this.db.query(
       'update speech_settings set preferences=$2,version=gen_random_uuid(),updated_at=now() where owner_id=$1',
@@ -156,7 +145,7 @@ export class SpeechService {
           on conflict(owner_id,provider) do update set secret_id=excluded.secret_id,key_last4=excluded.key_last4`,
           [owner, provider, secret, key.slice(-4)],
         );
-        const preferences = speechPreferences(r.preferences, this.config.localModel);
+        const preferences = speechPreferences(r.preferences);
         preferences.connections[provider].credentialSource = 'personal';
         await tx.query(
           'update speech_settings set preferences=$2,version=gen_random_uuid(),updated_at=now() where owner_id=$1',
@@ -173,7 +162,7 @@ export class SpeechService {
     await this.db.transaction(async (tx) => {
       const r = await this.row(owner, tx, true);
       await tx.query('delete from speech_credentials where owner_id=$1 and provider=$2', [owner, provider]);
-      const preferences = speechPreferences(r.preferences, this.config.localModel);
+      const preferences = speechPreferences(r.preferences);
       preferences.connections[provider].credentialSource = 'personal';
       await tx.query(
         'update speech_settings set preferences=$2,version=gen_random_uuid(),updated_at=now() where owner_id=$1',
@@ -189,7 +178,7 @@ export class SpeechService {
     const r = await this.row(owner);
     if (r.version !== input.version)
       throw new HttpError(409, 'speech_settings_changed', 'Speech settings changed. Reload the reader before playing.');
-    const preferences = speechPreferences(r.preferences, this.config.localModel),
+    const preferences = speechPreferences(r.preferences),
       provider = preferences.provider;
     if (provider === 'browser')
       throw new HttpError(
@@ -198,16 +187,15 @@ export class SpeechService {
         'Browser speech runs on this device. Select an audio provider first.',
       );
     const connection = preferences.connections[provider];
-    let apiKey =
-      provider === 'openai' ? this.config.openaiKey : provider === 'elevenlabs' ? this.config.elevenlabsKey : '';
-    if (provider !== 'local' && connection.credentialSource === 'personal') {
+    let apiKey = provider === 'openai' ? this.config.openaiKey : this.config.elevenlabsKey;
+    if (connection.credentialSource === 'personal') {
       const key = await this.db.query(
         'select v.decrypted_secret from speech_credentials c join vault.decrypted_secrets v on v.id=c.secret_id where c.owner_id=$1 and c.provider=$2',
         [owner, provider],
       );
       apiKey = key.rows[0]?.decrypted_secret ?? '';
     }
-    if (provider !== 'local' && !apiKey)
+    if (!apiKey)
       throw new HttpError(
         503,
         'speech_not_configured',
