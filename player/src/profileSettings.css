@@ -80,6 +80,10 @@
   display: block;
   margin-bottom: 12px;
 }
+.profile-narration-display {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 0;
+}
 .profile-sources label {
   display: flex;
   gap: 10px;

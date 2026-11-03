@@ -23,6 +23,7 @@ interface Props {
   /** The tour is still being written (or stopped being written); null for a finished one. */
   growth?: Growth | null;
   readingSettings?: ReactNode;
+  showNarration?: boolean;
   speed: number;
   muted: boolean;
   onToggle(): void;
@@ -50,6 +51,7 @@ export function ControlBar({
   state,
   growth,
   readingSettings,
+  showNarration = true,
   speed,
   muted,
   onToggle,
@@ -133,14 +135,14 @@ export function ControlBar({
     }
     const spoken = Math.round((word!.offsetTop - box.offsetTop) / line);
     if (spoken < first || spoken > first + 1) box.scrollTo({ top: Math.max(0, spoken - 1) * line, behavior: 'smooth' });
-  }, [state.word, state.index, state.waiting]);
+  }, [state.word, state.index, state.waiting, showNarration]);
 
   useEffect(() => {
     textRef.current?.scrollTo({ top: 0 });
   }, [state.index]);
 
   return (
-    <footer className="controls">
+    <footer className={`controls${showNarration ? '' : ' without-captions'}`}>
       <Timeline
         steps={steps}
         chapters={chapters}
@@ -191,35 +193,42 @@ export function ControlBar({
             ? 'No tour'
             : `${formatTime(elapsedAt(clock, state, steps))} / ${clock.measured || muted ? '' : '~'}${formatTime(clock.total)}${clock.pending > 0 ? '+' : ''}`}
         </span>
-      </div>
-
-      <div className="narration">
-        {current ? (
-          <>
-            <span className="speaker">{current.step.speaker ?? DEFAULT_SPEAKER}</span>
-            <div className="narration-text" ref={textRef} aria-live="off">
-              {state.status === 'idle' && <span className="hint">Press play to start. </span>}
-              {current.words.map((w, i) => (
-                <span
-                  key={i}
-                  className={`w${i <= state.word ? ' spoken' : ''}${i === state.word && playing ? ' now' : ''}`}
-                >
-                  {w}{' '}
-                </span>
-              ))}
-              {/* Everything written has been played: say what the tour waits for, on the line after the last word. */}
-              {state.waiting && growth && growth.phase !== 'stopped' && (
-                <span className="writing-status" role="status">
-                  <i aria-hidden="true" />
-                  {writingLabel(growth)}…
-                </span>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="narration-text muted">Add a tour.json to this paper folder to get a narrated tour.</div>
+        {!showNarration && state.waiting && growth && growth.phase !== 'stopped' && (
+          <span className="transport-waiting" role="status">
+            {writingLabel(growth)}…
+          </span>
         )}
       </div>
+
+      {showNarration && (
+        <div className="narration">
+          {current ? (
+            <>
+              <span className="speaker">{current.step.speaker ?? DEFAULT_SPEAKER}</span>
+              <div className="narration-text" ref={textRef} aria-live="off">
+                {state.status === 'idle' && <span className="hint">Press play to start. </span>}
+                {current.words.map((w, i) => (
+                  <span
+                    key={i}
+                    className={`w${i <= state.word ? ' spoken' : ''}${i === state.word && playing ? ' now' : ''}`}
+                  >
+                    {w}{' '}
+                  </span>
+                ))}
+                {/* Everything written has been played: say what the tour waits for, on the line after the last word. */}
+                {state.waiting && growth && growth.phase !== 'stopped' && (
+                  <span className="writing-status" role="status">
+                    <i aria-hidden="true" />
+                    {writingLabel(growth)}…
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="narration-text muted">Add a tour.json to this paper folder to get a narrated tour.</div>
+          )}
+        </div>
+      )}
 
       <div className="settings">
         {unclear && <NotClear {...unclear} />}

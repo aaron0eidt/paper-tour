@@ -26,6 +26,7 @@ export function AgentActivity({
   documentId,
   mode,
   playback,
+  showNarration = true,
   onSource,
   onAsk,
   onTogglePlayback,
@@ -33,6 +34,7 @@ export function AgentActivity({
   documentId: string;
   mode: ActivityKind;
   playback: CompanionPlayback;
+  showNarration?: boolean;
   onSource?(id: string): void;
   onAsk(): void;
   onTogglePlayback(): void;
@@ -62,9 +64,12 @@ export function AgentActivity({
   const liveOperations = active || !!local?.foreground;
   const speaking = !historical && playback.speaking;
   const presence = companionPresence(run, mode, { ...playback, speaking }, !!local?.foreground);
-  const sentence = spokenSentence({ ...playback, speaking });
   const busy = presence.mood === 'working';
-  const peek = !quiet && (busy || speaking);
+  const sentence =
+    showNarration && !historical && !busy && presence.mood !== 'attention'
+      ? spokenSentence({ ...playback, speaking }, true)
+      : undefined;
+  const peek = !quiet && (busy || (speaking && showNarration));
   const tourPlayback = !historical && mode === 'tour' && playback.canPlay && (!run || run.status === 'completed');
   const operations = tourPlayback && !allActions ? undefined : allActions ? run?.operations : run?.operations.slice(-3);
   const lastDraft = liveOperations ? [...(run?.operations ?? [])].reverse().find((op) => op.draft)?.draft : undefined;
@@ -223,7 +228,9 @@ export function AgentActivity({
               </span>
             </div>
             {!historical && context && <p className="agent-speech-context">{context}</p>}
-            <p className="agent-message">{speaking ? speech : presence.message}</p>
+            <p className="agent-message">
+              {sentence ? speech : speaking ? 'Follow along in the player below.' : presence.message}
+            </p>
             {tourPlayback && playback.step && (
               <div className="activity-queue-progress">
                 <span>

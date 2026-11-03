@@ -17,6 +17,13 @@ shows the page and tour position; past generation actions stay in the history.
 Asking through the companion opens the existing document conversation, including
 from Read aloud, and keeps the reading checkpoint for the way back.
 
+Settings > Reading > Spoken text selects the bottom player, the agent bubble,
+or both. The default is the bottom player alone. This browser preference updates
+open readers immediately without restarting speech, including across tabs. It
+only changes caption placement: playback controls and real work/status messages
+remain available. The bubble uses the current narration sentence; opening the
+card retains that sentence when playback is paused.
+
 Vercel AI SDK
 -------------
 The installed SDK owns transport and structured partial parsing:

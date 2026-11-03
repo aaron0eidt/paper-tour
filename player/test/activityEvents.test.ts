@@ -72,6 +72,10 @@ test('the companion shows the sentence at the actual narrated word and stays sil
   };
   assert.deepEqual(spokenSentence(playback), { words: ['Now', 'the', 'second', 'one.'], current: 2 });
   assert.equal(spokenSentence({ ...playback, speaking: false }), undefined);
+  assert.deepEqual(spokenSentence({ ...playback, speaking: false }, true), {
+    words: ['Now', 'the', 'second', 'one.'],
+    current: -1,
+  });
   assert.equal(spokenSentence({ ...playback, word: -1 }), undefined);
   assert.deepEqual(spokenSentence({ ...playback, word: 1 }), { words: ['First', 'sentence.'], current: 1 });
 });

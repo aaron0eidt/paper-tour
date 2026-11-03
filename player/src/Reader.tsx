@@ -5,7 +5,7 @@ import type { View } from './camera';
 import { readingTour, readingStepOnPage, readingStepForTarget, DEFAULT_READING_OPTIONS } from './readAloud';
 import { useReadingSpeech } from './useReadingSpeech';
 import { AgentActivity } from './activity/AgentActivity';
-import { getMaxAutoZoom, subscribeReadingPreferences } from './readerPreferences';
+import { getMaxAutoZoom, getNarrationDisplay, narrationSurfaces, subscribeReadingPreferences } from './readerPreferences';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
 import type { CameraCommand, EngineState } from './engine';
 import { layoutDeck, layoutPages } from './layout';
@@ -152,6 +152,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [engine, setEngine] = useState<TourEngine | null>(null);
   const camera = useMemo(() => new Camera(), []);
   const maxAutoZoom = useSyncExternalStore(subscribeReadingPreferences, getMaxAutoZoom) / 100;
+  const narrationDisplay = useSyncExternalStore(subscribeReadingPreferences, getNarrationDisplay);
+  const captions = narrationSurfaces(narrationDisplay);
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
@@ -1640,6 +1642,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           <BoardSplit board={state.board} playback={boardPlayback(state, active?.steps ?? [])}
             activity={documentId && (readAloud || tab === 'tour' || mainState.status === 'playing' || !!away || !!answer || isTourGenerationActive(manifest?.tourGeneration)) ? <AgentActivity
               documentId={documentId}
+              showNarration={captions.agent}
               mode={answer || away ? 'answer' : readAloud ? 'reading' : 'tour'}
               playback={{
                 playing: state.status === 'playing',
@@ -1797,6 +1800,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
 
         {active && clock && (
           <ControlBar
+            showNarration={captions.player || !documentId}
             steps={active.steps}
             chapters={active.tour.chapters.map((chapter) => chapter.title)}
             clock={clock}

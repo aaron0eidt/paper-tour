@@ -26,12 +26,16 @@ export function currentActivity(runs: ActivityRun[], mode: ActivityKind, foregro
 }
 
 /** The same word callbacks that drive PDF marks drive the companion's sentence. No second speech clock. */
-export function spokenSentence(playback: CompanionPlayback): { words: readonly string[]; current: number } | undefined {
-  if (!playback.speaking || playback.word < 0 || !playback.words.length) return;
-  const start = sentenceStart(playback.words, playback.word);
-  let end = Math.min(playback.word, playback.words.length - 1);
+export function spokenSentence(
+  playback: CompanionPlayback,
+  retain = false,
+): { words: readonly string[]; current: number } | undefined {
+  if ((!retain && (!playback.speaking || playback.word < 0)) || !playback.words.length) return;
+  const at = Math.max(0, Math.min(playback.word, playback.words.length - 1));
+  const start = sentenceStart(playback.words, at);
+  let end = at;
   while (end < playback.words.length - 1 && !SENTENCE_END.test(playback.words[end])) end++;
-  return { words: playback.words.slice(start, end + 1), current: playback.word - start };
+  return { words: playback.words.slice(start, end + 1), current: playback.speaking ? playback.word - start : -1 };
 }
 
 export function companionPresence(
