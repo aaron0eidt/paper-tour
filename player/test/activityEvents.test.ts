@@ -14,6 +14,7 @@ import { activityEvents } from '../src/components/activityEvents';
 import type { GenerationEvent } from '../../shared/activity';
 import type { ActivityRun } from '../../shared/agentActivity';
 import { companionPresence, currentActivity, spokenSentence } from '../src/activity/presence';
+import { companionPlacement } from '../src/activity/placement';
 const event = (id: string, type: string): GenerationEvent => ({ id, type, at: '2026-10-30T00:00:00Z', data: {} });
 
 test('current attempt excludes older failed drafts without deleting their history', () => {
@@ -81,4 +82,37 @@ test('preparation state cannot label actual speech as paused or failed', () => {
   assert.equal(companionPresence({ ...paused, status: 'failed' }, 'reading', playback).mood, 'speaking');
   assert.equal(companionPresence(paused, 'reading', { ...playback, speaking: false }).mood, 'paused');
   assert.equal(companionPresence(paused, 'reading', { ...playback, speaking: false }, true).mood, 'working');
+});
+
+test('expanding a composer keeps the sphere stationary when there is room beside it', () => {
+  const frame = { left: 0, right: 1000, top: 0, bottom: 800, width: 1000 };
+  const composer = { left: 200, right: 800, top: 720, bottom: 780, width: 600 };
+  const folded = companionPlacement(frame, composer, 80, 18, 14, false);
+  const expanded = companionPlacement(frame, { ...composer, top: 600 }, 80, 18, 14, false);
+  assert.equal(expanded.bottom, folded.bottom);
+  assert.equal(expanded.right, folded.right);
+  assert.equal(expanded.beside, true);
+  // The bubble clears the tray even though the sphere itself does not move.
+  assert.equal(frame.bottom - expanded.bottom - 80 - expanded.bubbleGap, 586);
+});
+test('narrow layouts stack above the composer and short layouts keep the popup inside the reader', () => {
+  const frame = { left: 0, right: 400, top: 100, bottom: 800, width: 400 };
+  const composer = { left: 12, right: 388, top: 680, bottom: 788, width: 376 };
+  const placement = companionPlacement(frame, composer, 60, 16, 14, false);
+  assert.equal(placement.beside, false);
+  assert.equal(placement.bottom, 134);
+  assert.equal(placement.width + placement.right <= frame.width, true);
+  const shortFrame = { ...frame, bottom: 300 };
+  const short = companionPlacement(shortFrame, { ...composer, top: 130, bottom: 288 }, 60, 16, 14, false);
+  assert.equal(short.sheet, true);
+  assert.equal(shortFrame.bottom - short.bottom - 60 + short.sheetTop, 114);
+  assert.equal(short.sheetRoom, 172);
+});
+test('artwork keeps the character in its own footer rather than following the question tray', () => {
+  const frame = { left: 200, right: 1200, top: 100, bottom: 900, width: 1000 };
+  const composer = { left: 220, right: 800, top: 500, bottom: 550, width: 580 };
+  const placement = companionPlacement(frame, composer, 82, 14, 14, true);
+  assert.equal(placement.bottom, 14);
+  assert.equal(placement.bubbleGap, 14);
+  assert.equal(placement.beside, true);
 });

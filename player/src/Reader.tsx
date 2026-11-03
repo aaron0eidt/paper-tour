@@ -1649,6 +1649,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 word: state.word,
                 page: currentPage,
                 title: active?.tour.chapters[active.steps[state.index]?.chapterIndex ?? 0]?.title,
+                step: active?.steps.length ? { current: state.index + 1, total: active.steps.length } : undefined,
               }}
               onSource={navigateTo}
               onTogglePlayback={() => active?.toggle()}

@@ -1,5 +1,33 @@
 import type { ActivityOperation as Operation, OperationKind } from '../../../shared/agentActivity';
 
+export function OperationMark({ state, active }: { state: Operation['state'] | 'interrupted'; active: boolean }) {
+  if (state === 'running' && active) return <span className="activity-spinner" />;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {state === 'completed' ? (
+        <path d="m5 12 4 4L19 6" />
+      ) : state === 'failed' ? (
+        <>
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M12 7.5v5M12 16.5h.01" />
+        </>
+      ) : (
+        <path d="M7 12h10" />
+      )}
+    </svg>
+  );
+}
+
 export const elapsed = (ms: number) =>
   ms < 60_000 ? `${Math.max(0, Math.floor(ms / 1000))}s` : `${Math.floor(ms / 60_000)}m ${Math.floor(ms / 1000) % 60}s`;
 
@@ -26,7 +54,7 @@ export function ActivityGlyph({ kind }: { kind: OperationKind }) {
       height="18"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -87,7 +115,7 @@ export function ActivityOperation({
         )}
       </div>
       <span className="activity-operation-mark" aria-label={running ? 'In progress' : state}>
-        {running ? <span /> : state === 'completed' ? '✓' : state === 'failed' ? '!' : '−'}
+        <OperationMark state={state} active={active} />
       </span>
     </li>
   );

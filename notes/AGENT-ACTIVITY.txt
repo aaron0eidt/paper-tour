@@ -9,6 +9,11 @@ sphere opens real operations, public drafts and persisted history. Theme tokens,
 keyboard controls, reduced motion and the detailed tour inspector remain intact.
 With artwork open, a small footer holds the sphere and compact speech bubble
 without narrowing the PDF or covering the plot. Closing the card only hides it.
+When space permits, the sphere shares the question bar's baseline. Expanding the
+tray moves only the bubble, keeping the character still. Narrow layouts stack;
+short windows keep the scrollable popup inside the reader. Measurements use the
+actual controls, not their transparent full-width lane. During playback the card
+shows the page and tour position; past generation actions stay in the history.
 Asking through the companion opens the existing document conversation, including
 from Read aloud, and keeps the reading checkpoint for the way back.
 

@@ -15,11 +15,15 @@
 }
 .reader-agent-anchor {
   --agent-size: 82px;
+  --agent-edge: 18px;
   position: absolute;
-  right: 22px;
-  bottom: var(--agent-dock-clearance, 88px);
+  right: var(--agent-dock-right, var(--agent-edge));
+  bottom: var(--agent-dock-clearance, var(--agent-edge));
   z-index: 35;
   max-width: calc(100% - 32px);
+  transition:
+    bottom 180ms ease,
+    right 180ms ease;
 }
 .reader-agent {
   position: relative;
@@ -107,7 +111,7 @@
 .agent-speech-peek,
 .reader-agent-card {
   position: absolute;
-  bottom: calc(100% + 17px);
+  bottom: calc(100% + var(--agent-bubble-gap, 14px));
   right: 0;
   background: var(--panel);
   border: 1px solid var(--border-strong);
@@ -121,7 +125,7 @@
   position: absolute;
   width: 13px;
   height: 13px;
-  right: 33px;
+  right: calc(var(--agent-size) / 2 - 7px);
   bottom: -8px;
   background: var(--panel);
   border-right: 1px solid var(--border-strong);
@@ -139,7 +143,7 @@
   background: var(--panel);
   border-color: var(--border-accent);
 }
-.agent-speech-peek > .agent-spoken-sentence {
+.agent-peek-message {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -179,6 +183,8 @@
 }
 .agent-peek-step-state {
   color: var(--accent);
+  display: inline-flex;
+  align-items: center;
 }
 .agent-peek-step-state[data-state='failed'] {
   color: var(--warn);
@@ -193,7 +199,7 @@
   max-height: min(700px, var(--agent-card-room, calc(100dvh - 220px)));
   display: flex;
   flex-direction: column;
-  border-radius: 19px;
+  border-radius: 18px;
 }
 .reader-agent-card-head {
   display: flex;
@@ -218,10 +224,9 @@
 .reader-agent .activity-icon-button {
   display: grid;
   place-items: center;
-  min-width: 28px;
-  min-height: 28px;
+  min-width: 32px;
+  min-height: 32px;
   padding: 0;
-  font-size: 23px;
   color: var(--muted);
   border: 0;
   background: transparent;
@@ -236,14 +241,14 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   padding: 0 18px;
-  border-radius: 0 0 19px 19px;
+  border-radius: 0 0 18px 18px;
 }
 .activity-live-status {
   display: flex;
   align-items: center;
   gap: 7px;
   padding-top: 17px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .activity-live-status strong {
   color: var(--accent);
@@ -280,7 +285,7 @@
 }
 .agent-speech-context {
   margin: 12px 0 -5px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -289,7 +294,7 @@
   gap: 8px;
   margin-top: 13px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .activity-queue-progress progress {
   width: 100%;
@@ -321,8 +326,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
-  font-size: 11.5px;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
   border-radius: 8px;
 }
 .reader-agent .agent-playback-button {
@@ -377,18 +383,14 @@
 }
 .activity-operation-icon {
   flex: none;
-  width: 28px;
+  width: 24px;
   height: 28px;
   display: grid;
   place-items: center;
   color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 9px;
 }
 .activity-operation[data-state='running'] .activity-operation-icon {
   color: var(--accent);
-  background: var(--accent-soft);
-  border-color: var(--border-accent);
 }
 .activity-operation-content {
   flex: 1;
@@ -418,7 +420,8 @@
   color: var(--accent);
   font-size: 12px;
 }
-.activity-operation-mark > span {
+.activity-spinner {
+  display: inline-block;
   width: 12px;
   height: 12px;
   border: 1.5px solid var(--line);
@@ -530,7 +533,7 @@
   padding: 2px 0;
   text-align: left;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .activity-history-toggle span {
   font-size: 10px;
@@ -589,8 +592,7 @@
   --agent-footer: 104px;
 }
 .board-frame.with-agent-board > .reader-agent-anchor {
-  bottom: 13px;
-  right: 20px;
+  --agent-edge: 14px;
 }
 .board-frame.with-agent-board .board-view {
   bottom: var(--agent-footer);
@@ -617,7 +619,7 @@
 .board-frame.with-agent-board .agent-peek-steps {
   display: none;
 }
-.board-frame.with-agent-board .agent-speech-peek > .agent-spoken-sentence {
+.board-frame.with-agent-board .agent-peek-message {
   -webkit-line-clamp: 2;
 }
 @container board-split (orientation: portrait) or (max-width: 560px) {
@@ -626,8 +628,7 @@
   }
   .board-frame.with-agent-board > .reader-agent-anchor {
     --agent-size: 56px;
-    bottom: 10px;
-    right: 16px;
+    --agent-edge: 16px;
   }
   .board-frame.with-agent-board .reader-agent-card {
     width: min(366px, calc(100cqw - 32px));
@@ -640,7 +641,7 @@
 @media (max-width: 600px) {
   .reader-agent-anchor {
     --agent-size: 60px;
-    right: 16px;
+    --agent-edge: 16px;
   }
   .reader-agent-card,
   .agent-speech-peek {
@@ -655,6 +656,20 @@
   .agent-message {
     font-size: 13px;
   }
+}
+/* In a short reader, anchor the popup to the available stage instead of pushing it above the toolbar. */
+.reader-agent-anchor[data-panel='sheet'] :is(.reader-agent-card, .agent-speech-peek) {
+  top: var(--agent-sheet-top);
+  bottom: auto;
+  right: 0;
+  max-height: var(--agent-sheet-room);
+}
+.reader-agent-anchor[data-panel='sheet'] :is(.reader-agent-card, .agent-speech-peek)::after {
+  display: none;
+}
+.reader-agent-anchor[data-panel='sheet'] .agent-speech-peek {
+  width: min(292px, var(--agent-card-width));
+  overflow: auto;
 }
 @keyframes agent-water {
   from {
@@ -678,9 +693,12 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .reader-agent-anchor {
+    transition: none;
+  }
   .agent-avatar-water,
   .agent-avatar-cloud,
-  .activity-operation-mark > span {
+  .activity-spinner {
     animation: none !important;
   }
   .reader-agent .agent-avatar-sphere,

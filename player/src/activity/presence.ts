@@ -9,6 +9,7 @@ export interface CompanionPlayback {
   word: number;
   page: number;
   title?: string;
+  step?: { current: number; total: number };
 }
 export type CompanionMood = 'ready' | 'working' | 'speaking' | 'paused' | 'attention';
 
@@ -75,7 +76,7 @@ export function companionPresence(
     return {
       mood: 'paused' as const,
       label: 'Paused',
-      message: 'Take your time. We can continue from here, or take a closer look at this page.',
+      message: 'We can continue here, or take a closer look at this page.',
     };
   return {
     mood: 'ready' as const,

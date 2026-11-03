@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { activeActivity, type ActivityKind } from '../../../shared/agentActivity';
-import { PauseIcon, PlayIcon } from '../components/icons';
+import { CloseIcon, PauseIcon, PlayIcon } from '../components/icons';
+import { SparkIcon } from '../ask/icons';
 import { GenerationActivity } from '../components/GenerationActivity';
 import { AgentAvatar } from './AgentAvatar';
-import { ActivityOperation, elapsed } from './ActivityOperation';
+import { ActivityOperation, OperationMark, elapsed } from './ActivityOperation';
 import { companionPresence, currentActivity, spokenSentence, type CompanionPlayback } from './presence';
 import { useDocumentActivity } from './useDocumentActivity';
 import { useActivityPlacement } from './useActivityPlacement';
@@ -64,7 +65,8 @@ export function AgentActivity({
   const sentence = spokenSentence({ ...playback, speaking });
   const busy = presence.mood === 'working';
   const peek = !quiet && (busy || speaking);
-  const operations = allActions ? run?.operations : run?.operations.slice(-3);
+  const tourPlayback = !historical && mode === 'tour' && playback.canPlay && (!run || run.status === 'completed');
+  const operations = tourPlayback && !allActions ? undefined : allActions ? run?.operations : run?.operations.slice(-3);
   const lastDraft = liveOperations ? [...(run?.operations ?? [])].reverse().find((op) => op.draft)?.draft : undefined;
   const canControlPreparation =
     run?.controllable &&
@@ -166,14 +168,14 @@ export function AgentActivity({
             {presence.label}
             <span>{busy && run ? elapsed(now - Date.parse(run.startedAt)) : '···'}</span>
           </span>
-          {speaking ? speech : <span>{presence.message}</span>}
+          <span className="agent-peek-message">{speaking ? speech : presence.message}</span>
           {busy && !!operations?.length && (
             <span className="agent-peek-steps">
               {operations.slice(-3).map((operation) => (
                 <span key={operation.id}>
                   <span>{operation.label}</span>
                   <span className="agent-peek-step-state" data-state={operation.state}>
-                    {operation.state === 'completed' ? '✓' : operation.state === 'failed' ? '!' : '·'}
+                    <OperationMark state={operation.state} active={liveOperations} />
                   </span>
                 </span>
               ))}
@@ -186,12 +188,12 @@ export function AgentActivity({
           <header className="reader-agent-card-head">
             <strong>
               <span className="agent-header-spark" aria-hidden="true">
-                ✦
+                <SparkIcon />
               </span>{' '}
               Paper Tour agent
             </strong>
             <button type="button" className="activity-icon-button" aria-label="Close agent activity" onClick={close}>
-              ×
+              <CloseIcon />
             </button>
           </header>
           <div className="agent-card-scroll">
@@ -220,9 +222,17 @@ export function AgentActivity({
                       : ''}
               </span>
             </div>
-            {speaking && context && <p className="agent-speech-context">{context}</p>}
+            {!historical && context && <p className="agent-speech-context">{context}</p>}
             <p className="agent-message">{speaking ? speech : presence.message}</p>
-            {run?.progress && (
+            {tourPlayback && playback.step && (
+              <div className="activity-queue-progress">
+                <span>
+                  Step {playback.step.current} of {playback.step.total}
+                </span>
+                <progress max={playback.step.total} value={playback.step.current} aria-label="Tour position" />
+              </div>
+            )}
+            {!tourPlayback && run?.progress && (
               <div className="activity-queue-progress">
                 <span>
                   {run.progress.completed} / {run.progress.total} {run.progress.label}
@@ -261,7 +271,7 @@ export function AgentActivity({
                 </button>
               </div>
             )}
-            {!!run?.operations.length && (
+            {!!operations?.length && run && (
               <div className="activity-transcript">
                 <div className="activity-actions-heading">
                   <span>{allActions ? 'Actions and public drafts' : 'Recent activity'}</span>

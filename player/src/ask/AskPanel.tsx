@@ -535,7 +535,9 @@ export function AskPanel(props: AskPanelProps) {
         <span>{props.resumeLabel ?? 'Back to the tour'}</span>
       </button>,
     );
-  const open = !!status || !!questions.length || actions.length > 0 || !!voice.error || voiceBusy;
+  // Restoring a saved conversation must not open its old answer over an unrelated tour step.
+  const inactiveAnswer = phase.kind === 'answered' && !away && !focused && !typing;
+  const open = (!inactiveAnswer && (!!status || !!questions.length || actions.length > 0)) || !!voice.error || voiceBusy;
   // Keep the last content while the tray folds away, so it does not vanish before it closes.
   const tray = useRef<ReactNode>(null);
   const order = (i: number) => ({ '--i': i }) as CSSProperties;
@@ -660,7 +662,7 @@ export function AskPanel(props: AskPanelProps) {
                 ? 'Select a region on the page…'
                 : props.selection
                   ? 'Ask about this region…'
-                  : phase.kind === 'answered'
+                  : phase.kind === 'answered' && !inactiveAnswer
                     ? 'Ask a follow-up…'
                     : 'Ask about this document…'
             }
