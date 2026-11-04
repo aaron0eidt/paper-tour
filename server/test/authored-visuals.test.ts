@@ -185,3 +185,24 @@ test('hostile SVG dimensions are rejected before any raster allocation', () => {
     assert.equal(inspection.canvas, undefined);
   }
 });
+
+test('named array data errors expose the actual runtime contract for targeted repair', async () => {
+  const broken = {
+    ...attention,
+    code: `({data,math,svg})=>{const values=data.values.values||data.values;const mean=values.map(x=>x/2);math.record('mean',mean);return svg.scene(svg.text(30,40,mean.join(',')));}`,
+  };
+  await assert.rejects(renderProgramFrame(broken, 0), /use data\[name\] directly.*iterator method/);
+  let repairs = 0;
+  const repaired = await authorAndInspectVisual(broken, {
+    narration: 'Halve the values.', evidence: 'Illustrative input.',
+    repair: async (feedback) => {
+      repairs++;
+      assert.match(feedback.problems.join(';'), /use data\[name\] directly/);
+      return { ...broken, code: broken.code.replace('data.values.values||data.values', 'data.values') };
+    },
+  });
+  assert.equal(repairs, 1);
+  if (repaired.kind !== 'program') throw Error('Expected the repaired program');
+  const frame = await renderProgramFrame(repaired, 1);
+  assert.deepEqual(frame.calculations, [{ label: 'mean', value: [5, 0] }]);
+});
