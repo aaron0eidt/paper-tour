@@ -403,7 +403,7 @@
   text-align: right;
 }
 .reader-toolbar .reader-ids-button {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
 }
 .reader-toolbar button.active {

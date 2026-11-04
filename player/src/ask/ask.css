@@ -39,6 +39,58 @@
   pointer-events: none;
 }
 
+/* The lane (a "Your turn" card over the question bar) keeps to this share of the stage: on a short window the card's hints
+   scroll inside it, so the task the tour points at keeps room above the lane. It never squeezes the card below its head,
+   two lines of the task, one hint and the buttons, nor while the question tray is open (which is the learner's choice). */
+.ask-lane {
+  display: flex;
+  flex-direction: column;
+  max-height: max(60%, 18rem);
+}
+
+.ask-lane:has(> .ask.expanded) {
+  max-height: none;
+}
+
+.ask-lane > .ask.ask-dock {
+  flex: none;
+}
+
+.ask-lane > .coach-card {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.ask-lane > .coach-card > * {
+  flex: none;
+}
+
+.ask-lane > .coach-card > .coach-prompt {
+  flex: 0 1 auto;
+  min-height: 3em;
+}
+
+/* The hint list scrolls from its end, so the hint that has just arrived is the one in view. */
+.ask-lane > .coach-card > .coach-hints-live {
+  display: flex;
+  flex-direction: column-reverse;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.ask-lane > .coach-card > .coach-hints-live:not(:empty) {
+  min-height: 4.5rem;
+}
+
+.ask-lane > .coach-card > .coach-hints-live > .coach-hints {
+  flex: none;
+}
+
 /* The tray expands upward inside the floating card, without resizing the PDF. While the tour plays the
    card is just the bar; its width and the bar never change, so a control stays under the pointer when
    the learner engages and the tray opens above it. */
@@ -478,13 +530,14 @@
   max-height: min(240px, 28dvh);
   overflow-y: auto;
 }
+/* The mic and the region picker are one pair of round controls: quiet until the pointer comes, then lit alike. */
 .ask-mic {
   flex: none;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--text);
+  border: 1px solid var(--ask-edge);
+  background: var(--surface-subtle);
+  color: var(--muted);
   border-radius: 50%;
   width: 32px;
   height: 32px;
@@ -493,9 +546,16 @@
   touch-action: none;
   user-select: none;
 }
-.ask-mic.recording {
+.ask-mic:not(:disabled):hover {
+  color: var(--accent);
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+.ask-mic.recording,
+.ask-mic.recording:hover {
   border-color: var(--error);
   background: var(--error-surface);
+  color: var(--error-ink);
 }
 .ask-mic:disabled {
   opacity: 0.4;
@@ -635,12 +695,12 @@
   border: 1px solid var(--ask-edge);
   border-radius: 50%;
   color: var(--muted);
-  background: rgba(255,255,255,.025);
+  background: var(--surface-subtle);
 }
 .ask-region:hover, .ask-region.selected {
   color: var(--accent);
-  border-color: rgba(126,166,255,.4);
-  background: rgba(126,166,255,.1);
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
 }
 .ask-selection-chip {
   display: flex;

@@ -6,7 +6,7 @@ import type { BBox, CameraAction, Region } from './types';
 import { stageRect, toStage } from './layout';
 import type { Layout, PageBox } from './layout';
 import { unionRect } from './resolve';
-import type { Resolver } from './resolve';
+import type { Resolver, TargetKind } from './resolve';
 
 export interface View {
   cx: number;
@@ -53,8 +53,13 @@ const SETTLE_MS = 160;
 export const READ_TEXT_PX = 12.5;
 /** Marks kept in frame never shrink the type below this. */
 export const MIN_TEXT_PX = 11;
-/** Whatever floats over the stage may take at most this share of either side. */
-const MAX_INSET_SHARE = 0.4;
+/**
+ * Whatever floats over the stage may take all of either side but this much (and never less than the share below). It only
+ * guards against a nonsense measurement: a card that really is taller (the question bar under a "Your turn" card with its
+ * hints open on a short window) must still be cleared, or the target the tour points at ends up under it.
+ */
+export const MIN_FREE_PX = 64;
+export const MIN_INSET_SHARE = 0.4;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -80,9 +85,10 @@ export interface FreeArea extends Viewport {
 
 export function freeArea(vp: Viewport, insets: Insets = NO_INSETS): FreeArea {
   const axis = (a: number, b: number, size: number): [number, number] => {
-    const limit = size * MAX_INSET_SHARE;
+    const limit = Math.max(size * MIN_INSET_SHARE, size - MIN_FREE_PX);
     const lo = clamp(a, 0, limit);
-    const hi = clamp(b, 0, limit);
+    // Both sides together leave the same room.
+    const hi = clamp(b, 0, limit - lo);
     return [lo, hi];
   };
   const [left, right] = axis(insets.left, insets.right, vp.width);
@@ -313,11 +319,25 @@ export function frameFor(action: CameraAction, resolver: Resolver, layout: Layou
     return { view: slideView(page, layout, vp, options.insets, options.maxZoom), rect: [page.x, page.y, page.x + page.width, page.y + page.height], page: target.page };
   // Text focus keeps the page legible in context. Deliberate zoom commands can
   // inspect detail, except while a side explanation needs the full paper width.
-  const view =
+  let view =
     action.type === 'focus' || (options.fitWidth && !options.slide)
       ? focusView(target.rect, page, layout, vp, opts)
       : zoomView(target.rect, action.padding ?? DEFAULT_ZOOM_PADDING, layout, vp, opts);
+  if (!options.slide && OBJECT_KINDS.includes(resolver.kind(action.target) ?? 'page')) view = wholeObject(view, target.rect, layout, vp, options.insets);
   return { view, rect, page: target.page };
+}
+
+const OBJECT_KINDS: (TargetKind | 'page')[] = ['figure', 'panel', 'equation'];
+
+/**
+ * A figure or equation is shown whole. Where the view keeps the page's reading width (a board beside the stage, a plain
+ * focus on a figure) but the object is taller than the free area, zoom out until it fits, as a zoom does anyway.
+ */
+function wholeObject(view: View, rect: BBox, layout: Layout, vp: Viewport, insets: Insets = NO_INSETS): View {
+  const free = freeArea(vp, insets);
+  const fits = Math.max(MIN_ZOOM, (free.height * 0.96) / Math.max(1, rect[3] - rect[1]));
+  if (view.s <= fits) return view;
+  return viewAt({ x: view.cx + free.dx / view.s, y: (rect[1] + rect[3]) / 2 }, fits, layout, vp, insets);
 }
 
 export function cameraView(action: CameraAction, resolver: Resolver, layout: Layout, vp: Viewport, options: CameraOptions = {}): View | null {
