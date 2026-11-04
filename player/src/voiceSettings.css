@@ -195,3 +195,17 @@
   .playback-panel { position: fixed; left: 12px; right: 12px; width: auto; bottom: calc(var(--audio-controls-height, 84px) + 12px); max-height: calc(100dvh - var(--audio-controls-height, 84px) - 24px); }
 }
 @media (pointer: coarse) { .playback-panel-close { width: 40px; height: 40px; } .siri-management > summary, .audio-reading-settings > summary { min-height: 44px; align-content: center; } }
+
+/* Announce errors without adding a grid row or moving the player/PDF. Details live in Audio. */
+.speech-error-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.playback-options > summary[data-error] {
+  color: var(--danger, #b9584f);
+  border-color: currentColor;
+}

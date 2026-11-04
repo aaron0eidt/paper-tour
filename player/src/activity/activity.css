@@ -682,3 +682,23 @@
     animation: none !important;
   }
 }
+
+/* With narration hidden, the automatic peek is a status control rather than an empty transcript card. */
+.reader-agent .agent-speech-peek[data-compact] {
+  width: fit-content;
+  max-width: var(--agent-card-width, calc(100vw - 42px));
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 14px;
+}
+.reader-agent .agent-speech-peek[data-compact] .agent-peek-status {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+.reader-agent .agent-speech-peek[data-compact] .agent-peek-status > span:last-child {
+  margin-left: 12px;
+}
+.reader-agent-anchor[data-panel='sheet'] .agent-speech-peek[data-compact] {
+  top: auto;
+  bottom: calc(100% + var(--agent-bubble-gap, 14px));
+}

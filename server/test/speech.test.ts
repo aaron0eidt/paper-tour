@@ -251,3 +251,42 @@ test(
     }
   },
 );
+
+test('speech lookahead waits for capacity and queued requests can be cancelled', { timeout: 5000 }, async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'speech-capacity-'));
+  const preferences = { ...structuredClone(DEFAULT_SPEECH_PREFERENCES), provider: 'openai' };
+  const query = async () => ({ rows: [{ preferences, version: 'test-version' }] });
+  const db = { pool: { query }, query } as unknown as Database;
+  let release!: () => void, ready!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const occupied = new Promise<void>((resolve) => { ready = resolve; });
+  let active = 0, peak = 0, calls = 0;
+  const speech = new SpeechService(db, { ...config, cacheDir: folder }, async () => {
+    calls++;
+    active++;
+    peak = Math.max(peak, active);
+    if (calls === 2) ready();
+    try { await gate; return new Response(wav()); }
+    finally { active--; }
+  });
+  const input = (text: string) => ({ text, language: 'en-US', version: 'test-version' });
+  const running = [speech.synthesize('owner', input('First.')), speech.synthesize('owner', input('Second.'))];
+  try {
+    await occupied;
+    const queued = speech.synthesize('owner', input('Next sentence.'));
+    const stop = new AbortController();
+    const cancelled = speech.synthesize('owner', input('Cancelled sentence.'), stop.signal);
+    stop.abort();
+    await assert.rejects(cancelled, { name: 'AbortError' });
+    assert.equal(calls, 2, 'Queued work must not dispatch while both slots are occupied');
+    release();
+    const clips = await Promise.all([...running, queued]);
+    assert.equal(clips.length, 3);
+    assert.equal(calls, 3);
+    assert.equal(peak, 2);
+  } finally {
+    release();
+    await Promise.allSettled(running);
+    await rm(folder, { recursive: true, force: true });
+  }
+});
