@@ -1,3 +1,8 @@
+import { motion, useReducedMotion } from 'motion/react';
+import { setNarrationSoundGate } from './ui/sound';
+import { UI_SPRING } from './ui/motion';
+import { StatusBadge } from './ui/StatusBadge';
+import { ChoicePicker } from './components/ChoicePicker';
 import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView, slideView } from './camera';
@@ -412,6 +417,11 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
   const mainState = useSyncExternalStore(engine?.subscribe ?? noSubscribe, engine?.getState ?? idleState);
   const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
   const state = answer ? answerState : mainState;
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    setNarrationSoundGate(state.status === 'playing');
+    return () => setNarrationSoundGate(false);
+  }, [state.status]);
   const active = answer ?? engine;
   const applySpeechPreferences = useCallback(async (preferences: SpeechPreferences) => {
     if (speechUpdating.current) return;
@@ -1473,6 +1483,7 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
           <>
             <div className="reader-tabs">
               <button className={tab === 'document' ? 'active' : ''} onClick={() => setTab('document')}>
+                {tab === 'document' && <motion.span className="ui-reader-tab-indicator" layoutId="reader-active-tab" transition={reduceMotion ? { duration: 0 } : UI_SPRING} />}
                 Document
               </button>
               <button
@@ -1480,37 +1491,22 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
                 className={tab === 'tour' ? 'active' : ''}
                 onClick={() => { setReadAloud(false); setTab('tour'); }}
               >
+                {tab === 'tour' && <motion.span className="ui-reader-tab-indicator" layoutId="reader-active-tab" transition={reduceMotion ? { duration: 0 } : UI_SPRING} />}
                 Tour
               </button>
             </div>
             {!readAloud && (manifest?.tours.length ?? 0) > 1 && manifest && (
               <label className="reader-tour-picker">
                 Saved tour
-                <select
-                  title={manifest.tours.find((tour) => tour.id === manifest.selectedTour?.id)?.title}
-                  value={manifest.selectedTour?.id ?? ''}
-                  onChange={(event) => {
-                    leaveAnswer();
-                    engine?.pause();
-                    setSelection([]);
-                    savedPosition.current = null;
-                    picked.current = event.target.value;
-                    setReadAloud(false);
-                    setActiveTour(event.target.value);
-                    setTab('tour');
-                  }}
-                >
-                  <option value="" disabled>
-                    Select a tour
-                  </option>
-                  {manifest.tours.map((tour, index) => (
-                    <option key={tour.id} value={tour.id}>
-                      {manifest.tours.length > 1 ? `v${manifest.tours.length - index} · ` : ''}
-                      {tour.profile ? `${tour.profile.name} · ${tour.profile.depth} · ` : ''}
-                      {tour.title}
-                    </option>
-                  ))}
-                </select>
+                <ChoicePicker label="Saved tour" value={manifest.selectedTour?.id ?? ''}
+                  options={[
+                    { value: '', label: 'Select a tour', disabled: true },
+                    ...manifest.tours.map((tour, index) => ({ value: tour.id, label: `${manifest.tours.length > 1 ? `v${manifest.tours.length - index} · ` : ''}${tour.title}`,
+                      detail: tour.profile ? `${tour.profile.name} · ${tour.profile.depth}` : undefined })),
+                  ]} onChange={(id) => {
+                    leaveAnswer(); engine?.pause(); setSelection([]); savedPosition.current = null;
+                    picked.current = id; setReadAloud(false); setActiveTour(id); setTab('tour');
+                  }} />
               </label>
             )}
           </>
@@ -1623,16 +1619,10 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
           </button>
           {!!selection.length && <button onClick={() => setSelection([])}>Clear selection</button>}
           {manifest?.analysis && (
-            <span className="reader-status" role="status" title={manifest.analysis.warnings.join('\n')}>
-              {manifest.analysis.status === 'processing'
-                ? 'Analyzing…'
-                : manifest.analysis.status === 'queued'
-                  ? 'Analysis queued'
-                  : manifest.analysis.status === 'limited'
-                    ? 'Analysis notes'
-                    : manifest.analysis.status === 'failed'
-                      ? 'Analysis failed'
-                      : 'Ready'}
+            <span className="reader-status" role="status"><StatusBadge
+              label={manifest.analysis.status === 'processing' ? 'Analyzing…' : manifest.analysis.status === 'queued' ? 'Analysis queued' : manifest.analysis.status === 'limited' ? 'Analysis notes' : manifest.analysis.status === 'failed' ? 'Analysis failed' : 'PDF ready'}
+              tone={manifest.analysis.status === 'failed' ? 'failed' : manifest.analysis.status === 'limited' ? 'limited' : manifest.analysis.status === 'ready' ? 'ready' : 'pending'}
+              busy={manifest.analysis.status === 'processing'} detail={manifest.analysis.warnings.join('\n') || undefined} />
             </span>
           )}
           <button
@@ -1839,8 +1829,10 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
               {state.speechTiming === 'estimated' && <small>Word highlighting and word seeking use estimated audio timing.</small>}
               {state.speechTiming === 'provider' && <small>Word highlighting follows provider timestamps.</small>}
               {(speech.error || speechUpdateError) && <small role="alert">{speechUpdateError ?? speech.error}</small>}
-              <a href={`${import.meta.env.BASE_URL}?settings=profile#speech`}>Configure voices and keys</a>
-              <a href={`${import.meta.env.BASE_URL}?settings=voices`}>Compare, rank and download voices</a>
+              <div className="ui-audio-links">
+                <a href={`${import.meta.env.BASE_URL}?settings=profile#speech`}><svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 6h14M3 14h14M7 3v6m6 2v6" /></svg>Voice settings</a>
+                <a href={`${import.meta.env.BASE_URL}?settings=voices`}><svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 7v6m4-9v12m4-14v16m4-11v6" /></svg>Voice library</a>
+              </div>
             </div>}
             readingSettings={readAloud ? (
               <div className="reader-reading-options">

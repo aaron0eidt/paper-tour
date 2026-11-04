@@ -16,6 +16,11 @@ import {
   NARRATION_DISPLAY_OPTIONS,
 } from '../readerPreferences';
 import '../profileSettings.css';
+import { AccountMenu, BackLink } from '../ui/navigation';
+import { InterfaceSettings } from '../ui/InterfaceSettings';
+import { ActionButton } from '../ui/ActionButton';
+import { useNotice } from '../ui/InterfaceProvider';
+import { playInterfaceSound } from '../ui/sound';
 import { SpeechSettings } from '../narration/SpeechSettings';
 
 export function ProfileSettings({ email }: { email: string }) {
@@ -25,7 +30,7 @@ export function ProfileSettings({ email }: { email: string }) {
   const [source, setSource] = useState<'app' | 'personal'>('app');
   const [apiKey, setApiKey] = useState('');
   const [pending, setPending] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const notices = useNotice();
   const [error, setError] = useState<string | null>(null);
   const connectionHeading = useRef<HTMLHeadingElement>(null);
   const modelHeading = useRef<HTMLHeadingElement>(null);
@@ -44,12 +49,12 @@ export function ProfileSettings({ email }: { email: string }) {
   async function run(action: string, execute: () => Promise<unknown>, success: string, clearKey = false) {
     setPending(action);
     setError(null);
-    setNotice(null);
     try {
       await execute();
       if (clearKey) setApiKey('');
       settingsChanged();
-      setNotice(success);
+      notices.add({ title: success });
+      playInterfaceSound('success');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update settings.');
       // A failed verification can update the saved key status; keep that status current without clearing the draft.
@@ -70,9 +75,9 @@ export function ProfileSettings({ email }: { email: string }) {
     <div className="library">
       <header className="library-header">
         <PaperMark />
-        <a className="library-text-button" href={import.meta.env.BASE_URL}>
-          ‹ Back to library
-        </a>
+        <div className="ui-settings-navigation"><BackLink href={import.meta.env.BASE_URL} />
+          <AccountMenu email={email} busy={busy} onSignOut={() => void run('signout', signOut, 'Signed out.')} />
+        </div>
       </header>
       <main className="library-main profile-main">
         <div className="library-heading">
@@ -80,26 +85,16 @@ export function ProfileSettings({ email }: { email: string }) {
             <h1>Settings</h1>
             <p className="profile-email">{email}</p>
           </div>
-          <button
-            className="library-text-button"
-            disabled={busy}
-            onClick={() => void run('signout', signOut, 'Signed out.')}
-          >
-            Sign out
-          </button>
+
         </div>
         <nav className="profile-nav" aria-label="Settings sections">
           <a href={`${import.meta.env.BASE_URL}?settings=voices`}>Voices</a>
           <a href="#appearance">Appearance</a>
           <a href="#reading">Reading</a>
+          <a href="#interface">Sounds</a>
           <a href="#connection">Connection</a>
           <a href="#tour-model">Tour model</a>
         </nav>
-        {notice && (
-          <p className="library-feedback library-notice" role="status">
-            {notice}
-          </p>
-        )}
         {(error || profile.error) && (
           <p className="library-feedback library-error" role="alert">
             {error ?? profile.error}{' '}
@@ -112,6 +107,7 @@ export function ProfileSettings({ email }: { email: string }) {
         )}
         <div className="profile-grid">
           <SpeechSettings />
+          <InterfaceSettings />
           <section className="profile-card" id="appearance" aria-labelledby="appearance-heading">
             <div className="profile-card-heading">
               <h2 id="appearance-heading">Appearance</h2>
@@ -197,9 +193,10 @@ export function ProfileSettings({ email }: { email: string }) {
                             : 'Add a personal key or choose the shared connection.'}
                       </p>
                     </div>
-                    <button
+                    <ActionButton
                       className="library-button"
                       type="button"
+                      busy={pending === 'test'} label={pending === 'test' ? 'Testing…' : 'Test connection'}
                       disabled={
                         busy ||
                         sourceChanged ||
@@ -213,9 +210,7 @@ export function ProfileSettings({ email }: { email: string }) {
                           'Connection verified.',
                         )
                       }
-                    >
-                      {pending === 'test' ? 'Testing…' : 'Test connection'}
-                    </button>
+                    />
                   </div>
                   <fieldset disabled={busy} className="profile-sources">
                     <legend>API access</legend>
@@ -249,15 +244,13 @@ export function ProfileSettings({ email }: { email: string }) {
                   {sourceChanged && (
                     <div className="profile-unsaved">
                       <span>Connection change not saved</span>
-                      <button
-                        className="library-button primary"
+                      <ActionButton
+                        busy={pending === 'source'} label={pending === 'source' ? 'Saving…' : 'Save connection'}
                         disabled={busy}
                         onClick={() =>
                           void run('source', () => update({ credentialSource: source }), 'API connection updated.')
                         }
-                      >
-                        {pending === 'source' ? 'Saving…' : 'Save connection'}
-                      </button>
+                      />
                       <button
                         className="library-text-button"
                         disabled={busy}
@@ -304,13 +297,11 @@ export function ProfileSettings({ email }: { email: string }) {
                         your personal account.
                       </p>
                       <div className="profile-actions">
-                        <button
-                          className="library-button primary"
+                        <ActionButton
+                          busy={pending === 'key'} label={pending === 'key' ? 'Connecting…' : 'Save & connect'}
                           type="submit"
                           disabled={busy || apiKey.trim().length < 16}
-                        >
-                          {pending === 'key' ? 'Connecting…' : 'Save & connect'}
-                        </button>
+                        />
                         {key?.configured && (
                           <button
                             className="library-text-button profile-remove"
@@ -359,15 +350,13 @@ export function ProfileSettings({ email }: { email: string }) {
                     </p>
                   )}
                   <div className="profile-actions">
-                    <button
-                      className="library-button primary"
+                    <ActionButton
+                      busy={pending === 'model'} label={pending === 'model' ? 'Saving…' : 'Save model'}
                       disabled={
                         busy || !selected?.tourCompatible || selected.available === false || model === data.defaultModel
                       }
                       onClick={() => void run('model', () => update({ defaultModel: model }), 'Default model saved.')}
-                    >
-                      {pending === 'model' ? 'Saving…' : 'Save model'}
-                    </button>
+                    />
                     {model !== data.defaultModel && <>
                       <button className="library-button" disabled={busy} onClick={() => {
                         setModel(data.defaultModel);

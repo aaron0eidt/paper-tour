@@ -5,6 +5,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const storageOrigin = env.VITE_SUPABASE_URL ? new URL(env.VITE_SUPABASE_URL).origin : '';
   return {
+    resolve: { alias: { '@': new URL('./src', import.meta.url).pathname } },
     plugins: [
       react(),
       {

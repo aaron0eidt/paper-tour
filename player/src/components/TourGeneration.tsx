@@ -8,6 +8,8 @@ import { isTourGenerationActive, tourGenerationCopy } from '../library/tourGener
 import { useModelCatalog } from '../library/useModelCatalog';
 import { useSettings } from '../library/useSettings';
 import { canUseModel } from '../library/modelChoices';
+import { StatusBadge } from '../ui/StatusBadge';
+import { ActionButton } from '../ui/ActionButton';
 import '../tourGeneration.css';
 
 export interface TourGenerationProps {
@@ -65,16 +67,21 @@ export function TourGeneration({
     setRequesting(true);
     setError(null);
     try {
-      const response = await apiRequest<{ generation: TourGenerationSummary }>(`/api/documents/${documentId}/tours`, {
-        method: 'POST',
-        body: JSON.stringify({ regenerate, model, allowTraining, ...selection }),
-      });
+      const response = await apiRequest<{ generation: TourGenerationSummary }>(
+        `/api/documents/${documentId}/tours`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ regenerate, model, allowTraining, ...selection }),
+        },
+      );
       setSubmitted(response.generation);
       setCreating(null);
       onChanged();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Could not start the tour. Check your connection, then retry.';
+        error instanceof Error
+          ? error.message
+          : 'Could not start the tour. Check your connection, then retry.';
       setError(message);
       throw new Error(message);
     } finally {
@@ -91,8 +98,12 @@ export function TourGeneration({
       >
         {(!compact || current?.status !== 'ready') && (
           <div className="tour-generation-content" aria-live="polite" title={`${copy.title} ${copy.detail}`}>
-            <strong>{requesting ? 'Starting your tour…' : copy.title}</strong>
-            <p>{copy.detail}</p>
+            <StatusBadge
+              label={requesting ? 'Starting your tour…' : copy.title}
+              tone={copy.kind}
+              detail={copy.detail}
+              busy={active || requesting}
+            />
             {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
               <progress
                 aria-label="Images reviewed for the tour"
@@ -102,47 +113,50 @@ export function TourGeneration({
             )}
           </div>
         )}
-        {current && (
-          <GenerationActivity
-            key={current.id}
-            documentId={documentId}
-            generationId={current.id}
-            agentRunId={current.agentRunId}
-            active={active || requesting}
-            openRequest={activityRequest}
-            onChanged={onChanged}
-            label={toolbar ? 'Activity' : undefined}
-          />
-        )}
-        {error && (
-          <p className="tour-generation-error" role="alert" title={error}>
-            {error}
-          </p>
-        )}
-        {copy.action && canGenerate && (
-          <button
-            type="button"
-            disabled={requesting || !validChoice}
-            onClick={() => setCreating({ regenerate: false })}
-          >
-            {requesting ? 'Starting…' : copy.action}
-          </button>
-        )}
-        {current?.status === 'ready' && current.tourId && onOpenTour && (
-          <button type="button" onClick={() => onOpenTour(current.tourId!)}>
-            Open tour
-          </button>
-        )}
-        {current?.status === 'ready' && canGenerate && (
-          <button
-            type="button"
-            disabled={requesting || !validChoice}
-            onClick={() => setCreating({ regenerate: true })}
-            title="Create a new tour version; your saved tours are kept"
-          >
-            {requesting ? 'Starting…' : 'New tour'}
-          </button>
-        )}
+        <div className="generation-actions">
+          {current && (
+            <GenerationActivity
+              key={current.id}
+              documentId={documentId}
+              generationId={current.id}
+              agentRunId={current.agentRunId}
+              active={active || requesting}
+              openRequest={activityRequest}
+              onChanged={onChanged}
+              label="Activity"
+            />
+          )}
+          {error && (
+            <p className="tour-generation-error" role="alert" title={error}>
+              {error}
+            </p>
+          )}
+          {copy.action && canGenerate && (
+            <ActionButton
+              className="generation-action"
+              type="button"
+              busy={requesting}
+              label={requesting ? 'Starting…' : copy.action}
+              disabled={!validChoice}
+              onClick={() => setCreating({ regenerate: false })}
+            />
+          )}
+          {current?.status === 'ready' && current.tourId && onOpenTour && (
+            <button type="button" onClick={() => onOpenTour(current.tourId!)}>
+              Open tour
+            </button>
+          )}
+          {current?.status === 'ready' && canGenerate && (
+            <button
+              type="button"
+              disabled={requesting || !validChoice}
+              onClick={() => setCreating({ regenerate: true })}
+              title="Create a new tour version; your saved tours are kept"
+            >
+              {requesting ? 'Starting…' : 'New tour'}
+            </button>
+          )}
+        </div>
         {canGenerate && (
           <div className="tour-generation-extra">
             {current?.status === 'needs_configuration' && (

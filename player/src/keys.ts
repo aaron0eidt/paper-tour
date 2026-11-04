@@ -71,7 +71,7 @@ export interface KeyTarget {
  */
 export function keyBelongsTo(target: KeyTarget | null, key: string): boolean {
   if (!target || typeof target.closest !== 'function') return false;
-  if (target.isContentEditable || target.closest('input, textarea, select, [role="listbox"], [role="textbox"], dialog')) return true;
+  if (target.isContentEditable || target.closest('input, textarea, select, [role="listbox"], [role="textbox"], [role="combobox"], [role="menu"], [role="dialog"], dialog')) return true;
   return !!target.closest('button, a, summary') && (key === ' ' || key === 'Enter');
 }
 

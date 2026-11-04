@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useId, useRef, useState } from 'react';
+import { ChoicePicker } from './ChoicePicker';
+import { AnimatedDialog, DialogTitle } from '../ui/controls';
 import type { ModelCatalog } from '../../../shared/models';
 import { formatPrice, modelDisplayName, modelPurpose, otherPricing, selectedApiModel, tokenPrice } from '../library/modelChoices';
 import '../modelSettings.css';
@@ -20,16 +21,16 @@ export function ModelPicker({ catalog, model, onModelChange, disabled = false, l
   const selectedAbsent = !!catalog && !!model && !selected;
   const hasModels = !!catalog?.models.length;
   return <div className={`model-settings${compact ? ' compact' : ''}`}>
-    <label className="model-picker-label" htmlFor={id}>{label}</label>
-    <select id={id} value={catalog ? model : ''} onChange={(event) => onModelChange(event.target.value)} disabled={disabled || loading || !hasModels} aria-busy={loading} aria-describedby={`${id}-prices ${selected?.contributor ? `${id}-training` : ''}`}>
-      {!catalog && <option value="">{loading ? 'Loading models…' : 'Models unavailable'}</option>}
-      {catalog && !hasModels && <option value="">No models available</option>}
-      {hasModels && !model && <option value="" disabled>Choose a model</option>}
-      {selectedAbsent && <option value={model} disabled>{model} — not listed</option>}
-      {catalog?.models.map((candidate) => <option key={candidate.id} value={candidate.id} disabled={!candidate.tourCompatible || candidate.available === false}>
-        {modelDisplayName(candidate)}{!candidate.tourCompatible ? ` · ${modelPurpose(candidate)}` : candidate.available === false ? ' · unavailable' : ''}
-      </option>)}
-    </select>
+    <span className="model-picker-label">{label}</span>
+    <ChoicePicker value={catalog ? model : ''} label={label} disabled={disabled || loading || !hasModels}
+      onChange={onModelChange} options={[
+        ...(!hasModels ? [{ value: '', label: loading ? 'Loading models…' : catalog ? 'No models available' : 'Models unavailable' }] : []),
+        ...(hasModels && !model ? [{ value: '', label: 'Choose a model', disabled: true }] : []),
+        ...(selectedAbsent ? [{ value: model, label: `${model} — not listed`, disabled: true }] : []),
+        ...(catalog?.models.map((candidate) => ({ value: candidate.id, label: modelDisplayName(candidate),
+          detail: !candidate.tourCompatible ? modelPurpose(candidate) : candidate.available === false ? 'Unavailable' : undefined,
+          disabled: !candidate.tourCompatible || candidate.available === false })) ?? []),
+      ]} />
     <div className="model-selected-prices" id={`${id}-prices`}>
       {selected?.pricing ? <p>Per 1M tokens: input {formatPrice(selected.pricing.inputPerMillionTokens)}, cached input {formatPrice(selected.pricing.cachedInputPerMillionTokens)}, output {formatPrice(selected.pricing.outputPerMillionTokens)}.</p> : <p>{loading ? 'Loading model prices…' : !catalog ? 'Retry the model list to see availability and prices.' : !selected ? 'Choose an available model to see its prices.' : 'Prices are not published for this model.'}</p>}
       {catalog?.availability === 'not_configured' && <p>Tour creation is not configured yet. Your model choice will be saved with the PDF.</p>}
@@ -45,22 +46,15 @@ export function ModelPicker({ catalog, model, onModelChange, disabled = false, l
 
 export function ModelPricingTable({ catalog, modal = false }: { catalog: ModelCatalog; modal?: boolean }) {
   const [open, setOpen] = useState(false);
-  const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const heading = useId();
-  useEffect(() => {
-    if (!open) return;
-    const element = dialog.current;
-    element?.showModal();
-    return () => { element?.close(); };
-  }, [open]);
-  const close = () => { dialog.current?.close(); setOpen(false); trigger.current?.focus(); };
+  const close = () => setOpen(false);
   if (modal) return <div className="model-price-modal-trigger">
     <button type="button" ref={trigger} onClick={() => setOpen(true)}>Compare all API model prices</button>
-    {open && createPortal(<dialog ref={dialog} className="model-price-dialog" aria-labelledby={heading} onCancel={(event) => { event.preventDefault(); close(); }}>
-      <header><h2 id={heading}>Meta API model prices</h2><button type="button" onClick={close} aria-label="Close model prices">Close</button></header>
+    <AnimatedDialog open={open} onOpenChange={setOpen} className="model-price-dialog" popupProps={{ finalFocus: trigger }}>
+      <header><DialogTitle id={heading}>Meta API model prices</DialogTitle><button type="button" onClick={close} aria-label="Close model prices">Close</button></header>
       <PricingContents catalog={catalog} />
-    </dialog>, document.body)}
+    </AnimatedDialog>
   </div>;
   return <details className="model-price-details"><summary>Compare all API model prices</summary><PricingContents catalog={catalog} /></details>;
 }

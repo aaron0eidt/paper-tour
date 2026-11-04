@@ -1,3 +1,4 @@
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useVoiceInput } from './voice';
 import { ConversationHistory } from './ConversationHistory';
 import { useConversations } from './useConversations';
@@ -601,6 +602,7 @@ export function AskPanel(props: AskPanelProps) {
     }
   };
 
+  const reduceMotion = useReducedMotion();
   const empty = !draft.trim();
   const expanded = focused || busy || open || !empty;
   return (
@@ -616,8 +618,10 @@ export function AskPanel(props: AskPanelProps) {
         <div className={`ask-tray${open ? ' open' : ''}`}>
           <div className="ask-tray-clip">{tray.current}</div>
         </div>
+        <AnimatePresence initial={false}>
         {props.selection && !props.selecting && (
-          <div className="ask-selection-chip">
+          <motion.div key="region" className="ask-selection-chip"
+            initial={{ opacity: 0, height: reduceMotion ? 'auto' : 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: reduceMotion ? 'auto' : 0 }} transition={{ duration: 0.16 }}>
             {props.selectionPreview}
             <span>
               <strong>Selected region</strong>
@@ -643,8 +647,9 @@ export function AskPanel(props: AskPanelProps) {
             >
               ×
             </button>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
         <form className="ask-bar" onSubmit={submit}>
           <SparkIcon />
           <textarea
@@ -752,8 +757,10 @@ export function AskPanel(props: AskPanelProps) {
             </button>
           )}
           {/* Nothing to send yet: the bar stays quiet, and the controls before it do not move when it appears. */}
+          <AnimatePresence initial={false}>
           {(busy || !empty) && (
-            <button
+            <motion.button key="send"
+              initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.8 }} transition={{ duration: 0.14 }}
               type="submit"
               className={`ask-send${busy ? ' stop' : ' ready'}`}
               disabled={voiceBusy || props.selecting}
@@ -761,8 +768,9 @@ export function AskPanel(props: AskPanelProps) {
               title={busy ? 'Stop generating answer (Esc)' : 'Ask (Enter)'}
             >
               {busy ? <StopIcon /> : <SendIcon />}
-            </button>
+            </motion.button>
           )}
+          </AnimatePresence>
         </form>
       </div>
       {persistent && (

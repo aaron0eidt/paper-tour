@@ -1,0 +1,4 @@
+# npm starts the MCP process in player so registry tools find components.json.
+[mcp_servers.shadcn]
+command = "npm"
+args = ["--prefix", "player", "run", "--silent", "ui:mcp"]

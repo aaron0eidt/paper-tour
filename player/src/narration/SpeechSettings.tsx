@@ -10,6 +10,7 @@ import { settingsChanged } from '../library/useSettings';
 import { useSpeechSettings } from './useSpeechSettings';
 import { SpeechVoiceControl } from './SpeechVoiceControl';
 import { ChoicePicker } from '../components/ChoicePicker';
+import { ActionButton } from '../ui/ActionButton';
 
 export const SPEECH_LABELS: Record<SpeechProvider, string> = {
   browser: 'Browser voices',
@@ -147,23 +148,9 @@ export function SpeechSettings() {
               <p className="profile-help">{status?.message}</p>
               <label className="profile-field">
                 Model
-                <select
-                  value={connection!.model}
-                  disabled={pending}
-                  onChange={(event) =>
-                    setConnection({
-                      model: event.target.value,
-                      ...(provider === 'openai' && event.target.value !== 'gpt-4o-mini-tts' ? { voice: 'alloy' } : {}),
-                    })
-                  }
-                >
-                  {(provider === 'openai'
-                    ? ['gpt-4o-mini-tts', 'tts-1-hd', 'tts-1']
-                    : ['eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_v3']
-                  ).map((model) => (
-                    <option key={model}>{model}</option>
-                  ))}
-                </select>
+                <ChoicePicker value={connection!.model} disabled={pending} label="Speech model"
+                  onChange={(model) => setConnection({ model, ...(provider === 'openai' && model !== 'gpt-4o-mini-tts' ? { voice: 'alloy' } : {}) })}
+                  options={(provider === 'openai' ? ['gpt-4o-mini-tts', 'tts-1-hd', 'tts-1'] : ['eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_v3']).map((model) => ({ value: model, label: model }))} />
               </label>
               <SpeechVoiceControl
                 provider={provider}
@@ -181,16 +168,11 @@ export function SpeechSettings() {
               )}
               <label className="profile-field">
                 Connection
-                <select
-                  value={connection!.credentialSource}
-                  disabled={pending}
-                  onChange={(event) => setConnection({ credentialSource: event.target.value as 'app' | 'personal' })}
-                >
-                  <option value="app">Server key{status?.appKeyAvailable ? ' · configured' : ' · missing'}</option>
-                  <option value="personal">
-                    Personal key{status?.personalKey.configured ? ` · ${status.personalKey.masked}` : ' · missing'}
-                  </option>
-                </select>
+                <ChoicePicker<'app' | 'personal'> value={connection!.credentialSource} disabled={pending} label="Speech connection"
+                  onChange={(credentialSource) => setConnection({ credentialSource })} options={[
+                    { value: 'app', label: 'Server key', detail: status?.appKeyAvailable ? 'Configured' : 'Missing' },
+                    { value: 'personal', label: 'Personal key', detail: status?.personalKey.configured ? status.personalKey.masked ?? 'Configured' : 'Missing' },
+                  ]} />
               </label>
               <label className="profile-field">
                 Personal API key
@@ -225,13 +207,10 @@ export function SpeechSettings() {
             </>
           )}
           <div className="profile-actions">
-            <button
-              className="library-button primary"
+            <ActionButton busy={pending} label={pending ? 'Working…' : 'Save speech settings'}
               disabled={pending || !speech.data}
               onClick={() => void run(() => speech.update(draft), 'Speech settings saved.')}
-            >
-              {pending ? 'Working…' : 'Save speech settings'}
-            </button>
+            />
             {audioProvider && (
               <button className="library-button" disabled={pending || !speech.data} onClick={() => void preview()}>
                 Preview voice

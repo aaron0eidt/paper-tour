@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { EngineState, FlatStep } from '../engine';
 import { formatTime } from '../tourClock';
 import type { TourClock } from '../tourClock';
@@ -13,6 +13,9 @@ import { KEY_HELP } from '../keys';
 import { NotClear } from '../ask/NotClear';
 import type { NotClearProps } from '../ask/NotClear';
 import { KeyboardIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon, VolumeIcon } from './icons';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AnimatedPopover } from '../ui/controls';
+import { ChoicePicker } from './ChoicePicker';
 import '../voiceSettings.css';
 
 interface Props {
@@ -80,8 +83,8 @@ export function ControlBar({
   const playing = state.status === 'playing';
   const textRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLElement>(null);
-  const audioPanel = useRef<HTMLDetailsElement>(null);
-  const helpPanel = useRef<HTMLDivElement>(null);
+  const [audioOpen, setAudioOpen] = useState(false);
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
     const element = controlsRef.current;
     if (!element) return;
@@ -91,29 +94,6 @@ export function ControlBar({
     measure();
     return () => observer.disconnect();
   }, []);
-  useEffect(() => {
-    const closeOutside = (event: PointerEvent) => {
-      const inChoiceMenu = event.target instanceof Element && !!event.target.closest('.choice-popup');
-      if (audioPanel.current?.open && !audioPanel.current.contains(event.target as Node) && !inChoiceMenu)
-        audioPanel.current.open = false;
-      if (helpOpen && !helpPanel.current?.contains(event.target as Node)) onHelp(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && audioPanel.current?.open) {
-        audioPanel.current.open = false;
-        audioPanel.current.querySelector('summary')?.focus();
-      }
-    };
-    document.addEventListener('pointerdown', closeOutside);
-    document.addEventListener('keydown', escape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOutside);
-      document.removeEventListener('keydown', escape);
-    };
-  }, [helpOpen, onHelp]);
-  // A speed picked with the mouse or a finger hands focus back, so Space and the arrows control
-  // the tour again; with the keyboard, focus stays for further arrow presses.
-  const pickedByPointer = useRef(false);
   const automaticVoice = pickVoice(voices, voiceConfig);
   const selectedIsAvailable = voices.some((voice) => voiceId(voice) === selectedVoiceId);
   const language = (voiceConfig?.lang ?? automaticVoice?.lang ?? '').toLowerCase().replace(/_/g, '-').split('-')[0];
@@ -189,7 +169,12 @@ export function ControlBar({
           aria-label={playing ? 'Pause' : state.awaiting ? 'Show solution' : 'Play'}
           title={state.awaiting ? 'Show the solution' : undefined}
         >
-          {playing ? <PauseIcon /> : <PlayIcon />}
+          <AnimatePresence initial={false} mode="popLayout">
+            <motion.span className="ui-play-symbol" key={playing ? 'pause' : 'play'}
+              initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.7 }} transition={{ duration: 0.12 }}>
+              {playing ? <PauseIcon /> : <PlayIcon />}
+            </motion.span>
+          </AnimatePresence>
         </button>
         <button
           className="icon-btn"
@@ -245,15 +230,15 @@ export function ControlBar({
               </div>
             </>
           ) : (
-            <div className="narration-text muted">Add a tour.json to this paper folder to get a narrated tour.</div>
+            <div className="narration-text muted">Create a guided tour or choose Read aloud to start listening.</div>
           )}
         </div>
       )}
 
       <div className="settings">
         {unclear && <NotClear {...unclear} />}
-        <details className="playback-options" ref={audioPanel}>
-          <summary aria-label={state.speechError ? 'Audio settings: playback needs attention' : 'Audio settings'} data-error={!!state.speechError || undefined} title={state.speechError ?? 'Voice and playback speed'}>
+        <AnimatedPopover open={audioOpen} onOpenChange={setAudioOpen} side="top" label="Audio settings" className="ui-audio-panel" trigger={
+          <button type="button" className="ui-audio-trigger" aria-label={state.speechError ? 'Audio settings: playback needs attention' : 'Audio settings'} data-error={!!state.speechError || undefined} title={state.speechError ?? 'Voice and playback speed'}>
             <svg
               width="17"
               height="17"
@@ -268,13 +253,12 @@ export function ControlBar({
             </svg>
             <span>Audio</span>
             <span className="playback-speed">{speed}×</span>
-          </summary>
+          </button>}>
           <div className="playback-panel">
             <div className="playback-panel-heading">
               <h3>Audio settings</h3>
               <button type="button" className="playback-panel-close" aria-label="Close audio settings" onClick={() => {
-                if (audioPanel.current) audioPanel.current.open = false;
-                audioPanel.current?.querySelector('summary')?.focus();
+                setAudioOpen(false);
               }}>
                 <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
               </button>
@@ -284,48 +268,13 @@ export function ControlBar({
             {onVoiceChange && !current?.step.audio && (
               <label className="voice-setting">
                 <span>Voice</span>
-                <select
-                  aria-label="Narration voice"
-                  value={selectedVoiceId}
-                  title={voiceHint}
-                  disabled={disabled || !voices.length}
-                  onPointerDown={() => (pickedByPointer.current = true)}
-                  onKeyDown={() => (pickedByPointer.current = false)}
-                  onChange={(event) => {
-                    onVoiceChange(event.target.value);
-                    if (pickedByPointer.current) event.currentTarget.blur();
-                    pickedByPointer.current = false;
-                  }}
-                >
-                  <option value="">
-                    {voicesLoading
-                      ? 'Loading voices…'
-                      : `Automatic${automaticVoice ? ` · ${automaticVoice.name}` : ' · browser default'}`}
-                  </option>
-                  {selectedVoiceId && !selectedIsAvailable && (
-                    <option value={selectedVoiceId} disabled>
-                      Saved voice unavailable
-                    </option>
-                  )}
-                  {sameLanguage.length > 0 && (
-                    <optgroup label="For this paper">
-                      {sortedVoices(sameLanguage).map((voice) => (
-                        <option value={voiceId(voice)} key={voiceId(voice)}>
-                          {voice.name} ({voice.lang})
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {otherLanguages.length > 0 && (
-                    <optgroup label="Other languages">
-                      {sortedVoices(otherLanguages).map((voice) => (
-                        <option value={voiceId(voice)} key={voiceId(voice)}>
-                          {voice.name} ({voice.lang})
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                <ChoicePicker label="Narration voice" value={selectedVoiceId} disabled={disabled || !voices.length} searchable onChange={onVoiceChange}
+                  options={[
+                    { value: '', label: voicesLoading ? 'Loading voices…' : `Automatic${automaticVoice ? ` · ${automaticVoice.name}` : ' · browser default'}` },
+                    ...(selectedVoiceId && !selectedIsAvailable ? [{ value: selectedVoiceId, label: 'Saved voice unavailable' }] : []),
+                    ...sortedVoices(sameLanguage).map((voice) => ({ value: voiceId(voice), label: voice.name, badge: voice.lang, group: 'For this paper' })),
+                    ...sortedVoices(otherLanguages).map((voice) => ({ value: voiceId(voice), label: voice.name, badge: voice.lang, group: 'Other languages' })),
+                  ]} />
                 <small>{voiceHint}</small>
               </label>
             )}
@@ -336,19 +285,16 @@ export function ControlBar({
             </label>
             {readingSettings && <details className="audio-reading-settings"><summary>Reading options</summary>{readingSettings}</details>}
           </div>
-        </details>
-        <div className="key-help-wrap" ref={helpPanel}>
+        </AnimatedPopover>
+        <AnimatedPopover open={helpOpen} onOpenChange={onHelp} side="top" label="Keyboard shortcuts" className="ui-key-help" trigger={
           <button
             className={`icon-btn key-help-button${helpOpen ? ' open' : ''}`}
-            onClick={() => onHelp(!helpOpen)}
-            aria-expanded={helpOpen}
             aria-label="Keyboard shortcuts"
             title="Keyboard shortcuts (?)"
           >
             <KeyboardIcon />
-          </button>
-          {helpOpen && (
-            <div className="key-help" role="dialog" aria-label="Keyboard shortcuts">
+          </button>}>
+            <div className="ui-key-help-content">
               <h3>Keyboard</h3>
               <dl>
                 {KEY_HELP.map((row) => (
@@ -363,8 +309,7 @@ export function ControlBar({
                 ))}
               </dl>
             </div>
-          )}
-        </div>
+        </AnimatedPopover>
         <button
           className={`icon-btn${muted ? ' active' : ''}`}
           onClick={() => onMute(!muted)}

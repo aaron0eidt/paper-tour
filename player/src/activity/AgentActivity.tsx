@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { UI_EXIT, UI_SPRING } from '../ui/motion';
 import { activeActivity, type ActivityKind } from '../../../shared/agentActivity';
 import { CloseIcon, PauseIcon, PlayIcon } from '../components/icons';
 import { SparkIcon } from '../ask/icons';
@@ -42,6 +44,7 @@ export function AgentActivity({
   onTogglePlayback(): void;
 }) {
   const activity = useDocumentActivity(documentId);
+  const reducedMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [quiet, setQuiet] = useState(false);
   const [selected, setSelected] = useState<{ id: string; mode: ActivityKind }>();
@@ -103,7 +106,7 @@ export function AgentActivity({
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
     const key = (event: KeyboardEvent) => {
-      if (document.activeElement?.closest('dialog[open]')) return;
+      if (document.activeElement?.closest('dialog[open], [role="dialog"]')) return;
       if (event.key === 'Escape' && root.current?.contains(document.activeElement)) {
         event.preventDefault();
         event.stopPropagation();
@@ -177,8 +180,10 @@ export function AgentActivity({
           <span aria-hidden="true">{playback.playing ? <PauseIcon /> : <PlayIcon />}</span>
         </button>
       )}
+      <AnimatePresence initial={false} mode="wait">
       {!open && peek && (
-        <button
+        <motion.button key="peek"
+          initial={{ opacity: 0, y: reducedMotion ? 0 : 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : 4 }} transition={UI_EXIT}
           type="button"
           className="agent-speech-peek"
           data-compact={compactPeek || undefined}
@@ -203,10 +208,12 @@ export function AgentActivity({
               ))}
             </span>
           )}
-        </button>
+        </motion.button>
       )}
       {open && (
-        <section className="reader-agent-card" id={panelId} aria-label="Paper Tour agent activity">
+        <motion.section key="activity"
+          initial={{ opacity: 0, y: reducedMotion ? 0 : 8, scale: reducedMotion ? 1 : 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: reducedMotion ? 0 : 4, scale: reducedMotion ? 1 : 0.98 }} transition={UI_SPRING} className="reader-agent-card" id={panelId} aria-label="Paper Tour agent activity">
           <header className="reader-agent-card-head">
             <strong>
               <span className="agent-header-spark" aria-hidden="true">
@@ -433,8 +440,9 @@ export function AgentActivity({
               )}
             </footer>
           </div>
-        </section>
+        </motion.section>
       )}
+      </AnimatePresence>
     </div>
   );
 }

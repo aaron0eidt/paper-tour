@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.6",
+    "shadcn": "^4.23.0",
     "supabase": "^2.122.0"
   }
 }

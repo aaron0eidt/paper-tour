@@ -5,6 +5,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles.css';
 import './themes.css';
 import { initializeTheme } from './theme';
+import { InterfaceProvider } from './ui/InterfaceProvider';
 
 const disposeTheme = initializeTheme();
 if (import.meta.hot) import.meta.hot.dispose(disposeTheme);
@@ -12,7 +13,7 @@ if (import.meta.hot) import.meta.hot.dispose(disposeTheme);
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <InterfaceProvider><App /></InterfaceProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

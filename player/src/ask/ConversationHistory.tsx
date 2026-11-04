@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { AnimatedDialog, DialogTitle } from '../ui/controls';
 import type { Conversation, ConversationMessage, ConversationSummary } from '../../../shared/conversations';
 import { answerText } from './api';
 import { conversationLabel } from './conversations';
@@ -27,29 +27,12 @@ export function ConversationHistory({
   onReplay(message: ConversationMessage): void;
   onRefresh(): void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
-  useEffect(() => {
-    const el = dialog.current;
-    if (!el) return;
-    if (open && !el.open) el.showModal();
-    else if (!open && el.open) el.close();
-  }, [open]);
   return (
-    <dialog
-      ref={dialog}
-      className="conversation-dialog"
-      aria-labelledby={titleId}
-      onCancel={onClose}
-      onClose={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <AnimatedDialog open={open} onOpenChange={(next) => { if (!next) onClose(); }} className="conversation-dialog">
       <div className="conversation-shell">
         <header className="conversation-header">
           <div>
-            <h2 id={titleId}>Conversations</h2>
+            <DialogTitle>Conversations</DialogTitle>
             <p>Questions and explanations, separate from your saved tours.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close conversations">
@@ -140,6 +123,6 @@ export function ConversationHistory({
           </button>
         </footer>
       </div>
-    </dialog>
+    </AnimatedDialog>
   );
 }
