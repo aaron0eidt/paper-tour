@@ -3,6 +3,7 @@ import * as Sidebar from '@animate-ui/react/primitives/sidebar';
 import { Dialog } from '@animate-ui/react/primitives/base-ui/dialog';
 import { CloseIcon } from '../components/icons';
 import './readerNavigation.css';
+import { PanelLeft } from './vendor/PanelLeft';
 
 export { useSidebar as useReaderNavigation } from '@animate-ui/react/primitives/sidebar';
 
@@ -12,23 +13,6 @@ export function ReaderNavigationProvider({ children }: { children: ReactNode }) 
     <Sidebar.Provider defaultOpen={expanded} className="reader-navigation-provider">
       {children}
     </Sidebar.Provider>
-  );
-}
-
-function PanelIcon({ collapsed = false }: { collapsed?: boolean }) {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden="true"
-    >
-      <rect x="2" y="3" width="16" height="14" rx="2" />
-      <path d={collapsed ? 'M6 3v14m4-10 3 3-3 3' : 'M8 3v14m6-10-3 3 3 3'} />
-    </svg>
   );
 }
 
@@ -45,7 +29,7 @@ export function ReaderNavigationToggle() {
       title={`${expanded ? 'Hide' : 'Show'} contents (⌘/Ctrl+B)`}
       onClick={toggleSidebar}
     >
-      <Sidebar.TriggerIcon open={<PanelIcon />} closed={<PanelIcon collapsed />} />
+      <PanelLeft size={17} animate={!expanded} initial={false} aria-hidden="true" />
       <span>Contents</span>
     </button>
   );
