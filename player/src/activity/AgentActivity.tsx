@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AutoHeight } from '@animate-ui/react/primitives/effects/auto-height';
 import { UI_EXIT, UI_SPRING } from '../ui/motion';
 import { activeActivity, type ActivityKind } from '../../../shared/agentActivity';
 import { CloseIcon, PauseIcon, PlayIcon } from '../components/icons';
@@ -190,6 +191,8 @@ export function AgentActivity({
           onClick={() => setOpen(true)}
           aria-label="Open agent conversation and activity"
         >
+          <AutoHeight className="agent-peek-content"
+            deps={[compactPeek, speaking, presence.label, presence.message, sentence?.words.join(' '), operations?.length]}>
           <span className="agent-peek-status">
             <span className="activity-status-dot" />
             {presence.label}
@@ -208,6 +211,7 @@ export function AgentActivity({
               ))}
             </span>
           )}
+          </AutoHeight>
         </motion.button>
       )}
       {open && (

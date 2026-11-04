@@ -702,3 +702,8 @@
   top: auto;
   bottom: calc(100% + var(--agent-bubble-gap, 14px));
 }
+/* Keep the status dot and word marker clear of Auto Height's clipping edge. */
+.agent-peek-content {
+  margin-inline: -4px;
+  padding-inline: 4px;
+}
