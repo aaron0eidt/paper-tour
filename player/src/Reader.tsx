@@ -1,3 +1,4 @@
+import { AnimatedSwitch } from './ui/controls';
 import { motion, useReducedMotion } from 'motion/react';
 import { setNarrationSoundGate } from './ui/sound';
 import { UI_SPRING } from './ui/motion';
@@ -1839,10 +1840,10 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
                 <strong>Original paper text</strong>
                 <p>The model prepares the original prose word for word, cleaning layout and citation markers only. Equations, tables and figures receive detailed explanations and visual annotations using the PDF and context. Authors, affiliations and page metadata are skipped.</p>
                 {!speechAvailable() && (!speech.data || speech.data.preferences.provider === 'browser') && <p role="alert">Speech synthesis is unavailable in this browser. Open this document in a browser with text-to-speech to hear it.</p>}
-                <label><input type="checkbox" checked={readingOptions.removeCitations}
-                  onChange={(e) => setReadingOptions((o) => ({ ...o, removeCitations: e.target.checked }))} /> Skip citation markers</label>
-                <label><input type="checkbox" checked={readingOptions.includeReferences}
-                  onChange={(e) => setReadingOptions((o) => ({ ...o, includeReferences: e.target.checked }))} /> Read bibliography</label>
+                <label><span>Skip citation markers</span><AnimatedSwitch checked={readingOptions.removeCitations}
+                  onCheckedChange={(removeCitations) => setReadingOptions((o) => ({ ...o, removeCitations }))} /></label>
+                <label><span>Read bibliography</span><AnimatedSwitch checked={readingOptions.includeReferences}
+                  onCheckedChange={(includeReferences) => setReadingOptions((o) => ({ ...o, includeReferences }))} /></label>
                 <button onClick={() => {
                   leaveAnswer();
                   if (engine && loaded?.doc) { engine.goTo(readingStepOnPage(engine.tour, loaded.doc, currentPageRef.current)); engine.play(); }

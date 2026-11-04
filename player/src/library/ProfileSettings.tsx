@@ -1,3 +1,4 @@
+import { AnimatedRadio, AnimatedRadioGroup } from '../ui/Radio';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { UserSettings } from '../../../shared/settings';
 import { PaperMark } from './AuthForm';
@@ -75,7 +76,8 @@ export function ProfileSettings({ email }: { email: string }) {
     <div className="library">
       <header className="library-header">
         <PaperMark />
-        <div className="ui-settings-navigation"><BackLink href={import.meta.env.BASE_URL} />
+        <div className="ui-settings-navigation">
+          <BackLink href={import.meta.env.BASE_URL} />
           <AccountMenu email={email} busy={busy} onSignOut={() => void run('signout', signOut, 'Signed out.')} />
         </div>
       </header>
@@ -85,7 +87,6 @@ export function ProfileSettings({ email }: { email: string }) {
             <h1>Settings</h1>
             <p className="profile-email">{email}</p>
           </div>
-
         </div>
         <nav className="profile-nav" aria-label="Settings sections">
           <a href={`${import.meta.env.BASE_URL}?settings=voices`}>Voices</a>
@@ -113,17 +114,18 @@ export function ProfileSettings({ email }: { email: string }) {
               <h2 id="appearance-heading">Appearance</h2>
               <p>Choose how Paper Tour looks on this browser.</p>
             </div>
-            <fieldset className="profile-themes">
+            <AnimatedRadioGroup
+              render={<fieldset />}
+              className="profile-themes"
+              name="theme"
+              value={theme}
+              onValueChange={setThemePreference}
+              aria-label="Color theme"
+            >
               <legend className="profile-field">Color theme</legend>
               {THEME_OPTIONS.map(({ id: value, label }) => (
                 <label key={value} className={`profile-theme ${theme === value ? 'selected' : ''}`}>
-                  <input
-                    type="radio"
-                    name="theme"
-                    value={value}
-                    checked={theme === value}
-                    onChange={() => setThemePreference(value)}
-                  />
+                  <AnimatedRadio value={value} />
                   <span className={`profile-theme-preview ${value}`} aria-hidden="true">
                     <i />
                     <i />
@@ -132,7 +134,7 @@ export function ProfileSettings({ email }: { email: string }) {
                   <span>{label}</span>
                 </label>
               ))}
-            </fieldset>
+            </AnimatedRadioGroup>
             <p className="profile-help">Saved automatically. System follows your device’s appearance.</p>
           </section>
           <section className="profile-card" id="reading" aria-labelledby="reading-heading">
@@ -140,30 +142,50 @@ export function ProfileSettings({ email }: { email: string }) {
               <h2 id="reading-heading">Reading</h2>
               <p>Choose how explanations appear while reading.</p>
             </div>
-            <label className="profile-field" htmlFor="max-auto-zoom">Maximum automatic zoom</label>
+            <label className="profile-field" htmlFor="max-auto-zoom">
+              Maximum automatic zoom
+            </label>
             <div className="profile-zoom-setting">
-              <input id="max-auto-zoom" type="range" min={100} max={400} step={25}
-                value={maxAutoZoom} onChange={(event) => setMaxAutoZoom(Number(event.target.value))}
-                aria-describedby="max-auto-zoom-help" aria-valuetext={`${maxAutoZoom}%`} />
+              <input
+                id="max-auto-zoom"
+                type="range"
+                min={100}
+                max={400}
+                step={25}
+                value={maxAutoZoom}
+                onChange={(event) => setMaxAutoZoom(Number(event.target.value))}
+                aria-describedby="max-auto-zoom-help"
+                aria-valuetext={`${maxAutoZoom}%`}
+              />
               <output htmlFor="max-auto-zoom">{maxAutoZoom}%</output>
             </div>
             <p className="profile-help" id="max-auto-zoom-help">
-              Limits automatic zooms in tours and answers. Lower values show more context. Manual zoom stays independent.
-              Saved automatically on this browser.
+              Limits automatic zooms in tours and answers. Lower values show more context. Manual zoom stays
+              independent. Saved automatically on this browser.
             </p>
-            <fieldset className="profile-sources profile-narration-display" aria-describedby="narration-display-help">
+            <AnimatedRadioGroup
+              render={<fieldset />}
+              className="profile-sources profile-narration-display"
+              name="narration-display"
+              value={narrationDisplay}
+              onValueChange={setNarrationDisplay}
+              aria-label="Spoken text"
+              aria-describedby="narration-display-help"
+            >
               <legend className="profile-field">Spoken text</legend>
               {NARRATION_DISPLAY_OPTIONS.map(({ id, label, description }) => (
                 <label key={id} className={narrationDisplay === id ? 'selected' : ''}>
-                  <input type="radio" name="narration-display" value={id} checked={narrationDisplay === id}
-                    onChange={() => setNarrationDisplay(id)} />
-                  <span><strong>{label}</strong><small>{description}</small></span>
+                  <AnimatedRadio value={id} />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>{description}</small>
+                  </span>
                 </label>
               ))}
-            </fieldset>
+            </AnimatedRadioGroup>
             <p className="profile-help" id="narration-display-help">
-              Applies to tours, answers and Read aloud. Playback controls and agent activity stay available.
-              Saved automatically on this browser.
+              Applies to tours, answers and Read aloud. Playback controls and agent activity stay available. Saved
+              automatically on this browser.
             </p>
           </section>
           {profile.loading && !data ? (
@@ -173,7 +195,9 @@ export function ProfileSettings({ email }: { email: string }) {
               <>
                 <section className="profile-card" id="connection" aria-labelledby="connection-heading" aria-busy={busy}>
                   <div className="profile-card-heading">
-                    <h2 id="connection-heading" ref={connectionHeading} tabIndex={-1}>Meta connection</h2>
+                    <h2 id="connection-heading" ref={connectionHeading} tabIndex={-1}>
+                      Meta connection
+                    </h2>
                     <p>Choose the API access used to create tours and answer questions.</p>
                   </div>
                   <div className="profile-connection-state">
@@ -196,7 +220,8 @@ export function ProfileSettings({ email }: { email: string }) {
                     <ActionButton
                       className="library-button"
                       type="button"
-                      busy={pending === 'test'} label={pending === 'test' ? 'Testing…' : 'Test connection'}
+                      busy={pending === 'test'}
+                      label={pending === 'test' ? 'Testing…' : 'Test connection'}
                       disabled={
                         busy ||
                         sourceChanged ||
@@ -212,40 +237,37 @@ export function ProfileSettings({ email }: { email: string }) {
                       }
                     />
                   </div>
-                  <fieldset disabled={busy} className="profile-sources">
+                  <AnimatedRadioGroup
+                    render={<fieldset />}
+                    disabled={busy}
+                    className="profile-sources"
+                    name="credential-source"
+                    value={source}
+                    onValueChange={setSource}
+                    aria-label="API access"
+                  >
                     <legend>API access</legend>
                     <label className={source === 'app' ? 'selected' : ''}>
-                      <input
-                        type="radio"
-                        name="credential-source"
-                        value="app"
-                        checked={source === 'app'}
-                        onChange={() => setSource('app')}
-                      />
+                      <AnimatedRadio value="app" />
                       <span>
                         <strong>Shared connection</strong>
                         <small>Use the app’s API access.{!data.appKeyAvailable && ' Not configured yet.'}</small>
                       </span>
                     </label>
                     <label className={source === 'personal' ? 'selected' : ''}>
-                      <input
-                        type="radio"
-                        name="credential-source"
-                        value="personal"
-                        checked={source === 'personal'}
-                        onChange={() => setSource('personal')}
-                      />
+                      <AnimatedRadio value="personal" />
                       <span>
                         <strong>Personal API key</strong>
                         <small>Use your own Meta account. Shared access is never used with this option.</small>
                       </span>
                     </label>
-                  </fieldset>
+                  </AnimatedRadioGroup>
                   {sourceChanged && (
                     <div className="profile-unsaved">
                       <span>Connection change not saved</span>
                       <ActionButton
-                        busy={pending === 'source'} label={pending === 'source' ? 'Saving…' : 'Save connection'}
+                        busy={pending === 'source'}
+                        label={pending === 'source' ? 'Saving…' : 'Save connection'}
                         disabled={busy}
                         onClick={() =>
                           void run('source', () => update({ credentialSource: source }), 'API connection updated.')
@@ -298,7 +320,8 @@ export function ProfileSettings({ email }: { email: string }) {
                       </p>
                       <div className="profile-actions">
                         <ActionButton
-                          busy={pending === 'key'} label={pending === 'key' ? 'Connecting…' : 'Save & connect'}
+                          busy={pending === 'key'}
+                          label={pending === 'key' ? 'Connecting…' : 'Save & connect'}
                           type="submit"
                           disabled={busy || apiKey.trim().length < 16}
                         />
@@ -330,7 +353,9 @@ export function ProfileSettings({ email }: { email: string }) {
                 </section>
                 <section className="profile-card" id="tour-model" aria-labelledby="model-heading">
                   <div className="profile-card-heading">
-                    <h2 id="model-heading" ref={modelHeading} tabIndex={-1}>Default tour model</h2>
+                    <h2 id="model-heading" ref={modelHeading} tabIndex={-1}>
+                      Default tour model
+                    </h2>
                     <p>Used for new PDFs and new tour versions.</p>
                   </div>
                   <ModelPicker
@@ -351,21 +376,28 @@ export function ProfileSettings({ email }: { email: string }) {
                   )}
                   <div className="profile-actions">
                     <ActionButton
-                      busy={pending === 'model'} label={pending === 'model' ? 'Saving…' : 'Save model'}
+                      busy={pending === 'model'}
+                      label={pending === 'model' ? 'Saving…' : 'Save model'}
                       disabled={
                         busy || !selected?.tourCompatible || selected.available === false || model === data.defaultModel
                       }
                       onClick={() => void run('model', () => update({ defaultModel: model }), 'Default model saved.')}
                     />
-                    {model !== data.defaultModel && <>
-                      <button className="library-button" disabled={busy} onClick={() => {
-                        setModel(data.defaultModel);
-                        modelHeading.current?.focus();
-                      }}>
-                        Discard model change
-                      </button>
-                      <span className="profile-help">Model change not saved</span>
-                    </>}
+                    {model !== data.defaultModel && (
+                      <>
+                        <button
+                          className="library-button"
+                          disabled={busy}
+                          onClick={() => {
+                            setModel(data.defaultModel);
+                            modelHeading.current?.focus();
+                          }}
+                        >
+                          Discard model change
+                        </button>
+                        <span className="profile-help">Model change not saved</span>
+                      </>
+                    )}
                   </div>
                 </section>
               </>

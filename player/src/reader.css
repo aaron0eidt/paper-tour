@@ -294,8 +294,8 @@
   line-height: 1.5;
 }
 .reader-reading-options p { color: var(--muted); margin: 6px 0 10px; }
-.reader-reading-options label { display: flex; gap: 7px; align-items: center; margin: 8px 0; }
-.reader-reading-options button {
+.reader-reading-options label { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: 10px 0; cursor: pointer; }
+.reader-reading-options button:not(.ui-switch) {
   margin-top: 6px;
   padding: 6px 9px;
   border: 1px solid var(--line);

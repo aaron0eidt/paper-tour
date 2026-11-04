@@ -631,9 +631,6 @@ button.ui-status-badge:hover {
   border-radius: 99px;
   background: var(--panel-2);
   cursor: pointer;
-  transition:
-    background-color 160ms,
-    border-color 160ms;
 }
 .ui-switch[data-checked] {
   background: var(--accent);
@@ -831,3 +828,25 @@ button.ui-status-badge:hover {
   .library-settings-link { padding-inline: 10px; }
   .library-settings-link > span { display: none; }
 }
+
+.ui-radio {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+.ui-radio[data-checked] { border-color: var(--accent); background: var(--accent-soft); }
+.ui-radio-indicator { display: grid; place-items: center; }
+.ui-radio-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.ui-radio:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ui-radio[data-disabled] { opacity: .5; cursor: default; }
+.profile-theme .ui-radio { position: absolute; right: 10px; bottom: 10px; }
+.profile-sources label:has(.ui-radio[data-disabled]) { cursor: default; opacity: .65; }
