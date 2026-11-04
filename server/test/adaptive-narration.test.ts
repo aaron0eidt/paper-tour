@@ -1,3 +1,4 @@
+import type { GenerationWorkspace } from '../src/ai/workspace';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TeachingConcept, TeachingPlan } from '../../shared/teachingPlan';
@@ -149,6 +150,7 @@ function scripted(options: {
   pick?: (id: string) => string;
   write: (request: Request) => unknown;
   depth?: 'deep';
+  workspace?: GenerationWorkspace;
 }) {
   const requests: Request[] = [],
     events: { type: string; data: Record<string, any> }[] = [];
@@ -172,6 +174,7 @@ function scripted(options: {
       generator.generate({
         ...input,
         profile: selected,
+        workspace: options.workspace,
         onEvent: async (type, data) => {
           events.push({ type, data });
         },
@@ -338,4 +341,51 @@ test('empty native placeholders cannot satisfy the selected adaptive visual', as
     3,
   );
   assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.degraded'].includes(event.type)));
+});
+
+test('a failed tour resumes its saved visual repair without rewriting its narration or replanning', async () => {
+  const stored = new Map<string, unknown>();
+  const workspace: GenerationWorkspace = {
+    load: async (key) => structuredClone(stored.get(key)),
+    save: async (key, value) => {
+      stored.set(key, structuredClone(value));
+    },
+  };
+  let resume = false;
+  const flow = {
+    title: 'Sensor control loop',
+    nodes: [
+      { id: 'node-1', label: 'Probe reading' },
+      { id: 'node-2', label: 'Controller' },
+      { id: 'node-3', label: 'Valve' },
+    ],
+    edges: [
+      { from: 'node-1', to: 'node-2' },
+      { from: 'node-2', to: 'node-3' },
+      { from: 'node-3', to: 'node-1' },
+    ],
+  };
+  const model = scripted({
+    workspace,
+    pick: (id) => (id === 'teach-controller' ? 'flow' : 'none'),
+    write: (request) => {
+      if (!isController(request)) return direct(request, EXPLAIN);
+      if (!resume) return direct(request, EXPLAIN);
+      assert.match(request.task, /repair_visual_only/);
+      assert.ok(!Object.hasOwn(request.schema.properties, 'say'));
+      return { flow, cues: [], say: 'This must not replace the saved explanation.', plan: 'Changed' };
+    },
+  });
+  await assert.rejects(model.generate(), (error: any) => error.code === 'invalid_tour_direction');
+  const plans = model.requests.filter((request) => /paper_card|teaching_plan|visual_plan/.test(request.name)).length;
+  resume = true;
+  const result = await model.generate();
+  assert.equal(
+    model.requests.filter((request) => /paper_card|teaching_plan|visual_plan/.test(request.name)).length,
+    plans,
+  );
+  const step = result.tour.chapters.flatMap((chapter) => chapter.steps).find((step) => step.id === 'teach-controller');
+  assert.equal(step?.say, EXPLAIN);
+  assert.ok(step.actions.some((action) => action.type === 'board' && action.item.kind === 'flow'));
+  assert.ok(model.events.some((event) => event.type === 'workspace.reused' && event.data.status === 'draft'));
 });

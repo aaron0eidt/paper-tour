@@ -1,3 +1,5 @@
+import { workKey } from '../ai/workspace';
+import { visualRepairSchema, visualRepairTask, mergeVisualRepair } from './direction-repair';
 import { claimsNumericExample } from './example';
 import { randomUUID } from 'node:crypto';
 import { indexElements } from '../elements';
@@ -297,6 +299,14 @@ export class HarnessTourGenerator implements TourGenerator {
       });
       try {
         const reviewed = await reviewAuthoredWithModel(item, {
+          workspace: input.workspace,
+          workspaceScope: workKey({
+            model: this.model,
+            source: doc.source.sha256,
+            profile: input.profile,
+            harness: HARNESS_VERSION,
+            beat,
+          }),
           client: {
             complete: (...args: Parameters<MuseClient['complete']>) => {
               const [messages, name, schema, maxTokens, within] = args;
@@ -989,7 +999,42 @@ export class HarnessTourGenerator implements TourGenerator {
         };
       };
       let now = setup(chosen);
-      let direction: Direction | null = null;
+      const baseTask = now.task.slice();
+      const workspaceKey = workKey({
+        type: 'direction',
+        version: 1,
+        harness: HARNESS_VERSION,
+        model: this.model,
+        source: doc.source.sha256,
+        profile: input.profile,
+        beat,
+        chosen,
+        schema: now.schema,
+        task: baseTask,
+      });
+      const saved = (await input.workspace?.load(workspaceKey)) as
+        | {
+            status: 'draft' | 'inspect' | 'ready';
+            raw?: Record<string, unknown>;
+            problems?: string[];
+            result?: BeatResult;
+            direction?: Direction;
+            revision?: number;
+          }
+        | undefined;
+      if (saved?.status === 'ready' && saved.result) {
+        await input.onEvent?.('workspace.reused', { beat: beat.id, status: 'ready' });
+        await progress('writing', ++directed, beats.length);
+        return saved.result;
+      }
+      let repairRevision = saved?.revision ?? 0;
+      let repairDraft = saved?.status === 'draft' ? saved.raw : undefined;
+      if (repairDraft && saved?.problems?.length) {
+        repairRevision++;
+        now.task = visualRepairTask(baseTask, repairDraft, saved.problems, repairRevision);
+        await input.onEvent?.('workspace.reused', { beat: beat.id, status: 'draft', problems: saved.problems });
+      }
+      let direction: Direction | null = saved?.status === 'inspect' && saved.direction ? saved.direction : null;
       let requireExample = now.example.required;
       // A step that mostly restates its highlighted sentences, or runs past its cap, is sent back once; until then its
       // direction is kept. A rewrite that was only to shorten it and is not shorter does not replace it.
@@ -1050,22 +1095,27 @@ export class HarnessTourGenerator implements TourGenerator {
           const completion = await call(
             now.task,
             'beat_direction',
-            now.schema,
+            repairDraft ? visualRepairSchema(now.schema) : now.schema,
             detailed ? 12_000 : 6_000,
             effort,
             signal,
             { id: beat.id, label: beat.point },
             repairing ? Math.min(own, Math.max(pace.repairMs, pace.stepMs - spent())) : own,
           );
-          const rawSay = (completion.value as { say?: unknown } | null)?.say;
+          const wasVisualRepair = !!repairDraft;
+          const value = repairDraft
+            ? mergeVisualRepair(repairDraft, completion.value as Record<string, unknown>)
+            : completion.value;
+          if (wasVisualRepair) now.task = baseTask.slice();
+          const rawSay = (value as { say?: unknown } | null)?.say;
           requireExample ||=
             now.example.offered &&
-            ((completion.value as { example?: unknown } | null)?.example !== undefined ||
+            ((value as { example?: unknown } | null)?.example !== undefined ||
               (typeof rawSay === 'string' && claimsNumericExample(rawSay)));
           const corruption = typeof rawSay === 'string' ? narrationProblems(rawSay) : [];
           const cleaned = corruption.length
             ? null
-            : cleanDirection(completion.value, beat, now.targets, requireExample, now.visual);
+            : cleanDirection(value, beat, now.targets, requireExample, now.visual);
           if (corruption.length) {
             await input.onEvent?.('validation.failed', {
               stage: 'narration',
@@ -1073,7 +1123,7 @@ export class HarnessTourGenerator implements TourGenerator {
               problems: corruption,
               attempt: attempt + 1,
             });
-            now.task.push(...repairTurn(completion.value, corruption));
+            now.task.push(...repairTurn(value, corruption));
           }
           const copied = cleaned && readsSource(cleaned.say, doc);
           const repeated = cleaned && overview && repeatsExplanation(cleaned.say, overview);
@@ -1085,14 +1135,14 @@ export class HarnessTourGenerator implements TourGenerator {
           if (repeated) {
             await input.onEvent?.('beat.duplicate', { beat: beat.id, attempt: attempt + 1 });
             now.task.push(
-              ...repairTurn(completion.value, [
+              ...repairTurn(value, [
                 `This repeats the preceding overview. Teach a new ${now.visual?.bare ? '' : 'worked example, '}cause-and-effect mechanism or comparison instead; do not rephrase the same symbol definitions.`,
               ]),
             );
           }
           if (copied)
             now.task.push(
-              ...repairTurn(completion.value, [
+              ...repairTurn(value, [
                 'Explain the mechanism, consequence or intuition in your own words; do not read the source aloud.',
               ]),
             );
@@ -1114,9 +1164,23 @@ export class HarnessTourGenerator implements TourGenerator {
               problems: issues,
               attempt: attempt + 1,
             });
-            now.task.push(...repairTurn(completion.value, issues));
+            if (adaptive && next && !next.visualProblems?.length) {
+              repairDraft = value as Record<string, unknown>;
+              repairRevision++;
+              await input.workspace?.save(workspaceKey, {
+                status: 'draft',
+                raw: repairDraft,
+                problems: issues,
+                revision: repairRevision,
+              });
+              now.task = visualRepairTask(baseTask, repairDraft, issues, repairRevision);
+            } else {
+              repairDraft = undefined;
+              now.task.push(...repairTurn(value, issues));
+            }
             continue;
           }
+          repairDraft = undefined;
           if (next && (adaptive || (!rewrites && attempt < 2))) {
             // A step on slides is held against the slides' whole text, which the learner can read; any other against
             // the sentences it highlights.
@@ -1154,12 +1218,12 @@ export class HarnessTourGenerator implements TourGenerator {
                   problems: [...moves, ...callback, ...long],
                   attempt: attempt + 1,
                 });
-              now.task.push(...repairTurn(completion.value, repairs));
+              now.task.push(...repairTurn(value, repairs));
             }
           }
           if (!next)
             now.task.push(
-              ...repairTurn(completion.value, [
+              ...repairTurn(value, [
                 beat.flexibleNarration
                   ? 'Provide a complete explanation of the planned learning objective, with actual narration instead of empty or malformed text. Preserve necessary reasoning and qualifications; no word target applies.'
                   : `say must be 8-${sayLimit(beat)} spoken words.`,
@@ -1236,6 +1300,8 @@ export class HarnessTourGenerator implements TourGenerator {
       const filled = withReadyView(settled.direction, now.targets, now.visual);
       if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: now.visual!.visual });
       const ready = filled ?? settled.direction;
+      // Persist the checked text/cues before asynchronous rendering, which may be interrupted independently.
+      await input.workspace?.save(workspaceKey, { status: 'inspect', direction: ready });
       if (ready.board)
         ready.board = await inspectVisual(
           ready.board,
@@ -1263,11 +1329,9 @@ export class HarnessTourGenerator implements TourGenerator {
               ),
             }
           : undefined;
-      return {
-        targets: now.targets,
-        direction: ready,
-        ...(degraded ? { degraded } : {}),
-      };
+      const result = { targets: now.targets, direction: ready, ...(degraded ? { degraded } : {}) };
+      await input.workspace?.save(workspaceKey, { status: 'ready', result });
+      return result;
     };
     // The tour as one step list per beat: a beat's own steps, or none for an omitted detail or a step that only read the
     // source aloud. Built once per beat, since a finished beat never changes.

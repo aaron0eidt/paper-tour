@@ -48,12 +48,14 @@ export async function authorAndInspectVisual(
     narration: string;
     evidence: string;
     signal?: AbortSignal;
+    onItem?: (item: AuthoredVisual) => Promise<void>;
     repair: (feedback: VisualRepairContext) => Promise<AuthoredVisual>;
     review?: (feedback: VisualRepairContext) => Promise<string[]>;
   },
 ): Promise<AuthoredVisual> {
   let item = initial;
   for (let attempt = 0; attempt < 3; attempt++) {
+    await context.onItem?.(item);
     const inspection = await inspectAuthoredVisual(item, context.signal);
     const feedback = { ...inspection, item, narration: context.narration, evidence: context.evidence, attempt };
     if (!inspection.problems.length && context.review) feedback.problems.push(...(await context.review(feedback)));

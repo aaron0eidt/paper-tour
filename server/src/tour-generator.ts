@@ -1,3 +1,4 @@
+import type { GenerationWorkspace } from './ai/workspace';
 import type { TourProfileSnapshot } from '../../shared/tourProfiles';
 import type { ActivitySink } from './activity';
 import type { Doc, Tour } from '../../shared/paper';
@@ -23,6 +24,7 @@ export interface TourImage {
   ink?: InkMap;
 }
 export interface TourGenerationInput {
+  workspace?: GenerationWorkspace;
   profile?: TourProfileSnapshot;
   documentId: string;
   analysisId: string;

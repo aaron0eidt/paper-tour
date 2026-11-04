@@ -1,3 +1,4 @@
+import { workKey } from './workspace';
 import { randomUUID } from 'node:crypto';
 import { ProcessingError } from '../errors';
 import type { TourGenerationInput } from '../tour-generator';
@@ -17,6 +18,31 @@ export function recordedCalls(client: MuseClient, input: TourGenerationInput, mo
     signal: AbortSignal,
     task?: { id: string; label: string },
   ): Promise<Completion> => {
+    signal.throwIfAborted();
+    const key = workKey({
+      version: 1,
+      source: input.doc.source.sha256,
+      analysis: input.analysisId,
+      profile: input.profile,
+      model,
+      promptVersion,
+      name,
+      messages,
+      schema,
+      effort,
+      maxTokens,
+    });
+    const cached = (await input.workspace?.load(key)) as { value?: unknown } | undefined;
+    if (cached && Object.hasOwn(cached, 'value')) {
+      await input.onEvent?.('workspace.reused', { key, name, ...(task ? { task } : {}) });
+      const completion: Completion = {
+        value: structuredClone(cached.value),
+        requestId: null,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedInputTokens: 0 },
+      };
+      completions.push(completion);
+      return completion;
+    }
     const callId = randomUUID(),
       started = Date.now();
     const publicMessages = messages.map((message) => ({
@@ -55,6 +81,7 @@ export function recordedCalls(client: MuseClient, input: TourGenerationInput, mo
         effort,
         input.onEvent ? async (text) => input.onEvent!('model.narration', { callId, text }) : undefined,
       );
+      await input.workspace?.save(key, { value: completion.value });
       completions.push(completion);
       await input.onEvent?.('model.completed', {
         callId,
