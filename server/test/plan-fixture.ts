@@ -134,7 +134,8 @@ export const EXPLAIN =
 
 /**
  * A sentence that names what the boards of an answer show. The narration of a step is about its board
- * (board-agreement.ts), so a scripted step that draws one says its title and labels.
+ * (board-agreement.ts), so a scripted step that draws one says its title and labels. It speaks of the subject, never
+ * of the board (insight.ts styleProblems).
  */
 export function about(boards: object): string {
   const shown = Object.values(boards).flatMap((board: any) =>
@@ -143,7 +144,7 @@ export function about(boards: object): string {
       ...[...(board?.bars ?? []), ...(board?.nodes ?? []), ...(board?.terms ?? [])].map((x) => x.label),
     ].filter(Boolean),
   );
-  return shown.length ? `The board shows ${shown.join(', ')}.` : '';
+  return shown.length ? `Its parts are ${shown.join(', ')}.` : '';
 }
 
 export function reply(value: unknown, status = 200) {

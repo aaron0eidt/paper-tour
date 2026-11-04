@@ -1,0 +1,162 @@
+% Company policy "Use of AI Tools at Work" of a fictional company (Calder & Finch Consulting Ltd.). English, 3 pages.
+% Features: document control table, numbered sections, numbered rules (4.1 to 4.8), data classes table, responsibilities,
+% training deadline, consequences, version history table.
+\documentclass[10.5pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathptmx}
+\usepackage[scaled=0.9]{helvet}
+\usepackage[english]{babel}
+\usepackage[margin=2.4cm,top=2.4cm,bottom=2.3cm]{geometry}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{needspace}
+\usepackage{tcolorbox}
+\usepackage{caption}
+\captionsetup{font={small,sf}, labelfont={bf,sf}, labelsep=colon, justification=raggedright, singlelinecheck=false}
+\usepackage{microtype}
+
+\definecolor{cf}{HTML}{23395B}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\renewcommand{\arraystretch}{1.2}
+
+\titleformat{\section}{\sffamily\large\bfseries\color{cf}}{\thesection}{0.8em}{}
+\titlespacing*{\section}{0pt}{1.3em}{0.4em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\sffamily\small\textbf{Calder \& Finch Consulting Ltd.}}
+\fancyhead[R]{\sffamily\small POL-IT-014 \textperiodcentered{} Classification: Internal}
+\fancyfoot[L]{\sffamily\footnotesize Fictional company and policy, created for testing purposes only.}
+\fancyfoot[R]{\sffamily\footnotesize Page \thepage{} of \pageref{LastPage}}
+
+\newcommand{\yes}{\textbf{Yes}}
+\newcommand{\no}{\textbf{No}}
+
+\begin{document}
+
+{\sffamily\color{cf}\fontsize{22}{26}\selectfont\bfseries Use of AI Tools at Work}\\[0.3em]
+{\sffamily\large Group Policy POL-IT-014, Version 2.1}
+
+\vspace{0.3em}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\small}l X >{\sffamily\bfseries\small}l X@{}}
+  \toprule
+  Policy owner & Chief Information Security Officer & Approved by & Executive Board \\
+  Effective from & 1 December 2026 & Next review & 1 December 2027 \\
+  Applies to & All employees and contractors & Contact & security@calder-finch.example \\
+  \bottomrule
+\end{tabularx}
+
+\section{Purpose}
+Artificial intelligence (AI) tools such as chat assistants, code assistants and image generators can make our work
+faster and better. They can also leak confidential information, produce wrong results and create legal risk.
+This policy sets out how Calder \& Finch Consulting Ltd.\ (``the Company'') uses AI tools safely and responsibly.
+
+\section{Scope}
+This policy applies to all employees, interns and contractors of the Company worldwide who use an AI tool for
+Company work, on Company devices or on private devices. It covers generative AI tools that produce text, code, images
+or audio from a prompt, whether they are provided by the Company or by third parties. It does not cover
+the internal analytics models that the Data Science team runs under the separate model governance standard.
+
+\section{Definitions}
+\textbf{Approved AI tool:} a tool that appears on the Approved AI Tools List on the intranet and for which the Company
+has a contract that excludes training on our data. \textbf{Public AI tool:} any other AI tool, in particular free web
+chat services used with a personal account. \textbf{Prompt:} any text, file or image that you enter into an AI tool.
+
+\section{Rules for the use of AI tools}
+\begin{enumerate}[label=\textbf{4.\arabic*}, leftmargin=2.6em, itemsep=0.4em]
+  \item \textbf{Use approved tools.} Use only AI tools on the Approved AI Tools List for Company work. Do not use public AI
+        tools for Company work, and do not sign in to AI tools with a private account for work purposes.
+  \item \textbf{Respect the data classes.} Check the data class of everything you enter into an AI tool and follow the
+        table in section 5. Never enter Restricted data into any AI tool.
+  \item \textbf{No client data without permission.} Do not enter client names, client documents or client code into an AI
+        tool unless the client contract allows it and the engagement manager has confirmed this in writing.
+  \item \textbf{You remain responsible.} AI output may be wrong, biased or out of date. Check facts, figures, code and
+        references before you use them. You are responsible for your work, whether or not an AI tool helped.
+  \item \textbf{Be transparent.} Tell the client when the contract requires it, and mark AI-generated content in client
+        deliverables as the engagement manager directs.
+  \item \textbf{No automated decisions about people.} Do not use AI tools to make or prepare decisions about hiring,
+        promotion, pay or discipline of individuals without the approval of Human Resources and the Data Protection Officer.
+  \item \textbf{Protect intellectual property.} Do not enter source code or documents that are marked ``Confidential'' into
+        AI tools other than the Company's enterprise tenant, and do not use AI output that may infringe third-party rights.
+  \item \textbf{Report incidents.} Report any suspected leak of data into an AI tool, or any harmful AI output, to
+        security@calder-finch.example within 24 hours.
+\end{enumerate}
+
+\Needspace{20\baselineskip}
+\section{Data classes and permitted use}
+All Company information belongs to one of four data classes. The class decides which AI tools you may use.
+
+\begin{center}
+\small
+\captionof{table}{Data classes and permitted AI tools}
+\begin{tabularx}{\linewidth}{@{}l >{\raggedright\arraybackslash}p{3.6cm} >{\raggedright\arraybackslash}X >{\centering\arraybackslash}p{2.0cm} >{\centering\arraybackslash}p{1.6cm}@{}}
+  \toprule
+  \textbf{Class} & \textbf{Description} & \textbf{Examples} & \textbf{Approved AI tool} & \textbf{Public AI tool} \\
+  \midrule
+  1 Public & Meant for external release & Published marketing material, job adverts, press releases & \yes & \yes \\
+  \addlinespace[3pt]
+  2 Internal & Not public; low harm if disclosed & Meeting notes, internal slides, project plans without client names & \yes & \no \\
+  \addlinespace[3pt]
+  3 Confidential & Harm to the Company or its clients if disclosed & Client deliverables, contracts, price lists, financial results, source code & \yes, enterprise tenant only & \no \\
+  \addlinespace[3pt]
+  4 Restricted & Severe harm; protected by law or contract & Personal data of employees or clients (especially health data), passwords and keys, board papers, unpublished results & \no & \no \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+If you are not sure about the class of a document, treat it as the next higher class and ask your manager.
+
+\section{Responsibilities}
+\begin{itemize}[leftmargin=1.4em, itemsep=0.25em]
+  \item \textbf{Employees and contractors} follow this policy, complete the mandatory training and report incidents.
+  \item \textbf{Managers} make sure that their teams know and follow the policy and that new team members complete
+        the training within 30 days of starting.
+  \item \textbf{IT Security} maintains the Approved AI Tools List, reviews requests for new tools within 10 working days
+        and monitors compliance.
+  \item \textbf{The Data Protection Officer} carries out a privacy impact assessment before any tool that processes
+        personal data is added to the list.
+  \item \textbf{Human Resources} runs the disciplinary procedure and includes the training in the onboarding programme.
+\end{itemize}
+
+\section{Training}
+All employees and contractors must complete the e-learning course ``Responsible AI at Work'' (about 45 minutes) in the
+Learning Portal \textbf{by 31 January 2027}. New employees must complete it within 30 days of their start date, and
+everyone repeats a short refresher once a year. Access to the approved AI tools is suspended on 1 February 2027 for anyone
+who has not completed the course and is restored on the day it is completed.
+
+\section{Consequences of violations}
+A breach of this policy can lead to disciplinary action under the Company's Disciplinary Procedure, from a
+written warning up to dismissal in serious cases. For contractors, a breach can lead to termination of the contract.
+Where the law is broken, for example by unlawful disclosure of personal data, the Company may also report the matter
+to the authorities. Employees who report their own mistake within 24 hours will not be disciplined for the report
+itself, and the prompt reporting is taken into account.
+
+\section{Exceptions}
+Requests for exceptions are sent to the IT Service Desk. Only the Chief Information Security Officer can approve an
+exception, in writing and for a maximum of six months.
+
+\Needspace{12\baselineskip}
+\section{Version history}
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}l l l X@{}}
+  \toprule
+  \textbf{Version} & \textbf{Date} & \textbf{Author} & \textbf{Summary of changes} \\
+  \midrule
+  1.0 & 1 March 2024 & IT Security & First issue; public AI tools not allowed for client work \\
+  1.1 & 15 September 2024 & IT Security & Approved AI Tools List introduced \\
+  2.0 & 1 June 2025 & CISO & Four data classes introduced; rule on automated decisions about people \\
+  2.1 & 1 December 2026 & CISO & Training deadline of 31 January 2027, clarified Restricted data, 24-hour incident reporting \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\end{document}

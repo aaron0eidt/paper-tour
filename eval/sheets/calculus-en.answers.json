@@ -1,0 +1,24 @@
+{
+  "sheet": "calculus-en",
+  "language": "en",
+  "subject": "Calculus I: limits, derivatives, substitution, optimisation, Taylor polynomial",
+  "items": [
+    {"task": "Problem 1", "part": "a", "answer": "(x^2 - 4)/(x - 2) = x + 2 for x != 2, so the limit is 4", "numeric": [4], "unit": null, "method": "Factor the numerator and cancel the common factor (x - 2)."},
+    {"task": "Problem 1", "part": "b", "answer": "sin(3x)/(2x) = (3/2) * sin(3x)/(3x) -> 3/2", "numeric": [1.5], "unit": null, "method": "Use lim_{u->0} sin(u)/u = 1 with u = 3x."},
+    {"task": "Problem 1", "part": "c", "answer": "sqrt(x^2 + x) - x = x/(sqrt(x^2 + x) + x) = 1/(sqrt(1 + 1/x) + 1) -> 1/2", "numeric": [0.5], "unit": null, "method": "Multiply by the conjugate, divide numerator and denominator by x."},
+    {"task": "Problem 1", "part": "d", "answer": "e^x - 1 - x = x^2/2 + x^3/6 + ..., so the quotient tends to 1/2 (also: L'Hopital twice gives e^x/2 -> 1/2)", "numeric": [0.5], "unit": null, "method": "Taylor expansion of e^x, or L'Hopital's rule twice (0/0 form)."},
+    {"task": "Problem 2", "part": "a", "answer": "f'(x) = 5 (3x^2 + 1)^4 * 6x = 30x (3x^2 + 1)^4", "numeric": [30, 4], "unit": null, "method": "Chain rule: outer power 5, inner derivative 6x."},
+    {"task": "Problem 2", "part": "b", "answer": "g'(x) = 2x e^{-x} - x^2 e^{-x} = (2x - x^2) e^{-x}", "numeric": [], "unit": null, "method": "Product rule with (e^{-x})' = -e^{-x}."},
+    {"task": "Problem 2", "part": "c", "answer": "h'(x) = 2x cos(x^2) ln x + sin(x^2)/x", "numeric": [], "unit": null, "method": "Product rule; the chain rule for sin(x^2) gives cos(x^2) * 2x."},
+    {"task": "Problem 2", "part": "d", "answer": "g(1) = 1/e and g'(1) = (2 - 1)/e = 1/e, so the tangent line is y = 1/e + (1/e)(x - 1) = x/e", "numeric": [0.367879], "unit": null, "method": "Point-slope form with g(1) and g'(1) from part (b)."},
+    {"task": "Problem 3", "part": "a", "answer": "With u = x^2, du = 2x dx: integral = (1/2) e^{x^2} + C", "numeric": [0.5], "unit": null, "method": "Substitution u = x^2."},
+    {"task": "Problem 3", "part": "b", "answer": "u = 1 + x^2, du = 2x dx, limits 1 to 2: (1/2) * integral u^{1/2} du = (1/3) (2^{3/2} - 1) = (2 sqrt(2) - 1)/3, about 0.6095", "numeric": [0.6095], "unit": null, "method": "Substitution u = 1 + x^2 with the limits changed to u = 1 and u = 2."},
+    {"task": "Problem 3", "part": "c", "answer": "u = ln x, du = dx/x, limits 0 to 1: integral u du = 1/2", "numeric": [0.5], "unit": null, "method": "Substitution u = ln x, limits 0 and 1."},
+    {"task": "Problem 4", "part": "a", "answer": "Fence: 3x + y = 120, so y = 120 - 3x and A(x) = x y = 120x - 3x^2 with domain 0 < x < 40", "numeric": [120, 3, 0, 40], "unit": null, "method": "Constraint 3x + y = 120 (three fences of length x and one of length y), eliminate y."},
+    {"task": "Problem 4", "part": "b", "answer": "A'(x) = 120 - 6x = 0 gives x = 20 m; A''(x) = -6 < 0, so it is a maximum", "numeric": [20], "unit": "m", "method": "Set the first derivative to zero, check the sign of the second derivative."},
+    {"task": "Problem 4", "part": "c", "answer": "x = 20 m and y = 120 - 60 = 60 m, maximal area A = 20 * 60 = 1200 square metres", "numeric": [20, 60, 1200], "unit": "m^2", "method": "Back-substitute x = 20 into the constraint and the area."},
+    {"task": "Problem 5", "part": "a", "answer": "f' = 1/(1+x), f'' = -1/(1+x)^2, f''' = 2/(1+x)^3, so T3(x) = x - x^2/2 + x^3/3", "numeric": [1, -0.5, 0.333333], "unit": null, "method": "Derivatives at 0 are 0, 1, -1, 2; divide by k!."},
+    {"task": "Problem 5", "part": "b", "answer": "ln(1.2) is approximately T3(0.2) = 0.2 - 0.02 + 0.002667 = 0.18267 (true value 0.18232)", "numeric": [0.18267], "unit": null, "method": "Evaluate T3 at x = 0.2."},
+    {"task": "Problem 5", "part": "c", "answer": "R3 = f''''(xi)/4! * x^4 with f''''(xi) = -6/(1+xi)^4, |f''''| <= 6 on [0, 0.2], so |R3| <= (6/24) * 0.2^4 = 0.0004 (the actual error is about 0.00035)", "numeric": [0.0004], "unit": null, "method": "Lagrange remainder with the maximum of the fourth derivative on the interval."}
+  ]
+}

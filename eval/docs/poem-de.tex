@@ -1,0 +1,105 @@
+% Rilke, "Der Panther" (1902, gemeinfrei) as a school reader page with Worterklaerungen, a biographical note and an
+% Arbeitsauftrag box. German, 1 page. Features: poem with line numbers every 5 lines, glossary, task box.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{palatino}
+\usepackage[scaled=0.9]{helvet}
+\usepackage[ngerman]{babel}
+\usepackage[margin=2.0cm,top=2.1cm,bottom=2.0cm]{geometry}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{microtype}
+
+\definecolor{lesebuch}{HTML}{1F5A7A}
+\definecolor{lesebuchhell}{HTML}{E4EFF5}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\sffamily\small\textcolor{lesebuch}{\textbf{Deutsch Lesebuch 9/10}} \textperiodcentered{} Lyrik}
+\fancyhead[R]{\sffamily\small Kapitel 4: Dinggedichte}
+\fancyfoot[L]{\sffamily\footnotesize Text gemeinfrei (Rilke, gest.\ 1926). Aufgaben und Erläuterungen: eigener Text für Testzwecke.}
+\fancyfoot[R]{\sffamily\footnotesize 112}
+
+\begin{document}
+
+% ---- Kapitelkopf ------------------------------------------------------------------------
+{\sffamily\small\color{lesebuch}\textbf{TIERE IN DER LYRIK}}\\[-0.2em]
+{\color{lesebuch}\rule{\linewidth}{0.8pt}}
+
+\vspace{0.4em}
+\begin{minipage}[t]{0.63\linewidth}\vspace{0pt}
+% ---- Gedicht ----------------------------------------------------------------------------
+{\Huge\bfseries Der Panther}\\[0.2em]
+{\large\itshape Im Jardin des Plantes, Paris}\\[0.5em]
+{\sffamily\small Rainer Maria Rilke (1875--1926)}
+
+\vspace{1.4em}
+\large
+\renewcommand{\arraystretch}{1.28}
+\begin{tabular}{@{}r@{\hspace{1.6em}}l@{}}
+   & Sein Blick ist vom Vorübergehn der Stäbe \\
+   & so müd geworden, daß er nichts mehr hält. \\
+   & Ihm ist, als ob es tausend Stäbe gäbe \\
+   & und hinter tausend Stäben keine Welt. \\[0.9em]
+  \textcolor{lesebuch}{\sffamily\footnotesize 5} & Der weiche Gang geschmeidig starker Schritte, \\
+   & der sich im allerkleinsten Kreise dreht, \\
+   & ist wie ein Tanz von Kraft um eine Mitte, \\
+   & in der betäubt ein großer Wille steht. \\[0.9em]
+   & Nur manchmal schiebt der Vorhang der Pupille \\
+  \textcolor{lesebuch}{\sffamily\footnotesize 10} & sich lautlos auf --. Dann geht ein Bild hinein, \\
+   & geht durch der Glieder angespannte Stille -- \\
+   & und hört im Herzen auf zu sein. \\
+\end{tabular}
+\normalsize
+
+\vspace{1.0em}
+{\sffamily\footnotesize Aus: Rainer Maria Rilke, \emph{Neue Gedichte}, 1907. Das Gedicht entstand 1902 in Paris.}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.33\linewidth}\vspace{0pt}
+% ---- Randspalte -------------------------------------------------------------------------
+\begin{tcolorbox}[colback=lesebuchhell, colframe=lesebuch, boxrule=0.5pt, arc=2pt, left=6pt, right=6pt,
+  top=4pt, bottom=4pt, title={\sffamily\bfseries Worterklärungen}, fonttitle=\sffamily\small, coltitle=white,
+  colbacktitle=lesebuch]
+\sffamily\footnotesize
+\textbf{Jardin des Plantes} (frz.): botanischer Garten mit Tierpark in Paris\\[0.2em]
+\textbf{geschmeidig:} biegsam und elegant in der Bewegung\\[0.2em]
+\textbf{betäubt:} gelähmt, ohne Gefühl\\[0.2em]
+\textbf{Pupille:} das schwarze Sehloch in der Mitte des Auges\\[0.2em]
+\textbf{angespannt:} gespannt, unter Kraft gehalten
+\end{tcolorbox}
+
+\vspace{0.3em}
+\begin{tcolorbox}[colback=white, colframe=lesebuch, boxrule=0.5pt, arc=2pt, left=6pt, right=6pt,
+  top=4pt, bottom=4pt, title={\sffamily\bfseries Zum Autor}, fonttitle=\sffamily\small, coltitle=white,
+  colbacktitle=lesebuch]
+\sffamily\footnotesize
+Rainer Maria Rilke wurde 1875 in Prag geboren und starb 1926 in der Schweiz. 1902 reiste er nach Paris, um
+über den Bildhauer Auguste Rodin zu schreiben. Rodin lehrte ihn, die Dinge lange und genau anzusehen. So
+entstand eine neue Art von Gedicht, das \emph{Dinggedicht}: Es beschreibt einen Gegenstand oder ein Tier
+so genau, dass es zum Sinnbild wird. \emph{Der Panther} gilt als das bekannteste Beispiel.
+\end{tcolorbox}
+\end{minipage}
+
+% ---- Arbeitsauftrag ----------------------------------------------------------------------
+\vspace{1.2em}
+\begin{tcolorbox}[colback=white, colframe=lesebuch, boxrule=1.2pt, arc=3pt, left=10pt, right=10pt, top=6pt, bottom=6pt,
+  title={\sffamily\bfseries Arbeitsauftrag \hfill\normalfont\small Bearbeitungszeit: 25 Minuten}, fonttitle=\sffamily\large,
+  coltitle=white, colbacktitle=lesebuch]
+\begin{enumerate}[leftmargin=1.6em, itemsep=0.35em, label=\textbf{\arabic*.}]
+  \item Lies das Gedicht zweimal laut. Halte deinen ersten Eindruck in einem Satz fest.
+  \item \textbf{Analysiere das Reimschema und das Metrum} des Gedichts. Bestimme auch die Kadenzen
+        (männlich oder weiblich) der Verse.
+  \item Untersuche die \textbf{sprachlichen Bilder} (zum Beispiel Vergleiche, Metaphern und
+        Übertreibungen) und erkläre ihre Wirkung.
+  \item Beschreibe, wie sich der Zustand des Panthers von Strophe zu Strophe verändert. Belege deine Aussagen am
+        Text und gib die Zeilen an.
+\end{enumerate}
+\end{tcolorbox}
+
+\end{document}

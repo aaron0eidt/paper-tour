@@ -1,0 +1,139 @@
+% Blood test report of a FICTIONAL patient from a fictional laboratory (Meridian Clinical Laboratory). English, 2 pages.
+% Features: letterhead with a drawn logo (no caption), patient and sample header, results table with value, unit,
+% reference range and H/L flags in three panels (blood count, chemistry, lipids and inflammation), comment section.
+\documentclass[9.5pt,a4paper]{extarticle}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[scaled=0.95]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[english]{babel}
+\usepackage[margin=1.9cm,top=2.2cm,bottom=2.1cm]{geometry}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{tikz}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{needspace}
+\usepackage{tcolorbox}
+\usepackage{microtype}
+
+\definecolor{lab}{HTML}{14507A}
+\definecolor{flagbg}{HTML}{FBE9E7}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\renewcommand{\arraystretch}{1.22}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\small\textbf{Meridian Clinical Laboratory} \textperiodcentered{} Report MCL-2026-118204}
+\fancyhead[R]{\small Patient: Hale, Casey M. \textperiodcentered{} ID P-000417}
+\fancyfoot[L]{\scriptsize\textbf{FICTIONAL TEST DOCUMENT.} Laboratory, patient and physician do not exist; values are invented.}
+\fancyfoot[R]{\scriptsize Page \thepage{} of \pageref{LastPage}}
+
+% table rows: test, result, unit, reference range, flag
+\newcommand{\ok}[5]{#1 & #2 & #3 & #4 & #5 \\}
+\newcommand{\flagged}[5]{\rowcolor{flagbg}#1 & \textbf{#2} & #3 & #4 & \textbf{#5} \\}
+\newcommand{\panel}[1]{\midrule\rowcolor{lab!10}\multicolumn{5}{@{}l}{\textbf{\color{lab}#1}} \\\midrule}
+
+\begin{document}
+
+% ---- Letterhead ---------------------------------------------------------------------------
+\noindent
+\begin{minipage}[c]{0.12\linewidth}
+\begin{tikzpicture}[scale=0.9]
+  \draw[lab, line width=2pt] (0,0) circle (0.7);
+  \draw[lab, line width=2.5pt] (-0.4,0) -- (0.4,0);
+  \draw[lab, line width=2.5pt] (0,-0.4) -- (0,0.4);
+\end{tikzpicture}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.60\linewidth}
+{\LARGE\bfseries\color{lab} Meridian Clinical Laboratory}\\
+{\small Department of Haematology and Clinical Chemistry\\ 12 Example Road, Exampleville \textperiodcentered{} Tel.\ 555-0142}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.24\linewidth}
+\raggedleft\small
+\textbf{LABORATORY REPORT}\\
+Report no.\ MCL-2026-118204\\
+Status: \textbf{final}
+\end{minipage}
+
+\vspace{0.3em}\hrule height 1pt\vspace{0.6em}
+
+% ---- Patient and sample ----------------------------------------------------------------
+\begin{tabularx}{\linewidth}{@{}>{\bfseries}l X >{\bfseries}l X@{}}
+  Patient & Hale, Casey M. & Collected & 12 Oct 2026, 07:55 (fasting, 12 h) \\
+  Date of birth & 14 Mar 1981 (45 years) & Received & 12 Oct 2026, 09:02 \\
+  Sex & Female & Reported & 12 Oct 2026, 15:20 \\
+  Patient ID & P-000417 & Specimen & Venous blood (EDTA and serum) \\
+  Ordering physician & Dr.\ Anna Whitlock (fictional) & Clinic & Exampleville Family Practice \\
+\end{tabularx}
+
+\vspace{0.4em}
+\section*{\normalsize\color{lab} Results}
+{\small Reference ranges apply to adult females. \textbf{H} = above the reference range, \textbf{L} = below the
+reference range. Flagged rows are shaded.}
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}X r l l c@{}}
+  \toprule
+  \textbf{Test} & \textbf{Result} & \textbf{Unit} & \textbf{Reference range} & \textbf{Flag} \\
+  \panel{Complete blood count}
+  \flagged{White blood cells (WBC)}{11.4}{$\times 10^{9}$/L}{4.0 -- 10.0}{H}
+  \ok{Red blood cells (RBC)}{4.21}{$\times 10^{12}$/L}{3.80 -- 5.20}{}
+  \flagged{Haemoglobin}{11.2}{g/dL}{12.0 -- 15.5}{L}
+  \flagged{Haematocrit}{34.8}{\%}{36.0 -- 46.0}{L}
+  \ok{Mean cell volume (MCV)}{82.7}{fL}{80.0 -- 100.0}{}
+  \flagged{Mean cell haemoglobin (MCH)}{26.6}{pg}{27.0 -- 33.0}{L}
+  \ok{Mean cell haemoglobin concentration (MCHC)}{32.2}{g/dL}{32.0 -- 36.0}{}
+  \ok{Platelets}{268}{$\times 10^{9}$/L}{150 -- 400}{}
+  \panel{Clinical chemistry}
+  \flagged{Glucose, fasting}{5.9}{mmol/L}{3.9 -- 5.5}{H}
+  \ok{Creatinine}{71}{\textmu mol/L}{45 -- 84}{}
+  \ok{Estimated GFR}{96}{mL/min/1.73 m$^{2}$}{$>$ 90}{}
+  \ok{Sodium}{139}{mmol/L}{135 -- 145}{}
+  \ok{Potassium}{4.2}{mmol/L}{3.5 -- 5.1}{}
+  \ok{Alanine aminotransferase (ALT)}{24}{U/L}{$<$ 35}{}
+  \ok{Aspartate aminotransferase (AST)}{22}{U/L}{$<$ 35}{}
+  \ok{Thyroid-stimulating hormone (TSH)}{2.1}{mIU/L}{0.4 -- 4.0}{}
+  \panel{Lipids, iron stores and inflammation}
+  \flagged{Total cholesterol}{5.8}{mmol/L}{$<$ 5.2}{H}
+  \flagged{LDL cholesterol}{3.7}{mmol/L}{$<$ 3.0}{H}
+  \ok{HDL cholesterol}{1.5}{mmol/L}{$>$ 1.2}{}
+  \ok{Triglycerides}{1.3}{mmol/L}{$<$ 1.7}{}
+  \flagged{Ferritin}{14}{\textmu g/L}{15 -- 150}{L}
+  \flagged{C-reactive protein (CRP)}{6.8}{mg/L}{$<$ 5.0}{H}
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\Needspace{14\baselineskip}
+% ---- Comments --------------------------------------------------------------------------------
+\section*{\normalsize\color{lab} Laboratory comments}
+\begin{tcolorbox}[colback=lab!5, colframe=lab, boxrule=0.5pt, arc=2pt, left=8pt, right=8pt, top=5pt, bottom=5pt]
+\small
+\textbf{1. Blood count.} Haemoglobin, haematocrit and MCH are below the reference range, with a low-normal MCV
+(82.7 fL) and a ferritin of 14 \textmu g/L. The pattern is compatible with reduced iron stores. The mild
+increase in white blood cells (11.4 $\times 10^{9}$/L) is non-specific.
+
+\textbf{2. Glucose and lipids.} The fasting glucose of 5.9 mmol/L is slightly above the reference range.
+Total and LDL cholesterol are above the desirable range.
+
+\textbf{3. Inflammation.} The CRP of 6.8 mg/L is slightly raised.
+
+\textbf{Note.} The results have to be interpreted together with the clinical findings and history by the ordering
+physician. A single measurement is not sufficient for a diagnosis. The laboratory recommends repeating the abnormal
+values in 4 to 6 weeks if clinically indicated.
+\end{tcolorbox}
+
+\vspace{0.5em}
+{\footnotesize Methods: haematology by impedance and flow cytometry; chemistry by photometry and ion-selective
+electrodes; ferritin and TSH by chemiluminescence immunoassay; CRP by immunoturbidimetry. Estimated GFR calculated with
+the CKD-EPI equation. This report has been validated electronically and is valid without signature. \\
+\textbf{Authorised by:} Dr.\ Mira Okonkwo, Consultant Clinical Chemist (fictional) \quad Report generated 12 Oct 2026, 15:20.}
+
+\end{document}

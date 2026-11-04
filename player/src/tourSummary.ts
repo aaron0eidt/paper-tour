@@ -12,6 +12,11 @@ const DOC_TYPES: Record<NonNullable<Tour['doc_type']>, string | null> = {
   lecture: 'Lecture slides',
   contract: 'Contract',
   letter: 'Letter',
+  manual: 'Manual',
+  report: 'Report',
+  article: 'Article',
+  literature: 'Literature',
+  medical: 'Health information',
   other: null,
 };
 

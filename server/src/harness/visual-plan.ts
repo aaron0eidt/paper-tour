@@ -17,8 +17,9 @@ export interface StepVisual {
   idea: string;
   data: string;
   /**
-   * The kinds this step's worked-example frames may use, when it may carry one (allocateFrames): its own planned kind and
-   * the kinds the plan leaves free, so that frames count toward the tour's kind limits. Unset: any frame kind.
+   * The kinds this step's worked-example frames may use, when it may carry one (allocateFrames): one kind, used for
+   * every frame, so that the example counts toward the tour's kind limits. Several only where no kind was free. Unset:
+   * any frame kind.
    */
   frames?: BoardKind[];
   /** The table whose own numbers the step draws (a results step that rests on one), when code chose it (withTableBoard). */
@@ -59,8 +60,13 @@ export const sheetKinds = () => BOARD_KINDS.filter((kind) => kind !== 'formula' 
 
 /** Planned kinds that show a relationship themselves: a worked-example sequence is never forced on their steps. */
 const RELATIONAL_KINDS: readonly string[] = ['heatmap', 'scatter', 'shapes', 'plot', 'timeline', 'distribution'];
-/** The kinds that show a worked case's mechanism, best first, which the frames of a step planned as a formula may add. */
-const MECHANISM_KINDS: readonly BoardKind[] = ['plot', 'scene', 'flow', 'bars'];
+/**
+ * The kinds that show a worked case's mechanism, the easiest to write well first: a flow carries most cases (a process
+ * with its values), bars a few comparable quantities, and a scene needs vectors, geometry or a curve to pass as an
+ * example. A plot is not one of them: it cannot open or close an example (example.ts), and a step shows one kind of
+ * board, so an example in a plot is not possible.
+ */
+const MECHANISM_KINDS: readonly BoardKind[] = ['flow', 'bars', 'scene'];
 
 /**
  * Whether a step may carry a worked example (example frames) and whether it must. Without a plan a step may always, and
@@ -83,11 +89,12 @@ export const exampleKinds = (visual?: StepVisual): readonly BoardKind[] =>
   visual?.flexible ? LEGACY_BOARD_KINDS : visual?.frames?.length ? visual.frames : LEGACY_BOARD_KINDS;
 
 /**
- * Gives every step that may carry a worked example the kinds its frames may use, so that the frames count toward the
- * tour's kind limits and its diversity. A step planned as bars, flow or scene shows its example in that kind, as formula
- * cards where the formula limit has room. A step planned as a formula, or one without a visual that must show an example,
- * may also use the kinds that show a mechanism and that the plan has not used up: each unit of room goes to one such
- * step, in turn, so that two steps never take the same room.
+ * Gives every step that may carry a worked example the kind its frames use, so that the example counts toward the
+ * tour's kind limits and its diversity. The frames of an example are all of one kind (a step shows one picture): a step
+ * planned as bars, flow or scene shows its example in that kind. A step planned as a formula, or one without a visual
+ * that must show an example, takes one of the kinds that show a mechanism and that the plan has not used up: each unit of
+ * room goes to one such step, in turn, so that two steps never take the same room. A step that finds none free is not
+ * refused: it may use any of them.
  */
 export function allocateFrames(plan: VisualPlan, beats: Beat[], settled: ReadonlySet<string> = new Set()): VisualPlan {
   const used = new Map<BoardKind, number>();
@@ -108,17 +115,14 @@ export function allocateFrames(plan: VisualPlan, beats: Beat[], settled: Readonl
       out.set(beat.id, { ...entry, frames: [...LEGACY_BOARD_KINDS] });
       continue;
     }
-    const frames: BoardKind[] = entry.visual === 'none' ? [] : [entry.visual];
-    if (entry.visual !== 'formula' && room('formula') > 0) {
-      frames.push('formula');
-      used.set('formula', (used.get('formula') ?? 0) + 1);
-    }
     const turn = flexible.indexOf(beat);
-    if (turn >= 0)
-      for (const kind of slots.filter((_, k) => k % flexible.length === turn))
-        if (!frames.includes(kind)) frames.push(kind);
-    // An example needs a native visual frame, so a step that finds none free is not refused: it may use any.
-    if (!frames.some((kind) => kind !== 'formula')) frames.push(...MECHANISM_KINDS);
+    const own = turn >= 0 ? slots.filter((_, k) => k % flexible.length === turn) : [];
+    const frames: BoardKind[] =
+      entry.visual !== 'formula' && entry.visual !== 'none'
+        ? [entry.visual]
+        : own.length
+          ? [own[0]]
+          : [...MECHANISM_KINDS];
     out.set(beat.id, { ...entry, frames });
   }
   return out;
@@ -199,19 +203,24 @@ export function visualPlanSchema(beats: Beat[], { sheet, adaptive }: PlanOptions
   };
 }
 
-/** What each kind is for on an exercise sheet: the method of a task, drawn from what the task gives. */
+/**
+ * What each kind is for on an exercise sheet: the method of a task, drawn from what the task gives, in any subject
+ * (notes/TUTOR.md, "Subjects"). A picture shows the setup and the method, never the result.
+ */
 const SHEET_KINDS_HELP: Partial<Record<BoardKind, string>> = {
-  program: KINDS_HELP.program,
-  plotly: KINDS_HELP.plotly,
+  program:
+    'an animated construction with real intermediate values from the givens, for what is built or run step by step: free-body diagrams, circuits, molecules and Lewis structures, a mole map g → mol → mol → g with the givens’ numbers, pedigrees, trace tables of an algorithm, number lines, geometric constructions.',
+  plotly:
+    'an interactive graph of a function or of data the task gives, with labelled axes and units: titration curves, Michaelis-Menten kinetics, supply and demand, motion graphs v(t) and x(t).',
   heatmap:
-    'a grid of counts or probabilities that sets the problem up: natural frequencies for a conditional probability (rows are the groups, columns the outcomes), a table of outcomes, a contingency or confusion table, a formula’s values over two indices.',
+    'a grid that sets the problem up: natural frequencies for a conditional probability (rows are the groups, columns the outcomes), a Punnett square (the parents’ alleles as rows and columns), a contingency or confusion table, a dynamic-programming table, a formula’s values over two indices.',
   bars: 'a few values that the method compares or splits (the probabilities of the cases it combines, the parts of a total), never the numbers the task already lists.',
   plot: 'the graph of a function the task is about (a density, a trend, a parabola, a curve with a point on it), never a straight line.',
   shapes: 'a matrix or vector and how its dimensions combine in a product or a system (linear algebra).',
   scene:
-    'geometry: a point or a vector in the plane or the complex plane, an angle, a triangle, a projection, with labelled objects.',
+    'forces and vectors in the plane, and geometry: a point or a vector in the plane or the complex plane, an angle, a triangle, a projection, with labelled objects.',
   scatter: 'the (x, y) data points a task lists, when it prints at least three.',
-  flow: 'a procedure or tree with a real branch or loop (a probability tree, a case split, an algorithm).',
+  flow: 'a procedure or tree with a real branch or loop, never a simple chain: an algorithm, a probability tree, a case split, a limiting reagent (two reactants meeting in one product).',
   distribution:
     'the distribution a probability task is about (a normal, binomial, Poisson or exponential with the parameters the task gives), never with the range the task asks the chance of shaded.',
 };
@@ -220,21 +229,21 @@ const SHEET_ORDER: BoardKind[] = [
   'program',
   'plotly',
   'heatmap',
+  'flow',
   'shapes',
   'scene',
   'plot',
   'distribution',
   'bars',
   'scatter',
-  'flow',
 ];
 
 /** The task of the plan call for an exercise sheet: a visual only where the method gains from one. */
 function sheetPlanTask(language: string, adaptive = false): string {
   const kinds = SHEET_ORDER.map((kind) => `   - ${kind}: ${SHEET_KINDS_HELP[kind]}`).join('\n');
   return `TASK: design the side-board visuals of this exercise sheet's tour, which is narrated in ${JSON.stringify(language)}.
-Each step is one task or one part of a task. The tour solves it line by line on the board in formulas, and those lines
-stay as they are, so never plan a formula. A visual is only for what the algebra does not show: the structure of the
+Each step is one task or one part of a task, in any subject (maths, a science, computer science, economics). The tour
+solves it line by line on the board in formulas, and those lines stay as they are, so never plan a formula. A visual is only for what the algebra does not show: the structure of the
 method, set up from what the task gives. None is right for plain algebra, a short computation or a task whose method
 needs no picture.
 1. The kinds and what they are for:

@@ -248,7 +248,7 @@ test('a formula step on an unnumbered equation is briefed, targeted and narrated
   assert.ok(schema.properties.cues.items.properties.target.enum.includes('term-1'));
   // Without a narration the step names the equation by where it is.
   const step = beatStep(formula, targets, null, doc);
-  assert.match(step.say, /^Let's look at the equation on page 2\./);
+  assert.match(step.say, /^The equation on page 2: /);
   assert.deepEqual(step.actions[0], { type: 'zoom', target: 'equ1' });
   assert.ok(step.actions.some((a) => a.type === 'box' && a.target === 'equ1'));
 });

@@ -1,13 +1,18 @@
 // Board tests: item checks, flow layout and geometry, term wrapping, bars and easing. Run with
 // `npm test` (esbuild bundles this file for Node, no test framework needed).
 
-import katex from 'katex';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import katex from '../src/tex';
+import { FormulaBoard, formulaModel, workingModel } from '../src/components/FormulaBoard';
 import {
   BOARD_INK,
   BOARD_PALETTE,
+  WORKING_SHOWN,
   barClip,
   barFrameSource,
   boardFrameColors,
+  continuesWorking,
   continuousBoardFrame,
   interpolateBars,
   plotCursor,
@@ -20,14 +25,19 @@ import {
   cubicBezier,
   decimalsOf,
   fitText,
+  FLOW_FONT,
+  FLOW_MIN_SCALE,
+  FLOW_SMALL_SCALE,
   flowGeometry,
   flowLayout,
   formatValue,
   termColor,
+  workingLines,
+  twoLineWidth,
   wrapLabel,
   wrapTerms,
 } from '../src/board';
-import type { BarsItem, FlowItem } from '../src/board';
+import type { BarsItem, FlowItem, FormulaItem } from '../src/board';
 import {
   HEATMAP_TIMING,
   cellLook,
@@ -82,6 +92,8 @@ const warnings: string[] = [];
 const warn = (message: string) => void warnings.push(message);
 // About 7px a character, like a 13px label.
 const measure = (text: string) => text.length * 7;
+// The flow labels as drawn: 15px Inter 500 is about 8.3px a character.
+const measureFlow = (text: string) => text.length * 8.3;
 // The parse check the board uses, with KaTeX itself.
 const parses = (latex: string) => {
   try {
@@ -205,17 +217,63 @@ test('a flow runs down a tall board and across a wide one', () => {
 });
 
 test('a flow that does not fit is scaled down, never up, and never below readable', () => {
-  // A fork, which cannot wind into rows like a chain.
+  // A fork, which cannot wind into rows like a chain: its two boxes side by side need 260px.
   const fork: FlowItem = { kind: 'flow', nodes: chain(4).nodes, edges: [['n0', 'n1'], ['n1', 'n2'], ['n1', 'n3']] };
-  const g = flowGeometry(fork, { width: 200, height: 160 }, measure);
-  ok(g.scale < 1 && g.scale >= 0.8, `scale ${g.scale}`);
-  ok(g.width * g.scale <= 200.01 && g.height * g.scale <= 160.01, 'fits');
-  eq(flowGeometry(chain(10), { width: 200, height: 200 }, measure).scale, 0.8, 'scrolls instead');
+  const g = flowGeometry(fork, { width: 250, height: 300 }, measure);
+  eq(g.scale, 1, 'a small board spends less on air, so the fork fits');
+  const tight = flowGeometry(fork, { width: 400, height: 100 }, measure);
+  ok(tight.scale < 1 && tight.scale >= FLOW_SMALL_SCALE, `scale ${tight.scale}`);
+  ok(tight.width * tight.scale <= 400.01 && tight.height * tight.scale <= 100.01, 'fits');
+  const roomy = flowGeometry(fork, { width: 400, height: 300 }, measure);
+  eq(roomy.scale, 1, 'a roomier board fits it too');
+  eq(flowGeometry(chain(10), { width: 400, height: 400 }, measure).scale, FLOW_MIN_SCALE, 'scrolls instead');
   eq(flowGeometry(chain(2), { width: 1000, height: 1000 }, measure).scale, 1, 'never up');
 });
 
+test('a small board shrinks the flow to fit before it scrolls', () => {
+  // A phone or a short strip under the stage: scrolling there would hide boxes, so the 14px floor gives way to FLOW_SMALL_SCALE.
+  const fork: FlowItem = { kind: 'flow', nodes: chain(4).nodes, edges: [['n0', 'n1'], ['n1', 'n2'], ['n1', 'n3']] };
+  for (const box of [{ width: 200, height: 220 }, { width: 240, height: 150 }, { width: 180, height: 600 }]) {
+    const g = flowGeometry(fork, box, measure);
+    ok(g.scale >= FLOW_SMALL_SCALE && g.scale < FLOW_MIN_SCALE, `${box.width}x${box.height}: scale ${g.scale}`);
+    ok(g.width * g.scale <= box.width + 0.01 && g.height * g.scale <= box.height + 0.01, `${box.width}x${box.height}: fits`);
+  }
+  eq(flowGeometry(chain(10), { width: 200, height: 200 }, measure).scale, FLOW_SMALL_SCALE, 'only a flow past even that scrolls');
+  // A board with room keeps the floor.
+  ok(flowGeometry(fork, { width: 400, height: 260 }, measure).scale >= FLOW_MIN_SCALE, 'roomy boards keep labels near 15px');
+});
+
+test('no word of a label is cut at the sizes a board really has, with the labels measured as drawn', () => {
+  const training: FlowItem = {
+    kind: 'flow',
+    nodes: ['Training batch', 'Model', 'Cross-entropy loss', 'Gradients', 'Predictions'].map((label, i) => ({ id: `n${i}`, label })),
+    edges: [['n0', 'n1'], ['n1', 'n2'], ['n2', 'n3'], ['n3', 'n1'], ['n1', 'n4']],
+  };
+  const paths: FlowItem = {
+    kind: 'flow',
+    nodes: ['Random item', 'Machine A branch', 'Machine B branch', 'Defective paths', 'Add contributions', 'Band-limited signal'].map((label, i) => ({ id: `n${i}`, label })),
+    edges: [['n0', 'n1'], ['n0', 'n2'], ['n1', 'n3'], ['n2', 'n3'], ['n3', 'n4'], ['n4', 'n5']],
+  };
+  const words = (item: FlowItem) => item.nodes.flatMap((n) => n.label.split(/\s+/));
+  // A desktop side board, a narrow one, a tablet strip, a phone, and a wide one.
+  for (const box of [{ width: 389, height: 529 }, { width: 328, height: 529 }, { width: 231, height: 437 }, { width: 732, height: 253 }, { width: 339, height: 600 }, { width: 1000, height: 340 }]) {
+    for (const item of [training, paths]) {
+      const g = flowGeometry(item, box, measureFlow);
+      const label = `${item.nodes.length} boxes in ${box.width}x${box.height}`;
+      ok(g.nodes.every((n) => n.lines.every((l) => !l.endsWith('…'))), `${label}: ${g.nodes.flatMap((n) => n.lines).filter((l) => l.endsWith('…')).join(', ')} cut`);
+      ok(words(item).every((w) => g.nodes.some((n) => n.lines.some((l) => l.includes(w)))), `${label}: every word shown`);
+      ok(g.nodes.every((n) => n.lines.every((l) => measureFlow(l) <= n.w - 24 + 0.01)), `${label}: every line inside its box`);
+      ok(g.scale >= FLOW_SMALL_SCALE, `${label}: scale ${g.scale}`);
+    }
+  }
+  // The box is never narrower than its widest word, even in a room that is: the layout scales to fit instead.
+  const g = flowGeometry(training, { width: 328, height: 529 }, measureFlow);
+  ok(g.nodes[0].w >= measureFlow('Cross-entropy') + 24, `box ${g.nodes[0].w}px holds the word`);
+  ok(g.scale < 1 && g.scale >= FLOW_SMALL_SCALE && g.width * g.scale <= 328.01, `scaled to fit: ${g.scale}`);
+});
+
 test('a chain too long for a short, wide board winds into rows instead of shrinking', () => {
-  const g = flowGeometry(chain(6), { width: 390, height: 200 }, measure);
+  const g = flowGeometry(chain(6), { width: 480, height: 200 }, measure);
   eq(g.scale, 1, 'no shrinking');
   const rows = [...new Set(g.nodes.map((n) => n.y))];
   eq(rows.length, 2, 'two rows');
@@ -224,7 +282,7 @@ test('a chain too long for a short, wide board winds into rows instead of shrink
   ok(bottom.every((n, i) => i === 0 || n.x < bottom[i - 1].x), 'the second runs back');
   eq(bottom[0].x, top[2].x, 'the turn goes straight down');
   ok(g.nodes.every((n) => n.x >= 0 && n.y >= 0 && n.x + n.w <= g.width && n.y + n.h <= g.height), 'inside');
-  ok(g.width <= 390 && g.height <= 200, 'fits');
+  ok(g.width <= 480 && g.height <= 200, 'fits');
   // Its arrows: along the first row, down at the turn, and back along the second.
   const heads = g.edges.map((e) => e.head.match(/-?\d+(\.\d+)?/g)!.map(Number));
   const dir = (h: number[]) => (h[2] > h[0] && h[2] > h[4] ? 'right' : h[2] < h[0] && h[2] < h[4] ? 'left' : 'down');
@@ -233,14 +291,35 @@ test('a chain too long for a short, wide board winds into rows instead of shrink
   eq(flowGeometry(chain(6), { width: 380, height: 700 }, measure).nodes.every((n, _, all) => n.x === all[0].x), true);
   const edges = [['n0', 'n1'], ['n0', 'n2'], ['n1', 'n3'], ['n3', 'n4'], ['n4', 'n5']] as [string, string][];
   const branch: FlowItem = { kind: 'flow', nodes: chain(6).nodes, edges };
-  ok(new Set(flowGeometry(branch, { width: 390, height: 200 }, measure).nodes.map((n) => n.y)).size !== 2, 'not wound');
+  ok(new Set(flowGeometry(branch, { width: 480, height: 200 }, measure).nodes.map((n) => n.y)).size !== 2, 'not wound');
+});
+
+test('a short, wide board of phone width winds the chain and draws it inside the board', () => {
+  const g = flowGeometry(chain(6), { width: 390, height: 200 }, measure);
+  eq([...new Set(g.nodes.map((n) => n.y))].length, 2, 'two rows');
+  ok(g.scale >= FLOW_SMALL_SCALE && g.scale * FLOW_FONT >= 10.5, `labels at ${g.scale * FLOW_FONT}px`);
+  ok(g.width * g.scale <= 390.01 && g.height * g.scale <= 200.01, `drawn ${g.width * g.scale}x${g.height * g.scale}, inside the board`);
+});
+
+test('on a phone-sized board the flow trades air for label size', () => {
+  const diamond: FlowItem = {
+    kind: 'flow',
+    nodes: ['all positions', 'attend pos1', 'attend pos2', 'together once'].map((label, i) => ({ id: `n${i}`, label })),
+    edges: [['n0', 'n1'], ['n0', 'n2'], ['n1', 'n3'], ['n2', 'n3']],
+  };
+  const g = flowGeometry(diamond, { width: 339, height: 150 }, measureFlow);
+  ok(g.width * g.scale <= 339.01 && g.height * g.scale <= 150.01, `drawn ${g.width * g.scale}x${g.height * g.scale}, inside the board`);
+  ok(g.scale * FLOW_FONT >= 12.5, `labels at ${g.scale * FLOW_FONT}px`);
+  ok(g.nodes.every((n) => n.lines.every((l) => !l.endsWith('…'))), 'nothing cut');
+  const roomy = flowGeometry(diamond, { width: 600, height: 400 }, measureFlow);
+  ok(roomy.nodes[0].w > g.nodes[0].w, 'a board with room keeps the wider boxes');
 });
 
 test('a back edge loops beside the boxes instead of through them', () => {
   const item: FlowItem = { kind: 'flow', nodes: chain(3).nodes, edges: [['n0', 'n1'], ['n1', 'n2'], ['n2', 'n0']] };
   const g = flowGeometry(item, { width: 380, height: 600 }, measure);
   const back = g.edges[2];
-  const xs = back.d.match(/-?\d+(\.\d+)?/g)!.map(Number).filter((_, i) => i % 2 === 0);
+  const xs = trace(back.d).map(([x]) => x);
   ok(Math.max(...xs) > g.nodes[0].x + g.nodes[0].w + 10, 'loops to the right');
   ok(Math.max(...xs) <= g.width, 'within the drawing');
 });
@@ -302,6 +381,80 @@ test('labels wrap by words and end in an ellipsis when they run out of lines', (
   eq(fitText('Transformer (big)', 69, measure), 'Transfor…', 'one pixel less, one letter less');
 });
 
+test('a label wraps to two lines before anything is cut', () => {
+  // 154px on one line; the box is made as wide as two lines of it need, so nothing ends in an ellipsis.
+  eq(twoLineWidth('Compare required ratio', measure), 100, 'Compare / required ratio');
+  eq(twoLineWidth('Random item', measure), 42, 'two short words: the longer one');
+  eq(twoLineWidth('Convert', measure), 49, 'one word: its own width');
+  const item: FlowItem = {
+    kind: 'flow',
+    nodes: [{ id: 'a', label: 'Convert to moles' }, { id: 'b', label: 'Compare required ratio' }, { id: 'c', label: 'Find limiting reactant' }],
+    edges: [['a', 'b'], ['b', 'c']],
+  };
+  for (const box of [{ width: 392, height: 640 }, { width: 1000, height: 340 }, { width: 300, height: 640 }]) {
+    const g = flowGeometry(item, box, measure);
+    ok(g.nodes.every((n) => n.lines.length <= 2), `two lines at most in ${box.width}x${box.height}`);
+    ok(g.nodes.every((n) => n.lines.every((l) => !l.endsWith('…'))), 'nothing cut');
+    ok(g.nodes.every((n) => n.lines.every((l) => measure(l) <= n.w)), 'every line inside its box');
+    const padY = box.width < 360 || box.height < 240 ? 22 : 28;
+    ok(g.nodes.every((n) => n.h === n.lines.length * 20 + padY), 'the box is as tall as its lines');
+  }
+  // A label that fits on one line at the widest box stays on one line: the box grows to hold it.
+  const column = flowGeometry(item, { width: 392, height: 640 }, measure);
+  eq(column.nodes.map((n) => n.lines.length), [1, 1, 1], 'one line each down a side board');
+  ok(column.nodes[0].w >= 190, `the box holds the longest label: ${column.nodes[0].w}px`);
+  // Side by side two boxes have half the room: the longest label wraps, the others still need one line only if they fit.
+  const pair: FlowItem = { kind: 'flow', nodes: item.nodes, edges: [['a', 'c'], ['b', 'c']] };
+  const narrow = flowGeometry(pair, { width: 330, height: 640 }, measure);
+  ok(narrow.nodes[1].lines.length === 2 && narrow.nodes.every((n) => n.lines.length <= 2), 'two lines where one does not fit');
+  ok(narrow.nodes.every((n) => n.x >= 0 && n.x + n.w <= narrow.width), 'inside');
+});
+
+test('a flow uses its board: readable boxes, a drawing that fills it, labels near their size', () => {
+  const diamond: FlowItem = {
+    kind: 'flow',
+    nodes: ['Random item', 'Machine A branch', 'Machine B branch', 'Defective paths', 'Add contributions'].map((label, i) => ({ id: `n${i}`, label })),
+    edges: [['n0', 'n1'], ['n0', 'n2'], ['n1', 'n3'], ['n2', 'n3'], ['n3', 'n4']],
+  };
+  for (const box of [{ width: 392, height: 640 }, { width: 440, height: 560 }, { width: 680, height: 800 }, { width: 1000, height: 340 }, { width: 900, height: 300 }]) {
+    for (const item of [chain(4), chain(5), diamond]) {
+      const g = flowGeometry(item, box, measure);
+      const label = `${item.nodes.length} boxes in ${box.width}x${box.height}`;
+      ok(g.scale * FLOW_FONT >= 13.9, `${label}: labels at ${g.scale * FLOW_FONT}px`);
+      ok(g.nodes.every((n) => n.w >= 112 && n.h >= 48), `${label}: boxes of a readable size`);
+      ok(g.nodes.every((n) => n.w === g.nodes[0].w), `${label}: one width`);
+      // The drawing fills a good part of the board along its long side and is not a sliver across the short one.
+      const [drawnW, drawnH] = [g.width * g.scale, g.height * g.scale];
+      ok(drawnW <= box.width + 0.01 && drawnH <= box.height + 0.01, `${label}: inside the board`);
+      ok(Math.max(drawnW / box.width, drawnH / box.height) >= 0.6, `${label}: fills ${Math.round(Math.max(drawnW / box.width, drawnH / box.height) * 100)}% of the board`);
+      // Down a tall board, the width is used too; a wide one is a row, which is the shape of the board.
+      if (box.height > box.width) ok(drawnW / box.width >= 0.3, `${label}: not a thin strip`);
+    }
+  }
+  // Roomy boards grow the gaps between ranks (the arrows) instead of the boxes without limit.
+  const roomy = flowGeometry(chain(3), { width: 1400, height: 1400 }, measure);
+  ok(roomy.nodes[0].w <= 220, 'boxes stop growing');
+  const gapOf = (g: ReturnType<typeof flowGeometry>) => g.nodes[1].y - (g.nodes[0].y + g.nodes[0].h);
+  ok(gapOf(roomy) >= 44, `arrows have room: ${gapOf(roomy)}px between ranks`);
+});
+
+test('every edge has a visible arrowhead that touches its target and ends the line', () => {
+  const item: FlowItem = { kind: 'flow', nodes: chain(4).nodes, edges: [['n0', 'n1'], ['n0', 'n2'], ['n1', 'n3'], ['n2', 'n3']] };
+  for (const box of [{ width: 392, height: 640 }, { width: 1000, height: 340 }]) {
+    const g = flowGeometry(item, box, measure);
+    for (const e of g.edges) {
+      ok(e.head.endsWith('Z'), 'a filled triangle');
+      const [bx1, by1, tx, ty, bx2, by2] = e.head.match(/-?\d+(\.\d+)?/g)!.map(Number);
+      ok(Math.hypot(bx1 - bx2, by1 - by2) >= 9, `the head is ${Math.hypot(bx1 - bx2, by1 - by2)}px across`);
+      const target = g.nodes[e.to];
+      const touches = (tx >= target.x - 3 && tx <= target.x + target.w + 3) && (ty >= target.y - 3 && ty <= target.y + target.h + 3);
+      ok(touches, 'its tip is at the target box');
+      const end = trace(e.d).at(-1)!;
+      ok(Math.hypot(end[0] - (bx1 + bx2) / 2, end[1] - (by1 + by2) / 2) <= 2, 'the line ends at the base of the head');
+    }
+  }
+});
+
 // ----------------------------------------------------------------- formulas
 
 const wrap = (latex: string, ...terms: string[]) =>
@@ -339,6 +492,163 @@ test('a wrap that crosses a term or breaks the formula is left out', () => {
   eq(wrap('abc', 'ab', 'bc').placed, [true, false], 'crossing');
   const split = wrap('\\left(x\\right)', '\\left(x');
   eq([split.latex, split.placed], ['\\left(x\\right)', [false]], 'unbalanced');
+});
+
+// ------------------------------------------------------------- chemistry
+
+const REACTION = '\\ce{2H2 + O2 -> 2H2O}';
+/** The formula board as the server renders it; its fitting runs in layout effects, which only a browser runs (React warns). */
+const draw = (item: FormulaItem) => {
+  const error = console.error;
+  console.error = (message?: unknown, ...rest: unknown[]) => String(message).includes('useLayoutEffect') || error(message, ...rest);
+  try {
+    return renderToStaticMarkup(createElement(FormulaBoard, { item, focus: null }));
+  } finally {
+    console.error = error;
+  }
+};
+
+test('chemistry renders where mathematics does: \\ce and \\pu are typeset, not shown as source', () => {
+  const html = formulaModel({ kind: 'formula', latex: REACTION, terms: [{ latex: REACTION, label: 'the reaction' }] }).html;
+  ok(!!html && html.includes('katex-display'), 'a \\ce formula renders to KaTeX HTML');
+  ok(!!html && html.includes('pt-term-0'), 'the whole group takes its term colour');
+  ok(parses('M(\\ce{H2O}) = 18.02\\,\\mathrm{g/mol}') && parses('\\pu{1.5 mol}'), 'inline \\ce and \\pu parse');
+  const markup = draw({ kind: 'formula', latex: REACTION, terms: [] });
+  ok(markup.includes('katex-display') && !markup.includes('formula-source'), 'the board shows the typeset line, not the source fallback');
+  const broken = draw({ kind: 'formula', latex: '\\ce{2H2 + ', terms: [] });
+  ok(broken.includes('formula-source') && broken.includes('\\ce{2H2 +'), 'what does not parse is still shown as source');
+});
+
+test('a term wraps a whole \\ce group, never a piece inside one (it would lose its subscripts)', () => {
+  const inside = wrap('\\ce{2H2 + O2 -> 2H2O}', '2H2O');
+  eq([inside.latex, inside.placed], ['\\ce{2H2 + O2 -> 2H2O}', [false]], 'inside the group');
+  const group = wrap('M(\\ce{H2O}) = 18.02', '\\ce{H2O}');
+  eq(group.latex, `M(${cls(0, '\\ce{H2O}')}) = 18.02`);
+  ok(parses(group.latex), 'renders');
+  const around = wrap('M(\\ce{Fe^{3+}}) = 55.85', 'M(\\ce{Fe^{3+}})', '55.85');
+  eq(around.placed, [true, true]);
+  eq(wrap('\\ce{H2O} + \\ce{H2O}', 'H2O').placed, [false], 'not even where it is the whole group');
+  eq(wrap('n(\\ce{H2O}) = H2O', 'H2O').placed, [true], 'but a copy outside a group is a term');
+});
+
+// ----------------------------------------------------------------- working
+
+const line = (n: number, extra: object = {}) => ({ latex: `x_{${n}} = ${n}`, ...extra });
+const solution = (lines: number, extra: Partial<FormulaItem> = {}): FormulaItem => ({
+  kind: 'formula',
+  title: 'Solve for x',
+  latex: 'x = 9',
+  terms: [{ latex: 'x', label: 'the unknown' }, { latex: '9', label: 'the answer' }],
+  before: Array.from({ length: lines }, (_, i) => line(i + 1, { title: `step ${i + 1}` })),
+  ...extra,
+});
+const lineCount = (markup: string) => markup.split('class="formula-line"').length - 1;
+const checks = (markup: string) => markup.split('aria-label="checked"').length - 1;
+
+test('the working keeps what the schema allows, oldest first, and drops lines that cannot be drawn', () => {
+  const kept = checkBoardItem(
+    {
+      kind: 'formula',
+      latex: 'x = 9',
+      terms: [],
+      verified: true,
+      before: [
+        { latex: 'x + 1 = 10', title: 'start', verified: true },
+        { latex: ' ' },
+        { latex: 'x = 10 - 1', title: 'n'.repeat(81), verified: 'yes' },
+        { latex: 'y'.repeat(401) },
+        'junk',
+      ],
+    },
+    'step "s"',
+    warn,
+  );
+  eq(kept, {
+    kind: 'formula',
+    latex: 'x = 9',
+    terms: [],
+    before: [{ latex: 'x + 1 = 10', title: 'start', verified: true }, { latex: 'x = 10 - 1' }],
+    verified: true,
+  });
+  const many = checkBoardItem(solution(12), 'step "s"', warn);
+  ok(many?.kind === 'formula' && many.before?.length === 8, 'at most eight lines');
+  if (many?.kind === 'formula') eq(many.before?.[0].latex, 'x_{5} = 5', 'the newest eight');
+  const plain = checkBoardItem({ kind: 'formula', latex: 'a + b', terms: [], verified: false, before: [] }, 'step "s"', warn);
+  eq(plain, { kind: 'formula', latex: 'a + b', terms: [] }, 'nothing is added when there is no working');
+});
+
+test('the board shows the newest five earlier lines, oldest first', () => {
+  eq(workingLines(solution(0)), []);
+  eq(workingLines({ ...solution(0), before: undefined }), []);
+  eq(workingLines(solution(3)).map((l) => l.latex), ['x_{1} = 1', 'x_{2} = 2', 'x_{3} = 3']);
+  eq(workingLines(solution(8)).map((l) => l.title), ['step 4', 'step 5', 'step 6', 'step 7', 'step 8']);
+  eq(WORKING_SHOWN, 5);
+});
+
+test('a board continues the working when its earlier lines end with the formula that was on the board', () => {
+  const first: BoardItem = { kind: 'formula', latex: 'x + 1 = 10', terms: [] };
+  const second: BoardItem = { kind: 'formula', latex: 'x = 10 - 1', terms: [], before: [{ latex: 'x + 1 =  10' }] };
+  ok(continuesWorking(first, second), 'the next line, whitespace aside');
+  const third: BoardItem = { kind: 'formula', latex: 'x = 9', terms: [], before: [{ latex: 'x + 1 = 10' }, { latex: 'x = 10 - 1' }] };
+  ok(continuesWorking(second, third), 'and the one after it');
+  ok(!continuesWorking(first, third), 'not a board two lines on');
+  ok(!continuesWorking(third, second), 'not backwards (a seek)');
+  ok(!continuesWorking(first, { kind: 'formula', latex: 'x = 9', terms: [] }), 'not without earlier lines');
+  ok(!continuesWorking(null, second) && !continuesWorking(undefined, second), 'not on an empty board');
+  ok(!continuesWorking(bleu, second) && !continuesWorking(first, bleu), 'only between formulas');
+});
+
+test('the working is drawn above the current line: small, still, without term colours or a legend', () => {
+  const markup = draw(solution(3));
+  eq(lineCount(markup), 3, 'three earlier lines');
+  ok(markup.indexOf('formula-working') < markup.indexOf('formula-current'), 'above the current line');
+  const [working, current] = markup.split('<div class="formula-current">');
+  ok(working.includes('katex-display') && !working.includes('pt-term'), 'typeset, with no term colours');
+  ok(current.includes('pt-term-0') && current.includes('pt-term-1'), 'the current line keeps its terms');
+  eq(markup.split('class="formula-legend"').length - 1, 1, 'one legend, the current line\'s');
+  ok(current.indexOf('the unknown') > 0 && !working.includes('the unknown'), 'whose labels are not in the working');
+  const order = [1, 2, 3].map((n) => working.indexOf(`step ${n}<`));
+  ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), 'each line has its title as a note, oldest first');
+  eq(checks(markup), 0, 'no check mark when nothing was verified');
+});
+
+test('at most five earlier lines are shown, the newest', () => {
+  const markup = draw(solution(8));
+  eq(lineCount(markup), 5);
+  ok(!markup.includes('step 3<') && markup.includes('step 4<') && markup.includes('step 8<'), 'the oldest three are left out');
+  eq(workingModel(solution(8)).length, 5);
+  ok(workingModel(solution(2)).every((l) => l.html?.includes('katex')), 'each is typeset');
+  eq(workingModel({ ...solution(1), before: [{ latex: '\\frac{' }] })[0].html, null, 'a line that does not parse is shown as source');
+});
+
+test('a check mark is drawn only for lines code verified, with an accessible name', () => {
+  const none = draw(solution(2));
+  eq(checks(none), 0);
+  const now = draw(solution(2, { verified: true }));
+  eq(checks(now), 1, 'the current line');
+  ok(now.includes('role="img" aria-label="checked"'), 'named "checked"');
+  ok(now.indexOf('formula-check') > now.indexOf('formula-current'), 'beside the current line');
+  const before = solution(3, { before: [line(1, { verified: true }), line(2), line(3, { verified: true })] });
+  const earlier = draw(before);
+  eq(checks(earlier), 2, 'two earlier lines, not the unverified one or the current line');
+  eq(checks(draw({ ...before, verified: true })), 3);
+  const alone = draw({ ...solution(0), before: undefined, verified: true });
+  eq(checks(alone), 1, 'a first line has its mark too');
+  ok(!alone.includes('formula-working'), 'and no working');
+});
+
+test('a chemistry working renders its lines with mhchem', () => {
+  const item: FormulaItem = {
+    kind: 'formula',
+    latex: 'n(\\ce{H2O}) = \\frac{36.0}{18.0}\\,\\mathrm{mol}',
+    terms: [{ latex: 'n(\\ce{H2O})', label: 'amount of water' }],
+    before: [{ latex: REACTION, title: 'balanced equation', verified: true }, { latex: 'M(\\ce{H2O}) = 18.02\\,\\mathrm{g/mol}' }],
+  };
+  const models = workingModel(item);
+  ok(models.every((m) => m.html !== null && m.html.includes('katex')), 'both lines are typeset');
+  const markup = draw(item);
+  ok(!markup.includes('formula-source'), 'no line falls back to its source');
+  eq(checks(markup), 1);
 });
 
 // --------------------------------------------------------------------- bars

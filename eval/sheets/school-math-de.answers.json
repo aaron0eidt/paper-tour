@@ -1,0 +1,22 @@
+{
+  "sheet": "school-math-de",
+  "language": "de",
+  "subject": "Mathematik Klasse 10 (Gymnasium): quadratische Gleichungen, Pythagoras, Prozent- und Zinsrechnung, Parabel",
+  "items": [
+    {"task": "Aufgabe 1", "part": "a", "answer": "x1 = 3 + sqrt(9 - 8) = 4 und x2 = 3 - 1 = 2, also L = {2; 4}", "numeric": [2, 4], "unit": null, "method": "pq-Formel mit p = -6, q = 8: x = -p/2 +- sqrt((p/2)^2 - q)."},
+    {"task": "Aufgabe 1", "part": "b", "answer": "x = -2 +- sqrt(4 + 21) = -2 +- 5, also x1 = 3 und x2 = -7, L = {-7; 3}", "numeric": [3, -7], "unit": null, "method": "pq-Formel mit p = 4, q = -21."},
+    {"task": "Aufgabe 1", "part": "c", "answer": "Durch 2 teilen: x^2 - 6x + 9 = 0. Die Diskriminante (p/2)^2 - q = 9 - 9 = 0, also genau eine (doppelte) Lösung x = 3, L = {3}.", "numeric": [3], "unit": null, "method": "Zuerst normieren (durch den Koeffizienten 2 teilen), dann pq-Formel; Diskriminante null."},
+    {"task": "Aufgabe 1", "part": "d", "answer": "Diskriminante (p/2)^2 - q = 1 - 5 = -4 < 0, also keine reelle Lösung, L = {} (leere Menge).", "numeric": [-4], "unit": null, "method": "pq-Formel: negativer Wert unter der Wurzel bedeutet keine reelle Lösung."},
+    {"task": "Aufgabe 2", "part": "a", "answer": "h = sqrt(5,0^2 - 1,4^2) = sqrt(25 - 1,96) = sqrt(23,04) = 4,8 m", "numeric": [4.8], "unit": "m", "method": "Satz des Pythagoras im rechtwinkligen Dreieck: Leiter = Hypotenuse, h und 1,4 m = Katheten."},
+    {"task": "Aufgabe 2", "part": "b", "answer": "d = sqrt(5,0^2 - 4,0^2) = sqrt(9) = 3,0 m (höchstens 3,0 m Abstand)", "numeric": [3.0], "unit": "m", "method": "Pythagoras nach der anderen Kathete umgestellt: d^2 = l^2 - h^2."},
+    {"task": "Aufgabe 2", "part": "c", "answer": "cos(alpha) = 1,4/5,0 = 0,28, also alpha = arccos(0,28) = 73,7 Grad (gleichwertig: sin(alpha) = 4,8/5 = 0,96)", "numeric": [73.7], "unit": "Grad", "method": "Kosinus im rechtwinkligen Dreieck: Ankathete durch Hypotenuse, dann Umkehrfunktion."},
+    {"task": "Aufgabe 3", "part": "a", "answer": "480 EUR x 0,85 = 408,00 EUR (Preissenkung um 72 EUR)", "numeric": [408.00], "unit": "EUR", "method": "Prozentwert: Grundwert mal Prozentfaktor 1 - 0,15 = 0,85."},
+    {"task": "Aufgabe 3", "part": "b", "answer": "Nein: 408 EUR x 1,15 = 469,20 EUR. Die 15 % beziehen sich nun auf den kleineren Grundwert 408 EUR (15 % davon sind 61,20 EUR, nicht 72 EUR), deshalb wird der alte Preis nicht erreicht.", "numeric": [469.20], "unit": "EUR", "method": "Prozentfaktor 1,15 auf den neuen Grundwert anwenden; Erhöhung und Senkung um gleiche Prozent heben sich nicht auf."},
+    {"task": "Aufgabe 3", "part": "c", "answer": "K4 = 2500 x 1,03^4 = 2500 x 1,12551 = 2813,77 EUR (Zinsen 313,77 EUR)", "numeric": [2813.77], "unit": "EUR", "method": "Zinseszinsformel K_n = K_0 (1 + p)^n."},
+    {"task": "Aufgabe 3", "part": "d", "answer": "Z = K x p x t/360 = 800 x 0,025 x 90/360 = 5,00 EUR", "numeric": [5.00], "unit": "EUR", "method": "Zinsformel mit Tagen: Z = K * p * (Tage/360) (deutsche Zinsmethode)."},
+    {"task": "Aufgabe 4", "part": "a", "answer": "Scheitelpunkt S(1 | -4); Nullstellen x1 = -1 und x2 = 3", "numeric": [1, -4, -1, 3], "unit": null, "method": "Tiefsten Punkt und Schnittpunkte mit der x-Achse im Koordinatensystem ablesen."},
+    {"task": "Aufgabe 4", "part": "b", "answer": "Scheitelpunktform f(x) = (x - 1)^2 - 4. Ausmultipliziert: x^2 - 2x + 1 - 4 = x^2 - 2x - 3, also p = -2 und q = -3.", "numeric": [-2, -3], "unit": null, "method": "Scheitelpunktform f(x) = (x - x_S)^2 + y_S aus S(1 | -4), dann binomische Formel auflösen."},
+    {"task": "Aufgabe 4", "part": "c", "answer": "f(x) < 0 für -1 < x < 3 (zwischen den Nullstellen verläuft die nach oben geöffnete Parabel unter der x-Achse)", "numeric": [-1, 3], "unit": null, "method": "Aus dem Graphen: Bereich zwischen den Nullstellen, in dem die Parabel unterhalb der x-Achse liegt."},
+    {"task": "Aufgabe 4", "part": "d", "answer": "y = f(4) = 4^2 - 2*4 - 3 = 16 - 8 - 3 = 5, also P(4 | 5)", "numeric": [5], "unit": null, "method": "x = 4 in die Funktionsgleichung einsetzen."}
+  ]
+}

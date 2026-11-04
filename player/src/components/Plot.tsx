@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import katex from 'katex';
+import katex from '../tex';
 import { formatNumber, type PlotItem } from '../../../shared/plot';
 import { BOARD_INK, BOARD_PALETTE, EASE_OUT, cubicBezier, plotCursor } from '../board';
 import type { BoardPlayback } from '../engine';

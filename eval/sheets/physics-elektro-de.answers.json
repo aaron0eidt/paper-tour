@@ -1,0 +1,16 @@
+{
+  "sheet": "physics-elektro-de",
+  "language": "de",
+  "subject": "Elektrizitätslehre: Gleichstromkreis, Kirchhoff, Leistung, Kondensatoren",
+  "items": [
+    {"task": "1. Aufgabe", "part": "a", "answer": "R23 = R2 R3/(R2 + R3) = 60 x 120/180 = 40 Ohm; R_ges = R1 + R23 + R4 = 30 + 40 + 30 = 100 Ohm", "numeric": [40, 100], "unit": "Ohm", "method": "Parallelschaltung über den Leitwert bzw. Produkt durch Summe, dann Reihenschaltung addieren."},
+    {"task": "1. Aufgabe", "part": "b", "answer": "I = U0/R_ges = 12 V / 100 Ohm = 0,120 A (120 mA); U_AB = I x R23 = 0,120 A x 40 Ohm = 4,8 V", "numeric": [0.120, 4.8], "unit": "A", "method": "Ohmsches Gesetz mit dem Gesamtwiderstand, dann Spannungsabfall an der Parallelschaltung."},
+    {"task": "1. Aufgabe", "part": "c", "answer": "Knotenregel in A: I = I2 + I3. Maschenregel: U0 = I R1 + I2 R2 + I R4. Damit I2 = (12 - 0,120 x 30 - 0,120 x 30)/60 = 0,080 A (80 mA) und I3 = I - I2 = 0,040 A (40 mA).", "numeric": [0.080, 0.040], "unit": "A", "method": "Kirchhoff: Knotenregel (Summe der Ströme am Knoten = 0), Maschenregel (Summe der Spannungen in der Masche = 0), nach I2 auflösen; Kontrolle: U_AB/R3 = 4,8/120 = 0,040 A."},
+    {"task": "2. Aufgabe", "part": "a", "answer": "P1 = I^2 R1 = 0,432 W; P2 = U_AB^2/R2 = 0,384 W; P3 = U_AB^2/R3 = 0,192 W; P4 = I^2 R4 = 0,432 W", "numeric": [0.432, 0.384, 0.192, 0.432], "unit": "W", "method": "P = I^2 R für die Reihenwiderstände, P = U^2/R für die parallelen Widerstände (U_AB = 4,8 V)."},
+    {"task": "2. Aufgabe", "part": "b", "answer": "P_Quelle = U0 x I = 12 V x 0,120 A = 1,44 W. Die Summe 0,432 + 0,384 + 0,192 + 0,432 = 1,44 W ist gleich, die Quelle liefert genau die in den Widerständen umgesetzte Leistung (Energieerhaltung).", "numeric": [1.44], "unit": "W", "method": "P = U I an der Quelle, Vergleich mit der Summe der Einzelleistungen."},
+    {"task": "2. Aufgabe", "part": "c", "answer": "W = P t = 1,44 W x 2 h = 2,88 Wh = 1,44 W x 7200 s = 10 368 J, also etwa 10,4 kJ", "numeric": [2.88, 10.368], "unit": "Wh", "method": "Energie = Leistung mal Zeit; 1 Wh = 3,6 kJ."},
+    {"task": "3. Aufgabe", "part": "a", "answer": "Q = C U0 = 10 uF x 12 V = 120 uC (1,2e-4 C); E = (1/2) C U0^2 = 0,5 x 10e-6 x 144 = 7,2e-4 J = 0,72 mJ", "numeric": [120, 0.72], "unit": "uC", "method": "Q = C U und E = C U^2/2."},
+    {"task": "3. Aufgabe", "part": "b", "answer": "C_ges = C1 C2/(C1 + C2) = 400/50 = 8,0 uF; Q = C_ges x 50 V = 400 uC (auf beiden Kondensatoren gleich); U1 = Q/C1 = 40 V, U2 = Q/C2 = 10 V (Summe 50 V)", "numeric": [8.0, 400, 40, 10], "unit": "uF", "method": "Reihenschaltung: Kehrwerte der Kapazitäten addieren, gleiche Ladung auf beiden Kondensatoren, Spannung U = Q/C."},
+    {"task": "3. Aufgabe", "part": "c", "answer": "Kapazität halbiert sich (C = eps0 A/d), die Ladung bleibt konstant (getrennt von der Quelle), daher verdoppelt sich die Spannung U = Q/C und die Energie E = Q^2/(2C) verdoppelt sich. Die zusätzliche Energie stammt aus der mechanischen Arbeit, die beim Auseinanderziehen der Platten gegen die Anziehungskraft verrichtet wird.", "numeric": [], "unit": null, "method": "Q konstant, C proportional zu 1/d; Energiebilanz mit der aufgewendeten Arbeit."}
+  ]
+}

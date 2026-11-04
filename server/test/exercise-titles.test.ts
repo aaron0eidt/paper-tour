@@ -29,6 +29,31 @@ test('a points note is no part of a task name', () => {
     assert.equal(taskTitle(stored), name, String(stored));
 });
 
+test('a title that is only points or numbers is no title, so the chapter reads "Problem 1"', () => {
+  for (const stored of [
+    '(4 Punkte)',
+    '20',
+    '(20)',
+    '5,10,5,5',
+    '10 + 5',
+    '[4 pts]',
+    'Punkte: 20',
+    'Points 5',
+    'max. 20 P.',
+    'Total: 30',
+    '(4 BE)',
+    '20 %',
+    '1.',
+  ])
+    assert.equal(taskTitle(stored), '', stored);
+  // A real name that mentions points or holds numbers stays.
+  for (const name of ['Bonus', 'Aufgabe zu Matrizen 2x2', 'Total energy', 'Maximum likelihood', 'Scoring rules'])
+    assert.equal(taskTitle(name), name, name);
+  const doc = sheet([['p1.b1', 'Problem 1. (20: 10,10 pts.)', '']]);
+  for (const stored of ['(4 Punkte)', '20:', '25: 5,10,5,5 pts.', 'Points 5'])
+    assert.equal(taskName(doc, task('ex1', '1', 'p1.b1', stored)), 'Problem 1', stored);
+});
+
 const sheet = (rows: [string, string, string][]): Doc => ({
   schema: 'paper-tour/doc@0.1',
   source: { file: 'doc.pdf', sha256: 'e'.repeat(64), num_pages: 1, generator: 'test', title: 'Problem set' },

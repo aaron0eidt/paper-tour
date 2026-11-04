@@ -111,6 +111,11 @@
         "lecture",
         "contract",
         "letter",
+        "manual",
+        "report",
+        "article",
+        "literature",
+        "medical",
         "other"
       ],
       "description": "The kind of document, so the reader can pick its mode; a lecture deck plays slide by slide."
@@ -690,6 +695,36 @@
                 ],
                 "additionalProperties": false
               }
+            },
+            "before": {
+              "description": "Earlier lines of the same worked solution, oldest first, kept above the current line like the working on a whiteboard.",
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "latex": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "latex"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "verified": {
+              "description": "Code checked this line, so the board shows a check mark.",
+              "type": "boolean"
             }
           },
           "required": [

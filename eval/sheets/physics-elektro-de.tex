@@ -1,0 +1,79 @@
+% Uebungsblatt Elektrizitaetslehre (German, first-year physics), with a circuitikz circuit.
+% Headings: "N. Aufgabe: Titel" (number first) with "(P Punkte)" at the right margin; parts "a)", "b)", ...
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[ngerman]{babel}
+\usepackage[margin=2.3cm,top=2.0cm,bottom=2.2cm]{geometry}
+\usepackage{amsmath}
+\usepackage[locale=DE]{siunitx}
+\usepackage[siunitx,european]{circuitikz}
+\usepackage{caption}
+\usepackage{enumitem}
+
+\setlength{\parindent}{0pt}
+\setlist[enumerate,1]{label=\alph*), leftmargin=2em, itemsep=0.35em, topsep=0.3em}
+\newcommand{\aufgabe}[3]{\bigskip\par\noindent\textbf{#1. Aufgabe: #2}\hfill(#3 Punkte)\par\nopagebreak\smallskip}
+
+\begin{document}
+
+% ---- Kopf -----------------------------------------------------------------------------
+{\small Physik II \textperiodcentered{} Elektrizität und Magnetismus \hfill Sommersemester 2027}\\[-0.4em]
+\rule{\linewidth}{0.6pt}\\[0.5em]
+{\Large\bfseries Übungsblatt 7: Gleichstrom und Kondensatoren}\\[0.4em]
+Besprechung in der Übung am 19.\ November 2026 \hfill Abgabe bis 16.\ November 2026
+
+% ---- 1. Aufgabe -----------------------------------------------------------------------
+\aufgabe{1}{Gleichstromkreis}{8}
+Die Schaltung in Abbildung~1 wird von einer Gleichspannungsquelle mit $U_0 = \qty{12}{V}$ gespeist.
+Es gilt $R_1 = \qty{30}{\ohm}$, $R_2 = \qty{60}{\ohm}$, $R_3 = \qty{120}{\ohm}$ und
+$R_4 = \qty{30}{\ohm}$.
+
+\begin{center}
+\begin{circuitikz}[scale=1, transform shape]
+  \draw (0,0) to[battery1, invert, l_=$U_0$] (0,3)
+        to[R, l=$R_1$, i=$I$] (3,3)
+        to[short, *-] (6,3)
+        to[R, l=$R_3$, i=$I_3$] (6,0)
+        to[short, -*] (3,0)
+        to[R, l=$R_4$] (0,0);
+  \draw (3,3) to[R, l_=$R_2$, i_=$I_2$] (3,0);
+  \node[above] at (3,3.1) {A};
+  \node[below] at (3,-0.1) {B};
+\end{circuitikz}
+\captionof{figure}{Gleichstromkreis mit vier Widerständen.}
+\end{center}
+
+\begin{enumerate}
+  \item Berechnen Sie den Ersatzwiderstand $R_{23}$ der Parallelschaltung von $R_2$ und $R_3$ sowie den
+        Gesamtwiderstand $R_\mathrm{ges}$ der Schaltung.
+  \item Berechnen Sie den Gesamtstrom $I$ und die Spannung $U_\mathrm{AB}$ zwischen den Knoten A und B.
+  \item Stellen Sie die Knotenregel für den Knoten A und die Maschenregel für die Masche aus $U_0$,
+        $R_1$, $R_2$ und $R_4$ auf. Berechnen Sie damit die Ströme $I_2$ und $I_3$.
+\end{enumerate}
+
+% ---- 2. Aufgabe -----------------------------------------------------------------------
+\aufgabe{2}{Leistung}{5}
+Betrachten Sie die Schaltung aus der 1.\ Aufgabe.
+\begin{enumerate}
+  \item Berechnen Sie die in jedem der vier Widerstände umgesetzte elektrische Leistung.
+  \item Wie groß ist die von der Quelle abgegebene Leistung? Vergleichen Sie sie mit der Summe der
+        Leistungen aus a).
+  \item Welche Energie gibt die Quelle in zwei Stunden ab? Geben Sie das Ergebnis in Wh und in kJ an.
+\end{enumerate}
+
+% ---- 3. Aufgabe -----------------------------------------------------------------------
+\aufgabe{3}{Kondensator}{7}
+\begin{enumerate}
+  \item Ein Kondensator mit $C = \qty{10}{\micro F}$ wird an die Spannung $U_0 = \qty{12}{V}$ angeschlossen.
+        Berechnen Sie die Ladung $Q$ und die gespeicherte Energie $E$.
+  \item Die Kondensatoren $C_1 = \qty{10}{\micro F}$ und $C_2 = \qty{40}{\micro F}$ werden in Reihe
+        geschaltet und an \qty{50}{V} gelegt. Bestimmen Sie die Gesamtkapazität, die Ladung und die
+        Spannung an jedem der beiden Kondensatoren.
+  \item Ein Plattenkondensator wird aufgeladen und dann von der Quelle getrennt. Anschließend wird der
+        Plattenabstand verdoppelt. Wie ändern sich Kapazität, Spannung und gespeicherte Energie?
+        Woher stammt die zusätzliche Energie?
+\end{enumerate}
+
+\end{document}

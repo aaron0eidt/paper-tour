@@ -1,0 +1,50 @@
+{
+  "slug": "recipe-de",
+  "kind": "manual",
+  "language": "de",
+  "must_cover": [
+    "What the card is: the recipe 'Hähnchen-Gemüse-Blech mit Zitronenreis' (main course, one tray) for 4 portions; active time 25 minutes, total time 50 minutes, difficulty easy, oven 220 degrees C top and bottom heat (200 degrees C fan), about 620 kcal per portion. (The kind 'manual' is the closest value in the fixed kind list for step-by-step instructions.)",
+    "The ingredients in three groups: for the tray 600 g chicken breast fillet, 400 g sweet potatoes, 2 red peppers (about 300 g), 1 courgette (about 250 g), 1 red onion, 3 tbsp olive oil, 2 tsp sweet paprika, 1 tsp dried thyme, 1.5 tsp salt, 0.5 tsp pepper; for the lemon rice 250 g basmati rice, 500 ml water, 0.5 tsp salt, 1 organic lemon (zest and juice); for the dip 200 g natural yoghurt, 1 garlic clove, 1 tbsp lemon juice, 1 bunch parsley, 1 pinch of salt",
+    "The eight steps with their times: 1 preheat (minute 0); 2 cut (minute 0 to 10: sweet potatoes in 2 cm cubes, peppers and courgette in 3 cm pieces, chicken in 3 cm cubes); 3 pre-bake the sweet potatoes with 1 tbsp oil and 0.5 tsp salt for 10 minutes at 220 degrees C (minute 10 to 20); 4 season the rest meanwhile; 5 everything on the tray for another 25 minutes (minute 20 to 45), turn after 12 minutes, chicken done at a core temperature of at least 74 degrees C; 6 rice from minute 28: 12 minutes simmering covered on the lowest heat, then 5 minutes standing off the heat; 7 yoghurt dip (minute 30 to 35); 8 serve (minute 45 to 50)",
+    "The parallel timeline (Figure 1 'Abbildung 1', page 2): five rows (cutting and seasoning, oven, rice, yoghurt dip, serving) on a minute axis 0 to 50; the oven preheats from minute 0 to 10, bakes the sweet potatoes from 10 to 20 and the whole tray from 20 to 45; the rice (28 to 45) and the dip (30 to 35) run while the tray is in the oven; a dashed line marks turning the tray at minute 32",
+    "How the timing adds up: the tray needs no supervision from minute 20, rice starts at minute 28 so it finishes together with the tray at minute 45, serving takes 5 minutes, total 50 minutes",
+    "The nutrition table per portion (about): 620 kcal (31 % of a 2,000 kcal daily need), protein 44 g (88 %), carbohydrates 78 g (30 %), fat 14 g (20 %); these are guide values, not dietary advice",
+    "The tips: do not overload the tray (one layer, two trays if in doubt), cut pieces to similar sizes with sweet potatoes smaller, check the 74 degrees C core temperature and clear juices, vegetarian variant with 400 g chickpeas and 200 g halloumi (chickpeas after minute 20), leftovers keep up to 2 days in the fridge and rice should be reheated only once and thoroughly"
+  ],
+  "numbers": [4, 25, 50, 220, 200, 600, 400, 250, 500, 74, 10, 25, 12, 5, 28, 32, 620, 44, 78, 14],
+  "units": [
+    "portions",
+    "minutes (active time)",
+    "minutes (total time)",
+    "degrees C (oven, top and bottom heat)",
+    "degrees C (oven, fan)",
+    "g (chicken breast)",
+    "g (sweet potatoes)",
+    "g (basmati rice)",
+    "ml (water for the rice)",
+    "degrees C (chicken core temperature, minimum)",
+    "minutes (sweet potatoes alone in the oven)",
+    "minutes (whole tray in the oven)",
+    "minutes (rice simmering)",
+    "minutes (rice standing)",
+    "minute at which the rice starts",
+    "minute at which the tray is turned",
+    "kcal per portion",
+    "g protein per portion",
+    "g carbohydrates per portion",
+    "g fat per portion"
+  ],
+  "figures": [
+    "Figure 1 'Abbildung 1' (page 2): a tikz timeline (Gantt-style) of five rows on a 0 to 50 minute axis: Schneiden und würzen (0 to 20, two bars Schneiden and Würzen), Backofen (Vorheizen 0 to 10, Süßkartoffeln 10 to 20, ganzes Blech 20 to 45), Reis (quellen 28 to 40, ziehen 40 to 45), Joghurt-Dip (rühren 30 to 35), Anrichten (Servieren 45 to 50), and a dashed vertical line at minute 32 'Blech wenden'. A tour should point at the oven row and the rice and dip bars that overlap it",
+    "Info bar (page 1): portions, active time, total time, oven temperature, difficulty and kcal per portion in a cream-coloured box under the title",
+    "Page 1: ingredient lists in three groups (left column) beside the numbered steps (right column); page 2: nutrition table (no caption) and the Tipps box"
+  ],
+  "pitfalls": [
+    "Do not drop the temperatures and times: 220 degrees C top and bottom heat (200 degrees C fan), 10 + 25 minutes in the oven, 12 + 5 minutes for the rice, core temperature of at least 74 degrees C for the chicken",
+    "Do not read the page as one column: the ingredient groups on the left and the steps on the right sit side by side; list ingredients and steps separately and in the printed order",
+    "Do not start the rice or the dip at the wrong time; the rice goes on at minute 28 and the dip is made at minute 30, while the tray bakes",
+    "Do not scale quantities for other portion counts without saying that the card is for 4 portions, and do not invent amounts (for example for seasoning or oil that are not listed)",
+    "Do not give dietary, allergy or medical advice from the nutrition table; the card says the values are guide values, and it does not mention allergens (the recipe contains milk products and chicken)",
+    "Do not mix up the vegetarian variant with the main recipe; it replaces the chicken with 400 g chickpeas and 200 g halloumi"
+  ]
+}

@@ -50,13 +50,25 @@ export async function authorAndInspectVisual(
     signal?: AbortSignal;
     repair: (feedback: VisualRepairContext) => Promise<AuthoredVisual>;
     review?: (feedback: VisualRepairContext) => Promise<string[]>;
+    /**
+     * Whether a review call that failed (an unusable verdict, a provider fault) is no verdict: the visual that passed its
+     * rendering checks then stands without a review. Without it a failed review is an error, as it always was.
+     */
+    reviewFault?: (error: unknown) => boolean;
   },
 ): Promise<AuthoredVisual> {
   let item = initial;
   for (let attempt = 0; attempt < 3; attempt++) {
     const inspection = await inspectAuthoredVisual(item, context.signal);
     const feedback = { ...inspection, item, narration: context.narration, evidence: context.evidence, attempt };
-    if (!inspection.problems.length && context.review) feedback.problems.push(...(await context.review(feedback)));
+    if (!inspection.problems.length && context.review) {
+      try {
+        feedback.problems.push(...(await context.review(feedback)));
+      } catch (error) {
+        context.signal?.throwIfAborted();
+        if (!context.reviewFault?.(error)) throw error;
+      }
+    }
     if (!feedback.problems.length) return item;
     if (attempt === 2) throw new VisualValidationError(feedback.problems);
     item = await context.repair(feedback);

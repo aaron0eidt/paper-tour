@@ -221,7 +221,11 @@ function safeAreaDoc() {
   const free = freeArea(vp, dock);
   assert.equal(free.height, 540, 'the dock leaves the viewport above it');
   assert.equal(free.dy, -80, 'and the centre of what is left');
-  assert.equal(freeArea(vp, { top: 0, right: 0, bottom: 900, left: 0 }).height, 420, 'a huge dock never takes more than 40%');
+  assert.equal(freeArea(vp, { top: 0, right: 0, bottom: 900, left: 0 }).height, 64, 'a nonsense dock leaves a sliver, never nothing');
+  assert.equal(freeArea(vp, { top: 0, right: 0, bottom: 380, left: 0 }).height, 320, 'a tall "Your turn" card with its hints open is cleared in full, not cut to 40%');
+  assert.equal(freeArea({ width: 1000, height: 534 }, { top: 0, right: 0, bottom: 463, left: 0 }).height, 71, 'a card and bar at 87% of a short stage are cleared too');
+  const sides = freeArea({ width: 1000, height: 500 }, { top: 300, right: 0, bottom: 300, left: 0 });
+  assert.equal(sides.height >= 64, true, 'the two sides together leave room as well');
 
   // A figure is framed whole in the free area; without the dock it was centred in the whole viewport.
   const bare = cameraView({ type: 'zoom', target: 'fig1' }, resolver, layout, vp)!;
@@ -273,6 +277,41 @@ function safeAreaDoc() {
   const seen = project(tall, fitted, vp);
   assert.equal(seen.top >= 0 && seen.bottom <= vp.height - dock.bottom && seen.left >= 0 && seen.right <= vp.width, true, 'to fit above the dock');
   console.log('  ok    a chosen region is revealed above the ask dock');
+
+  // A dock taller than 40% of a short window: every target the tour frames stays above it.
+  const short = { width: 900, height: 454 };
+  const tallDock = { top: 0, right: 0, bottom: 285, left: 0 };
+  for (const action of [{ type: 'focus', target: 's2' }, { type: 'zoom', target: 's2' }, { type: 'zoom', target: 'fig1' }] as const) {
+    for (const fitWidth of [false, true]) {
+      const framed = frameFor(action, resolver, layout, short, { fitWidth, insets: tallDock })!;
+      const seen = project(framed.rect, framed.view, short);
+      assert.equal(seen.bottom <= short.height - tallDock.bottom + 0.5, true, `${action.type} ${action.target} (beside the board: ${fitWidth}) ends above a tall dock`);
+    }
+  }
+  console.log('  ok    a dock taller than 40% of the window still clears the target');
+
+  // The "Your turn" card with three hints and the ask bar took 463px of a 534px stage (87%): the target still ends above them.
+  const crowded = { width: 1000, height: 534 };
+  const crowdedDock = { top: 0, right: 0, bottom: 463, left: 0 };
+  for (const action of [{ type: 'focus', target: 's2' }, { type: 'zoom', target: 's2' }] as const) {
+    const framed = frameFor(action, resolver, layout, crowded, { insets: crowdedDock })!;
+    const seen = project(framed.rect, framed.view, crowded);
+    assert.equal(seen.top >= -0.5 && seen.bottom <= crowded.height - crowdedDock.bottom + 0.5, true, `${action.type} s2 sits in the 71px left above a 463px dock (${Math.round(seen.top)}..${Math.round(seen.bottom)})`);
+  }
+  console.log('  ok    a dock at 87% of a short stage still clears the target');
+
+  // A figure taller than the free area at reading width (a board beside the stage) zooms out to fit above the dock.
+  const lowDock = { top: 0, right: 0, bottom: 70, left: 0 };
+  const beside = { width: 700, height: 560 };
+  const plain = frameFor({ type: 'focus', target: 's2' }, resolver, layout, beside, { fitWidth: true, insets: lowDock })!;
+  const figure = frameFor({ type: 'zoom', target: 'fig1' }, resolver, layout, beside, { fitWidth: true, insets: lowDock })!;
+  const figShown = project([layout.pages[0].x + 100, layout.pages[0].y + 420, layout.pages[0].x + 500, layout.pages[0].y + 700], figure.view, beside);
+  assert.equal(figShown.top >= -0.5 && figShown.bottom <= beside.height - lowDock.bottom + 0.5, true, 'the whole figure sits in the free area');
+  assert.equal(figure.view.s < plain.view.s, true, 'at less than reading width');
+  const roomyBeside = { width: 700, height: 1400 };
+  const roomyFig = frameFor({ type: 'zoom', target: 'fig1' }, resolver, layout, roomyBeside, { fitWidth: true, insets: lowDock })!;
+  assert.equal(roomyFig.view.s, readingScale(layout.pages[0].width, freeArea(roomyBeside, lowDock)), 'a figure that fits keeps the reading width');
+  console.log('  ok    a tall figure backs off to fit above the dock, a figure that fits does not');
 
   // Views stay inside the document: the last lines can rise above the dock, never a page past its end.
   const end = clampView({ cx: 300, cy: 5000, s: 1 }, layout, vp, dock);

@@ -8,15 +8,9 @@ import { about } from './plan-fixture';
 import { ARC_SPECS, arcTourPlan, fallbackArcPlan } from '../src/harness/arcs';
 import { findAnchor } from '../src/harness/assemble';
 import { checkFormula } from '../src/harness/board';
-import { guessType } from '../src/harness/doctype';
-import {
-  SOLVE_EXAMPLE,
-  cleanSolution,
-  exercisePlan,
-  exerciseUnits,
-  planUnits,
-  unitOverhead,
-} from '../src/harness/exercise';
+import { DOC_TYPES, guessType } from '../src/harness/doctype';
+import { cleanSolution, exercisePlan, exerciseUnits, planUnits, unitOverhead } from '../src/harness/exercise';
+import { EXAMPLES } from '../src/harness/exercise-examples';
 import { paperBlock, proseSentences, taskName } from '../src/harness/paper-block';
 import { PACE, type Pace } from '../src/harness/pace';
 import { pythonVerifier, readChecks, type LineCheck, type MathVerifier } from '../src/harness/verify';
@@ -283,14 +277,9 @@ test('a contract follows what you agree to, what it costs, its deadlines and its
   const card = requests.find((r) => r.name === 'paper_card')!;
   assert.equal(card.schema.properties.problem.properties.evidence.items.$ref, '#/$defs/evidenceId');
   assert.ok(card.schema.$defs.evidenceId.enum.includes('p1.s2'));
-  assert.deepEqual(card.schema.properties.doc_type.enum, [
-    'research_paper',
-    'exercise_sheet',
-    'lecture',
-    'contract',
-    'letter',
-    'other',
-  ]);
+  assert.deepEqual(card.schema.properties.doc_type.enum, [...DOC_TYPES]);
+  assert.deepEqual(DOC_TYPES.slice(0, 5), ['research_paper', 'exercise_sheet', 'lecture', 'contract', 'letter']);
+  assert.equal(DOC_TYPES.at(-1), 'other');
   // The plan call offers the contract's arc and asks for the disclaimer; directions speak to someone about to sign.
   const plan = requests.find((r) => r.name === 'tour_plan')!;
   assert.deepEqual(Object.keys(plan.schema.properties), [
@@ -731,11 +720,22 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
         title: 'Subtract 2x',
         latex: 'x - 7 = 5',
         terms: [{ latex: 'x - 7', label: 'what is left' }],
+        verified: true,
       },
     },
     { type: 'board_focus', part: 0, at_word: findAnchor(first.say, 'x minus seven is left')! },
   ]);
   assert.equal(first.hold_ms, 800);
+  // The next line stands under the earlier ones of its part, and the answer under all of them.
+  const next = step('ex1.a-step-2').actions.find((a) => a.type === 'board');
+  assert.deepEqual(next?.type === 'board' && next.item.kind === 'formula' && next.item.before, [
+    { latex: 'x - 7 = 5', title: 'Subtract 2x', verified: true },
+  ]);
+  const result = step('ex1.a-answer').actions.find((a) => a.type === 'board');
+  assert.deepEqual(result?.type === 'board' && result.item.kind === 'formula' && result.item.before, [
+    { latex: 'x - 7 = 5', title: 'Subtract 2x', verified: true },
+    { latex: 'x = 12', title: 'Add 7', verified: true },
+  ]);
   // The answer lights up the question again in green; the next task step clears the board.
   const answer = step('ex1.a-answer');
   assert.deepEqual(answer.actions.at(-1), { type: 'highlight', targets: ['p1.s4'], color: 'green' });
@@ -754,9 +754,18 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
       at_word: findAnchor(det.say, 'rows one two')!,
     },
   );
-  // A line the code could not check is marked on the board; one its author doubts also asks the learner to check.
+  // A line the code could not check carries no tag; a line it verified carries a check mark, under the lines before it.
   const unchecked = step('ex2-step-1').actions.find((a) => a.type === 'board');
-  assert.equal(unchecked?.type === 'board' && unchecked.item.title, 'Multiply the diagonals · ungeprüft');
+  assert.deepEqual(unchecked?.type === 'board' && unchecked.item.title, 'Multiply the diagonals');
+  assert.equal(unchecked?.type === 'board' && 'verified' in unchecked.item, false);
+  const second = step('ex2-step-2').actions.find((a) => a.type === 'board');
+  assert.ok(second?.type === 'board' && second.item.kind === 'formula');
+  if (second?.type === 'board' && second.item.kind === 'formula') {
+    assert.deepEqual(second.item.before, [
+      { latex: '\\det A = 1 \\cdot (-1) - 2 \\cdot 3', title: 'Multiply the diagonals' },
+    ]);
+    assert.equal(second.item.verified, true);
+  }
   assert.equal(step('ex2-step-1').say, 'We multiply one times minus one, and subtract two times three.');
   assert.equal(step('ex2-step-2').say, 'Minus one minus six gives minus seven.');
   // The verifier saw every solution line and the answer, once per part.
@@ -806,7 +815,8 @@ test('a solution line that does not check out gets one repair with the reason; s
   const answer = fixed.step('ex1.b-answer');
   assert.equal(answer.say, 'So x is twelve, and both sides of the equation agree. Please check this step yourself.');
   const board = answer.actions.find((a) => a.type === 'board');
-  assert.equal(board?.type === 'board' && board.item.title, 'Result · ungeprüft');
+  assert.equal(board?.type === 'board' && board.item.title, 'Result');
+  assert.equal(board?.type === 'board' && 'verified' in board.item, false);
   assert.equal(fixed.step('ex1.b-step-1').say, solution('ex1.b').steps[0].say);
 });
 
@@ -879,16 +889,13 @@ test('a part the model cannot teach still points at its task, and a tight preset
   ]);
   assert.deepEqual(metadata.fallbackBeats, ['exercise-ex2']);
 
+  // Quick: every part compact, the task and the method in one step, the answer said with the last line.
   const quick = await run(sheet, sheetModel, verifier(), 'quick');
   const takeaway = quick.requests.find((r) => r.brief.includes('STEP KIND: takeaway'))!;
-  assert.match(
-    takeaway.brief,
-    /NOT COVERED, for the learner to try or ask about: Aufgabe 1: Lineare Gleichungen, part b\)/,
-  );
-  // Quick: the task and the method in one step, two solution lines at most, the answer said with the last line.
+  assert.doesNotMatch(takeaway.brief, /NOT COVERED/);
   assert.deepEqual(
     quick.tour.chapters[1].steps.map((s) => s.id),
-    ['ex1.a-task', 'ex1.a-step-1', 'ex1.a-step-2'],
+    ['ex1.a-task', 'ex1.a-step-1', 'ex1.a-step-2', 'ex1.b-task', 'ex1.b-step-1', 'ex1.b-step-2'],
   );
   assert.ok(quick.step('ex1.a-task').say.endsWith('stay equal at every step.'));
   const last = quick.step('ex1.a-step-2');
@@ -900,7 +907,7 @@ test('a part the model cannot teach still points at its task, and a tight preset
     color: 'green',
     at_word: line.split(' ').length,
   });
-  assert.ok(quick.steps.length <= 10);
+  assert.ok(quick.steps.length <= 60);
 });
 
 test('an answer longer than the plan allows is cut to size, not rejected; unknown IDs are dropped', () => {
@@ -934,38 +941,38 @@ test('parts are planned within the preset: all of them when they fit, else the f
     ],
   );
   const plan = (preset: 'quick' | 'standard' | 'deep', list = units) => planUnits(list, preset);
-  // Three parts at 20 steps: each in full form (task, your turn, method, answer) with the two solution steps that fit.
-  assert.deepEqual(
-    plan('standard').taught.map((u) => [u.id, u.steps, u.compact]),
-    [
-      ['ex1.a', 2, false],
-      ['ex1.b', 2, false],
-      ['ex2', 2, false],
-    ],
-  );
-  assert.deepEqual(
-    plan('standard', units.slice(0, 2)).taught.map((u) => [u.id, u.steps, u.compact]),
-    [
-      ['ex1.a', 3, false],
-      ['ex1.b', 3, false],
-    ],
-  );
-  assert.deepEqual(
-    plan('quick').taught.map((u) => [u.id, u.steps, u.compact]),
-    [
-      ['ex1.a', 2, true],
-      ['ex2', 2, true],
-    ],
-  );
-  assert.deepEqual(
-    plan('quick').skipped.map((u) => u.id),
-    ['ex1.b'],
-  );
-  const many = Array.from({ length: 9 }, (_, i) => ({ ...units[0], id: `u${i}`, task: { ...units[0].task } }));
+  const shape = (preset: 'quick' | 'standard' | 'deep', list = units) =>
+    plan(preset, list).taught.map((u) => [u.id, u.steps, u.form]);
+  // Standard: the first part of each task in full, its later parts as follow-ons, five solution lines each.
+  assert.deepEqual(shape('standard'), [
+    ['ex1.a', 5, 'full'],
+    ['ex1.b', 5, 'follow'],
+    ['ex2', 5, 'full'],
+  ]);
+  assert.deepEqual(shape('standard', units.slice(0, 2)), [
+    ['ex1.a', 5, 'full'],
+    ['ex1.b', 5, 'follow'],
+  ]);
+  // Quick: every part compact, three lines each; deep: every part in full, seven lines each.
+  assert.deepEqual(shape('quick'), [
+    ['ex1.a', 3, 'compact'],
+    ['ex1.b', 3, 'compact'],
+    ['ex2', 3, 'compact'],
+  ]);
+  assert.deepEqual(shape('deep'), [
+    ['ex1.a', 7, 'full'],
+    ['ex1.b', 7, 'full'],
+    ['ex2', 7, 'full'],
+  ]);
+  assert.deepEqual(plan('quick').skipped, []);
+  // Sixteen tasks of one part each keep their parts, compact with two lines, so quick grows past 60 by what they force.
+  const many = Array.from({ length: 16 }, (_, i) => ({ ...units[0], id: `u${i}`, task: { ...units[0].task } }));
   for (const preset of ['quick', 'standard', 'deep'] as const) {
     const { taught } = plan(preset, many);
     const length = 2 + taught.reduce((n, u) => n + unitOverhead(u) + u.steps, 0);
-    assert.ok(length <= { quick: 10, standard: 22, deep: 30 }[preset], `${preset}: ${length}`);
+    const limit = { quick: 60, standard: 100, deep: 160 }[preset];
+    assert.ok(length <= Math.max(limit, 2 + 16 * (unitOverhead({ form: 'compact' }) + 2)), `${preset}: ${length}`);
+    assert.equal(taught.length, 16, preset);
   }
   // The tour of a sheet: overview, the taught parts, takeaway.
   const card = cardFor('exercise_sheet', ['p1.s1', 'p1.s3']) as never;
@@ -1008,14 +1015,15 @@ test('the paper block lists a sheet’s tasks with the maths only the page shows
 });
 
 test('the worked example the solve call is shown passes the same checks as an answer', () => {
-  for (const line of [...SOLVE_EXAMPLE.steps, SOLVE_EXAMPLE.answer]) {
-    const { problems } = checkFormula(line, { minTerms: 1 });
-    assert.deepEqual(problems, [], line.latex);
-    const say = 'say' in line ? line.say : '';
-    for (const t of line.terms) assert.notEqual(findAnchor(say, t.anchor), null, t.anchor);
+  for (const example of Object.values(EXAMPLES)) {
+    for (const line of [...example.steps, example.answer]) {
+      const { problems } = checkFormula(line, { minTerms: 1 });
+      assert.deepEqual(problems, [], line.latex);
+      for (const t of line.terms) assert.notEqual(findAnchor(line.say, t.anchor), null, t.anchor);
+    }
+    for (const anchor of [example.read.given_anchor, example.read.asked_anchor])
+      assert.notEqual(findAnchor(example.read.say, anchor), null, anchor);
   }
-  for (const anchor of [SOLVE_EXAMPLE.read.given_anchor, SOLVE_EXAMPLE.read.asked_anchor])
-    assert.notEqual(findAnchor(SOLVE_EXAMPLE.read.say, anchor), null, anchor);
 });
 
 test('the lecture, contract, letter and other arcs fit the step budget of every preset', () => {

@@ -1,0 +1,186 @@
+% Rezeptkarte "Hähnchen-Gemüse-Blech mit Zitronenreis" (4 Portionen). German, 2 pages.
+% Features: Kopfleiste mit Portionen/Zeiten, Zutatenliste mit Mengen in drei Gruppen, nummerierte Schritte mit Zeiten und
+% Temperaturen, tikz-Ablaufplan (was läuft parallel, mit Beschriftung), Tipps.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{palatino}
+\usepackage[scaled=0.9]{helvet}
+\usepackage[ngerman]{babel}
+\usepackage[margin=2.0cm,top=2.0cm,bottom=2.0cm]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usepackage{tcolorbox}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage[locale=DE]{siunitx}
+\usepackage{microtype}
+
+\definecolor{tomate}{HTML}{C0392B}
+\definecolor{blatt}{HTML}{4F7D3A}
+\definecolor{creme}{HTML}{FBF5E6}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\captionsetup{font={small,sf}, labelfont={bf,sf}, labelsep=period, justification=raggedright, singlelinecheck=false}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{\sffamily\scriptsize Rezeptkarte Nr.\ 17 \textperiodcentered{} Eigenes Rezept für Testzwecke}
+\fancyfoot[R]{\sffamily\scriptsize Seite \thepage{} von 2}
+
+\newcommand{\gruppe}[1]{\par\vspace{0.5em}{\sffamily\bfseries\small\color{blatt}#1}\par\vspace{0.15em}}
+
+\begin{document}
+
+% ---- Kopf ----------------------------------------------------------------------------------
+{\sffamily\small\color{tomate}\textbf{HAUPTGERICHT \textperiodcentered{} EIN BLECH}}\\[0.5em]
+{\fontsize{26}{30}\selectfont\bfseries Hähnchen-Gemüse-Blech\\[-0.1em] mit Zitronenreis}\\[0.3em]
+{\itshape Knusprig gebackenes Gemüse, saftiges Hähnchen und ein frischer Joghurt-Dip: fast alles gart gleichzeitig im
+Ofen.}
+
+\vspace{0.4em}
+\begin{tcolorbox}[colback=creme, colframe=tomate!70, boxrule=0.6pt, arc=2pt, left=6pt, right=6pt, top=4pt, bottom=4pt]
+\sffamily\small
+\begin{tabular}{@{}l l@{\hspace{2.2em}}l l@{\hspace{2.2em}}l l@{}}
+  \textbf{Portionen:} & 4 & \textbf{Aktive Zeit:} & 25 Minuten & \textbf{Schwierigkeit:} & einfach \\
+  \textbf{Gesamtzeit:} & 50 Minuten & \textbf{Backofen:} & \qty{220}{\celsius} (Umluft \qty{200}{\celsius}) & \textbf{Pro Portion:} & ca.\ 620 kcal \\
+\end{tabular}
+\end{tcolorbox}
+
+% ---- Zutaten und Zubereitung nebeneinander ------------------------------------------------------
+\vspace{0.4em}
+\begin{minipage}[t]{0.37\linewidth}\vspace{0pt}
+{\sffamily\Large\bfseries\color{tomate} Zutaten}\\[-0.2em]
+{\sffamily\small für 4 Personen}
+
+\gruppe{Für das Blech}
+\sffamily\small
+\begin{tabular}{@{}r l@{}}
+  600 g & Hähnchenbrustfilet \\
+  400 g & Süßkartoffeln \\
+  2 & rote Paprika (ca.\ 300 g) \\
+  1 & Zucchini (ca.\ 250 g) \\
+  1 & rote Zwiebel \\
+  3 EL & Olivenöl \\
+  2 TL & Paprikapulver, edelsüß \\
+  1 TL & getrockneter Thymian \\
+  1½ TL & Salz \\
+  ½ TL & schwarzer Pfeffer \\
+\end{tabular}
+
+\gruppe{Für den Zitronenreis}
+\sffamily\small
+\begin{tabular}{@{}r l@{}}
+  250 g & Basmatireis \\
+  500 ml & Wasser \\
+  ½ TL & Salz \\
+  1 & Bio-Zitrone (Schale und Saft) \\
+\end{tabular}
+
+\gruppe{Für den Joghurt-Dip}
+\sffamily\small
+\begin{tabular}{@{}r l@{}}
+  200 g & Naturjoghurt \\
+  1 & Knoblauchzehe \\
+  1 EL & Zitronensaft \\
+  1 Bund & Petersilie \\
+  1 Prise & Salz \\
+\end{tabular}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.58\linewidth}\vspace{0pt}
+{\sffamily\Large\bfseries\color{tomate} Zubereitung}
+\begin{enumerate}[leftmargin=2.0em, itemsep=0.45em, label=\textcolor{tomate}{\sffamily\bfseries\arabic*}, labelsep=0.6em]
+  \item \textbf{Ofen vorheizen} (Minute 0). Backofen auf \qty{220}{\celsius} Ober-/Unterhitze (Umluft \qty{200}{\celsius})
+        vorheizen und ein Backblech mit Backpapier auslegen.
+  \item \textbf{Schneiden} (Minute 0 bis 10). Süßkartoffeln schälen und in 2-cm-Würfel schneiden. Paprika und Zucchini
+        in 3-cm-Stücke schneiden, die Zwiebel in Spalten. Das Hähnchenfilet in 3-cm-Würfel schneiden.
+  \item \textbf{Süßkartoffeln vorgaren} (Minute 10 bis 20). Süßkartoffeln mit 1 EL Öl und ½ TL Salz mischen, auf dem
+        Blech verteilen und \qty{10}{min} bei \qty{220}{\celsius} backen.
+  \item \textbf{Würzen} (Minute 10 bis 20). Währenddessen Hähnchen, Paprika, Zucchini und Zwiebel mit dem restlichen Öl,
+        Paprikapulver, Thymian, 1 TL Salz und dem Pfeffer mischen.
+  \item \textbf{Alles auf das Blech} (Minute 20 bis 45). Die gewürzte Mischung zu den Süßkartoffeln geben und weitere
+        \qty{25}{min} backen. Nach \qty{12}{min} einmal wenden. Das Hähnchen ist gar, wenn die Kerntemperatur mindestens
+        \qty{74}{\celsius} erreicht.
+  \item \textbf{Reis kochen} (Minute 28 bis 45). Reis in einem Sieb waschen. Mit 500 ml Wasser und ½ TL Salz aufkochen,
+        zugedeckt \qty{12}{min} bei kleinster Hitze quellen lassen und dann \qty{5}{min} ohne Hitze ziehen lassen.
+  \item \textbf{Joghurt-Dip} (Minute 30 bis 35). Joghurt mit gepresstem Knoblauch, Zitronensaft und Salz verrühren.
+        Petersilie hacken, die Hälfte unterrühren.
+  \item \textbf{Servieren} (Minute 45 bis 50). Zitronenschale und Zitronensaft unter den Reis heben. Blech, Reis und Dip
+        anrichten und mit der restlichen Petersilie bestreuen.
+\end{enumerate}
+\end{minipage}
+
+\newpage
+% ---- Ablaufplan --------------------------------------------------------------------------------------------
+{\sffamily\Large\bfseries\color{tomate} Ablaufplan: Was läuft wann?}\\[0.2em]
+{\small Das Blech braucht keine Aufsicht. Nutzen Sie die Zeit im Ofen für Reis und Dip.}
+
+\begin{center}
+\begin{tikzpicture}[x=0.255cm, y=0.62cm, font=\sffamily\scriptsize,
+    bar/.style={draw=black!60, rounded corners=1pt, minimum height=0.46cm, inner sep=1pt, anchor=west}]
+  % rows (top to bottom): Schneiden, Ofen, Reis, Dip, Anrichten
+  \node[anchor=east] at (-0.4,0) {Schneiden und würzen};
+  \node[anchor=east] at (-0.4,-1) {Backofen};
+  \node[anchor=east] at (-0.4,-2) {Reis};
+  \node[anchor=east] at (-0.4,-3) {Joghurt-Dip};
+  \node[anchor=east] at (-0.4,-4) {Anrichten};
+  % bars (minute from, length)
+  \node[bar, fill=blatt!35, minimum width=0.255cm*10] at (0,0) {Schneiden};
+  \node[bar, fill=blatt!35, minimum width=0.255cm*10] at (10,0) {Würzen};
+  \node[bar, fill=orange!25, minimum width=0.255cm*10] at (0,-1) {Vorheizen \qty{220}{\celsius}};
+  \node[bar, fill=orange!55, minimum width=0.255cm*10] at (10,-1) {Süßkartoffeln};
+  \node[bar, fill=red!40, minimum width=0.255cm*25] at (20,-1) {ganzes Blech, \qty{25}{min}};
+  \node[bar, fill=yellow!40, minimum width=0.255cm*12] at (28,-2) {quellen, 12 min};
+  \node[bar, fill=yellow!70, minimum width=0.255cm*5] at (40,-2) {ziehen};
+  \node[bar, fill=blue!15, minimum width=0.255cm*5] at (30,-3) {rühren};
+  \node[bar, fill=tomate!30, minimum width=0.255cm*5] at (45,-4) {Servieren};
+  % time axis
+  \draw[-latex] (0,-4.8) -- (51.5,-4.8);
+  \foreach \m in {0,5,...,50} {\draw (\m,-4.8) -- (\m,-4.95); \node[anchor=north] at (\m,-4.95) {\m};}
+  \node[anchor=west] at (51.8,-4.8) {Minuten};
+  % marker: wenden
+  \draw[dashed, black!60] (32,0.5) -- (32,-4.8);
+  \node[anchor=south, fill=white, inner sep=1pt] at (32,0.45) {Blech wenden (Minute 32)};
+\end{tikzpicture}
+\captionof{figure}{Zeitplan für 50 Minuten. Das Blech ist von Minute 10 bis 45 im Ofen; Reis und Dip entstehen parallel.}
+\end{center}
+
+% ---- Naehrwerte --------------------------------------------------------------------------------------------------
+\subsection*{\sffamily\large\bfseries\color{tomate} Nährwerte pro Portion (ca.)}
+\begin{center}
+\sffamily\small
+\begin{tabular}{@{}l r r@{}}
+  \toprule
+  \textbf{Nährwert} & \textbf{Menge} & \textbf{Anteil am Tagesbedarf*} \\
+  \midrule
+  Energie & 620 kcal & 31 \% \\
+  Eiweiß & 44 g & 88 \% \\
+  Kohlenhydrate & 78 g & 30 \% \\
+  Fett & 14 g & 20 \% \\
+  \bottomrule
+\end{tabular}\\[0.2em]
+{\scriptsize *bezogen auf einen Erwachsenen mit 2\,000 kcal Tagesbedarf; Richtwerte, keine Ernährungsberatung}
+\end{center}
+
+% ---- Tipps -----------------------------------------------------------------------------------------------------
+\begin{tcolorbox}[colback=creme, colframe=blatt, boxrule=0.6pt, arc=2pt, left=8pt, right=8pt, top=5pt, bottom=5pt,
+  title={\sffamily\bfseries Tipps}, fonttitle=\sffamily, coltitle=white, colbacktitle=blatt]
+\begin{itemize}[leftmargin=1.3em, itemsep=0.2em]
+  \item \textbf{Knusprig statt matschig:} Das Blech nicht überladen. Gemüse und Fleisch sollen in einer Schicht liegen;
+        sonst dämpft es statt zu rösten. Im Zweifel zwei Bleche verwenden.
+  \item \textbf{Gleichmäßig garen:} Alle Stücke etwa gleich groß schneiden, die Süßkartoffeln etwas kleiner (2 cm) als
+        Paprika und Zucchini (3 cm).
+  \item \textbf{Sicher gegart:} Das Hähnchen ist durchgegart, wenn die Kerntemperatur mindestens \qty{74}{\celsius} beträgt
+        und der Saft klar austritt.
+  \item \textbf{Vegetarisch:} Das Hähnchen durch 400 g Kichererbsen (Abtropfgewicht) und 200 g Halloumi ersetzen. Die
+        Kichererbsen kommen erst nach Minute 20 aufs Blech.
+  \item \textbf{Reste:} Abgekühlt im Kühlschrank bis zu 2 Tage haltbar. Reis nur einmal aufwärmen und gut durcherhitzen.
+\end{itemize}
+\end{tcolorbox}
+
+\end{document}

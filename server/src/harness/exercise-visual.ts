@@ -28,7 +28,7 @@ export const UNIT_FOCUS_MAX = 3;
  * solution line) the first solution line, which follows the checkpoint. A part with no method narration has none.
  */
 export const hasVisualHost = (unit: Unit, solution: Solution) =>
-  Boolean(solution.method.say) && (!unit.compact || Boolean(solution.coach));
+  Boolean(solution.method.say) && (unit.form !== 'compact' || Boolean(solution.coach));
 
 /** The task text and the maths of a part as the learner reads them: the numbers its givens print. */
 function givenText(unit: Unit, doc: Doc): string {

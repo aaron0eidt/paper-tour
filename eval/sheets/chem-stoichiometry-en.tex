@@ -1,0 +1,105 @@
+% General chemistry problem set (English, university level).
+% Headings: "Problem N [P points]" in bold; parts (a), (b), ...
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm,top=2.0cm,bottom=2.2cm]{geometry}
+\usepackage{amsmath}
+\usepackage[version=4]{mhchem}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\setlength{\parindent}{0pt}
+\setlist[enumerate,1]{label=(\alph*), leftmargin=2.2em, itemsep=0.35em, topsep=0.3em}
+\newcommand{\problem}[2]{\bigskip\par\textbf{Problem #1}\ \textbf{[#2]}\par\nopagebreak\smallskip}
+\newcommand{\blank}{\rule{2.4cm}{0.4pt}}
+
+\begin{document}
+
+% ---- header ---------------------------------------------------------------------------
+{\small CHEM 1201 \textperiodcentered{} General Chemistry I \hfill Fall 2026}\\[-0.4em]
+\rule{\linewidth}{0.6pt}\\[0.5em]
+{\Large\bfseries Problem Set 4: Stoichiometry, Gases and Equilibrium}\\[0.5em]
+Due: Friday, 14 November 2026, 5:00 pm \hfill Total: 48 points\\[0.3em]
+{\small Show all steps and give final answers with units and the correct number of significant figures.}
+
+% ---- Problem 1 ------------------------------------------------------------------------
+\problem{1}{8 points}
+Balance the following chemical equations.
+\begin{enumerate}
+  \item \ce{C3H8 + O2 -> CO2 + H2O}
+  \item \ce{Al + H2SO4 -> Al2(SO4)3 + H2}
+  \item The reaction in acidic solution (use the half-reaction method and show both half-reactions):
+        \ce{MnO4- + Fe^2+ -> Mn^2+ + Fe^3+}
+\end{enumerate}
+
+% ---- Problem 2 ------------------------------------------------------------------------
+\problem{2}{10 points}
+Ammonia is made by the Haber process, \ce{N2 + 3 H2 -> 2 NH3}. A reactor is charged with
+\qty{56.0}{g} of \ce{N2} and \qty{6.0}{g} of \ce{H2}. Use $M(\ce{N2}) = \qty{28.0}{g/mol}$,
+$M(\ce{H2}) = \qty{2.0}{g/mol}$ and $M(\ce{NH3}) = \qty{17.0}{g/mol}$.
+\begin{enumerate}
+  \item Which reactant is the limiting reagent? Support your answer with the amounts in mol.
+  \item What is the theoretical yield of \ce{NH3} in grams?
+  \item What mass of the excess reactant remains after the reaction has gone to completion?
+  \item The experiment gives only \qty{27.2}{g} of \ce{NH3}. Calculate the percent yield.
+\end{enumerate}
+
+% ---- Problem 3 ------------------------------------------------------------------------
+\problem{3}{6 points}
+Take $R = \qty{0.08206}{L.atm/(mol.K)}$ and treat all gases as ideal.
+\begin{enumerate}
+  \item A \qty{5.00}{L} flask holds \qty{0.200}{mol} of a gas at \qty{27}{\celsius}. Find the pressure in atm.
+  \item The flask is heated to \qty{127}{\celsius} at constant volume. What is the new pressure?
+  \item An unknown gas has a density of \qty{1.78}{g/L} at \qty{1.00}{atm} and \qty{0}{\celsius}
+        (\qty{273}{K}). Calculate its molar mass and name the gas.
+\end{enumerate}
+
+% ---- Problem 4 ------------------------------------------------------------------------
+\problem{4}{6 points}
+Molarity and dilution.
+\begin{enumerate}
+  \item What mass of NaCl ($M = \qty{58.44}{g/mol}$) is needed to prepare \qty{250.0}{mL} of a
+        \qty{0.400}{M} solution?
+  \item \qty{25.0}{mL} of this solution are diluted with water to a final volume of \qty{500.0}{mL}.
+        What is the new concentration?
+  \item What volume of \qty{12.0}{M} HCl is needed to prepare \qty{500}{mL} of \qty{0.600}{M} HCl?
+\end{enumerate}
+
+% ---- Problem 5 ------------------------------------------------------------------------
+\problem{5}{8 points}
+Acetic acid, \ce{CH3COOH}, has $K_a = \num{1.8e-5}$ at \qty{25}{\celsius}.
+\begin{enumerate}
+  \item Calculate the pH of a \qty{0.100}{M} solution. You may assume that the amount of acid that
+        dissociates is small compared with \qty{0.100}{M}.
+  \item What percentage of the acid is ionised in this solution?
+  \item What initial concentration of acetic acid gives a pH of $3.00$?
+\end{enumerate}
+
+% ---- Problem 6 ------------------------------------------------------------------------
+\problem{6}{10 points}
+At a certain temperature, \ce{N2O4(g) <=> 2 NO2(g)} has $K_c = \num{1.00e-2}$. A sealed vessel
+initially contains only \ce{N2O4} at \qty{0.0500}{M}.
+\begin{enumerate}
+  \item Write the expression for $K_c$.
+  \item Complete the ICE table below and solve for the equilibrium concentrations.
+\end{enumerate}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+ & $[\ce{N2O4}]$ / M & $[\ce{NO2}]$ / M \\
+\midrule
+Initial     & 0.0500 & 0 \\
+Change      & $-x$   & \blank \\
+Equilibrium & \blank & \blank \\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{enumerate}[resume]
+  \item What percentage of the \ce{N2O4} has dissociated at equilibrium?
+  \item The volume of the vessel is suddenly halved at constant temperature. In which direction does the
+        equilibrium shift? Explain with Le Chatelier's principle.
+\end{enumerate}
+
+\end{document}

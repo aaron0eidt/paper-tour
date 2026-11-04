@@ -7,8 +7,198 @@ const words = (s: string) =>
     .match(/[\p{L}\p{N}]+/gu) ?? [];
 const normalized = (s: string) => words(s).join(' ');
 
-/** Detect decoder padding without banning multilingual joiners, actual numbers,
- * or mathematical notation. Return repair feedback; never silently trim say. */
+/**
+ * The most spoken words an overview step runs to; longer explanations lose the learner (TUTOR-RESEARCH 4.8, item 15).
+ * The direction task, the response schema and the length repair all take it from here (direct.ts sayWords): a detail
+ * step (a worked case), a claim's move or a slide brings its own range and is held to that.
+ */
+export const STEP_MAX_WORDS = 60;
+
+/** Words and phrases as they stand alone: not inside another word, nor after an apostrophe (l'illustration). */
+const phrases = (...sources: string[]) =>
+  new RegExp(`(?<![\\p{L}\\p{N}'])(?:${sources.join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+
+/**
+ * Narration about the tour's own pictures instead of the subject, in English, German, French, Spanish and Italian. The
+ * nouns are the tour's visuals (illustration, diagram, chart); a figure or table is the paper's own subject and stays
+ * unflagged. The board has its own list (BOARD_TALK), since a step without a board may mean a board of directors.
+ */
+const VISUAL_TALK = phrases(
+  // English
+  String.raw`(?:the|this|that|our|these|those|the following|the above|the animated)\s+(?:illustration|diagram|chart|animation|visuali[sz]ation|sketch|graphic)s?\s+(?:shows?|illustrates?|depicts?|demonstrates?)`,
+  String.raw`as\s+(?:shown|seen|displayed|illustrated|depicted)\s+(?:on|in|by)\s+the\s+(?:illustration|diagram|chart|animation|picture|visuali[sz]ation)`,
+  String.raw`as\s+(?:you|we)\s+can\s+see`,
+  String.raw`this\s+(?:illustrative|illustrated)\s+(?:example|case|scenario)`,
+  String.raw`in\s+this\s+step,?\s+(?:we|you|i|let(?:'s|\s+us))`,
+  String.raw`let(?:'s|\s+us)\s+(?:now\s+|next\s+|first\s+|briefly\s+)?(?:take\s+a\s+|have\s+a\s+)?look\s+at`,
+  // German
+  String.raw`(?:die|diese|das|dieses|der|dieser|unsere?)\s+(?:illustration|diagramm|grafik|skizze|animation|schaubild|visualisierung)\s+(?:zeigt|zeigen|veranschaulicht|illustriert)`,
+  // "wie sie sehen" alone may be "how they see", so the formal form (FORMAL) needs a capital and the others a verb.
+  String.raw`wie\s+(?:ihr\s+seht|du\s+siehst|man\s+(?:hier\s+)?sieht)`,
+  String.raw`wie\s+(?:hier\s+|oben\s+|unten\s+)?(?:im\s+diagramm|in\s+der\s+illustration)\s+zu\s+sehen`,
+  String.raw`in\s+diesem\s+schritt,?\s+(?:\p{L}+\s+)?(?:wir|du|ihr)`,
+  String.raw`(?:schauen|sehen)\s+wir\s+uns|werfen\s+wir\s+einen\s+blick`,
+  String.raw`dies\p{L}*\s+illustrativ\p{L}*\s+(?:beispiel|fall|szenario)`,
+  // French
+  String.raw`(?:l'|la\s+|le\s+|cette\s+|ce\s+|notre\s+)(?:illustration|schéma|diagramme|graphique|animation|visualisation)\s+(?:montre|montrent|illustre|représente)`,
+  String.raw`comme\s+(?:vous\s+(?:pouvez\s+(?:le\s+)?voir|le\s+voyez|voyez)|on\s+(?:peut\s+(?:le\s+)?voir|le\s+voit|voit)|tu\s+(?:peux\s+(?:le\s+)?voir|le\s+vois|vois))`,
+  String.raw`dans\s+cette\s+étape,?\s+(?:nous|on|je|\p{L}+ons)`,
+  String.raw`regardons|jetons\s+un\s+(?:coup\s+d'œil|œil|oeil)`,
+  String.raw`(?:cet\s+exemple|ce\s+cas)\s+illustratif`,
+  // Spanish
+  String.raw`(?:la|esta|el|este|nuestra|nuestro)\s+(?:ilustración|diagrama|gráfico|gráfica|animación|esquema|visualización)\s+(?:muestra|ilustra|representa)`,
+  String.raw`como\s+(?:(?:puedes|puede|pueden|podemos|se\s+puede)\s+ver|ves|vemos|se\s+ve)`,
+  String.raw`en\s+este\s+paso,?\s+(?:vamos|veremos|\p{L}+mos)`,
+  String.raw`veamos|echemos\s+un\s+vistazo|miremos`,
+  String.raw`(?:este|ese)\s+(?:ejemplo|caso)\s+ilustrativo`,
+  // Italian
+  String.raw`(?:l'|la\s+|il\s+|lo\s+|questa\s+|questo\s+|nostra\s+|nostro\s+)(?:illustrazione|diagramma|grafico|animazione|schema|visualizzazione)\s+(?:mostra|illustra|rappresenta)`,
+  String.raw`come\s+(?:(?:puoi|potete|possiamo)\s+vedere|si\s+(?:può\s+vedere|vede))`,
+  String.raw`in\s+questo\s+(?:passaggio|passo),?\s+(?:noi|\p{L}+iamo)`,
+  String.raw`guardiamo|diamo\s+un'occhiata`,
+  String.raw`questo\s+(?:esempio|caso)\s+illustrativo`,
+);
+
+/**
+ * Talk about the step's own board. Only a step that draws a board is held to it: in one without, "the board shows strong
+ * support for the merger" is about a board of directors, and a blackboard is a blackboard.
+ */
+const BOARD_TALK = phrases(
+  String.raw`(?:the|this|that|our|these|those|the following|the above|the animated)\s+boards?\s+(?:shows?|illustrates?|depicts?|demonstrates?)`,
+  String.raw`as\s+(?:shown|seen|displayed|illustrated|depicted)\s+(?:on|in|by)\s+the\s+board`,
+  String.raw`(?:die|diese|das|dieses|der|dieser|unsere?)\s+tafel\s+(?:zeigt|zeigen|veranschaulicht|illustriert)`,
+  String.raw`wie\s+(?:hier\s+|oben\s+|unten\s+)?auf\s+der\s+tafel\s+zu\s+sehen`,
+  String.raw`(?:la|esta|nuestra)\s+pizarra\s+(?:muestra|ilustra|representa)`,
+  String.raw`(?:la|questa|nostra)\s+lavagna\s+(?:mostra|illustra|rappresenta)`,
+);
+
+/**
+ * The formal German "Sie", which only a capital tells from "sie" (they, it): "wie sie sehen lernen" and "in diesem
+ * Schritt werden sie addiert" are subject matter. Case-sensitive, so it has its own list.
+ */
+const FORMAL = new RegExp(
+  `(?<![\\p{L}\\p{N}'])(?:${[
+    String.raw`[Ww]ie\s+Sie\s+(?:(?:hier|dort)\s+sehen(?:\s+k(?:ö|oe)nnen)?|sehen\s+k(?:ö|oe)nnen)`,
+    String.raw`[Ii]n\s+diesem\s+Schritt,?\s+(?:\p{L}+\s+)?Sie`,
+  ].join('|')})(?![\\p{L}\\p{N}])`,
+  'gu',
+);
+
+/**
+ * Condescending fillers: they claim the point is easy and put the learner who finds it hard on display. "clearly" and
+ * "simply" are also ordinary words ("clearly defined", "simply connected"), so they have their own tests below. "Easy"
+ * stands only where it says the point is plain to see ("es fácil que" means "it is likely that"), and an idiom of its own
+ * stays out: a change of course, as a matter of course, a claim manifestly unfounded ("offensichtlich unbegründet").
+ */
+const FILLERS = phrases(
+  String.raw`obviously|trivially|(?<!\b(?:change|matter|reversal)\s+)of\s+course|(?:it(?:'s|\s+is)|is|are)\s+easy\s+to\s+see|it(?:'s|\s+is)\s+(?:obvious|trivial)\s+(?:that|to)`,
+  String.raw`offensichtlich(?!\s+un\p{L}+)|einfach\s+nur|trivialerweise|natürlich\s+ist|selbstverständlich`,
+  String.raw`évidemment|bien\s+sûr|il\s+est\s+(?:facile\s+de\s+voir|(?:évident|trivial)\s+(?:de\s+voir|que))|trivialement|tout\s+simplement`,
+  String.raw`obviamente|por\s+supuesto|es\s+(?:fácil\s+ver|(?:obvio|trivial)\s+(?:ver|que))|trivialmente|simplemente(?!\s+conex[oa])`,
+  String.raw`ovviamente|è\s+(?:facile\s+vedere|(?:ovvio|banale)\s+(?:vedere|che))|banalmente|semplicemente(?!\s+conness[oa])`,
+);
+
+/** What turns a filler into its opposite: "not obviously tight", "nicht offensichtlich", "no es simplemente", "non è ovvio". */
+const NEGATED =
+  /(?<![\p{L}\p{N}'])(?:not|never|nicht|nie|pas|(?:no|non)(?:\s+(?:es|son|está|están|fue|è|sono|era|erano))?)\s+$|n't\s+$/iu;
+
+/** A sentence-opening "Clearly, ..." or a parenthetical ", clearly, ..."; the manner "explained clearly" stays. */
+const CLEARLY = /^clearly(?:\s*,|\s+(?:the|this|that|it|we|you|there|these|those)(?![\p{L}\p{N}]))|,\s*clearly\s*,/iu;
+
+/** Terms in which "simply" is part of the subject: simply connected, simply supported, simply typed. */
+const SIMPLY_TERM =
+  /^[\s-]+(?:connected|supported|typed|laced|transitive|ordered|periodic|reducible)(?![\p{L}\p{N}])/iu;
+
+/** "Simply" as a filler: an adverb before a verb, not the term, a contrast ("not simply a lookup") or a name. */
+function simplyFiller(text: string): string | null {
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}])simply(?![\p{L}\p{N}])/giu)) {
+    const before = text.slice(0, match.index),
+      after = text.slice(match.index + match[0].length);
+    if (SIMPLY_TERM.test(after) || /(?:not|than|but|never|n't)\s+$/iu.test(before)) continue;
+    // A name: capitalised in mid-sentence, after a title, or at the start of a sentence before another capitalised word.
+    const opens = /(?:^|[.!?:]\s+)$/u.test(before) && !/\b(?:dr|prof|mr|mrs|ms)\.\s+$/iu.test(before);
+    const capital = match[0][0] !== match[0][0].toLocaleLowerCase();
+    if (capital && (!opens || /^\s+\p{Lu}/u.test(after))) continue;
+    return match[0].toLocaleLowerCase();
+  }
+  return null;
+}
+
+/**
+ * Empty comprehension checks, which test nobody: the learner asks when something is unclear. Each is tied to its question
+ * mark, since the same words state a fact ("ist alles klar geregelt", "lässt noch Fragen offen", "si tiene alguna
+ * pregunta, contacte", "il contratto rende tutto chiaro").
+ */
+const CHECKS = phrases(
+  String.raw`do\s+you\s+(?:all\s+)?(?:understand|get\s+(?:it|this|that)|follow\s+(?:me|so\s+far))|have\s+you\s+understood|does\s+(?:that|this|it)\s+make\s+sense|(?:is|was)\s+(?:that|this|it)\s+(?:all\s+)?clear\s*\?|any\s+questions\s*\?`,
+  String.raw`alles\s+klar\s*[?!]|verstanden\s*\?|ist\s+(?:das|dies)\s+klar\s*\?|noch\s+fragen\s*\?|gibt\s+es\s+(?:noch\s+)?fragen\s*\?|irgendwelche\s+fragen\s*\?`,
+  String.raw`c'est\s+clair\s*\?|est-ce\s+(?:que\s+c'est\s+)?clair|(?:avez-vous|as-tu)\s+(?:bien\s+)?compris|vous\s+(?:me\s+)?suivez\s*\?|(?:avez-vous|y\s+a-t-il)\s+des\s+questions|des\s+questions\s*\?`,
+  String.raw`(?:está|queda)\s+claro\s*\?|entendido\s*\?|alguna\s+pregunta\s*\?|hay\s+(?:alguna\s+)?preguntas?\s*\?|(?:me\s+(?:entienden|siguen)|lo\s+entiendes)\s*\?`,
+  String.raw`è\s+chiaro\s*\?|tutto\s+chiaro\s*\?|capito\s*\?|avete\s+capito\s*\?|ci\s+sono\s+domande\s*\?|domande\s*\?`,
+);
+
+/** A sentence that opens with "Any questions" and asks it is the check, also when it goes on ("Any questions about the fee?"). */
+const OPENING_CHECK = /^(?:are\s+there\s+)?any\s+questions(?![\p{L}\p{N}])[^.!?]*\?$/iu;
+
+/** The distinct phrases a pattern finds, as the repair feedback quotes them. */
+function found(text: string, pattern: RegExp): string[] {
+  return [...new Set([...text.matchAll(pattern)].map((m) => m[0].toLocaleLowerCase().replace(/\s+/g, ' ').trim()))];
+}
+const quoted = (list: string[]) =>
+  list
+    .slice(0, 3)
+    .map((phrase) => `"${phrase}"`)
+    .join(', ');
+
+/** The fillers a text uses, not those it denies ("not obviously tight"): the distinct phrases, as the feedback quotes them. */
+function fillersIn(text: string): string[] {
+  const phrasesFound = new Set<string>();
+  for (const match of text.matchAll(FILLERS))
+    if (!NEGATED.test(text.slice(0, match.index)))
+      phrasesFound.add(match[0].toLocaleLowerCase().replace(/\s+/g, ' ').trim());
+  return [...phrasesFound];
+}
+
+/**
+ * The tour-style problems of a narration, as repair feedback: its own pictures, condescending fillers and empty
+ * comprehension checks. They are style points, asked to be fixed once and never a reason to refuse a step or an answer
+ * (see styleProblems' callers). `board` is whether the step draws a board: only then is "the board shows" tour talk.
+ */
+export function styleProblems(say: string, board = true): string[] {
+  const text = say.normalize('NFKC').replace(/[‘’ʼ`´]/g, "'");
+  const problems: string[] = [];
+  const visuals = [
+    ...new Set([...found(text, VISUAL_TALK), ...(board ? found(text, BOARD_TALK) : []), ...found(text, FORMAL)]),
+  ];
+  if (visuals.length)
+    problems.push(
+      `Narration talks about the tour's own pictures (${quoted(visuals)}). Speak about the subject itself and let the marks and the board show it; never announce or describe a visual.`,
+    );
+  const fillers = fillersIn(text);
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  if (sentences.some((sentence) => CLEARLY.test(sentence.trim()))) fillers.push('clearly');
+  const simply = simplyFiller(text);
+  if (simply) fillers.push(simply);
+  if (fillers.length)
+    problems.push(
+      `Narration uses a condescending filler (${quoted(fillers)}). Drop it and state the point; nobody is put on display.`,
+    );
+  const checks = found(text, CHECKS);
+  if (!checks.some((check) => check.startsWith('any questions')) && sentences.some((s) => OPENING_CHECK.test(s.trim())))
+    checks.push('any questions');
+  if (checks.length)
+    problems.push(
+      `Narration asks an empty comprehension check (${quoted(checks)}). Drop it and say the point; the learner asks when something is unclear.`,
+    );
+  return problems;
+}
+
+/**
+ * Detect decoder padding without banning multilingual joiners, actual numbers, or mathematical notation. Return repair
+ * feedback; never silently trim say. Only these corruption checks refuse a narration. The tour-style points
+ * (styleProblems) are asked for once, apart from this, and the length is the direction's own repair (direct.ts
+ * lengthProblems): a style point or a long step must not fail a tour or an answer that is otherwise usable.
+ */
 export function narrationProblems(say: string): string[] {
   const problems: string[] = [];
   if (/\p{Cf}{8,}/u.test(say))
@@ -100,9 +290,30 @@ function promisedVisual(say: string): 'video' | 'illustration' | null {
   return nouns.length ? 'illustration' : null;
 }
 
+/**
+ * The tour-style points of an answer's steps (styleProblems), as repair feedback, from step `from` (0-based) on: the
+ * steps before it were spoken already. Apart from answerNarrationProblems: a style point is asked for once and the
+ * answer is accepted whatever the reply, so it never holds back a streamed step.
+ */
+export function answerStyleProblems(
+  steps: readonly { say: string; actions?: readonly Action[] }[],
+  from = 0,
+): string[] {
+  return steps.flatMap((step, index) =>
+    index < from
+      ? []
+      : styleProblems(
+          step.say,
+          (step.actions ?? []).some((action) => action.type === 'board'),
+        ).map((problem) => `Step ${index + 1}: ${problem}`),
+  );
+}
+
 /** Actionable repair feedback; never silently delete or rewrite the narration.
  * Keep native visuals alongside the explanation that needs them; do not repeat
- * an explanation just to introduce a separate visual step.
+ * an explanation just to introduce a separate visual step. An answer step has no
+ * word count here: the answer already cuts a step at 100 words. Only what makes a
+ * step unusable is here; its style is answerStyleProblems.
  */
 export function answerNarrationProblems(
   steps: readonly { say: string; actions?: readonly Action[] }[],
@@ -234,6 +445,62 @@ export function readsSource(say: string, doc: Doc): boolean {
   return copied / (spoken.length - 3) >= 0.8;
 }
 
+/** The most highlights one step shows. More compete with each other and with the narration. */
+export const MAX_HIGHLIGHTS = 3;
+/** The most pen marks (arrow, circle) one step draws. */
+export const MAX_PEN_MARKS = 2;
+
+/**
+ * The sentences a box or a spotlight already points at in the step: its own target, or every sentence of the block it
+ * outlines when it names no region (a region marks only part of the block).
+ */
+function outlined(actions: readonly Action[], doc: Doc): Set<string> {
+  const covered = new Set<string>();
+  for (const action of actions) {
+    if (action.type !== 'box' && action.type !== 'spotlight') continue;
+    if (doc.sentences.some((s) => s.id === action.target)) covered.add(action.target);
+    else if (!action.region)
+      for (const id of doc.blocks.find((b) => b.id === action.target)?.sentences ?? []) covered.add(id);
+  }
+  return covered;
+}
+
+/**
+ * Marks that help understanding instead of cluttering it. A highlight names a sentence once, and not one that a box or
+ * spotlight in the step already points at; a step keeps at most MAX_HIGHLIGHTS highlights and MAX_PEN_MARKS pen marks.
+ * The marks whose words come first stay.
+ */
+function declutter(actions: Action[], doc: Doc): Action[] {
+  const covered = outlined(actions, doc);
+  const order = actions.map((_, i) => i).sort((a, b) => (actions[a].at_word ?? 0) - (actions[b].at_word ?? 0) || a - b);
+  const remove = new Set<number>();
+  const narrowed = new Map<number, string[]>();
+  const named = new Set<string>();
+  let highlights = 0,
+    pens = 0;
+  for (const i of order) {
+    const action = actions[i];
+    if (action.type === 'highlight') {
+      const fresh = [...new Set(action.targets)].filter((id) => !named.has(id) && !covered.has(id));
+      if (!fresh.length || highlights >= MAX_HIGHLIGHTS) remove.add(i);
+      else {
+        highlights++;
+        for (const id of fresh) named.add(id);
+        if (fresh.length !== action.targets.length) narrowed.set(i, fresh);
+      }
+    } else if (action.type === 'arrow' || action.type === 'circle') {
+      if (pens >= MAX_PEN_MARKS) remove.add(i);
+      else pens++;
+    }
+  }
+  if (!remove.size && !narrowed.size) return actions;
+  return actions.flatMap((action, i): Action[] => {
+    if (remove.has(i)) return [];
+    const targets = narrowed.get(i);
+    return targets && action.type === 'highlight' ? [{ ...action, targets }] : [action];
+  });
+}
+
 /** Shared final guard for authored tours and Q&A: a mark can stay useful without repeating its printed name. */
 export function insightStep(step: Step, doc: Doc): Step {
   const actions = step.actions.flatMap((a): Action[] => {
@@ -256,5 +523,5 @@ export function insightStep(step: Step, doc: Doc): Step {
     }
     return [a];
   });
-  return { ...step, actions };
+  return { ...step, actions: declutter(actions, doc) };
 }

@@ -8,10 +8,11 @@ import { sceneProblems } from '../../shared/scene';
 import { canonicalShapes, shapesProblems } from '../../shared/shapes';
 import { canonicalTimeline, timelineProblems } from '../../shared/timeline';
 // The side board: checks that a board item can be drawn, and computes what the board draws (term
-// wrapping, flow and bar geometry, easing). Pure, so it can be tested; rendering is in
-// components/Board.tsx.
+// wrapping, the working kept above a formula, flow and bar geometry, easing). Pure, so it can be tested; rendering is in
+// components/Board.tsx (the formula board in components/FormulaBoard.tsx).
 
-import type { BoardItem, Color, FormulaTerm } from './types';
+import { FORMULA_BEFORE_MAX } from './types';
+import type { BoardItem, Color, FormulaLine, FormulaTerm } from './types';
 
 const COLORS: readonly string[] = ['yellow', 'blue', 'green', 'pink', 'orange'];
 /** Stable semantic colours; the active theme provides their actual ink. */
@@ -26,8 +27,26 @@ export const BOARD_INK: Record<Color, string> = {
   yellow: 'var(--canvas-yellow)',
 };
 
+export type FormulaItem = Extract<BoardItem, { kind: 'formula' }>;
 export type FlowItem = Extract<BoardItem, { kind: 'flow' }>;
 export type BarsItem = Extract<BoardItem, { kind: 'bars' }>;
+
+/** Most earlier lines of a worked solution the board shows above the current one (an item may carry FORMULA_BEFORE_MAX). */
+export const WORKING_SHOWN = 5;
+
+/** The earlier lines the board shows, oldest first: the newest few. */
+export function workingLines(item: FormulaItem): FormulaLine[] {
+  return (item.before ?? []).slice(-WORKING_SHOWN);
+}
+
+const squash = (latex: string) => latex.replace(/\s+/g, ' ').trim();
+
+/** Whether `next` writes the line after the one the board shows: its earlier lines end with the formula on the board. */
+export function continuesWorking(previous: BoardItem | null | undefined, next: BoardItem): boolean {
+  if (previous?.kind !== 'formula' || next.kind !== 'formula') return false;
+  const last = next.before?.at(-1);
+  return !!last && squash(last.latex) === squash(previous.latex);
+}
 
 /** A formula term's colour: its own, else the palette in order. */
 export function termColor(term: FormulaTerm, index: number): Color {
@@ -98,6 +117,17 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const color = (c: unknown) => (COLORS.includes(c as string) ? { color: c as Color } : {});
 const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 
+/** The earlier lines of a worked solution that can be drawn (a formula, at most 400 characters; a note, at most 80), the newest eight. */
+function earlierLines(v: unknown): { before?: FormulaLine[] } {
+  const lines = (Array.isArray(v) ? v : []).filter(isObj).flatMap((line): FormulaLine[] => {
+    const latex = text(line.latex);
+    if (!latex || latex.length > 400) return [];
+    const note = text(line.title);
+    return [{ latex, ...(note && note.length <= 80 ? { title: note } : {}), ...(line.verified === true ? { verified: true } : {}) }];
+  });
+  return lines.length ? { before: lines.slice(-FORMULA_BEFORE_MAX) } : {};
+}
+
 /** A board item with its unusable parts dropped, or null (with a warning) when nothing drawable is left. */
 export function checkBoardItem(raw: unknown, where: string, warn: (message: string) => void): BoardItem | null {
   const fail = (why: string) => {
@@ -147,7 +177,7 @@ export function checkBoardItem(raw: unknown, where: string, warn: (message: stri
       const terms: FormulaTerm[] = list(raw.terms)
         .filter((t) => text(t.latex) && typeof t.label === 'string' && latex.includes(t.latex as string))
         .map((t) => ({ latex: t.latex as string, label: t.label as string, ...color(t.color) }));
-      return { kind: 'formula', ...title, latex, terms };
+      return { kind: 'formula', ...title, latex, terms, ...earlierLines(raw.before), ...(raw.verified === true ? { verified: true } : {}) };
     }
     case 'flow': {
       const nodes = list(raw.nodes)
@@ -213,8 +243,42 @@ const overlaps = (a: Span, b: Span) => a[0] < b[1] && b[0] < a[1];
 const contains = (a: Span, b: Span) => a[0] <= b[0] && b[1] <= a[1];
 const crosses = (a: Span, b: Span) => overlaps(a, b) && !contains(a, b) && !contains(b, a);
 const CONTROL_WORD = /\\[a-zA-Z]+/y;
+const CHEM_OPEN = /\s*\{/y;
 
-/** Positions between LaTeX tokens: a control word, a control symbol or one character. */
+/** Where the group opened by the brace at `open` ends: its closing brace, else the end of the LaTeX. */
+function groupEnd(latex: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < latex.length; i++) {
+    if (latex[i] === '\\') i++;
+    else if (latex[i] === '{') depth++;
+    else if (latex[i] === '}' && --depth === 0) return i;
+  }
+  return latex.length;
+}
+
+/**
+ * Positions after the opening brace to before the closing one of each \ce{…} and \pu{…}. mhchem typesets such a group
+ * as a whole: a term wrapped inside it prints as plain maths (H2O without its subscript), so no term starts or ends there.
+ */
+function chemInsides(latex: string): Span[] {
+  const insides: Span[] = [];
+  for (let i = 0; i < latex.length; ) {
+    CONTROL_WORD.lastIndex = i;
+    const word = CONTROL_WORD.exec(latex);
+    const code = latex.charCodeAt(i);
+    if (!word) {
+      i += latex[i] === '\\' || (code >= 0xd800 && code <= 0xdbff) ? 2 : 1;
+      continue;
+    }
+    i += word[0].length;
+    CHEM_OPEN.lastIndex = i;
+    const open = word[0] === '\\ce' || word[0] === '\\pu' ? CHEM_OPEN.exec(latex) : null;
+    if (open) insides.push([i + open[0].length, groupEnd(latex, i + open[0].length - 1)]);
+  }
+  return insides;
+}
+
+/** Positions between LaTeX tokens: a control word, a control symbol or one character; none inside a \ce or \pu group. */
 function tokenBounds(latex: string): boolean[] {
   const bounds = new Array<boolean>(latex.length + 1).fill(false);
   let i = 0;
@@ -228,6 +292,7 @@ function tokenBounds(latex: string): boolean[] {
     else i += code >= 0xd800 && code <= 0xdbff ? 2 : 1;
   }
   bounds[latex.length] = true;
+  for (const [from, to] of chemInsides(latex)) for (let at = from; at <= to; at++) bounds[at] = false;
   return bounds;
 }
 
@@ -298,7 +363,7 @@ export interface FlowEdgePath {
   to: number;
   /** The curve, ending just short of the target. */
   d: string;
-  /** The arrowhead: two short strokes that meet at the end of the curve. */
+  /** The arrowhead: a filled triangle at the end of the curve. */
   head: string;
 }
 
@@ -313,20 +378,31 @@ export interface FlowGeometry {
   edges: FlowEdgePath[];
 }
 
-/** Line height of node labels; labels are drawn at 13px. */
-export const FLOW_LINE = 17;
-const FLOW_PAD = { x: 14, y: 10 };
-const FLOW_W = { min: 92, max: 176 };
+/** Node labels are drawn at this size (board.css), with this line height. */
+export const FLOW_FONT = 15;
+export const FLOW_LINE = 20;
+const FLOW_PAD = { x: 18, y: 14 };
+// Every box has one width: what two lines of the longest label need, grown toward `share` of the room one box has, within
+// these limits (a box never gets so wide that a short label floats in it).
+const FLOW_W = { min: 112, max: 220, share: 0.72 };
 // Gaps between ranks (room for the arrows): they grow within these limits to use the board.
-const FLOW_RANK_GAP = { vertical: [30, 50], horizontal: [38, 64] };
-const FLOW_FILL = 0.8;
-const FLOW_MIN_SCALE = 0.8;
-const FLOW_LANE_GAP = 14;
+const FLOW_RANK_GAP = { vertical: [44, 92], horizontal: [56, 108] };
+// A small board (a phone, a short strip under the stage) gives up some air between and inside the boxes: the labels
+// then keep a size nearer 15px, which matters more there than the room around them.
+const FLOW_COMPACT = { w: 92, pad: { x: 12, y: 11 }, gap: { vertical: [32, 92], horizontal: [40, 108] } };
+const isSmallBoard = (box: { width: number; height: number }) => box.height < 240 || box.width < 360;
+const FLOW_FILL = 0.86;
+// A flow that would shrink below this scrolls on the board instead, so labels stay near their 15px. A small board (a
+// short strip under the stage, a phone) shrinks the flow further first: scrolling there would hide most of it.
+export const FLOW_MIN_SCALE = 0.93;
+export const FLOW_SMALL_SCALE = 0.72;
+const FLOW_LANE_GAP = 20;
 // Room around the nodes for the focus ring, and beside them for edges that loop back.
 const FLOW_MARGIN = 8;
-const FLOW_LOOP = 28;
-const FLOW_HEAD = 5;
-const FLOW_GAP = 3;
+const FLOW_LOOP = 30;
+// An arrowhead is a filled triangle this long and wide (half-width); the line ends at its base.
+const FLOW_HEAD = { len: 10, half: 5.5 };
+const FLOW_GAP = 2;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const round = (v: number) => Math.round(v * 10) / 10;
@@ -359,13 +435,27 @@ export function wrapLabel(text: string, width: number, measure: Measure, max = 3
   return lines.map((l) => (measure(l) > width ? ellipsize(l, width, measure) : l));
 }
 
-/** An arrowhead at `tip` pointing along the unit vector (ux, uy). */
-function arrowHead(tipX: number, tipY: number, ux: number, uy: number): string {
-  const bx = tipX - ux * FLOW_HEAD;
-  const by = tipY - uy * FLOW_HEAD;
-  const px = -uy * FLOW_HEAD * 0.8;
-  const py = ux * FLOW_HEAD * 0.8;
-  return `M${pt(bx + px, by + py)} L${pt(tipX, tipY)} L${pt(bx - px, by - py)}`;
+/** The narrowest line width at which a label wraps to two lines at most (never narrower than its longest word). */
+export function twoLineWidth(text: string, measure: Measure): number {
+  const full = Math.ceil(measure(text.trim()));
+  const longest = Math.ceil(Math.max(0, ...text.split(/\s+/).filter(Boolean).map(measure)));
+  for (let w = longest; w < full; w += 4) if (wrapLabel(text, w, measure).length <= 2) return w;
+  return full;
+}
+
+/**
+ * An arrowhead at `tip` pointing along the unit vector (ux, uy): a filled triangle, and the point at its base where the
+ * line it ends stops.
+ */
+function arrowHead(tipX: number, tipY: number, ux: number, uy: number): { head: string; end: [number, number] } {
+  const bx = tipX - ux * FLOW_HEAD.len;
+  const by = tipY - uy * FLOW_HEAD.len;
+  const px = -uy * FLOW_HEAD.half;
+  const py = ux * FLOW_HEAD.half;
+  return {
+    head: `M${pt(bx + px, by + py)} L${pt(tipX, tipY)} L${pt(bx - px, by - py)} Z`,
+    end: [tipX - ux * (FLOW_HEAD.len - 1), tipY - uy * (FLOW_HEAD.len - 1)],
+  };
 }
 
 /**
@@ -381,26 +471,30 @@ function edgePath(
   clear = -Infinity,
 ): Omit<FlowEdgePath, 'from' | 'to'> {
   if (forward && vertical) {
-    const [sx, sy, ex, ey] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y - FLOW_GAP];
+    const [sx, sy] = [a.x + a.w / 2, a.y + a.h];
+    const { head, end: [ex, ey] } = arrowHead(b.x + b.w / 2, b.y - FLOW_GAP, 0, 1);
     const k = Math.max(10, (ey - sy) / 2);
-    return { d: `M${pt(sx, sy)} C${pt(sx, sy + k)} ${pt(ex, ey - k)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, 1) };
+    return { d: `M${pt(sx, sy)} C${pt(sx, sy + k)} ${pt(ex, ey - k)} ${pt(ex, ey)}`, head };
   }
   if (forward) {
-    const [sx, sy, ex, ey] = [a.x + a.w, a.y + a.h / 2, b.x - FLOW_GAP, b.y + b.h / 2];
+    const [sx, sy] = [a.x + a.w, a.y + a.h / 2];
+    const { head, end: [ex, ey] } = arrowHead(b.x - FLOW_GAP, b.y + b.h / 2, 1, 0);
     const k = Math.max(10, (ex - sx) / 2);
-    return { d: `M${pt(sx, sy)} C${pt(sx + k, sy)} ${pt(ex - k, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 1, 0) };
+    return { d: `M${pt(sx, sy)} C${pt(sx + k, sy)} ${pt(ex - k, ey)} ${pt(ex, ey)}`, head };
   }
   // Both handles at one offset C: the curve's furthest point, at its middle, is (s + e) / 8 + 0.75 C,
   // which is set to lie FLOW_LOOP * 0.75 beyond the boxes it passes.
   const handle = (s: number, e: number, edge: number) => (Math.max(s, e, edge) + 0.75 * FLOW_LOOP - (s + e) / 8) / 0.75;
   if (vertical) {
-    const [sx, sy, ex, ey] = [a.x + a.w, a.y + a.h / 2, b.x + b.w + FLOW_GAP, b.y + b.h / 2];
+    const [sx, sy] = [a.x + a.w, a.y + a.h / 2];
+    const { head, end: [ex, ey] } = arrowHead(b.x + b.w + FLOW_GAP, b.y + b.h / 2, -1, 0);
     const c = handle(sx, ex, clear);
-    return { d: `M${pt(sx, sy)} C${pt(c, sy)} ${pt(c, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, -1, 0) };
+    return { d: `M${pt(sx, sy)} C${pt(c, sy)} ${pt(c, ey)} ${pt(ex, ey)}`, head };
   }
-  const [sx, sy, ex, ey] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y + b.h + FLOW_GAP];
+  const [sx, sy] = [a.x + a.w / 2, a.y + a.h];
+  const { head, end: [ex, ey] } = arrowHead(b.x + b.w / 2, b.y + b.h + FLOW_GAP, 0, -1);
   const c = handle(sy, ey, clear);
-  return { d: `M${pt(sx, sy)} C${pt(sx, c)} ${pt(ex, c)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, -1) };
+  return { d: `M${pt(sx, sy)} C${pt(sx, c)} ${pt(ex, c)} ${pt(ex, ey)}`, head };
 }
 
 /**
@@ -410,21 +504,24 @@ function edgePath(
 function laneEdge(a: FlowNodeBox, b: FlowNodeBox, vertical: boolean): Omit<FlowEdgePath, 'from' | 'to'> {
   if (vertical) {
     const right = b.x > a.x;
-    const [sx, ex] = right ? [a.x + a.w, b.x - FLOW_GAP] : [a.x, b.x + b.w + FLOW_GAP];
-    const [sy, ey] = [a.y + a.h / 2, b.y + b.h / 2];
-    return { d: `M${pt(sx, sy)} L${pt(ex, ey)}`, head: arrowHead(ex, ey, right ? 1 : -1, 0) };
+    const sx = right ? a.x + a.w : a.x;
+    const sy = a.y + a.h / 2;
+    const { head, end: [ex, ey] } = arrowHead(right ? b.x - FLOW_GAP : b.x + b.w + FLOW_GAP, b.y + b.h / 2, right ? 1 : -1, 0);
+    return { d: `M${pt(sx, sy)} L${pt(ex, ey)}`, head };
   }
   const down = b.y > a.y;
-  const [sx, ex] = [a.x + a.w / 2, b.x + b.w / 2];
-  const [sy, ey] = down ? [a.y + a.h, b.y - FLOW_GAP] : [a.y, b.y + b.h + FLOW_GAP];
-  return { d: `M${pt(sx, sy)} L${pt(ex, ey)}`, head: arrowHead(ex, ey, 0, down ? 1 : -1) };
+  const sx = a.x + a.w / 2;
+  const sy = down ? a.y + a.h : a.y;
+  const { head, end: [ex, ey] } = arrowHead(b.x + b.w / 2, down ? b.y - FLOW_GAP : b.y + b.h + FLOW_GAP, 0, down ? 1 : -1);
+  return { d: `M${pt(sx, sy)} L${pt(ex, ey)}`, head };
 }
 
 /** A forward edge running right to left: from the source's left side to the target's right side. */
 function leftwardEdge(a: FlowNodeBox, b: FlowNodeBox): Omit<FlowEdgePath, 'from' | 'to'> {
-  const [sx, sy, ex, ey] = [a.x, a.y + a.h / 2, b.x + b.w + FLOW_GAP, b.y + b.h / 2];
+  const [sx, sy] = [a.x, a.y + a.h / 2];
+  const { head, end: [ex, ey] } = arrowHead(b.x + b.w + FLOW_GAP, b.y + b.h / 2, -1, 0);
   const k = Math.max(10, (sx - ex) / 2);
-  return { d: `M${pt(sx, sy)} C${pt(sx - k, sy)} ${pt(ex + k, ey)} ${pt(ex, ey)}`, head: arrowHead(ex, ey, -1, 0) };
+  return { d: `M${pt(sx, sy)} C${pt(sx - k, sy)} ${pt(ex + k, ey)} ${pt(ex, ey)}`, head };
 }
 
 /**
@@ -434,16 +531,35 @@ function leftwardEdge(a: FlowNodeBox, b: FlowNodeBox): Omit<FlowEdgePath, 'from'
  * A chain that fits neither way (a short, wide board under the stage) winds into rows instead.
  */
 export function flowGeometry(item: FlowItem, box: { width: number; height: number }, measure: Measure): FlowGeometry {
+  const small = isSmallBoard(box);
+  const pad = small ? FLOW_COMPACT.pad : FLOW_PAD;
+  const minW = small ? FLOW_COMPACT.w : FLOW_W.min;
+  const rankGaps = small ? FLOW_COMPACT.gap : FLOW_RANK_GAP;
   const place = flowLayout(item);
   const index = new Map(item.nodes.map((n, i) => [n.id, i]));
   const ranks = Math.max(...place.map(([c]) => c)) + 1;
   const inRank = Array.from({ length: ranks }, (_, r) => place.flatMap(([c], i) => (c === r ? [i] : [])));
-  const w = clamp(Math.max(...item.nodes.map((n) => measure(n.label))) + 2 * FLOW_PAD.x, FLOW_W.min, FLOW_W.max);
-  const lines = item.nodes.map((n) => wrapLabel(n.label, w - 2 * FLOW_PAD.x, measure));
-  const heights = lines.map((l) => l.length * FLOW_LINE + 2 * FLOW_PAD.y);
   const forward = item.edges.map(([a, b]) => place[index.get(b)!][0] > place[index.get(a)!][0]);
   // Room beside the boxes for edges that loop back to an earlier rank.
   const loops = item.edges.some(([a, b]) => place[index.get(b)!][0] < place[index.get(a)!][0]) ? FLOW_LOOP : 0;
+  const lanes = Math.max(...inRank.map((ids) => ids.length));
+  // The widest single word with its padding: a box is never narrower, or the word would be cut (the layout's scale takes up
+  // the difference where the room is short).
+  const word = Math.max(...item.nodes.flatMap((n) => n.label.trim().split(/\s+/).map(measure))) + 2 * pad.x;
+  // The one width of every box, given the room one box has: a label that fits one line at the widest box goes on one, a
+  // longer one wraps to two lines, and the box is as wide as the neediest label asks, grown toward FLOW_W.share of the room.
+  const sized = (room: number) => {
+    const limit = Math.max(minW, Math.min(room, FLOW_W.max));
+    const asks = Math.max(
+      ...item.nodes.map((n) => {
+        const oneLine = measure(n.label.trim()) + 2 * pad.x;
+        return oneLine <= limit ? oneLine : twoLineWidth(n.label, measure) + 2 * pad.x;
+      }),
+    );
+    const w = clamp(Math.max(asks, FLOW_W.share * room), minW, Math.max(limit, Math.min(word, FLOW_W.max)));
+    const lines = item.nodes.map((n) => wrapLabel(n.label, w - 2 * pad.x, measure));
+    return { w, lines, heights: lines.map((l) => l.length * FLOW_LINE + 2 * pad.y) };
+  };
 
   const build = (vertical: boolean): FlowGeometry => {
     const nodes: FlowNodeBox[] = new Array(item.nodes.length);
@@ -453,10 +569,11 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
     const rankGap = (room: number, used: number, [min, max]: number[]) =>
       ranks > 1 ? clamp((room * FLOW_FILL - used - 2 * FLOW_MARGIN) / (ranks - 1), min, max) : 0;
     if (vertical) {
+      const { w, lines, heights } = sized((box.width - 2 * FLOW_MARGIN - loops - (lanes - 1) * FLOW_LANE_GAP) / lanes);
       const depth = inRank.map((ids) => Math.max(...ids.map((i) => heights[i])));
       const span = inRank.map((ids) => ids.length * w + (ids.length - 1) * FLOW_LANE_GAP);
       const used = depth.reduce((s, d) => s + d, 0);
-      const gap = rankGap(box.height, used, FLOW_RANK_GAP.vertical);
+      const gap = rankGap(box.height, used, rankGaps.vertical);
       width = Math.max(...span) + 2 * FLOW_MARGIN + loops;
       height = used + (ranks - 1) * gap + 2 * FLOW_MARGIN;
       let y = FLOW_MARGIN;
@@ -474,8 +591,9 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
         y += depth[r] + gap;
       });
     } else {
+      const { w, lines, heights } = sized((box.width - 2 * FLOW_MARGIN - (ranks - 1) * rankGaps.horizontal[0]) / ranks);
       const stack = inRank.map((ids) => ids.reduce((s, i) => s + heights[i], 0) + (ids.length - 1) * FLOW_LANE_GAP);
-      const gap = rankGap(box.width, ranks * w, FLOW_RANK_GAP.horizontal);
+      const gap = rankGap(box.width, ranks * w, rankGaps.horizontal);
       width = ranks * w + (ranks - 1) * gap + 2 * FLOW_MARGIN;
       height = Math.max(...stack) + 2 * FLOW_MARGIN + loops;
       inRank.forEach((ids, r) => {
@@ -503,7 +621,8 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
   // A chain (one box per rank, each arrow to the next) can also wind down the board in rows of
   // `per` boxes, left to right, then right to left below, like a path down a page.
   const wind = (per: number): FlowGeometry => {
-    const [gapX, gapY] = [FLOW_RANK_GAP.horizontal[0], FLOW_RANK_GAP.vertical[0]];
+    const [gapX, gapY] = [rankGaps.horizontal[0], rankGaps.vertical[0]];
+    const { w, lines, heights } = sized((box.width - 2 * FLOW_MARGIN - (per - 1) * gapX) / per);
     const rows = Array.from({ length: Math.ceil(ranks / per) }, (_, r) =>
       inRank.slice(r * per, r * per + per).map(([i]) => i),
     );
@@ -547,8 +666,9 @@ export function flowGeometry(item: FlowItem, box: { width: number; height: numbe
       if (wound.scale > best.scale + 0.04) best = wound;
     }
   }
-  // Labels stay readable: a flow that would shrink further scrolls on the board instead.
-  return { ...best, scale: Math.max(FLOW_MIN_SCALE, best.scale) };
+  // Labels stay readable: a flow that would shrink further scrolls on the board instead, but a small board shrinks it to fit first.
+  const floor = small ? FLOW_SMALL_SCALE : FLOW_MIN_SCALE;
+  return { ...best, scale: Math.max(floor, best.scale) };
 }
 
 // --------------------------------------------------------------------- bars

@@ -11,8 +11,6 @@ import { SceneBoard } from './SceneBoard';
 // a flow of boxes and arrows, or bars of the paper's numbers) and lights the part in focus. The board
 // opens alongside camera travel; the reader retargets the remaining flight when the stage resizes.
 
-import katex from 'katex';
-import type { TrustContext } from 'katex';
 import 'katex/dist/katex.min.css';
 import { memo, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
@@ -20,10 +18,12 @@ import {
   BAR_THICKNESS,
   BOARD_INK,
   EASE_OUT,
+  FLOW_FONT,
   FLOW_LINE,
   barClip,
   barFrameSource,
   boardFrameColors,
+  continuesWorking,
   continuousBoardFrame,
   interpolateBars,
   barPath,
@@ -37,10 +37,9 @@ import {
   flowGeometry,
   formatValue,
   sourceTag,
-  termColor,
-  wrapTerms,
 } from '../board';
 import type { BarsItem, FlowItem } from '../board';
+import { FormulaBoard } from './FormulaBoard';
 import { BOARD_KINDS } from '../engine';
 import type { BoardPlayback, BoardState } from '../engine';
 import type { BoardItem } from '../types';
@@ -51,6 +50,8 @@ interface Shown {
   viewKey?: string;
   item: BoardItem;
   continuous?: boolean;
+  /** A formula that writes the next line of the working already on the board (see continuesWorking). */
+  continued?: boolean;
   from?: BarsItem;
   range?: number[];
 }
@@ -71,12 +72,15 @@ function dockReducer(dock: Dock, action: DockAction): Dock {
       // Related frames keep their colours and rendered objects. Numeric frames
       // also retain their axis instead of returning to zero.
       const shown = { ...action.shown, item: boardFrameColors(dock.current, action.shown) };
-      const continuous = action.animate && continuousBoardFrame(dock.current, shown);
+      // The next line of a worked solution is written under the earlier ones: the board does not fade out and in. A
+      // continued line is never a continuous frame, or it would not build.
+      const continued = continuesWorking(dock.current?.item, shown.item);
+      const continuous = action.animate && !continued && continuousBoardFrame(dock.current, shown);
       const from = action.animate ? barFrameSource(dock.current, shown) : null;
       const range = from ? [...new Set([...(dock.current?.range ?? from.bars.map(bar => bar.value)),
         ...(shown.item.kind === 'bars' ? shown.item.bars.map(bar => bar.value) : [])])] : undefined;
-      const current = { ...shown, continuous, viewKey: continuous ? dock.current?.viewKey ?? dock.current?.key : shown.key, ...(from ? { from, range } : {}) };
-      return { open: true, current, leaving: dock.open && !from && !continuous ? dock.current : null };
+      const current = { ...shown, continuous, continued, viewKey: continuous ? dock.current?.viewKey ?? dock.current?.key : shown.key, ...(from ? { from, range } : {}) };
+      return { open: true, current, leaving: dock.open && !from && !continuous && !continued ? dock.current : null };
     case 'close':
       return dock.open ? { ...dock, open: false, leaving: null } : dock;
     case 'closed':
@@ -136,7 +140,7 @@ export function BoardSplit({ board, playback = { playing: false, progress: 1 }, 
           {dock.current && (
             <aside className="board" aria-label="Board" aria-hidden={!dock.open}>
               {dock.leaving && <BoardView key={`leaving:${dock.leaving.viewKey ?? dock.leaving.key}`} item={dock.leaving.item} focus={null} playback={{ playing: false, progress: 1 }} leaving />}
-              <BoardView key={dock.current.viewKey ?? dock.current.key} item={dock.current.item} focus={focus} playback={playback} from={dock.current.from} range={dock.current.range} continuous={dock.current.continuous} />
+              <BoardView key={dock.current.viewKey ?? dock.current.key} item={dock.current.item} focus={focus} playback={playback} from={dock.current.from} range={dock.current.range} continuous={dock.current.continuous} continued={dock.current.continued} />
             </aside>
           )}
         </div>
@@ -154,6 +158,7 @@ const BoardView = memo(function BoardView({
   from,
   range,
   continuous,
+  continued,
 }: {
   item: BoardItem;
   focus: number | null;
@@ -162,13 +167,14 @@ const BoardView = memo(function BoardView({
   from?: BarsItem;
   range?: number[];
   continuous?: boolean;
+  continued?: boolean;
 }) {
   const unit = item.kind === 'bars' ? barsUnit(item) : null;
   const tag = sourceTag(item);
   const bodyRef = useRef<HTMLDivElement>(null);
   useFocusInView(bodyRef, focus);
   return (
-    <div className={`board-view${leaving ? ' leaving' : ''}${from || continuous ? ' is-frame-transition' : ''}`} data-kind={item.kind}>
+    <div className={`board-view${leaving ? ' leaving' : ''}${from || continuous ? ' is-frame-transition' : ''}${continued ? ' is-continued' : ''}`} data-kind={item.kind}>
       {(item.title || unit || tag) && (
         <header className="board-head">
           {item.title && <h2 className="board-title">{item.title}</h2>}
@@ -276,143 +282,13 @@ const ink = (color: string): CSSProperties => ({ '--c': color }) as CSSPropertie
 /** A part's place in the build: board.css staggers its entrance by it. */
 const order = (i: number): CSSProperties => ({ '--i': i }) as CSSProperties;
 
-// ----------------------------------------------------------------- formula
-
-type FormulaItem = Extract<BoardItem, { kind: 'formula' }>;
-
-// Only the board's own term classes are trusted; anything else that needs trust renders inert.
-const trustTerms = (context: TrustContext) =>
-  context.command === '\\htmlClass' && /^pt-term pt-term-\d+$/.test(context.class);
-
-/** KaTeX HTML for the LaTeX, or null when it does not parse. */
-function tex(latex: string, display: boolean, terms = false): string | null {
-  try {
-    return katex.renderToString(latex, {
-      displayMode: display,
-      throwOnError: true,
-      strict: 'ignore',
-      trust: terms && trustTerms,
-    });
-  } catch {
-    return null;
-  }
-}
-
-interface FormulaModel {
-  /** The formula with its terms wrapped, or null when it does not parse (the source is shown instead). */
-  html: string | null;
-  inks: string[];
-  /** Each term rendered on its own for the legend, or null to show its source. */
-  symbols: (string | null)[];
-}
-
-function formulaModel(item: FormulaItem): FormulaModel {
-  const inks = item.terms.map((term, i) => BOARD_INK[termColor(term, i)]);
-  const symbols = item.terms.map((term) => tex(term.latex, false));
-  if (!tex(item.latex, true)) return { html: null, inks, symbols };
-  const wrapped = wrapTerms(item.latex, item.terms, (latex) => tex(latex, true, true) !== null);
-  return { html: tex(wrapped.latex, true, true), inks, symbols };
-}
-
-// A formula shrinks to fit one line down to ONE_LINE_FIT; past that it breaks after a relation
-// or operator (KaTeX's top-level boxes) instead, and only a single box too wide for the board
-// shrinks further, down to MIN_FIT, before it scrolls.
-const ONE_LINE_FIT = 0.82;
-const MIN_FIT = 0.55;
-
-/** Fits the rendered formula to the element's width: --fit scales its font, .is-wrapped lets it break. */
-function useFitWidth(ref: RefObject<HTMLElement>, html: string | null): void {
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || !html) return;
-    let alive = true;
-    const measure = () => {
-      if (!alive) return;
-      // Measure on one line at full size; KaTeX scales with the font size.
-      el.classList.remove('is-wrapped');
-      el.style.setProperty('--fit', '1');
-      // The formula's top-level boxes (.katex-base in KaTeX 0.19, .base before it).
-      const boxes = [...el.querySelectorAll('.katex-html > *')].map((b) => b.getBoundingClientRect());
-      if (!boxes.length) return;
-      const line = Math.max(...boxes.map((r) => r.right)) - Math.min(...boxes.map((r) => r.left));
-      const widest = Math.max(...boxes.map((r) => r.width));
-      const style = getComputedStyle(el);
-      const room = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-      const wrap = line * ONE_LINE_FIT > room && boxes.length > 1;
-      el.classList.toggle('is-wrapped', wrap);
-      const fit = Math.max(MIN_FIT, Math.min(1, room / (wrap ? widest : line)));
-      el.style.setProperty('--fit', fit.toFixed(3));
-      width = el.clientWidth;
-    };
-    let width = -1;
-    measure();
-    // Refit when the width changes (fitting itself changes only the height).
-    const observer = new ResizeObserver(() => el.clientWidth !== width && measure());
-    observer.observe(el);
-    void document.fonts?.ready.then(measure);
-    return () => {
-      alive = false;
-      observer.disconnect();
-    };
-  }, [ref, html]);
-}
-
-function FormulaBoard({ item, focus }: { item: FormulaItem; focus: number | null }) {
-  const model = useMemo(() => formulaModel(item), [item]);
-  const mathRef = useRef<HTMLDivElement>(null);
-  const focused = focus !== null && focus < item.terms.length ? focus : null;
-
-  // KaTeX made the term spans: give each its colour and place in the build, and mark the one in
-  // focus. Runs before the fit below measures, so the build starts with the right delays.
-  useLayoutEffect(() => {
-    const root = mathRef.current;
-    if (!root) return;
-    model.inks.forEach((color, i) => {
-      root.querySelectorAll<HTMLElement>(`.pt-term-${i}`).forEach((el) => {
-        el.style.setProperty('--c', color);
-        el.style.setProperty('--i', String(i));
-        el.classList.toggle('is-focus', i === focused);
-      });
-    });
-  }, [model, focused]);
-  useFitWidth(mathRef, model.html);
-
-  return (
-    <div className={`formula${focused !== null ? ' has-focus' : ''}`}>
-      {model.html ? (
-        <div className="formula-math" ref={mathRef} dangerouslySetInnerHTML={{ __html: model.html }} />
-      ) : (
-        <div className="formula-math formula-source" ref={mathRef}>
-          <code>{item.latex}</code>
-        </div>
-      )}
-      {item.terms.length > 0 && (
-        <ul className="formula-legend">
-          {item.terms.map((term, i) => (
-            <li key={i} style={{ ...ink(model.inks[i]), ...order(i) }}>
-              <div className={`formula-row${i === focused ? ' is-focus' : ''}`}>
-                {model.symbols[i] ? (
-                  <span className="formula-symbol" dangerouslySetInnerHTML={{ __html: model.symbols[i]! }} />
-                ) : (
-                  <code className="formula-symbol">{term.latex}</code>
-                )}
-                <span className="formula-label">{term.label}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 // -------------------------------------------------------------------- flow
 
 const ACCENT = 'var(--accent)';
 
 function FlowBoard({ item, focus, playing }: { item: FlowItem; focus: number | null; playing: boolean }) {
   const [boxRef, box] = useBoxSize<HTMLDivElement>();
-  const geometry = useMemo(() => (box ? flowGeometry(item, box, textMeasure(500, 13)) : null), [item, box]);
+  const geometry = useMemo(() => (box ? flowGeometry(item, box, textMeasure(500, FLOW_FONT)) : null), [item, box]);
   const focused = focus !== null && focus < item.nodes.length ? focus : null;
   const inks = item.nodes.map((n) => (n.color ? BOARD_INK[n.color] : ACCENT));
   const label = `Flow: ${item.edges.map(([a, b]) => `${nodeLabel(item, a)} to ${nodeLabel(item, b)}`).join(', ')}`;
@@ -449,13 +325,13 @@ function FlowBoard({ item, focus, playing }: { item: FlowItem; focus: number | n
               <g className="flow-node-state">
                 <rect
                   className="flow-ring"
-                  x={node.x - 4}
-                  y={node.y - 4}
-                  width={node.w + 8}
-                  height={node.h + 8}
-                  rx={13}
+                  x={node.x - 5}
+                  y={node.y - 5}
+                  width={node.w + 10}
+                  height={node.h + 10}
+                  rx={17}
                 />
-                <rect className="flow-box" x={node.x} y={node.y} width={node.w} height={node.h} rx={9} />
+                <rect className="flow-box" x={node.x} y={node.y} width={node.w} height={node.h} rx={12} />
                 <text className="flow-label" textAnchor="middle" dominantBaseline="central">
                   {node.lines.map((line, j) => (
                     <tspan

@@ -1,0 +1,166 @@
+% Antrag auf Ausstellung eines Bewohnerparkausweises (fiktives Buergeramt Musterstadt). German, 2 pages.
+% Features: Eingangsstempel box, numbered sections with field boxes and checkboxes (page 1), signature block, field
+% "Vom Amt auszufuellen"; page 2: Ausfuellhinweise, list of documents to attach, fees table, deadline, contact.
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[scaled=0.95]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[ngerman]{babel}
+\usepackage[margin=1.8cm,top=1.8cm,bottom=1.8cm]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{microtype}
+
+\definecolor{amt}{HTML}{8A1C1C}
+\definecolor{feldgrau}{HTML}{6B6B6B}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\setlength{\fboxsep}{3pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{\scriptsize Stadt Musterstadt \textperiodcentered{} Bürgeramt \textperiodcentered{} Formular BA-VP-07 \textperiodcentered{} Stand 10/2026 \textperiodcentered{} Fiktives Formular zu Testzwecken}
+\fancyfoot[R]{\scriptsize Seite \thepage{} von \pageref{LastPage}}
+
+% ---- Bausteine: Feld mit Beschriftung, Ankreuzfeld, Zeichenkasten, Abschnittsbalken ----------
+\newcommand{\feld}[2]{\fbox{\begin{minipage}[t][0.95cm][t]{\dimexpr#1\linewidth-2\fboxsep-2\fboxrule\relax}%
+  \scriptsize\textcolor{feldgrau}{#2}\end{minipage}}}
+\newcommand{\kreuz}{\raisebox{-0.2ex}{\fbox{\rule{0pt}{1.35ex}\rule{1.35ex}{0pt}}}\,}
+\newcommand{\zeichen}[1]{\foreach \i in {1,...,#1} {\fbox{\rule{0pt}{2.0ex}\rule{1.4ex}{0pt}}\hspace{-\fboxrule}}}
+\newcommand{\sektion}[2]{\par\vspace{0.5em}\noindent\colorbox{amt}{\parbox{\dimexpr\linewidth-2\fboxsep}{\color{white}\bfseries
+  #1\quad #2}}\par\vspace{0.3em}}
+
+\begin{document}
+
+% ---- Kopf ---------------------------------------------------------------------------------------
+\noindent
+\begin{minipage}[c]{0.09\linewidth}
+\begin{tikzpicture}[scale=0.55]
+  \draw[amt, fill=amt!15, line width=1.2pt] (0,0) -- (0,2) -- (2,2) -- (2,0) .. controls (2,-0.8) and (1,-1.2) .. (1,-1.4)
+        .. controls (1,-1.2) and (0,-0.8) .. (0,0) -- cycle;
+  \draw[amt, line width=1.2pt] (0.5,0.5) -- (1,1.5) -- (1.5,0.5) -- cycle;
+\end{tikzpicture}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.56\linewidth}
+{\large\bfseries\color{amt} Stadt Musterstadt}\\
+{\small Bürgeramt \textperiodcentered{} Abteilung Verkehr und Parken\\ Beispielplatz 1, 12345 Musterstadt}
+\end{minipage}\hfill
+\fbox{\begin{minipage}[t][2.0cm][t]{0.27\linewidth}\scriptsize\textcolor{feldgrau}{Eingangsstempel / Aktenzeichen\\
+(vom Amt auszufüllen)}\end{minipage}}
+
+\vspace{0.6em}
+{\LARGE\bfseries Antrag auf Ausstellung eines Bewohnerparkausweises}\\[0.2em]
+{\small Bitte in Druckbuchstaben ausfüllen und die Ausfüllhinweise auf Seite 2 beachten. Felder mit * sind Pflichtfelder.}
+
+% ---- 1 ---------------------------------------------------------------------------------------------
+\sektion{1}{Antragstellerin / Antragsteller}
+\feld{0.49}{Name *}\hfill\feld{0.49}{Vorname(n) *}\\[0.2em]
+\feld{0.30}{Geburtsdatum (TT.MM.JJJJ) *}\hfill\feld{0.33}{Telefon (tagsüber)}\hfill\feld{0.33}{E-Mail}\\[0.2em]
+\feld{0.64}{Straße und Hausnummer *}\hfill\feld{0.16}{PLZ *}\hfill\feld{0.16}{Ort *}
+
+% ---- 2 ---------------------------------------------------------------------------------------------
+\sektion{2}{Fahrzeug}
+Amtliches Kennzeichen *\quad \zeichen{3}\ --\ \zeichen{2}\ \zeichen{4}\quad (z.\,B. MU-AB 1234)\\[0.5em]
+Fahrzeugart *\quad \kreuz Pkw \quad \kreuz Kraftrad \quad \kreuz Wohnmobil bis 3,5 t \quad \kreuz Anhänger\\[0.5em]
+Die Halterin / der Halter des Fahrzeugs ist \quad \kreuz die Antragstellerin / der Antragsteller \quad \kreuz eine andere Person
+oder Firma (Vollmacht und Halternachweis beifügen)\\[0.3em]
+\feld{0.49}{Hersteller und Typ}\hfill\feld{0.49}{Name der Halterin / des Halters (falls abweichend)}
+
+% ---- 3 ---------------------------------------------------------------------------------------------
+\sektion{3}{Art des Antrags und Geltungsdauer}
+\kreuz Erstausstellung \qquad \kreuz Verlängerung, bisherige Ausweisnummer: \fbox{\rule{0pt}{2.0ex}\rule{3.5cm}{0pt}} \\[0.3em]
+\kreuz Ersatz bei Verlust oder Diebstahl \qquad \kreuz Änderung des Kennzeichens\\[0.5em]
+Gewünschte Geltungsdauer *\quad \kreuz 1 Jahr \quad \kreuz 2 Jahre \qquad Gewünscht ab dem: \fbox{\rule{0pt}{2.0ex}\rule{2.8cm}{0pt}}
+
+% ---- 4 ---------------------------------------------------------------------------------------------
+\sektion{4}{Beigefügte Unterlagen}
+\kreuz Kopie der Zulassungsbescheinigung Teil I (Fahrzeugschein) \qquad \kreuz Meldebescheinigung (nicht älter als 3 Monate)\\[0.3em]
+\kreuz Vollmacht der Halterin / des Halters \qquad \kreuz Nachweis des Leasing- oder Firmenfahrzeugs \qquad \kreuz Anzeige bei Verlust
+
+% ---- 5 ---------------------------------------------------------------------------------------------
+\sektion{5}{Erklärung und Unterschrift}
+Ich versichere, dass meine Angaben vollständig und richtig sind. Ich bin damit einverstanden, dass die Stadt
+Musterstadt meine Daten zur Bearbeitung dieses Antrags speichert. Mir ist bekannt, dass der Ausweis nur für das
+angegebene Fahrzeug im Bewohnerparkgebiet meiner Wohnanschrift gilt.\\[0.4em]
+\feld{0.30}{Ort, Datum *}\hfill
+\fbox{\begin{minipage}[t][1.3cm][t]{\dimexpr0.66\linewidth-2\fboxsep-2\fboxrule\relax}\scriptsize\textcolor{feldgrau}{Unterschrift der Antragstellerin / des Antragstellers *}\end{minipage}}
+
+\vspace{0.6em}
+\fcolorbox{feldgrau}{black!6}{\begin{minipage}{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}
+\small\textbf{Vom Amt auszufüllen}\\[0.2em]
+Antrag eingegangen am: \rule{2.5cm}{0.4pt} \quad Gebühr bezahlt: \kreuz bar \ \kreuz Karte \ \kreuz Überweisung\\[0.5em]
+Ausweisnummer: \rule{3cm}{0.4pt} \quad Gültig bis: \rule{2.5cm}{0.4pt} \quad Bearbeitet von: \rule{3cm}{0.4pt}
+\end{minipage}}
+
+\newpage
+% ---- Seite 2 -----------------------------------------------------------------------------------------
+\small
+{\LARGE\bfseries\color{amt} Ausfüllhinweise}\\[0.1em]
+{\small zum Antrag auf Ausstellung eines Bewohnerparkausweises}
+
+\subsection*{Zu den einzelnen Feldern}
+\begin{description}[leftmargin=2.4cm, labelwidth=2.2cm, style=nextline, itemsep=0.3em, font=\bfseries]
+  \item[Zu 1] Tragen Sie Ihren Namen so ein, wie er im Personalausweis steht. Der Ausweis wird nur an Personen
+        ausgestellt, die mit Hauptwohnsitz im Bewohnerparkgebiet gemeldet sind.
+  \item[Zu 2] Geben Sie das Kennzeichen genau wie im Fahrzeugschein an. Pro Antrag kann nur ein Fahrzeug eingetragen
+        werden. Gehört das Fahrzeug einer anderen Person oder einer Firma, benötigen Sie deren schriftliche Vollmacht.
+  \item[Zu 3] Kreuzen Sie nur eine Art des Antrags an. Bei einer Verlängerung tragen Sie die Nummer des bisherigen Ausweises
+        ein. Bei einem Verlust legen Sie bitte die Anzeige bei der Polizei bei.
+  \item[Zu 4] Kreuzen Sie alle Unterlagen an, die Sie beifügen. Welche Unterlagen für Ihren Antrag nötig sind,
+        steht in der Liste unten.
+  \item[Zu 5] Der Antrag ist nur mit eigenhändiger Unterschrift gültig. Anträge per E-Mail ohne Unterschrift
+        können nicht bearbeitet werden.
+\end{description}
+
+\subsection*{Diese Unterlagen müssen Sie beifügen}
+\begin{enumerate}[leftmargin=1.6em, itemsep=0.2em]
+  \item Kopie der Zulassungsbescheinigung Teil I (Fahrzeugschein) des Fahrzeugs.
+  \item Meldebescheinigung, nicht älter als drei Monate (nur wenn Ihr Hauptwohnsitz nicht in Musterstadt gemeldet ist).
+  \item Schriftliche Vollmacht und Kopie des Ausweises der Halterin / des Halters, wenn das Fahrzeug nicht auf Sie zugelassen ist.
+  \item Bei Leasing- oder Firmenfahrzeugen: Bescheinigung der Leasinggesellschaft oder des Arbeitgebers über die dauerhafte Nutzung.
+  \item Bei Ersatz wegen Verlust oder Diebstahl: Kopie der Anzeige bei der Polizei.
+\end{enumerate}
+
+\subsection*{Gebühren}
+\begin{center}
+\small
+\begin{tabular}{@{}l r r@{}}
+  \toprule
+  \textbf{Leistung} & \textbf{Geltungsdauer} & \textbf{Gebühr} \\
+  \midrule
+  Erstausstellung oder Verlängerung & 1 Jahr & 15,00 Euro \\
+  Erstausstellung oder Verlängerung & 2 Jahre & 30,00 Euro \\
+  Ersatz bei Verlust oder Diebstahl & Restlaufzeit & 10,00 Euro \\
+  Änderung des Kennzeichens & Restlaufzeit & 10,00 Euro \\
+  \bottomrule
+\end{tabular}
+\end{center}
+Die Gebühr wird bei Abholung des Ausweises im Bürgeramt fällig. Eine Rückerstattung ist nicht möglich.
+
+\subsection*{Fristen und Bearbeitung}
+\begin{itemize}[leftmargin=1.4em, itemsep=0.2em]
+  \item Anträge auf \textbf{Verlängerung} müssen spätestens \textbf{4 Wochen vor Ablauf} des bisherigen Ausweises
+        eingehen. Danach kann ein nahtloser Anschluss nicht garantiert werden.
+  \item Die Bearbeitung dauert in der Regel \textbf{10 Werktage}, sobald alle Unterlagen vollständig vorliegen.
+  \item Fehlen Unterlagen, fordert das Amt diese schriftlich nach. Werden sie nicht innerhalb von \textbf{14 Tagen}
+        nachgereicht, wird der Antrag abgelehnt.
+\end{itemize}
+
+\subsection*{Abgabe und Kontakt}
+Sie können den Antrag persönlich abgeben, per Post senden oder in den Briefkasten des Bürgeramts werfen.\\
+\textbf{Bürgeramt Musterstadt, Abteilung Verkehr und Parken}, Beispielplatz 1, 12345 Musterstadt\\
+Öffnungszeiten: Montag bis Freitag 8 bis 12 Uhr, Donnerstag zusätzlich 14 bis 18 Uhr \quad Telefon: 0000 555-0100
+
+\subsection*{Datenschutz}
+\small Ihre Daten werden nur zur Bearbeitung dieses Antrags verwendet und nach Ablauf der gesetzlichen Aufbewahrungsfrist
+gelöscht. Weitere Informationen finden Sie in der Datenschutzerklärung der Stadt Musterstadt im Bürgeramt.
+
+\end{document}

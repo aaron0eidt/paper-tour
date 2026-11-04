@@ -397,9 +397,10 @@ test('deep formula details correct their concrete sequence within two repairs; a
   const corrected = await run(true);
   assert.equal(attempts, 2);
   const detail = steps(corrected.tour).find((step) => step.id === 'formula-2')!;
+  // The example is one kind of board, whose output fills in.
   assert.deepEqual(
-    detail.actions.filter((a) => a.type === 'board').map((a) => a.item.kind === 'formula' && a.item.latex),
-    [false, '2+2=4'],
+    detail.actions.filter((a) => a.type === 'board').map((a) => a.item.kind === 'flow' && a.item.nodes.at(-1)!.label),
+    ['Output', 'Output 4'],
   );
   assert.ok(!(corrected.metadata.omittedDetails as { beat: string }[]).some((d) => d.beat === 'formula-2'));
   assert.deepEqual(corrected.metadata.degraded, []);

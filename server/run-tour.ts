@@ -2,6 +2,7 @@
 // Run from server/ with MODEL_API_KEY in the root .env (each run makes real Meta API calls):
 //   node --import tsx run-tour.ts <preset> <out> [folder] [document id] [language]
 // The folder holds the PDF and its doc.json (ingest/ingest.py <pdf> --out <folder>); the default is the demo paper.
+// PROFILE=concept-led takes the app's path: every tour the app creates has a profile, which makes it adaptive.
 // Images are prepared as the worker prepares them (ingest/tour_assets.py), into <out>/images.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -10,6 +11,7 @@ import { config } from './src/config';
 import { HarnessTourGenerator } from './src/harness/generator';
 import type { TourImage } from './src/tour-generator';
 import type { Doc } from '../shared/paper';
+import { BUILTIN_TOUR_PROFILES, profileSnapshot, type TourDepth } from '../shared/tourProfiles';
 
 const [preset = 'standard', out, folderArg = '../demo/attention', idArg, language] = process.argv.slice(2);
 if (!out) throw new Error('usage: run-tour.ts <preset> <out> [folder] [document id] [language]');
@@ -35,9 +37,13 @@ const events: unknown[] = [];
 const started = Date.now();
 const muse = { ...config().muse, ...(language ? { language } : {}) };
 const generator = new HarnessTourGenerator(muse, preset as 'quick' | 'standard' | 'deep');
+const builtin = BUILTIN_TOUR_PROFILES.find((p) => p.id === process.env.PROFILE);
+if (process.env.PROFILE && !builtin) throw new Error(`unknown profile ${process.env.PROFILE}`);
+const profile = builtin ? profileSnapshot(builtin, { depth: preset as TourDepth }) : undefined;
 const { tour, metadata } = await generator.generate({
   documentId: id,
   analysisId: 'local',
+  ...(profile ? { profile } : {}),
   doc,
   images,
   onEvent: async (type, data) => void events.push({ type, at: Date.now() - started, ...(type === 'model.delta' ? {} : { data }) }),

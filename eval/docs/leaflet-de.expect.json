@@ -1,0 +1,47 @@
+{
+  "slug": "leaflet-de",
+  "kind": "medical",
+  "language": "de",
+  "must_cover": [
+    "What the document is: a patient information leaflet (Gebrauchsinformation) for the FICTIONAL medicine 'Beispielin 400 mg Filmtabletten' with the fictional active substance Probanol; the footer marks it as a test document, not a real leaflet; it is used for short-term treatment of mild to moderate pain (headache, toothache, period pain) and fever",
+    "The structure: six numbered sections as in real leaflets (1 what it is and what it is used for, 2 what to consider before taking it, 3 how to take it, 4 possible side effects, 5 how to store it, 6 contents of the pack and further information), plus the opening box 'Lesen Sie die gesamte Packungsbeilage sorgfältig durch ...'",
+    "When not to take it (section 2): allergy to Probanol or an ingredient; the last 3 months of pregnancy (from week 28); earlier stomach or intestinal ulcer or bleeding; severe liver, kidney or heart failure; children under 12 years or under 40 kg; also the cautions (asthma, high blood pressure, other medicines) and the 'Achtung' box on the maximum duration",
+    "The dosage table (section 3): by age and body weight; 12 to 14 years and 40 to 49 kg: half a tablet (200 mg) at least 8 hours apart, at most 3 half tablets (600 mg) in 24 hours; adults and from 15 years, from 50 kg: 1 tablet (400 mg) at least 6 hours apart, at most 3 tablets (1,200 mg) in 24 hours; children under 12 years not recommended; not longer than 3 days for fever and 4 days for pain without asking a doctor",
+    "Side effects grouped by frequency (section 4): sehr häufig (more than 1 in 10: stomach complaints), häufig (up to 1 in 10: headache, dizziness, diarrhoea, constipation, wind, vomiting), gelegentlich (up to 1 in 100: rash, itching, insomnia, restlessness, ringing in the ears, mouth inflammation), selten (up to 1 in 1,000: ulcers and bleeding, raised liver values, oedema, severe allergic reactions); the box says stop and see a doctor at once for swelling of face, tongue or throat, shortness of breath, blood in vomit, black stool or severe stomach pain",
+    "A missed dose (section 3): never take a double dose; if symptoms remain, take the next dose when remembered but keep the 6 hour interval (8 hours for 12 to 14 year olds) and never exceed the 24-hour maximum; if symptoms are gone, do not make up the dose; in case of overdose see a doctor or poison centre at once",
+    "Storage and contents (sections 5 and 6): out of the reach of children, below 25 degrees C, original package, not after the 'Verwendbar bis' date, not in waste water; white oval film-coated tablets with score and the imprint 'BSP 400' containing 400 mg Probanol and lactose; packs of 10, 20 and 50; fictional company Musterpharma GmbH; leaflet revised October 2026"
+  ],
+  "numbers": [400, 200, 600, 1200, 8, 6, 3, 4, 12, 40, 50, 15, 28, 25, 10, 20],
+  "units": [
+    "mg (one tablet)",
+    "mg (half tablet, age 12 to 14)",
+    "mg (daily maximum, age 12 to 14)",
+    "mg (daily maximum, adults)",
+    "hours (minimum interval, age 12 to 14)",
+    "hours (minimum interval, adults)",
+    "days (maximum for fever without a doctor)",
+    "days (maximum for pain without a doctor)",
+    "years (children under 12 not recommended)",
+    "kg (children under 40 kg not recommended)",
+    "kg (adult dose from 50 kg)",
+    "years (adult dose from age 15)",
+    "weeks of pregnancy (not from week 28)",
+    "degrees C (store below)",
+    "tablets (smallest pack)",
+    "tablets (middle pack, the largest has 50)"
+  ],
+  "figures": [
+    "Page 1 boxes: the green 'Lesen Sie die gesamte Packungsbeilage ...' box with four bullets, and the 'Achtung' box (not longer than 3 days for fever, 4 days for pain without medical advice, do not exceed the maximum dose); point at the numbered contents list, which mirrors the six sections",
+    "Dosage table (page 2, no caption): columns Alter, Körpergewicht, Einzeldosis, Abstand zwischen den Einnahmen, Höchstdosis in 24 Stunden; three rows (children under 12, young people 12 to 14, adults and from 15). A tour should read the row that applies and say it is a table taken from the leaflet",
+    "Side-effect frequency table (page 3, no caption): columns Häufigkeit, Das bedeutet, Beobachtete Nebenwirkungen; rows sehr häufig, häufig, gelegentlich, selten",
+    "The 'Beenden Sie die Einnahme ...' box above the frequency table (page 3): the warning signs for which a doctor must be seen immediately"
+  ],
+  "pitfalls": [
+    "Do not give medical advice: never say 'you should take', 'it is safe for you' or tell a specific person how much to take; only explain what the leaflet says and refer to a doctor or pharmacist for personal questions",
+    "Do not invent doses, intervals, side effects or interactions that are not in the leaflet, and do not apply knowledge from real medicines (the product, the substance Probanol and the company are fictional)",
+    "Do not downplay the warning box about severe allergic reactions and bleeding, the contraindications, or the limit on the duration of use",
+    "Do not tell pregnant or breast-feeding readers that it is safe; the leaflet only says to ask a doctor in the first 6 months and not to take it in the last 3 months",
+    "Do not mix up the age bands and the intervals (8 hours for 12 to 14 year olds, 6 hours for adults) or the frequency definitions (sehr häufig is more than 1 in 10, selten is up to 1 in 1,000)",
+    "Do not present the test document as a real, approved leaflet or suggest buying the product; the footer states it is a fictional test document"
+  ]
+}

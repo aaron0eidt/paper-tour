@@ -1,0 +1,48 @@
+{
+  "slug": "textbook-en",
+  "kind": "textbook",
+  "language": "en",
+  "must_cover": [
+    "What the page is: section 8.2 'Photosynthesis: capturing light energy' of chapter 8 (Energy and Metabolism) in an introductory biology textbook; it opens with four learning objectives (equation, chloroplast structure, green leaves and wavelengths, light-response curve) and ends with key terms and review questions",
+    "The overall reaction (Equation 8.1): 6 CO2 + 6 H2O + light gives C6H12O6 + 6 O2; light energy becomes chemical energy in glucose; the oxygen comes from water, not from carbon dioxide",
+    "The chloroplast (Figure 8.1, about 4 to 6 micrometres long, 30 to 70 per mesophyll cell): outer and inner membrane, stroma with enzymes, DNA and ribosomes, thylakoids stacked into grana, starch granule; chlorophyll sits in the thylakoid membranes",
+    "Light and pigments: chlorophyll a absorbs mainly blue-violet (about 430 nm) and red (about 660 nm) light and reflects green, so leaves look green; carotenoids pass energy to chlorophyll",
+    "Stage 1, light-dependent reactions (thylakoid membranes): water is split (Equation 8.2, 2 H2O gives O2 + 4 H+ + 4 e-), electrons move along a carrier chain, ATP synthase makes ATP, NADP+ is reduced to NADPH; products ATP, NADPH and oxygen, no sugar yet",
+    "Stage 2, Calvin cycle (stroma, no direct light needed): rubisco attaches CO2 to RuBP, the product becomes 3-phosphoglycerate then G3P; one G3P leaves for every three CO2 fixed; one glucose needs six turns, 18 ATP and 12 NADPH",
+    "Reading the light-response curve (Figure 8.2): below zero net uptake in the dark (respiration), the light compensation point is about 40 for the sun plant and about 15 for the shade plant (units: micromol photons per square metre per second), the sun plant saturates near 1000 at about 18 micromol CO2 per square metre per second, the shade plant near 400 at about 8; above saturation another factor such as CO2 or rubisco limits the rate",
+    "The key terms box (eight terms) and the six review questions Q1 to Q6 (equation in words, location and products of stage 1, green leaves, compensation point in Figure 8.2, does the Calvin cycle need light, ATP and NADPH per glucose)"
+  ],
+  "numbers": [6, 30, 70, 4, 6, 430, 660, 6, 18, 12, 40, 15, 1000, 400, 18, 8],
+  "units": [
+    "molecules of CO2 (and of H2O and O2) per glucose in Equation 8.1",
+    "chloroplasts per mesophyll cell (minimum)",
+    "chloroplasts per mesophyll cell (maximum)",
+    "micrometres (chloroplast length, minimum)",
+    "micrometres (chloroplast length, maximum)",
+    "nm (blue-violet absorption peak of chlorophyll a)",
+    "nm (red absorption peak of chlorophyll a)",
+    "turns of the Calvin cycle per glucose",
+    "ATP molecules per glucose",
+    "NADPH molecules per glucose",
+    "micromol photons per m2 per s (sun plant, light compensation point)",
+    "micromol photons per m2 per s (shade plant, light compensation point)",
+    "micromol photons per m2 per s (sun plant, light saturation)",
+    "micromol photons per m2 per s (shade plant, light saturation)",
+    "micromol CO2 per m2 per s (sun plant, maximum net uptake)",
+    "micromol CO2 per m2 per s (shade plant, maximum net uptake)"
+  ],
+  "figures": [
+    "Figure 8.1 (page 1): schematic longitudinal section of a chloroplast with labels Outer membrane, Inner membrane, Stroma, Granum (stack of thylakoids), Thylakoid membrane and Starch granule; a tour should point at the outer and inner membranes first, then the stroma, then a granum and a thylakoid membrane, and say where each stage takes place",
+    "Figure 8.2 (page 2): light-response curves, x axis light intensity 0 to 1500 micromol photons m-2 s-1, y axis net CO2 uptake from -4 to 20; solid sun-plant curve starts at about -2 and levels off near 18, dashed shade-plant curve starts at about -1 and levels off near 8; two dots near the origin mark the light compensation points; the text annotation says net uptake below zero means respiration exceeds photosynthesis",
+    "Equations 8.1 and 8.2 (page 1 and 2): displayed with mhchem, with 'light' written over the reaction arrow in 8.1",
+    "Learning objectives box (page 1) and Key terms box (page 3): shaded green boxes with a title bar"
+  ],
+  "pitfalls": [
+    "Do not say that the oxygen released by photosynthesis comes from carbon dioxide; the text says it comes from water",
+    "Do not mix up the two stages: light-dependent reactions in the thylakoid membranes make ATP, NADPH and oxygen; the Calvin cycle in the stroma makes sugar",
+    "Do not say the Calvin cycle needs no light at all; the text says it does not need light directly but depends on ATP and NADPH from stage 1",
+    "Do not swap the two plants or their numbers (sun plant: compensation about 40, saturation about 1000, maximum about 18; shade plant: about 15, 400 and 8), and do not claim the curves are measurements of a real species",
+    "Do not invent numbers or facts that are not in the section (for example chloroplast counts for other cell types or other wavelengths)",
+    "Do not give the answers to the review questions as if they were printed in the book; they are exercises for the learner"
+  ]
+}

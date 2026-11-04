@@ -3,16 +3,47 @@ import type { Doc } from '../../../shared/paper';
 // What kind of document the tour explains (notes/HARNESS.md, stage A). The card call classifies it from the document
 // itself; the type chooses the arc, the tone and the board use of the tour.
 
-export const DOC_TYPES = ['research_paper', 'exercise_sheet', 'lecture', 'contract', 'letter', 'other'] as const;
+export const DOC_TYPES = [
+  'research_paper',
+  'exercise_sheet',
+  'lecture',
+  'contract',
+  'letter',
+  'manual',
+  'report',
+  'article',
+  'literature',
+  'medical',
+  'other',
+] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 
-/** How the card call tells the types apart. */
+/**
+ * How the card call tells the types apart, and how each reads after "It is": the examples route the neighbours (a
+ * policy to a contract, a form to a letter, a textbook chapter to a lecture) so that the classifier has one place for
+ * each kind of document.
+ */
 export const DOC_TYPE_HELP: Record<DocType, string> = {
   research_paper: 'a scientific or technical paper or report that presents its own work',
   exercise_sheet: 'tasks for the reader to solve: homework, an exercise sheet, a problem set or an exam',
-  lecture: 'lecture slides, a lecture script or teaching notes that explain a topic',
-  contract: 'a contract, lease, agreement, policy or terms and conditions the reader may accept',
-  letter: 'an official letter, notice, bill or form addressed to the reader',
+  lecture: 'lecture slides, a lecture script, a textbook chapter or teaching notes that explain a topic',
+  contract: 'a contract, lease, agreement, policy, code of conduct or terms and conditions the reader may accept',
+  letter: 'an official letter, notice, bill, form or application addressed to the reader (a medical letter is medical)',
+  manual:
+    'a manual, set of instructions, how-to guide, datasheet, piece of technical or API documentation, or recipe ' +
+    'that tells the reader how to use, build, make or do something (a textbook chapter is a lecture)',
+  report:
+    'a business, annual, financial, government or project report, or the results of a lab experiment or study, ' +
+    'that reports figures for a period or an outcome (a paper that presents new research is a research_paper)',
+  article:
+    'a news or magazine article, essay, opinion piece or blog post that reports on or argues about something for ' +
+    'general readers (a scientific paper is a research_paper)',
+  literature:
+    'a poem, story, play, novel excerpt or other literary text to read for its form and meaning (an essay about ' +
+    'literature is an article)',
+  medical:
+    'a patient information leaflet, package insert, medical test result (such as blood work), medical letter, ' +
+    'discharge summary or other health information for a patient (a clinical study is a research_paper)',
   other: 'anything else',
 };
 
@@ -30,6 +61,25 @@ export const TONE: Record<DocType, string> = {
   letter:
     'Explain calmly and practically what the letter says, what the reader must do and by when, with dates, ' +
     'amounts and reference numbers exactly as written.',
+  manual:
+    'Speak as an experienced technician standing next to the reader: say what to do, in order, and why each step ' +
+    'matters, with times, temperatures, settings, commands and part names exactly as written. Say plainly what ' +
+    'must not be done.',
+  report:
+    'Brief a colleague as an analyst would: lead with what changed and why, with every number, unit, currency and ' +
+    'period exactly as written. Compare only what the report compares, stay neutral and never recommend an action.',
+  article:
+    'Speak as a thoughtful, neutral editor: say what the author claims and what evidence the article gives for ' +
+    'it, attribute every view to whoever holds it, and keep the article’s facts apart from your own remarks. ' +
+    'Never take a side.',
+  literature:
+    'Teach as an enthusiastic literature teacher: point at the exact words and say what they do to the reader, ' +
+    'then link them to the meaning. Quote only the few words you point at; never paraphrase the whole text, and ' +
+    'never present one reading as the only one.',
+  medical:
+    'Explain calmly and in plain words, with doses, times, values, units, reference ranges and frequencies exactly ' +
+    'as written. Say what the document states; never diagnose or advise changing a treatment, and send questions ' +
+    'about the reader’s own health to a doctor or pharmacist.',
   other: 'Explain the document clearly and simply to a curious reader.',
 };
 

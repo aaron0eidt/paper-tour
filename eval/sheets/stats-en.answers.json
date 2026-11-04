@@ -1,0 +1,26 @@
+{
+  "sheet": "stats-en",
+  "language": "en",
+  "subject": "Statistics: descriptive statistics, confidence interval, t-test, regression, probability tree",
+  "items": [
+    {"task": "Question 1", "part": "a", "answer": "mean = (8+10+12+9+11+13+7+10)/8 = 80/8 = 10.0 hours; sorted data 7, 8, 9, 10, 10, 11, 12, 13 give median = (10+10)/2 = 10 hours", "numeric": [10.0, 10], "unit": "h", "method": "Sum divided by n; median is the average of the two middle values of the ordered data."},
+    {"task": "Question 1", "part": "b", "answer": "Squared deviations 4, 0, 4, 1, 1, 9, 9, 0 sum to 28; s^2 = 28/7 = 4.0 hours^2; s = 2.0 hours", "numeric": [4.0, 2.0], "unit": "h", "method": "Sample variance with divisor n - 1 = 7, then the square root."},
+    {"task": "Question 1", "part": "c", "answer": "z = (13 - 10.0)/2.0 = 1.5", "numeric": [1.5], "unit": null, "method": "z = (x - mean)/s."},
+    {"task": "Question 1", "part": "d", "answer": "CV = s/mean = 2.0/10.0 = 0.20 = 20 %", "numeric": [20], "unit": "%", "method": "Coefficient of variation = standard deviation divided by the mean."},
+    {"task": "Question 2", "part": "a", "answer": "standard error = 6.0/sqrt(36) = 1.0 mL; 502.0 +- 1.96 x 1.0 gives (500.04, 503.96) mL", "numeric": [500.04, 503.96], "unit": "mL", "method": "z-interval with known sigma: mean +- z_{0.025} sigma/sqrt(n)."},
+    {"task": "Question 2", "part": "b", "answer": "width = 2 x 2.576 x 1.0 = 5.15 mL (interval 499.42 to 504.58)", "numeric": [5.15], "unit": "mL", "method": "Width = 2 z_{0.005} sigma/sqrt(n)."},
+    {"task": "Question 2", "part": "c", "answer": "1.96 x 6.0/sqrt(n) <= 1.0 gives sqrt(n) >= 11.76, n >= 138.3, so n = 139 bottles", "numeric": [138.3, 139], "unit": null, "method": "Solve the margin-of-error condition for n and round up."},
+    {"task": "Question 3", "part": "a", "answer": "H0: mu = 40.0 h versus H1: mu < 40.0 h (one-sided, lower tail)", "numeric": [40.0], "unit": "h", "method": "The group suspects less than claimed, so the alternative is one-sided."},
+    {"task": "Question 3", "part": "b", "answer": "t = (37.5 - 40.0)/(4.5/sqrt(9)) = -2.5/1.5 = -1.667 with 8 degrees of freedom", "numeric": [-1.667, 8], "unit": null, "method": "One-sample t statistic with standard error s/sqrt(n) = 1.5."},
+    {"task": "Question 3", "part": "c", "answer": "Critical value -t_{0.05,8} = -1.860. Since -1.667 > -1.860, the statistic is not in the rejection region: do not reject H0 (one-sided p-value is about 0.067 > 0.05). There is not enough evidence at the 5 % level that the batteries last less than 40 h.", "numeric": [-1.860, 0.067], "unit": null, "method": "Compare t with the left-tail critical value."},
+    {"task": "Question 3", "part": "d", "answer": "37.5 +- 2.306 x 1.5 = 37.5 +- 3.46 gives (34.04, 40.96) hours. It contains 40.0, so it is consistent with not rejecting H0 (a two-sided 5 % test would also not reject).", "numeric": [34.04, 40.96], "unit": "h", "method": "t-interval with t_{0.025,8} = 2.306."},
+    {"task": "Question 4", "part": "a", "answer": "x-bar = 15/5 = 3, y-bar = 20/5 = 4", "numeric": [3, 4], "unit": null, "method": "Sample means."},
+    {"task": "Question 4", "part": "b", "answer": "Sxy = sum (x-3)(y-4) = 4 + 1 + 0 + 0 + 4 = 9, Sxx = 4 + 1 + 0 + 1 + 4 = 10, b1 = 9/10 = 0.9, b0 = 4 - 0.9 x 3 = 1.3, so y-hat = 1.3 + 0.9 x", "numeric": [0.9, 1.3], "unit": null, "method": "b1 = Sxy/Sxx, b0 = y-bar - b1 x-bar."},
+    {"task": "Question 4", "part": "c", "answer": "y-hat(6) = 1.3 + 0.9 x 6 = 6.7", "numeric": [6.7], "unit": null, "method": "Plug x = 6 into the fitted line."},
+    {"task": "Question 4", "part": "d", "answer": "Syy = 4 + 1 + 1 + 0 + 4 = 10, r = Sxy/sqrt(Sxx Syy) = 9/10 = 0.90, R^2 = 0.81", "numeric": [0.90, 0.81], "unit": null, "method": "r = Sxy/sqrt(Sxx Syy), R^2 = r^2 for simple regression."},
+    {"task": "Question 4", "part": "e", "answer": "y-hat(4) = 1.3 + 3.6 = 4.9, residual = 4 - 4.9 = -0.9", "numeric": [-0.9], "unit": null, "method": "Residual = observed minus fitted."},
+    {"task": "Question 5", "part": "a", "answer": "P(D) = 0.6 x 0.02 + 0.4 x 0.05 = 0.012 + 0.020 = 0.032", "numeric": [0.032], "unit": null, "method": "Law of total probability over the two branches of the tree."},
+    {"task": "Question 5", "part": "b", "answer": "P(B | D) = P(B and D)/P(D) = 0.020/0.032 = 0.625", "numeric": [0.625], "unit": null, "method": "Bayes' theorem using the tree products."},
+    {"task": "Question 5", "part": "c", "answer": "P(exactly one) = 2 x 0.032 x 0.968 = 0.0620 (0.061952)", "numeric": [0.0620], "unit": null, "method": "Two independent items: choose which one is defective, binomial with n = 2, p = 0.032."}
+  ]
+}

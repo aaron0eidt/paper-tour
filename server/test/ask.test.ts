@@ -1413,8 +1413,8 @@ test('Q&A corrects a narrated numerical example into actual timed native values'
   assert.equal(calls, 2);
   const boards = result.answer.steps[0].actions.filter((a) => a.type === 'board');
   assert.deepEqual(
-    boards.map((a) => a.item.kind === 'formula' && a.item.latex),
-    [false, '2+2=4'],
+    boards.map((a) => a.item.kind === 'flow' && a.item.nodes.at(-1)!.label),
+    ['Output', 'Output 4'],
   );
   assert.ok((boards[1].at_word ?? 0) > (boards[0].at_word ?? 0));
   let failures = 0;

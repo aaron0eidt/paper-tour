@@ -1,0 +1,21 @@
+{
+  "sheet": "physics-mechanics-en",
+  "language": "en",
+  "subject": "Classical mechanics: projectile, incline with friction, energy with a spring, 1D collisions",
+  "items": [
+    {"task": "Exercise 1", "part": "a", "answer": "H = (v0 sin(theta))^2 / (2 g) = (10.0)^2 / (2 x 9.81) = 5.10 m", "numeric": [5.10], "unit": "m", "method": "Vertical motion alone: v_y0 = v0 sin(30 deg) = 10.0 m/s, v_y = 0 at the apex."},
+    {"task": "Exercise 1", "part": "b", "answer": "T = 2 v0 sin(theta) / g = 2 x 10.0 / 9.81 = 2.04 s", "numeric": [2.04], "unit": "s", "method": "Time up equals time down for level ground: y(T) = 0."},
+    {"task": "Exercise 1", "part": "c", "answer": "R = v0 cos(theta) x T = 17.32 m/s x 2.039 s = 35.3 m (equivalently v0^2 sin(2 theta)/g)", "numeric": [35.3], "unit": "m", "method": "Constant horizontal velocity times the time of flight."},
+    {"task": "Exercise 1", "part": "d", "answer": "t = 20.0/(v0 cos 30) = 1.155 s; y = 10.0 x 1.155 - 0.5 x 9.81 x 1.155^2 = 5.01 m. This is above 4.0 m, so the ball clears the fence by about 1.0 m.", "numeric": [1.155, 5.01, 1.01], "unit": "m", "method": "Find the time to reach x = 20 m, then evaluate y(t) and compare with the fence height."},
+    {"task": "Exercise 2", "part": "a", "answer": "Forces: weight mg (down), normal force N = m g cos(theta) perpendicular to the incline, kinetic friction f = mu_k N up along the incline. Along the incline (down positive): m a = m g sin(theta) - mu_k m g cos(theta).", "numeric": [], "unit": null, "method": "Free-body diagram with axes along and perpendicular to the incline; no acceleration perpendicular so N = m g cos(theta)."},
+    {"task": "Exercise 2", "part": "b", "answer": "a = g (sin 30 - 0.20 cos 30) = 9.81 x (0.5 - 0.1732) = 3.21 m/s^2", "numeric": [3.21], "unit": "m/s^2", "method": "The mass cancels in the equation of motion along the incline."},
+    {"task": "Exercise 2", "part": "c", "answer": "v = sqrt(2 a d) = sqrt(2 x 3.206 x 4.0) = 5.06 m/s", "numeric": [5.06], "unit": "m/s", "method": "Constant acceleration from rest: v^2 = 2 a d."},
+    {"task": "Exercise 2", "part": "d", "answer": "The block stays at rest if mu_s m g cos(theta) >= m g sin(theta), i.e. mu_s >= tan 30 deg = 0.577", "numeric": [0.577], "unit": null, "method": "Static friction must balance the downhill component: mu_s >= tan(theta)."},
+    {"task": "Exercise 3", "part": "a", "answer": "m g h = (1/2) m v^2 gives v = sqrt(2 g h) = sqrt(2 x 9.81 x 0.60) = 3.43 m/s", "numeric": [3.43], "unit": "m/s", "method": "Energy conservation on a frictionless ramp."},
+    {"task": "Exercise 3", "part": "b", "answer": "m g h = (1/2) k x^2 gives x = sqrt(2 m g h / k) = sqrt(2 x 0.40 x 9.81 x 0.60 / 250) = 0.137 m", "numeric": [0.137], "unit": "m", "method": "All gravitational potential energy (2.354 J) ends up as spring energy."},
+    {"task": "Exercise 3", "part": "c", "answer": "Friction removes mu_k m g d = 0.10 x 0.40 x 9.81 x 1.0 = 0.392 J, so (1/2) k x^2 = 2.354 - 0.392 = 1.962 J and x = sqrt(2 x 1.962 / 250) = 0.125 m", "numeric": [0.392, 1.962, 0.125], "unit": "m", "method": "Energy conservation with the work done by friction on the rough stretch subtracted."},
+    {"task": "Exercise 4", "part": "a", "answer": "Momentum: 2.0 x 3.0 = (2.0 + 1.0) v gives v = 2.0 m/s. Kinetic energy before 9.0 J, after 6.0 J, so 3.0 J is lost.", "numeric": [2.0, 9.0, 6.0, 3.0], "unit": "m/s", "method": "Conservation of momentum for a perfectly inelastic collision, then compare kinetic energies."},
+    {"task": "Exercise 4", "part": "b", "answer": "v_A' = (m_A - m_B)/(m_A + m_B) x v_A = 1.0 m/s and v_B' = 2 m_A/(m_A + m_B) x v_A = 4.0 m/s, both in the original direction", "numeric": [1.0, 4.0], "unit": "m/s", "method": "Conservation of momentum and kinetic energy (or the elastic-collision formulas); check: 1 + 8 = 9 J."},
+    {"task": "Exercise 4", "part": "c", "answer": "No external horizontal force acts on the carts (frictionless track), so total momentum is conserved in every collision. Kinetic energy is conserved only if no energy goes into deformation, heat or sound, which holds for the elastic case b) but not when the carts stick together.", "numeric": [], "unit": null, "method": "Conceptual: internal forces conserve momentum; energy is conserved only for elastic collisions."}
+  ]
+}
