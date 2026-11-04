@@ -49,6 +49,16 @@ The 10-29 tour of MIT 18.05 problem set 2 shows the gaps:
 - **Background steps: 0.** Every tour hit the 48-step budget, so every part was compact. In round 3 the budget rises to
   60 / 100 / 160 steps, so the first part of each task gets the full flow.
 
+**After round 3 (2026-11-04, same model and preset, all 11 sheets):**
+
+- **Completed:** 11 of 11.
+- **Parts taught: 169 of 169.**
+- **Answers: 126 of 146 scored parts right**, 17 partial (the answer step stated only some of the asked values).
+- **Background steps: 44, pictures: 37.**
+- **The checker:** it confirmed 354 of 707 lines; 302 board lines carry a ✓, and 2 lines still failed after the repair
+  (they ask the learner to check them).
+- **Length:** tours of 73-102 steps (13-26 minutes of narration).
+
 ## The tutor's moves per part
 
 These are the classic moves of a tutor: understand the problem, recall what is needed, plan, carry out the plan
