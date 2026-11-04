@@ -70,7 +70,7 @@ test('conversation endpoints authenticate and validate source snapshots without 
   } as unknown as Library;
   const app = await createApp({
     service,
-    demo: false,
+    localSpeech: false,
     authenticate: async (token) => (token === 'owner' ? owner : null),
   });
   const headers = { authorization: 'Bearer owner' };

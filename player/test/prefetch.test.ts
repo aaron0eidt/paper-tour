@@ -3,7 +3,7 @@
 // the test settles by hand. Bundled for Node with esbuild like the other player tests (no test framework).
 
 import type { AskAnswer, AskRequest, AskSource } from '../src/ask/api';
-import { AnswerKeeper, prefetchPossible, prefetchWanted, requestKey } from '../src/ask/prefetch';
+import { AnswerKeeper, prefetchWanted, requestKey } from '../src/ask/prefetch';
 import type { PrefetchState } from '../src/ask/prefetch';
 
 const results: string[] = [];
@@ -25,7 +25,7 @@ function eq<T>(actual: T, expected: T, what = 'value') {
   if (a !== e) throw new Error(`${what}: expected ${e}, got ${a}`);
 }
 
-const source: AskSource = { paper: 'demo' };
+const source: AskSource = { documentId: 'doc' };
 const answerTo = (say: string): AskAnswer => ({
   answerable: 'yes',
   steps: [{ id: 'a', say, actions: [] }],
@@ -87,7 +87,7 @@ await test('a request is the same question whatever the earlier exchanges, spaci
   ])
     if (requestKey(source, other) === base) throw new Error(`the same key for ${JSON.stringify(other)}`);
   eq(requestKey(source, request('Why this?', { conversationId: 'thread-1' })), base, 'first-turn prefetch attaches to the chosen thread');
-  eq(requestKey({ paper: 'other' }, request('Why this?')) === base, false, 'another document');
+  eq(requestKey({ documentId: 'other' }, request('Why this?')) === base, false, 'another document');
   eq(requestKey({ documentId: 'demo' }, request('Why this?')) === base, false, 'a library document is not a demo');
 });
 
@@ -275,13 +275,6 @@ await test('nothing is asked for while the tour is being written or the learner 
   eq(prefetchWanted(state({ steps: 0, index: 0 })), false, 'no steps');
 });
 
-await test('a demo paper is asked about in the background only where a local API can answer', () => {
-  eq(prefetchPossible({ documentId: 'd1' }, {}), true, 'a library document has its API');
-  eq(prefetchPossible({ paper: 'demo' }, { DEV: true }), true, 'the dev server proxies the demo route');
-  eq(prefetchPossible({ paper: 'demo' }, { VITE_API_URL: 'http://127.0.0.1:3001' }), true, 'an API address was given');
-  eq(prefetchPossible({ paper: 'demo' }, {}), false, 'a static demo has no ask route');
-  eq(prefetchPossible({ paper: 'demo' }, { DEV: false, VITE_API_URL: '' }), false);
-});
 
 await test('a question the learner asks reports its progress; a kept or background answer comes whole', async () => {
   const progress: string[] = [];

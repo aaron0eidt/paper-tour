@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { encodeWav } from '../../../shared/voice';
-import { apiRequest, ApiRequestError } from '../library/client';
+import { apiRequest } from '../library/client';
 import type { AskSource } from './api';
 
 export async function transcribeQuestion(source: AskSource, wav: Uint8Array, signal: AbortSignal): Promise<string> {
@@ -10,21 +10,7 @@ export async function transcribeQuestion(source: AskSource, wav: Uint8Array, sig
     body: new Uint8Array(wav),
     signal,
   };
-  let result: { transcript: string };
-  if ('documentId' in source)
-    result = await apiRequest(`/api/documents/${encodeURIComponent(source.documentId)}/transcribe`, options);
-  else {
-    const base = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
-    const response = await fetch(`${base}/api/demo/${encodeURIComponent(source.paper)}/transcribe`, options);
-    const data = await response.json().catch(() => null);
-    if (!response.ok)
-      throw new ApiRequestError(
-        data?.error?.message ?? 'Voice input needs the local API and a Meta connection.',
-        response.status,
-        'voice_unavailable',
-      );
-    result = data;
-  }
+  const result = await apiRequest<{ transcript: string }>(`/api/documents/${encodeURIComponent(source.documentId)}/transcribe`, options);
   if (!result || typeof result.transcript !== 'string' || !result.transcript.trim())
     throw new Error('No usable transcript came back. Try recording again.');
   return result.transcript;
@@ -64,7 +50,7 @@ export function useVoiceInput(
   };
   const cancelRef = useRef(cancel);
   cancelRef.current = cancel;
-  const key = 'documentId' in source ? source.documentId : source.paper;
+  const key = source.documentId;
   useEffect(
     () => () => {
       cancelRef.current();

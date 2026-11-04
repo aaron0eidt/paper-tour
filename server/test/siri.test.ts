@@ -147,7 +147,7 @@ test('UTF-16 native timings match repeated words and interpolate missing events'
   assert.equal(siriWordTimes('one', [{ start: -1, utf16Location: 0, utf16Length: 3 }], 1000), undefined);
 });
 
-test('local demo cannot install from remote hosts or origins and cannot invoke cloud providers', async () => {
+test('local speech cannot install from remote hosts or origins and cannot invoke cloud providers', async () => {
   const f = await fixture();
   const app = Fastify({ ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
   app.setErrorHandler((error, _request, reply) => reply.code(error instanceof HttpError ? error.status : (error as { statusCode?: number }).statusCode ?? 500).send({ error: 'failed' }));

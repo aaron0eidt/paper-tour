@@ -9,8 +9,7 @@ below. Read the latest acceptance results in [STATUS.md](STATUS.md); historical 
 
 Air implementation update (2026-10-28): read the current [STATUS.md](STATUS.md) before rebuilding the next-step list
 below. Insight guards, plots, language, reader polish, voice and documented local workflows are now implemented and
-locally tested; real paid-provider quality checks, naming and hackathon decisions remain open. Local demo/backup
-instructions are in [DEMO.md](DEMO.md).
+locally tested; real paid-provider quality checks, naming and hackathon decisions remain open. Local setup instructions are in [current library setup](../README.md#local-library-setup).
 
 Start here if you are new to the project. This page says what the app does today, how to run it, how the parts fit
 together, the rules we work by, and what to build next. Details live in the other notes:
@@ -41,8 +40,6 @@ steps. Its weak points are listed in [STATUS.md](STATUS.md) and are the first it
 
 ## Run it
 
-- **Demo without Supabase:** follow the README quick start, then open http://localhost:5174/?paper=attention. Add
-  `&silent=1&rate=4` to test quickly without speech.
 - **The full app:** README section "Local library setup". With Colima instead of Docker Desktop, start Supabase with
   `mkdir -p .data/tmp && TMPDIR=$PWD/.data/tmp npm run supabase:start`. Then `npm run dev` runs the web app (5174), the
   API (3001) and the worker. The worker does not reload on changes: restart `npm run dev` after server changes.
@@ -54,16 +51,14 @@ steps. Its weak points are listed in [STATUS.md](STATUS.md) and are the first it
   calls, so it needs `MODEL_API_KEY`):
 
   ```bash
-  mkdir -p demo/mydoc && cp path/to/doc.pdf demo/mydoc/paper.pdf
-  ingest/.venv/bin/python ingest/ingest.py demo/mydoc/paper.pdf
-  cd server && node --import tsx run-tour.ts standard /tmp/mydoc-tour ../demo/mydoc mydoc
-  cp /tmp/mydoc-tour/tour.json ../demo/mydoc/tour.json
+  mkdir -p .data/documents/mydoc && cp path/to/doc.pdf .data/documents/mydoc/paper.pdf
+  ingest/.venv/bin/python ingest/ingest.py .data/documents/mydoc/paper.pdf
+  cd server && node --import tsx run-tour.ts standard /tmp/mydoc-tour ../.data/documents/mydoc mydoc
   ```
 
-  Then open http://localhost:5174/?paper=mydoc. Do not commit the PDF, doc.json or figures (gitignored), and commit a
-  tour.json only when it is meant as a demo.
+  Inspect the generated artifacts in `/tmp/mydoc-tour`; the reader opens documents through the private library.
 - **Tests:** `npm test` at the root runs the player, server and ingest suites; `npm run build` type-checks.
-  `ingest/.venv/bin/python ingest/validate.py demo/<paper>` checks a doc.json and its tour against the schemas.
+  `ingest/.venv/bin/python ingest/validate.py .data/documents/<paper>` checks a doc.json and its tour against the schemas.
 
 ## How it fits together
 
@@ -72,7 +67,7 @@ steps. Its weak points are listed in [STATUS.md](STATUS.md) and are the first it
 | `ingest/` | Python (PyMuPDF): `ingest.py` turns a PDF into doc.json (IDs and coordinates for sentences, blocks, sections, figures, panels, equations, exercise tasks); `process.py` runs it for uploads; `tour_assets.py` renders page and figure images; `verify_math.py` checks solution lines; `validate.py`, `outline.py`, `check_tour.py` are tools |
 | `schema/`, `shared/paper.ts` | The two contracts: doc.json and tour.json. A tour names elements by ID and never contains coordinates |
 | `server/src/harness/` | The short-tour writer. `generator.ts` runs the stages: understand the document (`card.ts`, `doctype.ts`), plan beats in code (`beats.ts`, `arcs.ts`, `exercise.ts`), direct every beat in parallel with small calls whose targets are limited to that beat (`direct.ts`, `prompts.ts`), assemble and validate in code (`assemble.ts`, `board.ts`). `ask.ts` answers questions |
-| `server/src/` | API routes (`app.ts`, `service.ts`; asking is `POST /api/documents/:id/ask`, plus `POST /api/demo/:paper/ask` in local development only), the worker, model calls through the Vercel AI SDK (`ai/`, `generation/`, `muse/client.ts`) and Nikolas's agent (`agent/`) |
+| `server/src/` | API routes (`app.ts`, `service.ts`; asking is `POST /api/documents/:id/ask`), the worker, model calls through the Vercel AI SDK (`ai/`, `generation/`, `muse/client.ts`) and Nikolas's agent (`agent/`) |
 | `player/src/` | The reader: `Reader.tsx`, the tour engine (`engine.ts`, with a board channel), target resolution and checks (`resolve.ts`), pen marks (`scene.ts`, `components/PageView.tsx`, `ScreenLayer.tsx`), the side board (`components/Board.tsx`, `board.ts`), asking (`ask/`), the library (`library/`) |
 | `notes/` | Plan, harness, status, use cases, names, and the review of the scaffold |
 

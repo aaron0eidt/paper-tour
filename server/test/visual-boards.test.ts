@@ -1,16 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import type { Doc } from '../../shared/paper';
 import { canonicalScatter, needsLogAxis } from '../../shared/scatter';
-import { tableLines } from '../../shared/tableTargets';
 import { findAnchor } from '../src/harness/assemble';
 import { boardPart, boardParts, boardPartIds, checkBoard, numbersIn, type BoardKind } from '../src/harness/board';
 import { BOARD_EXAMPLES, SHARED_RULES, directTask } from '../src/harness/prompts';
 import { groundedProblems } from '../src/harness/visual-rules';
 import { SOURCE_VISUAL_POLICY } from '../src/muse/visual-policy';
-import { printedNumbers } from '../src/harness/tables';
 
 // The server side of the heatmap, scatter and shapes boards: grounding in the evidence and the prompts that teach them.
 
@@ -213,28 +208,6 @@ test('the exponents a newer ingest marks ground the same costs as the flattened 
   const large = (text: string) => numbersIn(text).filter((n) => n >= 1e18);
   assert.deepEqual(large(marked), large(FLATTENED_COSTS));
 });
-
-// demo/attention-short/doc.json is a link to demo/attention/doc.json, where the file lives; neither is committed.
-const realDoc = ['attention-short', 'attention']
-  .map((folder) => resolve(import.meta.dirname, `../../demo/${folder}/doc.json`))
-  .find((path) => existsSync(path));
-
-test(
-  'the real paper: costs of its results table ground a scatter from the flattened text of the page',
-  { skip: !realDoc },
-  () => {
-    const doc = JSON.parse(readFileSync(realDoc!, 'utf8')) as Doc;
-    const table = doc.figures.find((f) => f.id === 'tab2')!;
-    // What a table without a grid gives the model: the extracted lines, "2.3 · 1019" among them.
-    const flattened = tableLines(doc, { ...table, grid: undefined });
-    assert.ok(flattened.some((line) => /2\.3 · 10(?:\^)?19/.test(line)));
-    const { item, problems } = checkBoard('scatter', costs(), flattened.join('\n'));
-    assert.deepEqual(problems, []);
-    assert.equal(item?.kind === 'scatter' && item.x_log, true);
-    const printed = printedNumbers(doc, { ...table, grid: undefined });
-    for (const cost of [9.6e18, 2e19, 2.3e19, 3.3e18, 1.1e21]) assert.ok(printed.includes(cost), String(cost));
-  },
-);
 
 test('a log axis is chosen in code where a linear one cannot show the values, and only there', () => {
   for (const [values, log] of [

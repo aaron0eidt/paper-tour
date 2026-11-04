@@ -2,7 +2,7 @@
 // for in the background, one request at a time and with exactly the request a click on that question would send, so
 // picking one plays at once. A question the learner asks meanwhile goes first: it joins a background request that is
 // already answering the same thing, and otherwise stops the background work. A background request that fails ends the
-// background work for good (a demo without the ask route, a model that is busy): speculation is never retried. Free of
+// background work for good (a model that is busy): speculation is never retried. Free of
 // the DOM, so test/ask.test.ts drives it with a fake transport.
 
 import { responseLanguage } from '../../../shared/languages';
@@ -18,7 +18,7 @@ export type Transport = (
 ) => Promise<AskAnswer>;
 
 const sourceKey = (source: AskSource) =>
-  'documentId' in source ? `document:${source.documentId}` : `demo:${source.paper}`;
+  `document:${source.documentId}`;
 
 /**
  * What makes two requests the same question: everything the server reads, except the earlier exchanges. A suggested
@@ -43,12 +43,9 @@ export function requestKey(source: AskSource, request: AskRequest): string {
   ]);
 }
 
-/**
- * Whether there is anything to ask in the background. A library document has its API; a demo paper's questions are
- * answered only by a local API (api.ts demoRequest), so without the dev server or an API address nothing is asked.
- */
-export function prefetchPossible(source: AskSource, env: { DEV?: boolean; VITE_API_URL?: string }): boolean {
-  return 'documentId' in source || !!env.DEV || !!env.VITE_API_URL;
+/** Background questions need an authenticated library document. */
+export function prefetchPossible(source: AskSource): boolean {
+  return !!source.documentId;
 }
 
 /** What decides whether the suggested questions are answered in the background now. */

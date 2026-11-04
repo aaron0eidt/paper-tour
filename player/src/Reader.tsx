@@ -7,11 +7,11 @@ import { useReadingSpeech } from './useReadingSpeech';
 import { AgentActivity } from './activity/AgentActivity';
 import { getMaxAutoZoom, getNarrationDisplay, narrationSurfaces, subscribeReadingPreferences } from './readerPreferences';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
-import type { CameraCommand, EngineState } from './engine';
+import type { CameraCommand, EngineState, OverlayEntry } from './engine';
 import { layoutDeck, layoutPages } from './layout';
 import { clampSlide, readerMode, stepSlides, stepsBySlide } from './deck';
 import { coverVisible, lengthLabel, readerTitle, recapVisible } from './tourSummary';
-import { loadManifest, loadPaper } from './load';
+import { loadManifest } from './load';
 import type { Loaded } from './load';
 import { createNarrator, SilentNarrator, useBrowserVoices, speechAvailable } from './narration';
 import { useSpeechSettings } from './narration/useSpeechSettings';
@@ -52,9 +52,7 @@ import {
   tourSourceKey,
   withPlayableSteps,
 } from './partialTour';
-import { readGrowthPlan, simulatedSource } from './dev/growth';
 import type { DocumentManifest, ReaderState, SearchHit, TourPartialView } from '../../shared/contracts';
-import type { OverlayEntry } from './engine';
 import { positionFromView, viewFromPosition } from './readerState';
 import { AskPanel } from './ask/AskPanel';
 import type { AskContext } from './ask/AskPanel';
@@ -72,7 +70,6 @@ import './reader.css';
 type Prepared = ReturnType<typeof prepareTour>;
 
 interface Params {
-  paper: string;
   silent: boolean;
   /** URL speed multiplier, for testing (?rate=4). */
   rate: number;
@@ -80,10 +77,8 @@ interface Params {
 
 function readParams(): Params {
   const q = new URLSearchParams(location.search);
-  const paper = q.get('paper') ?? 'attention';
   const rate = Number(q.get('rate'));
   return {
-    paper: /^[\w.-]+$/.test(paper) && !paper.startsWith('.') ? paper : 'attention',
     silent: q.get('silent') === '1',
     rate: Number.isFinite(rate) && rate > 0 ? Math.min(8, Math.max(0.1, rate)) : 1,
   };
@@ -139,7 +134,7 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-export function Reader({ documentId, onBack }: { documentId?: string; onBack(): void }) {
+export function Reader({ documentId, onBack }: { documentId: string; onBack(): void }) {
   const params = useMemo(readParams, []);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadedAnalysisId, setLoadedAnalysisId] = useState<string | undefined>();
@@ -173,10 +168,10 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [selection, setSelection] = useState<OverlayEntry[]>([]);
   const [regionSelection, setRegionSelection] = useState<RegionSelection | null>(null);
   const [selectingRegion, setSelectingRegion] = useState(false);
-  // Asking is open wherever there is a document to ask about: a library document by its ID, a demo by its folder.
+  // Questions belong to the current private library document.
   const askSource = useMemo<AskSource>(
-    () => (documentId ? { documentId } : { paper: params.paper }),
-    [documentId, params.paper],
+    () => ({ documentId }),
+    [documentId],
   );
   const readingSpeech = useReadingSpeech(askSource, loadedAnalysisId, readingOptions.removeCitations);
   const prepareReading = useRef(readingSpeech.prepare);
@@ -186,7 +181,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     setRegionSelection(null);
     setSelectingRegion(false);
     selectionCheckpoint.current = null;
-  }, [documentId, params.paper]);
+  }, [documentId]);
   const [currentPage, setCurrentPage] = useState(1);
   const currentPageRef = useRef(1);
   currentPageRef.current = currentPage;
@@ -237,11 +232,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       loading = true;
       let fetchingManifest = !!documentId;
       try {
-        if (!documentId) {
-          accept(await loadPaper(params.paper));
-          if (alive) setFatal(null);
-          return;
-        }
         const pinnedTour = activeTour ?? manifestRef.current?.selectedTour?.id;
         const next = await apiRequest<DocumentManifest>(
           `/api/documents/${documentId}/manifest${pinnedTour ? `?tourId=${encodeURIComponent(pinnedTour)}` : ''}`,
@@ -317,7 +307,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       alive = false;
       clearInterval(interval);
     };
-  }, [params.paper, documentId, activeTour, onBack, manifestRefresh]);
+  }, [documentId, documentId, activeTour, onBack, manifestRefresh]);
 
   useEffect(() => {
     if (!documentId) return;
@@ -353,35 +343,27 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   usePdfDocument(loaded?.pdf);
 
   // A tour still being written plays from its first steps. While its generation runs, the leading steps come from the
-  // partial endpoint (a demo simulates them, dev/growth.ts) and the reader follows them; the finished tour comes through
+  // partial endpoint and the reader follows them; the finished tour comes through
   // the manifest and takes their place without a break.
   const generation = manifest?.tourGeneration ?? null;
-  const simulation = useMemo(
-    () => (import.meta.env.DEV && !documentId ? readGrowthPlan(new URLSearchParams(location.search)) : null),
-    [documentId],
-  );
-  const [simulated, setSimulated] = useState(false);
   // A saved tour on screen is never taken over by one being written: the learner opens that one when it is done.
   const tourOnScreen = !!manifest?.selectedTour;
   const hasDoc = !!loaded?.doc;
-  const demoTour = simulation ? (loaded?.tour ?? null) : null;
   const generationId = generation?.id;
   const following = !!documentId && !!generationId && !tourOnScreen && hasDoc && isTourGenerationActive(generation);
   const source = useMemo<PartialSource | null>(() => {
-    if (import.meta.env.DEV && simulation) return demoTour ? simulatedSource(demoTour, simulation) : null;
     if (!following || !documentId || !generationId) return null;
     return {
       key: generationId,
       fetch: (held, signal) =>
         apiRequest<TourPartialView>(partialPath(documentId, generationId, held), { signal }),
     };
-  }, [simulation, !!demoTour, following, documentId, generationId]);
-  const follow = usePartialTour(source, `${generation?.status}:${generation?.stage}`, (status) => {
-    if (simulation) setSimulated(status === 'ready');
-    else setManifestRefresh((value) => value + 1);
+  }, [following, documentId, generationId]);
+  const follow = usePartialTour(source, `${generation?.status}:${generation?.stage}`, () => {
+    setManifestRefresh((value) => value + 1);
   });
   const status = currentStatus(generation?.status, follow.status);
-  const finishedTour = simulation ? (simulated ? demoTour : null) : (loaded?.tour ?? null);
+  const finishedTour = loaded?.tour ?? null;
   const partialTour = useMemo(
     () => (tourOnScreen ? null : playablePartial(follow.held, loaded?.doc ?? null)),
     [tourOnScreen, follow.held, loaded?.doc],
@@ -391,7 +373,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const fromPartial = !readAloud && !finishedTour && !!partialTour;
   const growth = fromPartial ? growthOf(follow.held, status) : null;
   const growing = !!growth && growth.phase !== 'stopped';
-  const sourceKey = readAloud ? `reading:${loadedAnalysisId ?? params.paper}|${readingOptions.removeCitations}|${readingOptions.includeReferences}` : tourSourceKey(manifest?.selectedTour?.id, !!finishedTour, generationId);
+  const sourceKey = readAloud ? `reading:${loadedAnalysisId ?? documentId}|${readingOptions.removeCitations}|${readingOptions.includeReferences}` : tourSourceKey(manifest?.selectedTour?.id, !!finishedTour, generationId);
 
   // The tour says what the document is: a lecture plays as a deck, one slide at a time; anything else as a paper.
   const deck = useMemo(() => readerMode(tourSource, loaded?.sizes ?? []) === 'deck', [tourSource?.doc_type, loaded?.sizes]);
@@ -1084,7 +1066,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 .slice(0, 30)
                 .map(
                   (sentence): SearchHit => ({
-                    ref: { documentId: params.paper, analysisId: 'demo', elementId: sentence.id },
+                    ref: { documentId: documentId, analysisId: manifest?.docAnalysisId ?? '', elementId: sentence.id },
                     kind: 'sentence',
                     page: sentence.page,
                     text: sentence.text,
@@ -1102,7 +1084,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       alive = false;
       clearTimeout(timer);
     };
-  }, [query, loaded?.doc, documentId, manifest?.docAnalysisId, params.paper]);
+  }, [query, loaded?.doc, documentId, manifest?.docAnalysisId]);
 
   useEffect(() => () => camera.destroy(), [camera]);
 

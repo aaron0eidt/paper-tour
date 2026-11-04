@@ -23,17 +23,18 @@ const RUNNING = ['queued', 'generating'];
 // ---------------------------------------------------------------------------------------------------- pure parts
 
 export function parseArgs(argv) {
-  const options = { pdf: resolve(root, 'demo/attention/paper.pdf'), keep: false, json: false, pollMs: 400, timeoutS: 420 };
+  const options = { pdf: null, keep: false, json: false, pollMs: 400, timeoutS: 420 };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === '--keep') options.keep = true;
     else if (flag === '--json') options.json = true;
-    else if (flag === '--pdf') options.pdf = resolve(argv[++i] ?? '');
+    else if (flag === '--pdf') { const pdf = argv[++i]; if (!pdf || pdf.startsWith('--')) throw new Error('Provide --pdf <file>.'); options.pdf = resolve(pdf); }
     else if (flag === '--poll-ms') options.pollMs = Number(argv[++i]);
     else if (flag === '--timeout-s') options.timeoutS = Number(argv[++i]);
     else throw new Error(`Unknown option ${flag}.`);
   }
   if (!(options.pollMs >= 100) || !(options.timeoutS >= 30)) throw new Error('Use --poll-ms 100 or more and --timeout-s 30 or more.');
+  if (!options.pdf) throw new Error('Provide --pdf <file>.');
   return options;
 }
 

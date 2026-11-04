@@ -2,7 +2,17 @@
 // timeline expects of the steps still to be written, and the simulated server the demo uses. Bundled for Node with esbuild
 // like the other player tests (no test framework).
 
-import { simulatedView, readGrowthPlan, leadingSteps } from '../src/dev/growth';
+function leadingSteps(tour: Tour, count: number): Tour {
+  let left = count;
+  const chapters = tour.chapters
+    .map((chapter) => {
+      const steps = chapter.steps.slice(0, Math.max(0, left));
+      left -= steps.length;
+      return { ...chapter, steps };
+    })
+    .filter((chapter) => chapter.steps.length);
+  return { ...tour, chapters };
+}
 import { flattenTour } from '../src/engine';
 import { followPartial } from '../src/library/followPartial';
 import type { PartialFollow, PartialSource } from '../src/library/followPartial';
@@ -283,42 +293,8 @@ await test('the timeline expects the steps still to be written to take as long a
 
 // ------------------------------------------------------------------------------------ the simulated server (dev)
 
-await test('the simulated generation hands out steps on a clock and follows the endpoint\'s rules', () => {
-  const plan = { first: 2, every: 5 };
-  const at = (seconds: number, held: { ready: number; attempt: string } | null = null) => simulatedView(tour, plan, seconds * 1000, held);
-  eq([at(0).ready, at(0).planned, at(0).tour && countSteps(at(0).tour!)], [2, 5, 2]);
-  eq([at(4.9).ready, at(5).ready, at(10).ready], [2, 3, 4]);
-  eq(at(5, { ready: 2, attempt: 'attempt-1' }).tour && 1, 1, 'newer than what is held: the tour comes');
-  eq(at(5, { ready: 3, attempt: 'attempt-1' }).tour, null, 'what is held is current: counts only');
-  eq(at(5, { ready: 3, attempt: 'other' }).tour && 1, 1, 'another attempt: always the tour');
-  const done = at(15);
-  eq([done.status, done.tour, done.attempt, done.ready, done.tourId], ['ready', null, null, 0, 'simulated-tour']);
-});
 
-await test('the simulation can stop, or start the attempt again with the same steps', () => {
-  const stopped = { first: 2, every: 5, stop: { after: 3, status: 'cancelled' as const } };
-  eq([simulatedView(tour, stopped, 5000, null).ready, simulatedView(tour, stopped, 10000, null).status], [3, 'cancelled']);
-  const restart = { first: 2, every: 5, restart: { at: 4, renamed: false } };
-  const before = simulatedView(tour, restart, 5000, null);
-  const after = simulatedView(tour, restart, 10000, null);
-  eq([before.attempt, before.ready, after.attempt, after.ready], ['attempt-1', 3, 'attempt-2', 2]);
-  eq(after.tour && countSteps(after.tour), 2);
-  const renamed = simulatedView(tour, { ...restart, restart: { at: 4, renamed: true } }, 10000, null);
-  eq(renamed.tour?.chapters[0].steps.map((st) => st.id), ['a~2', 'b~2']);
-});
 
-await test('the demo reads its plan from the address', () => {
-  eq(readGrowthPlan(new URLSearchParams('paper=x')), null);
-  eq(readGrowthPlan(new URLSearchParams('grow')), { first: 2, every: 6 });
-  eq(readGrowthPlan(new URLSearchParams('grow=3&growFrom=4&growStop=7:cancelled&growRestart=5')), {
-    first: 4,
-    every: 3,
-    stop: { after: 7, status: 'cancelled' },
-    restart: { at: 5, renamed: false },
-  });
-  eq(readGrowthPlan(new URLSearchParams('grow=3&growRestart=5:new'))?.restart, { at: 5, renamed: true });
-  eq(readGrowthPlan(new URLSearchParams('grow=nope&growStop=6'))?.stop, { after: 6, status: 'failed' });
-});
 
 await test('only the same tour grows in place: a saved tour picked instead replaces it, whatever its step IDs', () => {
   const saved = { key: tourSourceKey('v2', true, 'g0'), partial: false };

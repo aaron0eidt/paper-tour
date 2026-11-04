@@ -7,10 +7,6 @@ import { isLibraryConfigured } from '../library/client';
 import { LanguagePicker } from './LanguagePicker';
 import { forgetLocalActivity, localActivity } from '../activity/client';
 import type { ActivityRun } from '../../../shared/agentActivity';
-// The ask bar: a field below the stage that opens into a tray with the tour's suggested questions
-// when it ends, a waiting state, the answer's verdict and follow-ups, and errors in plain words. It does not play
-// answers: the reader plays them as a second tour and sets the tour aside meanwhile ("Back to the tour").
-
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { answerText, askErrorMessage, askQuestion, isCancelled, MAX_HISTORY } from './api';
@@ -98,7 +94,7 @@ const VERDICT: Record<Answerable, string> = {
 };
 const MAX_LINES_PX = 120;
 const sourceKey = (source: AskSource) =>
-  'documentId' in source ? `document:${source.documentId}` : `demo:${source.paper}`;
+  `document:${source.documentId}`;
 
 function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || !!target.closest('input, textarea, select'));
@@ -381,7 +377,7 @@ export function AskPanel(props: AskPanelProps) {
     if (
       (persistent && (sessions.loading || hasConversationHistory)) ||
       !now?.questions.length ||
-      !prefetchPossible(source, import.meta.env)
+      !prefetchPossible(source)
     ) {
       keeper.hold();
       return;

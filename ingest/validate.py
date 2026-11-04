@@ -362,7 +362,7 @@ def check_tour(tour, folder, doc, index, num_pages, report, *, check_folder=True
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Validate doc.json and tour.json of a paper folder.")
-    ap.add_argument("folder", help="paper folder, e.g. demo/attention")
+    ap.add_argument("folder", help="paper folder, e.g. .data/documents/my-paper")
     args = ap.parse_args(argv)
     folder = args.folder
     if not os.path.isdir(folder):

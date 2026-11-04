@@ -42,11 +42,8 @@ export interface AskAnswer {
   followups: string[];
 }
 
-/**
- * What a question is about: a document in the signed-in learner's library, or a demo paper folder (?paper=), which the
- * API answers without an account only in local development.
- */
-export type AskSource = { documentId: string } | { paper: string };
+/** A question always belongs to an authenticated library document. */
+export type AskSource = { documentId: string };
 
 export const MAX_HISTORY = 4;
 /** The server gives up after 75 seconds; the browser waits a little longer for its reply. */
@@ -88,9 +85,7 @@ export async function askQuestion(
   };
   const answer = onProgress
     ? await streamedRequest(source, init, onProgress)
-    : 'documentId' in source
-      ? await apiRequest<AskAnswer>(`/api/documents/${encodeURIComponent(source.documentId)}/ask`, init)
-      : await demoRequest(source.paper, init);
+    : await apiRequest<AskAnswer>(`/api/documents/${encodeURIComponent(source.documentId)}/ask`, init);
   if (!answer?.steps?.length)
     throw new ApiRequestError('No answer came back. Try asking it another way.', 502, 'empty_answer');
   return answer;
@@ -102,36 +97,19 @@ async function streamedRequest(
   init: RequestInit,
   onProgress: (answer: AskAnswer) => void,
 ): Promise<AskAnswer> {
-  const library = 'documentId' in source;
   const headers = new Headers({ 'Content-Type': 'application/json', Accept: `${NDJSON}, application/json` });
-  if (library) headers.set('Authorization', `Bearer ${await getAccessToken()}`);
-  const path = library
-    ? `/api/documents/${encodeURIComponent(source.documentId)}/ask`
-    : `/api/demo/${encodeURIComponent(source.paper)}/ask`;
+  headers.set('Authorization', `Bearer ${await getAccessToken()}`);
+  const path = `/api/documents/${encodeURIComponent(source.documentId)}/ask`;
   const response = await fetch(`${apiBase}${path}`, { ...init, headers, cache: 'no-store' });
-  if (!response.ok) throw await failure(response, library);
+  if (!response.ok) throw await failure(response);
   return response.headers.get('content-type')?.includes(NDJSON)
     ? readAnswerStream(response, onProgress)
     : ((await response.json()) as AskAnswer);
 }
 
-/** Demo papers are not in a library, so there is no session to send. */
-async function demoRequest(paper: string, init: RequestInit): Promise<AskAnswer> {
-  const response = await fetch(`${apiBase}/api/demo/${encodeURIComponent(paper)}/ask`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json' },
-    cache: 'no-store',
-  });
-  if (response.ok) return (await response.json().catch(() => null)) as AskAnswer;
-  throw await failure(response, false);
-}
-
 /** A failed request in plain words. */
-async function failure(response: Response, library: boolean): Promise<ApiRequestError> {
+async function failure(response: Response): Promise<ApiRequestError> {
   const data = await response.json().catch(() => null);
-  // The API answers demo questions only in local development, and only for folders under demo/ with a doc.json.
-  if (!library && response.status === 404)
-    return new ApiRequestError('Demo questions need the API running locally in development.', 404, 'demo_unavailable');
   return new ApiRequestError(
     data?.error?.message ??
       (response.status === 401

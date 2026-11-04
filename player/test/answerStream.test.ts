@@ -1,7 +1,7 @@
 // Reading an answer while the server writes it: lines of NDJSON, one step at a time, then the whole answer. Driven with
 // Responses built in the test and a stubbed fetch. Bundled for Node with esbuild like the other player tests.
 
-import { askQuestion, readAnswerStream } from '../src/ask/api';
+import { readAnswerStream } from '../src/ask/api';
 import type { AskAnswer } from '../src/ask/api';
 import { answerTour } from '../src/ask/answer';
 import { ApiRequestError } from '../src/library/client';
@@ -114,87 +114,6 @@ await test('an error line ends the stream with its words, and a stream that just
 });
 
 /** Run `fn` with fetch replaced; records what the request asked for. */
-async function withFetch<T>(reply: () => Response, fn: (sent: { url: string; accept: string | null }[]) => Promise<T>) {
-  const real = globalThis.fetch;
-  const sent: { url: string; accept: string | null }[] = [];
-  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-    sent.push({ url: String(url), accept: new Headers(init?.headers).get('accept') });
-    return reply();
-  }) as typeof fetch;
-  try {
-    return await fn(sent);
-  } finally {
-    globalThis.fetch = real;
-  }
-}
-
-await test('a question that wants progress asks for NDJSON and reports the steps; without it nothing changes', async () => {
-  const progress: string[] = [];
-  const answer = await withFetch(
-    () => pieces(stream({ type: 'step', answerable: 'yes', step: first }, { type: 'answer', answer: whole }), 40),
-    async (sent) => {
-      const done = await askQuestion({ paper: 'demo' }, { question: ' Why scale? ' }, undefined, (part) =>
-        progress.push(part.steps.length.toString()),
-      );
-      eq(sent.length, 1);
-      eq(sent[0].url.endsWith('/api/demo/demo/ask'), true, sent[0].url);
-      eq(sent[0].accept?.includes('application/x-ndjson'), true, String(sent[0].accept));
-      return done;
-    },
-  );
-  eq(answer.steps.length, 2);
-  eq(progress, ['1']);
-  // The usual JSON: no Accept for NDJSON, and a whole answer needs no progress.
-  await withFetch(
-    () => Response.json(whole),
-    async (sent) => {
-      const plain = await askQuestion({ paper: 'demo' }, { question: 'Why scale?' });
-      eq(sent[0].accept === null || !sent[0].accept.includes('ndjson'), true);
-      eq(plain.steps.length, 2);
-    },
-  );
-  // An answer the server already had comes back as JSON even to a client that asked for NDJSON.
-  const known: string[] = [];
-  await withFetch(
-    () => Response.json(whole),
-    async () => {
-      const done = await askQuestion({ paper: 'demo' }, { question: 'Why scale?' }, undefined, () => known.push('x'));
-      eq(done.steps.length, 2);
-    },
-  );
-  eq(known, [], 'a stored answer has no progress');
-});
-
-await test('a refused question is explained as before, to a client that reads the stream too', async () => {
-  await withFetch(
-    () =>
-      Response.json(
-        { error: { code: 'too_many_questions', message: 'Wait for the current answer.' } },
-        { status: 429 },
-      ),
-    async () => {
-      await askQuestion({ paper: 'demo' }, { question: 'Why?' }, undefined, () => {}).then(
-        () => {
-          throw new Error('it should have failed');
-        },
-        (error) =>
-          eq([error.message, error.status, error.code], ['Wait for the current answer.', 429, 'too_many_questions']),
-      );
-    },
-  );
-  await withFetch(
-    () => new Response('', { status: 404 }),
-    async () => {
-      await askQuestion({ paper: 'demo' }, { question: 'Why?' }, undefined, () => {}).then(
-        () => {
-          throw new Error('it should have failed');
-        },
-        (error) => eq(error.code, 'demo_unavailable'),
-      );
-    },
-  );
-});
-
 await test('the steps of an answer keep their IDs as it grows, so the playing answer can take the next ones', () => {
   const timers: Timers = { setTimeout: () => 0, clearTimeout: () => {} };
   const tour = answerTour({ ...whole, steps: [first], followups: [] }, 'Why scale?', null);

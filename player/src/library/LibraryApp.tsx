@@ -20,10 +20,9 @@ import '../library.css';
 
 interface Props {
   onOpenDocument(documentId: string): void;
-  onOpenDemo(): void;
 }
 
-export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
+export function LibraryApp({ onOpenDocument }: Props) {
   const auth = useSession();
   if (!isLibraryConfigured())
     return (
@@ -45,11 +44,6 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
             </p>
             <p>The repository README includes the local setup and database migrations.</p>
           </section>
-          {import.meta.env.DEV && (
-            <button type="button" className="library-button primary" onClick={onOpenDemo}>
-              Open local demo (deprecated)
-            </button>
-          )}
         </main>
       </div>
     );
@@ -71,7 +65,6 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
           key={auth.recovering ? 'recovery' : 'auth'}
           recovering={auth.recovering}
           onRecovered={auth.finishRecovery}
-          onOpenDemo={onOpenDemo}
         />
         {auth.error && (
           <p className="library-error library-session-error" role="alert">
@@ -90,12 +83,11 @@ export function LibraryApp({ onOpenDocument, onOpenDemo }: Props) {
       accountId={auth.session.user.id}
       email={auth.session.user.email ?? 'Your account'}
       onOpenDocument={onOpenDocument}
-      onOpenDemo={onOpenDemo}
     />
   );
 }
 
-function AuthenticatedLibrary({ accountId, email, onOpenDocument, onOpenDemo }: Props & {
+function AuthenticatedLibrary({ accountId, email, onOpenDocument }: Props & {
   accountId: string;
   email: string;
 }) {
@@ -256,11 +248,6 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument, onOpenDemo }: 
             <h1>Your library</h1>
             <p>Pick up where you left off.</p>
           </div>
-          {import.meta.env.DEV && (
-            <button className="library-text-button" type="button" onClick={onOpenDemo}>
-              Open local demo (deprecated)
-            </button>
-          )}
         </div>
         {models.error && (
           <div className="model-catalog-error" role="alert">

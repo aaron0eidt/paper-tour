@@ -4,8 +4,7 @@ import type { RegionSelection } from '../../shared/selection';
 import { maskOutline, segment, SAM_TIMEOUT_MS, type Point, type PixelBox } from './ai/sam';
 import type { MuseConfig } from './config';
 import type { Database } from './db';
-import { HttpError, missing, ProcessingError } from './errors';
-import { demoSelectionImages, DEMO_ROOT, loadDemo } from './harness/ask-assets';
+import { HttpError, ProcessingError } from './errors';
 import { selectionImages } from './selection-image';
 import type { FileStorage } from './storage';
 import type { TourImage } from './tour-generator';
@@ -68,7 +67,7 @@ const EDGE_SLACK = 0.01;
 /** Boxes within CACHE_STEP points of each other share an answer. */
 const CACHE_STEP = 2;
 const CACHE_SIZE = 256;
-/** Snaps in flight per learner (and for all demo papers together): each one is a paid model call. */
+/** Snaps in flight per learner: each one is a paid model call. */
 const MAX_ACTIVE = 3;
 
 /** Reasons that stay true for the same box; the rest (timeouts, a busy model) may pass on the next try. */
@@ -91,11 +90,9 @@ export interface SnapLibrary {
   db: Pick<Database, 'query'>;
   storage: Pick<FileStorage, 'download'>;
   settings?: SnapSettings;
-  /** Where demo papers are read from; defaults to demo/ in the repository. */
-  demoRoot?: string;
 }
 
-/** The server's Meta connection (settings.ts): its own key for demos, the learner's choice for their documents. */
+/** The server's Meta connection (settings.ts): the learner's choice for their documents. */
 export interface SnapSettings {
   base: MuseConfig;
   transport: typeof fetch;
@@ -229,22 +226,6 @@ export class SnapService {
       },
       request,
       async () => (await this.settings.resolveMuse(owner)).config,
-      signal,
-    );
-  }
-
-  /** A drag over a demo paper (demo/<paper>/) on the server's own key; app.ts exposes it only in local development. */
-  async demoSnap(paper: string, request: SnapRequest, signal?: AbortSignal): Promise<SnapResult> {
-    const root = this.library.demoRoot ?? DEMO_ROOT;
-    const demo = (await loadDemo(paper, root)) ?? missing();
-    return this.run(
-      { scope: 'demo', key: `demo:${paper}`, log: { demo: paper } },
-      {
-        doc: demo.doc,
-        images: (selection, abortable) => demoSelectionImages(paper, demo.doc, selection, root, abortable),
-      },
-      request,
-      async () => this.settings.base,
       signal,
     );
   }

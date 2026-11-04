@@ -15,16 +15,13 @@ export function useReadingSpeech(source: AskSource, analysisId: string | undefin
       async (step, signal) => {
         const activityRunId = activity.begin();
         const targetId = step.id.replace(/^reading-/, '');
-        const path =
-          'documentId' in source
-            ? `/api/documents/${encodeURIComponent(source.documentId)}/reading-passage`
-            : `/api/demo/${encodeURIComponent(source.paper)}/reading-passage`;
+        const path = `/api/documents/${encodeURIComponent(source.documentId)}/reading-passage`;
         const result = await apiRequest<ReadingPassage>(path, {
           method: 'POST',
           body: JSON.stringify({
             targetId,
             removeCitations,
-            ...('documentId' in source ? { analysisId, activityRunId } : {}),
+            analysisId, activityRunId,
           }),
           signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
         });

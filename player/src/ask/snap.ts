@@ -9,7 +9,6 @@ import type { RegionSelection } from './regionSelection';
 
 /** The model answers within about 8 s on the server; the browser gives up a little after that. */
 const WAIT_MS = 15_000;
-const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 /**
  * The outline of the object inside the region, or null when there is none to show (a failed snap, no server, no
@@ -29,19 +28,7 @@ export async function snapObject(
     signal: AbortSignal.any([AbortSignal.timeout(WAIT_MS), ...(signal ? [signal] : [])]),
   };
   try {
-    let reply: unknown;
-    if ('documentId' in source) {
-      reply = await apiRequest<unknown>(`/api/documents/${encodeURIComponent(source.documentId)}/snap`, init);
-    } else {
-      // Demo papers have no session; the API answers them only in local development.
-      const response = await fetch(`${apiBase}/api/demo/${encodeURIComponent(source.paper)}/snap`, {
-        ...init,
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-      });
-      if (!response.ok) return null;
-      reply = await response.json();
-    }
+    const reply = await apiRequest<unknown>(`/api/documents/${encodeURIComponent(source.documentId)}/snap`, init);
     return parseSnapped(reply, page);
   } catch {
     return null;

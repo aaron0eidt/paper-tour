@@ -1,7 +1,7 @@
 # Plan
 
 Implementation update (2026-10-28): current verified work is in [STATUS.md](STATUS.md); local additional document
-workflows in [LOCAL-WORKFLOWS.md](LOCAL-WORKFLOWS.md), voice in [VOICE.md](VOICE.md), rehearsal in [DEMO.md](DEMO.md).
+workflows in [LOCAL-WORKFLOWS.md](LOCAL-WORKFLOWS.md), voice in [VOICE.md](VOICE.md), rehearsal in [current library setup](../README.md#local-library-setup).
 The modes and P1/P2 items below describe the broader product direction; they are not all implemented features.
 
 Paper Tour turns a document into a tutor that reads it with you. A voice explains while the page moves: it lights

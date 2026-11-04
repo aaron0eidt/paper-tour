@@ -263,7 +263,7 @@ and tested; its breakpoint now also covers the previously inaccessible 581–860
   [LOCAL-WORKFLOWS.md](LOCAL-WORKFLOWS.md).
 - **Demo:** reproducible CC0 synthetic documents and explicitly authored offline renderer fixtures, local instructions,
   pitch rehearsal script and a labelled 22-second silent backup video. These are not unedited real model outputs or
-  evidence of writer quality. See [DEMO.md](DEMO.md). Name candidates remain Nib, Penlight and Lupe; no name selected.
+  evidence of writer quality. See [current library setup](../README.md#local-library-setup). Name candidates remain Nib, Penlight and Lupe; no name selected.
 
 **Verified on the Air:** build passes; all player suites pass; server 142 pass / 6 database-only skips in the ordinary
 run, and 194/194 pass with isolated local Supabase (zero skips). Ingestion 53/53 passes with local Tesseract language
@@ -362,8 +362,7 @@ findings were confirmed and 2 refuted. All of them, with evidence and suggested 
 6. Push to GitHub (ask Aaron; main is ahead of origin, pull --rebase first).
 7. Later: push-to-talk with Muse Voice Transcribe, course packs, contracts with "what changed", life admin.
 
-**Running the static demo:** after the README quick start, `npm run dev` in `player/` (or `npm run dev:demo` from the
-root), then open http://localhost:5174/?paper=attention. Add `&silent=1&rate=4` to test quickly without speech.
+**Current local entry point:** use the authenticated library at http://localhost:5174/ after `npm run dev`. Static demo routes and assets have been retired.
 
 **Local Supabase with Colima:** `npm run supabase:start` fails with "bind source path does not exist: /var/folders/…",
 because the experimental stack mounts a temp folder that Colima's VM cannot see (it shares only your home folder).

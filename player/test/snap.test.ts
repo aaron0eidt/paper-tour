@@ -160,54 +160,17 @@ function fakeFetch(handler: (call: FetchCall) => Response | Promise<Response>) {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-await test('a demo paper is snapped through its own endpoint with the box in points', async () => {
-  fakeFetch(() => json(reply(ellipse(300, 250, 150, 130))));
-  const snapped = await snapObject({ paper: 'attention-short' }, selection, page);
-  eq(calls.length, 1, 'one request');
-  eq(calls[0].url, '/api/demo/attention-short/snap');
-  eq(calls[0].init.method, 'POST');
-  eq(JSON.parse(String(calls[0].init.body)), { page: 2, box: [150, 100, 450, 400] }, 'body');
-  eq(snapped?.bbox, [150, 120, 450, 380], 'the outline comes back');
-});
 
-await test('no outline never throws: the rectangle stays for every failure', async () => {
-  fakeFetch(() => json({ ok: false, reason: 'low_confidence' }));
-  eq(await snapObject({ paper: 'p' }, selection, page), null, 'ok false');
-  fakeFetch(() => json({ error: { message: 'Snapping is not available on this server.' } }, 503));
-  eq(await snapObject({ paper: 'p' }, selection, page), null, 'server error');
-  fakeFetch(() => json({}, 404));
-  eq(await snapObject({ paper: 'p' }, selection, page), null, 'no API running');
-  fakeFetch(() => {
-    throw new TypeError('network down');
-  });
-  eq(await snapObject({ paper: 'p' }, selection, page), null, 'network error');
-  fakeFetch(() => new Response('<html>', { status: 200 }));
-  eq(await snapObject({ paper: 'p' }, selection, page), null, 'a reply that is not JSON');
-  fakeFetch(() => json({ ok: true, polygon: 'x', bbox: 3 }));
-  eq(await snapObject({ paper: 'p' }, selection, page), null, 'a reply that is not an outline');
-});
 
 await test('a library document without a session does not snap; a drag that holds no object is not sent', async () => {
   fakeFetch(() => json(reply(ellipse(300, 250, 150, 130))));
   eq(await snapObject({ documentId: 'doc-1' }, selection, page, 'a-1'), null, 'not signed in');
   eq(calls.length, 0, 'nothing is sent without a session');
-  eq(await snapObject({ paper: 'p' }, { page: 1, rect: [0, 0, 1, 1] }, page), null, 'the whole page');
-  eq(await snapObject({ paper: 'p' }, { page: 1, rect: [0.1, 0.1, 0.11, 0.11] }, page), null, 'a speck');
+  eq(await snapObject({ documentId: 'doc-1' }, { page: 1, rect: [0, 0, 1, 1] }, page), null, 'the whole page');
+  eq(await snapObject({ documentId: 'doc-1' }, { page: 1, rect: [0.1, 0.1, 0.11, 0.11] }, page), null, 'a speck');
   eq(calls.length, 0, 'and no model call is spent on them');
 });
 
-await test('a snap that is no longer wanted can be abandoned', async () => {
-  const controller = new AbortController();
-  fakeFetch(
-    (call) =>
-      new Promise<Response>((_, reject) => {
-        (call.init.signal as AbortSignal).addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
-      }),
-  );
-  const pending = snapObject({ paper: 'p' }, selection, page, undefined, controller.signal);
-  controller.abort();
-  eq(await pending, null, 'aborted');
-});
 
 globalThis.fetch = realFetch;
 console.log(results.join('\n'));
