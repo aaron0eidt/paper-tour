@@ -1,3 +1,4 @@
+import { generationWorkspace } from './ai/workspace';
 import { BUILTIN_TOUR_PROFILES, profileSnapshot, sameTourProfile, validTourDepth } from '../../shared/tourProfiles';
 import type { TourProfileSnapshot } from '../../shared/tourProfiles';
 import { generationRecorder } from './activity';
@@ -404,6 +405,7 @@ export class TourWorker {
             doc: input.doc,
             images,
             profile: row.profile ?? undefined,
+            workspace: generationWorkspace(this.db.pool, generationId, record),
             onEvent,
           },
           onProgress,

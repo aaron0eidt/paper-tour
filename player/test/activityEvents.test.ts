@@ -99,7 +99,15 @@ test('preparation state cannot label actual speech as paused or failed', () => {
 });
 
 test('foreground speech generation belongs to the companion, including between spoken chunks', () => {
-  const playback = { playing: true, speaking: false, generating: true, canPlay: true, page: 3, words: ['Ready.'], word: 0 };
+  const playback = {
+    playing: true,
+    speaking: false,
+    generating: true,
+    canPlay: true,
+    page: 3,
+    words: ['Ready.'],
+    word: 0,
+  };
   const paused = run('reading', 'reading', 'paused', '2026-11-03T12:00:00Z');
   for (const activity of [undefined, paused, { ...paused, status: 'failed' as const }]) {
     const presence = companionPresence(activity, 'reading', playback);
@@ -107,7 +115,10 @@ test('foreground speech generation belongs to the companion, including between s
     assert.equal(presence.label, 'Generating speech…');
   }
   assert.equal(companionPresence(paused, 'reading', { ...playback, playing: false }).mood, 'paused');
-  assert.equal(companionPresence(paused, 'reading', { ...playback, generating: false, speaking: true }).mood, 'speaking');
+  assert.equal(
+    companionPresence(paused, 'reading', { ...playback, generating: false, speaking: true }).mood,
+    'speaking',
+  );
 });
 
 test('expanding a composer keeps the sphere stationary when there is room beside it', () => {
@@ -145,9 +156,22 @@ test('artwork keeps the character in its own footer rather than following the qu
 
 test('visual validation failure is not reported as an empty provider response', () => {
   const output = modelOutput([{ ...event('1', 'model.failed'), data: { code: 'visual_validation_failed' } }]);
-  assert.equal(output, 'The generated visualization failed rendering checks after repair. The tour was interrupted to avoid publishing a broken visual.');
+  assert.equal(
+    output,
+    'The generated visualization failed rendering checks after repair. The tour was interrupted to avoid publishing a broken visual.',
+  );
 });
 
- test('rendering failures retain the actionable tool diagnostic', () => {
-  assert.equal(modelOutput([{ ...event('1', 'tool.completed'), data: { failed: true, error: 'Frame 0: invalid data access' } }]), 'Frame 0: invalid data access');
+test('rendering failures retain the actionable tool diagnostic', () => {
+  assert.equal(
+    modelOutput([{ ...event('1', 'tool.completed'), data: { failed: true, error: 'Frame 0: invalid data access' } }]),
+    'Frame 0: invalid data access',
+  );
+});
+
+test('tour validation rejection is distinguished from an empty model response', () => {
+  assert.equal(
+    modelOutput([{ ...event('1', 'model.failed'), data: { code: 'invalid_tour_direction' } }]),
+    'Tour validation rejected an explanation or visual. See the validation events for the specific problems and repair diagnostics.',
+  );
 });

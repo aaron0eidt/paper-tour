@@ -1,3 +1,4 @@
+import { workKey } from '../ai/workspace';
 import type { BoardItem } from '../../../shared/paper';
 import { plotlyFigure } from '../../../shared/plotly';
 import { computePlotlyPython } from './plotly-compute';
@@ -48,18 +49,35 @@ export async function authorAndInspectVisual(
     narration: string;
     evidence: string;
     signal?: AbortSignal;
+    onItem?: (item: AuthoredVisual) => Promise<void>;
     repair: (feedback: VisualRepairContext) => Promise<AuthoredVisual>;
     review?: (feedback: VisualRepairContext) => Promise<string[]>;
   },
 ): Promise<AuthoredVisual> {
   let item = initial;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const failedStates = new Map<string, number>();
+  for (let attempt = 0; ; attempt++) {
+    context.signal?.throwIfAborted();
+    await context.onItem?.(item);
     const inspection = await inspectAuthoredVisual(item, context.signal);
     const feedback = { ...inspection, item, narration: context.narration, evidence: context.evidence, attempt };
     if (!inspection.problems.length && context.review) feedback.problems.push(...(await context.review(feedback)));
     if (!feedback.problems.length) return item;
-    if (attempt === 2) throw new VisualValidationError(feedback.problems);
+    // Continue improving visuals beyond an arbitrary total attempt count. Repeated identical
+    // rendered output (or the same execution failure with no frames) is a genuine lack of progress.
+    const state = workKey(
+      feedback.frames.length
+        ? { frames: feedback.frames.map(({ t, image, calculations }) => ({ t, image, calculations })) }
+        : { problems: [...feedback.problems].sort() },
+    );
+    const repeats = (failedStates.get(state) ?? 0) + 1;
+    failedStates.set(state, repeats);
+    if (repeats >= 3)
+      throw new VisualValidationError([
+        ...feedback.problems,
+        'Repair repeatedly produced the same failed rendered state; change the construction before continuing.',
+      ]);
+    context.signal?.throwIfAborted();
     item = await context.repair(feedback);
   }
-  throw new Error('Unreachable visual authoring state');
 }

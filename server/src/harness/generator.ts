@@ -1,3 +1,11 @@
+import { workKey } from '../ai/workspace';
+import {
+  visualRepairSchema,
+  visualRepairTask,
+  mergeVisualRepair,
+  representationSchema,
+  revisedRepresentation,
+} from './direction-repair';
 import { claimsNumericExample } from './example';
 import { randomUUID } from 'node:crypto';
 import { indexElements } from '../elements';
@@ -297,6 +305,14 @@ export class HarnessTourGenerator implements TourGenerator {
       });
       try {
         const reviewed = await reviewAuthoredWithModel(item, {
+          workspace: input.workspace,
+          workspaceScope: workKey({
+            model: this.model,
+            source: doc.source.sha256,
+            profile: input.profile,
+            harness: HARNESS_VERSION,
+            beat,
+          }),
           client: {
             complete: (...args: Parameters<MuseClient['complete']>) => {
               const [messages, name, schema, maxTokens, within] = args;
@@ -989,7 +1005,50 @@ export class HarnessTourGenerator implements TourGenerator {
         };
       };
       let now = setup(chosen);
-      let direction: Direction | null = null;
+      let baseTask = now.task.slice();
+      const workspaceKey = workKey({
+        type: 'direction',
+        version: 1,
+        harness: HARNESS_VERSION,
+        model: this.model,
+        source: doc.source.sha256,
+        profile: input.profile,
+        beat,
+        chosen,
+        schema: now.schema,
+        task: baseTask,
+      });
+      const saved = (await input.workspace?.load(workspaceKey)) as
+        | {
+            status: 'draft' | 'inspect' | 'ready';
+            raw?: Record<string, unknown>;
+            problems?: string[];
+            result?: BeatResult;
+            direction?: Direction;
+            revision?: number;
+            visual?: StepVisual;
+            replanned?: boolean;
+          }
+        | undefined;
+      let replanned = saved?.replanned ?? false;
+      if (saved?.visual) {
+        now = setup(saved.visual);
+        baseTask = now.task.slice();
+        visuals?.set(beat.id, saved.visual);
+      }
+      if (saved?.status === 'ready' && saved.result) {
+        await input.onEvent?.('workspace.reused', { beat: beat.id, status: 'ready' });
+        await progress('writing', ++directed, beats.length);
+        return saved.result;
+      }
+      let repairRevision = saved?.revision ?? 0;
+      // A checker fix may make this draft valid already. Re-run its normal checks before paying for another repair.
+      let pendingDraft = saved?.status === 'draft' ? saved.raw : undefined;
+      let repairDraft: Record<string, unknown> | undefined;
+      if (pendingDraft) {
+        await input.onEvent?.('workspace.reused', { beat: beat.id, status: 'draft', problems: saved?.problems });
+      }
+      let direction: Direction | null = saved?.status === 'inspect' && saved.direction ? saved.direction : null;
       let requireExample = now.example.required;
       // A step that mostly restates its highlighted sentences, or runs past its cap, is sent back once; until then its
       // direction is kept. A rewrite that was only to shorten it and is not shorter does not replace it.
@@ -1002,7 +1061,7 @@ export class HarnessTourGenerator implements TourGenerator {
       // then given up; the step says what it lost, and that it was the time.
       let slow = 0;
       let ceiling: Effort = 'high';
-      let tries = 3;
+      let tries = pendingDraft ? 4 : 3;
       const gave = new Set<'board' | 'example'>();
       // Why the latest try gave no usable narration, for a step that ends without any; and whether that narration, asked
       // for alone, was nothing without the worked example (it repeated the overview).
@@ -1047,25 +1106,34 @@ export class HarnessTourGenerator implements TourGenerator {
           // A repair gets what is left of the step's time, and at least repairMs: one of a faulty board, and one after a
           // first try that gave nothing usable (its task carries the turn that says what to fix).
           const repairing = direction ? correcting : now.task.length > now.asked;
-          const completion = await call(
-            now.task,
-            'beat_direction',
-            now.schema,
-            detailed ? 12_000 : 6_000,
-            effort,
-            signal,
-            { id: beat.id, label: beat.point },
-            repairing ? Math.min(own, Math.max(pace.repairMs, pace.stepMs - spent())) : own,
-          );
-          const rawSay = (completion.value as { say?: unknown } | null)?.say;
+          const replay = pendingDraft;
+          pendingDraft = undefined;
+          const completion = replay
+            ? { value: replay }
+            : await call(
+                now.task,
+                'beat_direction',
+                repairDraft ? visualRepairSchema(now.schema, repairDraft) : now.schema,
+                detailed ? 12_000 : 6_000,
+                effort,
+                signal,
+                { id: beat.id, label: beat.point },
+                repairing ? Math.min(own, Math.max(pace.repairMs, pace.stepMs - spent())) : own,
+              );
+          const wasVisualRepair = !replay && !!repairDraft;
+          const value = repairDraft
+            ? mergeVisualRepair(repairDraft, completion.value as Record<string, unknown>)
+            : completion.value;
+          if (wasVisualRepair) now.task = baseTask.slice();
+          const rawSay = (value as { say?: unknown } | null)?.say;
           requireExample ||=
             now.example.offered &&
-            ((completion.value as { example?: unknown } | null)?.example !== undefined ||
+            ((value as { example?: unknown } | null)?.example !== undefined ||
               (typeof rawSay === 'string' && claimsNumericExample(rawSay)));
           const corruption = typeof rawSay === 'string' ? narrationProblems(rawSay) : [];
           const cleaned = corruption.length
             ? null
-            : cleanDirection(completion.value, beat, now.targets, requireExample, now.visual);
+            : cleanDirection(value, beat, now.targets, requireExample, now.visual);
           if (corruption.length) {
             await input.onEvent?.('validation.failed', {
               stage: 'narration',
@@ -1073,7 +1141,7 @@ export class HarnessTourGenerator implements TourGenerator {
               problems: corruption,
               attempt: attempt + 1,
             });
-            now.task.push(...repairTurn(completion.value, corruption));
+            now.task.push(...repairTurn(value, corruption));
           }
           const copied = cleaned && readsSource(cleaned.say, doc);
           const repeated = cleaned && overview && repeatsExplanation(cleaned.say, overview);
@@ -1085,14 +1153,14 @@ export class HarnessTourGenerator implements TourGenerator {
           if (repeated) {
             await input.onEvent?.('beat.duplicate', { beat: beat.id, attempt: attempt + 1 });
             now.task.push(
-              ...repairTurn(completion.value, [
+              ...repairTurn(value, [
                 `This repeats the preceding overview. Teach a new ${now.visual?.bare ? '' : 'worked example, '}cause-and-effect mechanism or comparison instead; do not rephrase the same symbol definitions.`,
               ]),
             );
           }
           if (copied)
             now.task.push(
-              ...repairTurn(completion.value, [
+              ...repairTurn(value, [
                 'Explain the mechanism, consequence or intuition in your own words; do not read the source aloud.',
               ]),
             );
@@ -1114,9 +1182,78 @@ export class HarnessTourGenerator implements TourGenerator {
               problems: issues,
               attempt: attempt + 1,
             });
-            now.task.push(...repairTurn(completion.value, issues));
+            if (adaptive && next && !next.visualProblems?.length) {
+              repairDraft = value as Record<string, unknown>;
+              repairRevision++;
+              if (
+                repairRevision >= 3 &&
+                !replanned &&
+                now.visual &&
+                now.visual.visual !== 'none' &&
+                (repairDraft[now.visual.visual] || repairDraft.example)
+              ) {
+                const previous = now.visual.visual;
+                const decision = await call(
+                  [
+                    {
+                      role: 'developer',
+                      content:
+                        'Choose a better visual tool for the same saved explanation. The previous representation could not pass its checks. Preserve its learning objective, source facts and narration; choose a different supported representation with meaningful quantitative or spatial behavior. Do not omit the visualization or invent a simpler unrelated task. Return a representation decision, not narration or visual code.',
+                    },
+                    {
+                      role: 'user',
+                      content: [
+                        {
+                          type: 'text',
+                          text: JSON.stringify({
+                            source: beatBrief(beat, doc, now.targets, now.visual),
+                            narration: next.say,
+                            previous: now.visual,
+                            draft: repairDraft,
+                            problems: issues,
+                          }),
+                        },
+                        ...imageParts(seen),
+                      ],
+                    },
+                  ],
+                  'visual_repair_plan',
+                  representationSchema(previous),
+                  6000,
+                  'low',
+                  signal,
+                  { id: beat.id, label: 'Choose a better representation for the same explanation' },
+                );
+                const revised = revisedRepresentation(decision.value, previous);
+                now = setup(revised);
+                baseTask = now.task.slice();
+                visuals?.set(beat.id, revised);
+                requireExample = now.example.required;
+                replanned = true;
+                tries = Math.max(tries, attempt + 4);
+                await input.onEvent?.('visual.replanned', {
+                  beat: beat.id,
+                  previous,
+                  visual: revised.visual,
+                  reason: (decision.value as { reason: string }).reason,
+                });
+              }
+              await input.workspace?.save(workspaceKey, {
+                status: 'draft',
+                raw: repairDraft,
+                problems: issues,
+                revision: repairRevision,
+                visual: now.visual,
+                replanned,
+              });
+              now.task = visualRepairTask(baseTask, repairDraft, issues, repairRevision);
+            } else {
+              repairDraft = undefined;
+              now.task.push(...repairTurn(value, issues));
+            }
             continue;
           }
+          repairDraft = undefined;
           if (next && (adaptive || (!rewrites && attempt < 2))) {
             // A step on slides is held against the slides' whole text, which the learner can read; any other against
             // the sentences it highlights.
@@ -1154,12 +1291,12 @@ export class HarnessTourGenerator implements TourGenerator {
                   problems: [...moves, ...callback, ...long],
                   attempt: attempt + 1,
                 });
-              now.task.push(...repairTurn(completion.value, repairs));
+              now.task.push(...repairTurn(value, repairs));
             }
           }
           if (!next)
             now.task.push(
-              ...repairTurn(completion.value, [
+              ...repairTurn(value, [
                 beat.flexibleNarration
                   ? 'Provide a complete explanation of the planned learning objective, with actual narration instead of empty or malformed text. Preserve necessary reasoning and qualifications; no word target applies.'
                   : `say must be 8-${sayLimit(beat)} spoken words.`,
@@ -1236,6 +1373,8 @@ export class HarnessTourGenerator implements TourGenerator {
       const filled = withReadyView(settled.direction, now.targets, now.visual);
       if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: now.visual!.visual });
       const ready = filled ?? settled.direction;
+      // Persist the checked text/cues before asynchronous rendering, which may be interrupted independently.
+      await input.workspace?.save(workspaceKey, { status: 'inspect', direction: ready, visual: now.visual, replanned });
       if (ready.board)
         ready.board = await inspectVisual(
           ready.board,
@@ -1263,11 +1402,9 @@ export class HarnessTourGenerator implements TourGenerator {
               ),
             }
           : undefined;
-      return {
-        targets: now.targets,
-        direction: ready,
-        ...(degraded ? { degraded } : {}),
-      };
+      const result = { targets: now.targets, direction: ready, ...(degraded ? { degraded } : {}) };
+      await input.workspace?.save(workspaceKey, { status: 'ready', result, visual: now.visual, replanned });
+      return result;
     };
     // The tour as one step list per beat: a beat's own steps, or none for an omitted detail or a step that only read the
     // source aloud. Built once per beat, since a finished beat never changes.

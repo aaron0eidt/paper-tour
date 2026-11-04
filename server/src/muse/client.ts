@@ -54,6 +54,7 @@ export class MuseClient {
   ): Promise<Completion> {
     if (!this.config.apiKey.trim())
       throw new ProcessingError('muse_not_configured', 'Connect Meta in Profile & Settings.');
+    const responseSchema = sdkSchema(schema);
     const operation = currentActivity()?.start(modelActivityNames[name] ?? 'Prepare the explanation', 'model');
     const abort = AbortSignal.any([AbortSignal.timeout(this.config.timeoutMs), ...(signal ? [signal] : [])]);
     const options = {
@@ -71,7 +72,7 @@ export class MuseClient {
           )
           .join('\n') || undefined,
       messages: sdkMessages(messages.filter((m) => m.role !== 'developer')),
-      output: Output.object({ schema: jsonSchema(sdkSchema(schema)), name }),
+      output: Output.object({ schema: jsonSchema(responseSchema), name }),
       maxOutputTokens: maxTokens,
       providerOptions: { muse: { reasoningEffort: effort, strictJsonSchema: false } },
       abortSignal: abort,

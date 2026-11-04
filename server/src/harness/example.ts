@@ -112,11 +112,23 @@ function visibleText(item: BoardItem): string[] {
   if (item.kind === 'plot') return item.curves.map((c) => c.label);
   return []; // Frames only use the kinds in LEGACY_BOARD_KINDS.
 }
-function visibleNumbers(item: BoardItem): number[] {
+/** Names may contain numerical identifiers (e.g. a model variant); these are not scalar operands.
+ * Only identifiers already declared in the input names are exempt. Numeric values still undergo provenance checks.
+ */
+function visibleNumbers(item: BoardItem, inputNames: readonly string[] = []): number[] {
+  const normalize = (token: string) => token.normalize('NFKC').toLowerCase().replace(/[‐‑–]/g, '-');
+  const namedTokens = new Set(
+    inputNames
+      .flatMap((name) => name.match(/[\p{L}\p{N}][\p{L}\p{N}._‐‑–-]*/gu) ?? [])
+      .filter((token) => /\p{L}/u.test(token) && /\p{N}/u.test(token) && !Number.isFinite(Number(normalize(token))))
+      .map(normalize),
+  );
+  const withoutNames = (text: string) =>
+    text.replace(/[\p{L}\p{N}][\p{L}\p{N}._‐‑–-]*/gu, (token) => (namedTokens.has(normalize(token)) ? '' : token));
   const labels = visibleText(item)
     .map((text) =>
       // 2.3 × 10^19 is one number, not a 2.3, a 10 and a 19
-      eNotation(text.replace(/\b(?:key|head|token|node|component|layer|position)\s+\d+\b/gi, ''))
+      eNotation(withoutNames(text).replace(/\b(?:key|head|token|node|component|layer|position)\s+\d+\b/gi, ''))
         .replace(/\\[A-Za-z]+/g, ' ')
         .replace(/\^\s*(?:\{\(?[+−-]?\d+\)?\}|\([+−-]?\d+\)|[+−-]?\d+)/g, ''),
     )
@@ -193,12 +205,15 @@ function displayedCalculationProblems(item: BoardItem, exact: ExactValues): stri
       .replace(/,\s*\\(?:quad|qquad|\s)/g, ';')
       .replace(/[−–]/g, '-')
       .replace(/≈/g, '=');
-    for (let i = 0; i < 4; i++) text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+    for (let i = 0; i < 4; i++) text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '(($1)/($2))');
     text = text
       .replace(/\\sqrt\{([^{}]+)\}/g, 'sqrt($1)')
       .replace(/\\(?:mathrm|text|operatorname)\{([^{}]+)\}/g, '$1')
       .replace(/[{}]/g, '')
-      .replace(/\\(sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\b/gi, '$1');
+      .replace(/\\(sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\b/gi, '$1')
+      // Display notation permits implicit products; execution still uses the bounded arithmetic parser.
+      .replace(/(\d|\))\s*(?=\()/g, '$1*')
+      .replace(/(\d|\))\s*(?=(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\()/gi, '$1*');
     // Comma-separated parameter assignments are separate statements, not chains.
     // Split only at top level: commas inside max/softmax or tuples belong to
     // their expression, while "8/8=1, 6/8=.75" contains two equations.
@@ -243,9 +258,10 @@ function displayedCalculationProblems(item: BoardItem, exact: ExactValues): stri
           !/^(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(/i.test(left)
         )
           continue;
-        const start = /[+\-]?\s*\b(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(|[+\-]?(?:\d|\.\d)|\(/.exec(
-          left,
-        );
+        const start =
+          /[+\-]?\s*\b(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(|[+\-]?(?:\d|\.\d)|\(/.exec(
+            left,
+          );
         if (!start) continue;
         const expression = left.slice(start.index).trim();
         const prefix = left.slice(0, start.index);
@@ -362,6 +378,7 @@ export function checkExample(
     problems.push('Declare 1–8 named finite illustrative input values.');
   if (!calculations.length || calculations.length > 10)
     problems.push('Declare 1–10 concrete calculations and their results.');
+  const inputNames = inputs.map((input) => clean(input.label));
   const results: number[] = [];
   const exact = new Map<number, number>();
   const operands = [-1, 0, 1, Math.PI, Math.E, ...inputs.flatMap((i) => (finite(i.value) ? [i.value] : []))];
@@ -449,7 +466,7 @@ export function checkExample(
       const subtracted = visibleText(preview).flatMap((text) =>
         [...text.matchAll(/[\d)]\s*[-−]\s*(\d+(?:\.\d+)?)/g)].map((match) => Number(match[1])),
       );
-      const unsupported = visibleNumbers(preview).find(
+      const unsupported = visibleNumbers(preview, inputNames).find(
         (n) => !allowed.some((v) => displayed(n, v) || (v < 0 && subtracted.includes(n) && displayed(n, -v))),
       );
       if (unsupported !== undefined)
@@ -492,7 +509,10 @@ export function checkExample(
       problems.push(
         'First and final example frames must show concrete inputs/results in formula, flow, bars or scene text/matrices; plot axis bounds alone do not demonstrate a calculation.',
       );
-    if (!first || !visibleNumbers(first).some((n) => inputs.some((i) => finite(i.value) && displayed(n, i.value))))
+    if (
+      !first ||
+      !visibleNumbers(first, inputNames).some((n) => inputs.some((i) => finite(i.value) && displayed(n, i.value)))
+    )
       problems.push(
         `The first example frame must visibly contain declared starting values (${inputs
           .filter((i) => finite(i.value))
@@ -501,7 +521,7 @@ export function checkExample(
             ', ',
           )}). Show these in frame 1 and preserve them while fixing other frames; a symbolic parent formula or later input frame is insufficient.`,
       );
-    if (!last || !visibleNumbers(last).some((n) => results.some((r) => displayed(n, r))))
+    if (!last || !visibleNumbers(last, inputNames).some((n) => results.some((r) => displayed(n, r))))
       problems.push('The final example frame must visibly contain a checked computed result.');
   }
   return problems.length ? { problems } : { example: { assumptions, frames: checked }, problems: [] };

@@ -363,7 +363,15 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['plan', 'say', 'cues'],
+    required: [
+      'plan',
+      'say',
+      'cues',
+      ...(strict && visual?.flexible && visual.visual !== 'none' && !offered ? [visual.visual] : []),
+    ],
+    ...(strict && visual?.flexible && visual.visual !== 'none' && offered
+      ? { anyOf: [{ required: [visual.visual] }, { required: ['example'] }] }
+      : {}),
     properties: {
       plan: strict
         ? {
@@ -382,7 +390,7 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
                 ...boardSchema(kind),
                 description:
                   visual?.flexible && visual.visual === kind
-                    ? `Selected visual for this teaching step: supply a complete valid ${kind} board, or a validated worked example that demonstrates the same planned concept. Do not omit it or supply an empty placeholder.`
+                    ? `Selected visual for this teaching step: supply a complete valid ${kind} board, or a validated worked example that demonstrates the same planned concept. Return exactly one representation: this board OR example, never both. Do not omit it or supply an empty placeholder.`
                     : kind === 'scene'
                       ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
                       : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,
@@ -446,7 +454,8 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const readingOrder = sourceOrder(doc);
   const quote = (ids: string[]) =>
-    [...ids].sort((a, b) => (readingOrder.get(a) ?? Infinity) - (readingOrder.get(b) ?? Infinity))
+    [...ids]
+      .sort((a, b) => (readingOrder.get(a) ?? Infinity) - (readingOrder.get(b) ?? Infinity))
       .map((id) => sentences.get(id))
       .filter(Boolean)
       .map((s) => `[${s!.id}] ${s!.text}`);
@@ -538,8 +547,11 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
     const table = doc.figures.find((f) => f.id === targets.table);
     if (table) lines.push(...cells(table));
   } else {
-    lines.push('EVIDENCE IN PDF READING ORDER (not importance order):', ...quote(beat.evidence),
-      'Plan narration and anchors together along these passages: premises above before their consequence below. Do not highlight a bottom conclusion and then jump upward to its premises. Announce any useful return for a comparison.');
+    lines.push(
+      'EVIDENCE IN PDF READING ORDER (not importance order):',
+      ...quote(beat.evidence),
+      'Plan narration and anchors together along these passages: premises above before their consequence below. Do not highlight a bottom conclusion and then jump upward to its premises. Announce any useful return for a comparison.',
+    );
     const more = (beat.boardEvidence ?? []).filter((id) => !beat.evidence.includes(id));
     if (more.length) lines.push('MORE NUMBERS FOR THE BARS ONLY (other steps speak about them):', ...quote(more));
     const data = (targets.visualEvidence ?? []).filter((id) => !more.includes(id));

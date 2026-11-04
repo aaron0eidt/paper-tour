@@ -1,3 +1,4 @@
+import { workKey, type GenerationWorkspace } from '../ai/workspace';
 import type { Completion, MuseClient, MuseMessage, MuseContent } from '../muse/client';
 import { withGrowingOutputBudget } from '../ai/output-budget';
 import { boardSchema } from '../harness/board';
@@ -30,6 +31,8 @@ const feedbackParts = (feedback: VisualRepairContext): MuseContent[] => [
 ];
 export interface ModelVisualContext {
   client: Pick<MuseClient, 'complete'>;
+  workspace?: GenerationWorkspace;
+  workspaceScope?: string;
   narration: string;
   evidence: string;
   sourceImages?: string[];
@@ -61,7 +64,21 @@ export async function reviewAuthoredWithModel(
     context.onCompletion?.(completion);
     return completion.value;
   };
-  return authorAndInspectVisual(item, {
+  const checkpointKey = workKey({
+    type: 'authored-visual',
+    version: 1,
+    scope: context.workspaceScope,
+    item,
+    narration: context.narration,
+    evidence: context.evidence,
+    sources: context.allowedSourceRefs,
+    sourceImages: context.sourceImages,
+  });
+  const saved = (await context.workspace?.load(checkpointKey)) as { item?: AuthoredVisual } | undefined;
+  return authorAndInspectVisual(saved?.item ?? item, {
+    onItem: context.workspace
+      ? async (current) => context.workspace!.save(checkpointKey, { item: current })
+      : undefined,
     narration: context.narration,
     evidence: context.evidence,
     signal: context.signal,

@@ -1,3 +1,4 @@
+import type { GenerationWorkspace } from '../src/ai/workspace';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TeachingConcept, TeachingPlan } from '../../shared/teachingPlan';
@@ -149,6 +150,7 @@ function scripted(options: {
   pick?: (id: string) => string;
   write: (request: Request) => unknown;
   depth?: 'deep';
+  workspace?: GenerationWorkspace;
 }) {
   const requests: Request[] = [],
     events: { type: string; data: Record<string, any> }[] = [];
@@ -172,6 +174,7 @@ function scripted(options: {
       generator.generate({
         ...input,
         profile: selected,
+        workspace: options.workspace,
         onEvent: async (type, data) => {
           events.push({ type, data });
         },
@@ -338,4 +341,156 @@ test('empty native placeholders cannot satisfy the selected adaptive visual', as
     3,
   );
   assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.degraded'].includes(event.type)));
+});
+
+test('a failed tour resumes its saved visual repair without rewriting its narration or replanning', async () => {
+  const stored = new Map<string, unknown>();
+  const workspace: GenerationWorkspace = {
+    load: async (key) => structuredClone(stored.get(key)),
+    save: async (key, value) => {
+      stored.set(key, structuredClone(value));
+    },
+  };
+  let resume = false;
+  const flow = {
+    title: 'Sensor control loop',
+    nodes: [
+      { id: 'node-1', label: 'Probe reading' },
+      { id: 'node-2', label: 'Controller' },
+      { id: 'node-3', label: 'Valve' },
+    ],
+    edges: [
+      { from: 'node-1', to: 'node-2' },
+      { from: 'node-2', to: 'node-3' },
+      { from: 'node-3', to: 'node-1' },
+    ],
+  };
+  const model = scripted({
+    workspace,
+    pick: (id) => (id === 'teach-controller' ? 'flow' : 'none'),
+    write: (request) => {
+      if (!isController(request)) return direct(request, EXPLAIN);
+      if (!resume) return direct(request, EXPLAIN);
+      assert.match(request.task, /repair_visual_only/);
+      assert.ok(!Object.hasOwn(request.schema.properties, 'say'));
+      return { flow, cues: [], say: 'This must not replace the saved explanation.', plan: 'Changed' };
+    },
+  });
+  await assert.rejects(model.generate(), (error: any) => error.code === 'invalid_tour_direction');
+  const plans = model.requests.filter((request) => /paper_card|teaching_plan|visual_plan/.test(request.name)).length;
+  resume = true;
+  const result = await model.generate();
+  assert.equal(
+    model.requests.filter((request) => /paper_card|teaching_plan|visual_plan/.test(request.name)).length,
+    plans,
+  );
+  const step = result.tour.chapters.flatMap((chapter) => chapter.steps).find((step) => step.id === 'teach-controller');
+  assert.equal(step?.say, EXPLAIN);
+  assert.ok(step.actions.some((action) => action.type === 'board' && action.item.kind === 'flow'));
+  assert.ok(model.events.some((event) => event.type === 'workspace.reused' && event.data.status === 'draft'));
+});
+
+test('a saved draft is rechecked locally before asking for another visual repair', async () => {
+  const stored = new Map<string, unknown>();
+  const workspace: GenerationWorkspace = {
+    load: async (key) => structuredClone(stored.get(key)),
+    save: async (key, value) => {
+      stored.set(key, structuredClone(value));
+    },
+  };
+  const flow = {
+    title: 'Sensor control loop',
+    nodes: [
+      { id: 'node-1', label: 'Probe reading' },
+      { id: 'node-2', label: 'Controller' },
+      { id: 'node-3', label: 'Valve' },
+    ],
+    edges: [
+      { from: 'node-1', to: 'node-2' },
+      { from: 'node-2', to: 'node-3' },
+      { from: 'node-3', to: 'node-1' },
+    ],
+  };
+  const model = scripted({
+    workspace,
+    pick: (id) => (id === 'teach-controller' ? 'flow' : 'none'),
+    write: (request) => direct(request, EXPLAIN),
+  });
+  await assert.rejects(model.generate(), (error: any) => error.code === 'invalid_tour_direction');
+  // Simulate a retained draft that now passes a corrected checker. Its stale diagnostics must not force another call.
+  for (const [key, state] of stored) {
+    const saved = state as { status?: string; raw?: Record<string, unknown> };
+    if (saved.status === 'draft' && saved.raw) stored.set(key, { ...saved, raw: { ...saved.raw, flow } });
+  }
+  const previous = model.requests.filter(isController).length;
+  const result = await model.generate();
+  assert.equal(model.requests.filter(isController).length, previous);
+  const step = result.tour.chapters.flatMap((chapter) => chapter.steps).find((step) => step.id === 'teach-controller');
+  assert.equal(step?.say, EXPLAIN);
+  assert.ok(step.actions.some((action) => action.type === 'board' && action.item.kind === 'flow'));
+});
+
+test('an unsuitable visual is replanned explicitly and rendered without dropping the explanation', async () => {
+  const stored = new Map<string, unknown>();
+  const workspace: GenerationWorkspace = {
+    load: async (key) => structuredClone(stored.get(key)),
+    save: async (key, value) => {
+      stored.set(key, structuredClone(value));
+    },
+  };
+  const model = scripted({
+    workspace,
+    pick: (id) => (id === 'teach-controller' ? 'flow' : 'none'),
+    write: (request) => {
+      if (request.name === 'visual_repair_plan')
+        return {
+          visual: 'plot',
+          idea: 'Show how supply follows a changing local reading.',
+          data: 'Illustrative normalized reading and supply.',
+          reason: 'A changing response teaches the control relationship more directly than a list-like chain.',
+        };
+      if (!isController(request)) return direct(request, EXPLAIN);
+      if (request.schema.properties.plot)
+        return {
+          cues: [],
+          plot: {
+            kind: 'plot',
+            title: 'Illustrative supply by measured need',
+            source: 'illustrative',
+            x: [0, 1],
+            y: [0, 1],
+            curves: [{ expression: '1-x^2', label: 'Supply response' }],
+            marks: [],
+          },
+        };
+      return direct(request, EXPLAIN, {
+        flow: {
+          title: 'Control steps',
+          nodes: [
+            { id: 'node-1', label: 'Probe reading' },
+            { id: 'node-2', label: 'Controller' },
+            { id: 'node-3', label: 'Valve' },
+          ],
+          edges: [
+            { from: 'node-1', to: 'node-2' },
+            { from: 'node-2', to: 'node-3' },
+          ],
+        },
+      });
+    },
+  });
+  const result = await model.generate();
+  const step = result.tour.chapters.flatMap((chapter) => chapter.steps).find((step) => step.id === 'teach-controller');
+  assert.equal(step?.say, EXPLAIN);
+  assert.ok(step.actions.some((action) => action.type === 'board' && action.item.kind === 'plot'));
+  assert.ok(
+    model.events.some(
+      (event) => event.type === 'visual.replanned' && event.data.previous === 'flow' && event.data.visual === 'plot',
+    ),
+  );
+  assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.omitted', 'beat.degraded'].includes(event.type)));
+  const calls = model.requests.length;
+  const repeated = await model.generate();
+  assert.equal(model.requests.length, calls, 'Ready directions and their revised tool choice survive a resumed caller');
+  assert.deepEqual(repeated.tour, result.tour);
 });
