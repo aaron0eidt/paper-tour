@@ -148,7 +148,38 @@ export function sdkMessages(messages: MuseMessage[]): ModelMessage[] {
     };
   });
 }
-export const sdkSchema = (schema: object) => schema as JSONSchema7;
+/** Reject known unsupported constructs locally: the endpoint returns a misleading, retryable 500 for oneOf. */
+export function sdkSchema(schema: object): JSONSchema7 {
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) return node.forEach(visit);
+    const value = node as Record<string, unknown>;
+    if (Array.isArray(value.oneOf))
+      throw new ProcessingError(
+        'muse_schema_unsupported',
+        'The response schema uses unsupported oneOf. Use a supported schema and validate exclusive alternatives in the application.',
+      );
+    for (const key of [
+      'items',
+      'additionalProperties',
+      'anyOf',
+      'allOf',
+      'not',
+      'if',
+      'then',
+      'else',
+      'contains',
+      'prefixItems',
+    ])
+      visit(value[key]);
+    for (const key of ['properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas']) {
+      const children = value[key];
+      if (children && typeof children === 'object') Object.values(children).forEach(visit);
+    }
+  };
+  visit(schema);
+  return schema as JSONSchema7;
+}
 export function modelUsage(usage: LanguageModelUsage): ModelUsage {
   const count = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : 0);
   return {

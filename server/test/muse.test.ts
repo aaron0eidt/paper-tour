@@ -378,3 +378,24 @@ test('shared call recording captures multimodal evidence without inline image by
   assert.equal(completions.length, 1);
   assert(recorded.some((event) => event.type === 'model.completed'));
 });
+
+test('unsupported response unions fail before a provider dispatch instead of retrying HTTP 500', async () => {
+  let dispatches = 0;
+  const client = new MuseClient(settings, (async () => {
+    dispatches++;
+    throw Error('Unexpected provider call');
+  }) as typeof fetch);
+  for (const schema of [
+    { type: 'object', oneOf: [{ required: ['a'] }, { required: ['b'] }] },
+    {
+      type: 'object',
+      properties: { nested: { type: 'array', items: { oneOf: [{ type: 'number' }, { type: 'string' }] } } },
+    },
+  ])
+    await assert.rejects(
+      client.complete([{ role: 'user', content: 'Return a result.' }], 'unsupported_schema', schema, 100),
+      (error: unknown) =>
+        error instanceof ProcessingError && error.code === 'muse_schema_unsupported' && !error.transient,
+    );
+  assert.equal(dispatches, 0);
+});
