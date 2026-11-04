@@ -1,5 +1,11 @@
 import { workKey } from '../ai/workspace';
-import { visualRepairSchema, visualRepairTask, mergeVisualRepair } from './direction-repair';
+import {
+  visualRepairSchema,
+  visualRepairTask,
+  mergeVisualRepair,
+  representationSchema,
+  revisedRepresentation,
+} from './direction-repair';
 import { claimsNumericExample } from './example';
 import { randomUUID } from 'node:crypto';
 import { indexElements } from '../elements';
@@ -999,7 +1005,7 @@ export class HarnessTourGenerator implements TourGenerator {
         };
       };
       let now = setup(chosen);
-      const baseTask = now.task.slice();
+      let baseTask = now.task.slice();
       const workspaceKey = workKey({
         type: 'direction',
         version: 1,
@@ -1020,19 +1026,27 @@ export class HarnessTourGenerator implements TourGenerator {
             result?: BeatResult;
             direction?: Direction;
             revision?: number;
+            visual?: StepVisual;
+            replanned?: boolean;
           }
         | undefined;
+      let replanned = saved?.replanned ?? false;
+      if (saved?.visual) {
+        now = setup(saved.visual);
+        baseTask = now.task.slice();
+        visuals?.set(beat.id, saved.visual);
+      }
       if (saved?.status === 'ready' && saved.result) {
         await input.onEvent?.('workspace.reused', { beat: beat.id, status: 'ready' });
         await progress('writing', ++directed, beats.length);
         return saved.result;
       }
       let repairRevision = saved?.revision ?? 0;
-      let repairDraft = saved?.status === 'draft' ? saved.raw : undefined;
-      if (repairDraft && saved?.problems?.length) {
-        repairRevision++;
-        now.task = visualRepairTask(baseTask, repairDraft, saved.problems, repairRevision);
-        await input.onEvent?.('workspace.reused', { beat: beat.id, status: 'draft', problems: saved.problems });
+      // A checker fix may make this draft valid already. Re-run its normal checks before paying for another repair.
+      let pendingDraft = saved?.status === 'draft' ? saved.raw : undefined;
+      let repairDraft: Record<string, unknown> | undefined;
+      if (pendingDraft) {
+        await input.onEvent?.('workspace.reused', { beat: beat.id, status: 'draft', problems: saved?.problems });
       }
       let direction: Direction | null = saved?.status === 'inspect' && saved.direction ? saved.direction : null;
       let requireExample = now.example.required;
@@ -1047,7 +1061,7 @@ export class HarnessTourGenerator implements TourGenerator {
       // then given up; the step says what it lost, and that it was the time.
       let slow = 0;
       let ceiling: Effort = 'high';
-      let tries = 3;
+      let tries = pendingDraft ? 4 : 3;
       const gave = new Set<'board' | 'example'>();
       // Why the latest try gave no usable narration, for a step that ends without any; and whether that narration, asked
       // for alone, was nothing without the worked example (it repeated the overview).
@@ -1092,17 +1106,21 @@ export class HarnessTourGenerator implements TourGenerator {
           // A repair gets what is left of the step's time, and at least repairMs: one of a faulty board, and one after a
           // first try that gave nothing usable (its task carries the turn that says what to fix).
           const repairing = direction ? correcting : now.task.length > now.asked;
-          const completion = await call(
-            now.task,
-            'beat_direction',
-            repairDraft ? visualRepairSchema(now.schema) : now.schema,
-            detailed ? 12_000 : 6_000,
-            effort,
-            signal,
-            { id: beat.id, label: beat.point },
-            repairing ? Math.min(own, Math.max(pace.repairMs, pace.stepMs - spent())) : own,
-          );
-          const wasVisualRepair = !!repairDraft;
+          const replay = pendingDraft;
+          pendingDraft = undefined;
+          const completion = replay
+            ? { value: replay }
+            : await call(
+                now.task,
+                'beat_direction',
+                repairDraft ? visualRepairSchema(now.schema, repairDraft) : now.schema,
+                detailed ? 12_000 : 6_000,
+                effort,
+                signal,
+                { id: beat.id, label: beat.point },
+                repairing ? Math.min(own, Math.max(pace.repairMs, pace.stepMs - spent())) : own,
+              );
+          const wasVisualRepair = !replay && !!repairDraft;
           const value = repairDraft
             ? mergeVisualRepair(repairDraft, completion.value as Record<string, unknown>)
             : completion.value;
@@ -1167,11 +1185,66 @@ export class HarnessTourGenerator implements TourGenerator {
             if (adaptive && next && !next.visualProblems?.length) {
               repairDraft = value as Record<string, unknown>;
               repairRevision++;
+              if (
+                repairRevision >= 3 &&
+                !replanned &&
+                now.visual &&
+                now.visual.visual !== 'none' &&
+                (repairDraft[now.visual.visual] || repairDraft.example)
+              ) {
+                const previous = now.visual.visual;
+                const decision = await call(
+                  [
+                    {
+                      role: 'developer',
+                      content:
+                        'Choose a better visual tool for the same saved explanation. The previous representation could not pass its checks. Preserve its learning objective, source facts and narration; choose a different supported representation with meaningful quantitative or spatial behavior. Do not omit the visualization or invent a simpler unrelated task. Return a representation decision, not narration or visual code.',
+                    },
+                    {
+                      role: 'user',
+                      content: [
+                        {
+                          type: 'text',
+                          text: JSON.stringify({
+                            source: beatBrief(beat, doc, now.targets, now.visual),
+                            narration: next.say,
+                            previous: now.visual,
+                            draft: repairDraft,
+                            problems: issues,
+                          }),
+                        },
+                        ...imageParts(seen),
+                      ],
+                    },
+                  ],
+                  'visual_repair_plan',
+                  representationSchema(previous),
+                  6000,
+                  'low',
+                  signal,
+                  { id: beat.id, label: 'Choose a better representation for the same explanation' },
+                );
+                const revised = revisedRepresentation(decision.value, previous);
+                now = setup(revised);
+                baseTask = now.task.slice();
+                visuals?.set(beat.id, revised);
+                requireExample = now.example.required;
+                replanned = true;
+                tries = Math.max(tries, attempt + 4);
+                await input.onEvent?.('visual.replanned', {
+                  beat: beat.id,
+                  previous,
+                  visual: revised.visual,
+                  reason: (decision.value as { reason: string }).reason,
+                });
+              }
               await input.workspace?.save(workspaceKey, {
                 status: 'draft',
                 raw: repairDraft,
                 problems: issues,
                 revision: repairRevision,
+                visual: now.visual,
+                replanned,
               });
               now.task = visualRepairTask(baseTask, repairDraft, issues, repairRevision);
             } else {
@@ -1301,7 +1374,7 @@ export class HarnessTourGenerator implements TourGenerator {
       if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: now.visual!.visual });
       const ready = filled ?? settled.direction;
       // Persist the checked text/cues before asynchronous rendering, which may be interrupted independently.
-      await input.workspace?.save(workspaceKey, { status: 'inspect', direction: ready });
+      await input.workspace?.save(workspaceKey, { status: 'inspect', direction: ready, visual: now.visual, replanned });
       if (ready.board)
         ready.board = await inspectVisual(
           ready.board,
@@ -1330,7 +1403,7 @@ export class HarnessTourGenerator implements TourGenerator {
             }
           : undefined;
       const result = { targets: now.targets, direction: ready, ...(degraded ? { degraded } : {}) };
-      await input.workspace?.save(workspaceKey, { status: 'ready', result });
+      await input.workspace?.save(workspaceKey, { status: 'ready', result, visual: now.visual, replanned });
       return result;
     };
     // The tour as one step list per beat: a beat's own steps, or none for an omitted detail or a step that only read the

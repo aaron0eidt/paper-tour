@@ -100,3 +100,13 @@ test('provider work survives a reconstructed caller without charging or dispatch
   assert.equal(dispatches, 2, 'Changed instructions must invalidate saved work');
   assert.notEqual(workKey({ model: 'a' }), workKey({ model: 'b' }));
 });
+
+test('an example repair accepts one representation and removes the obsolete native board contract', () => {
+  const visual = { visual: 'flow' as const, flexible: true, idea: 'Show a merge', data: 'Illustrative' };
+  const schema = directionSchema(beat, beatTargets(beat, doc, visual), true, visual);
+  const repair = visualRepairSchema(schema, { example: { frames: [] }, flow: { nodes: [] } });
+  assert.deepEqual(Object.keys(repair.properties).sort(), ['cues', 'example']);
+  assert.deepEqual(repair.required, ['cues', 'example']);
+  assert.equal('oneOf' in repair, false);
+  assert.ok(Object.hasOwn(schema.properties, 'flow'), 'The original schema remains unchanged');
+});

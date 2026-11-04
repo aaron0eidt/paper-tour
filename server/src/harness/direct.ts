@@ -390,7 +390,7 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
                 ...boardSchema(kind),
                 description:
                   visual?.flexible && visual.visual === kind
-                    ? `Selected visual for this teaching step: supply a complete valid ${kind} board, or a validated worked example that demonstrates the same planned concept. Do not omit it or supply an empty placeholder.`
+                    ? `Selected visual for this teaching step: supply a complete valid ${kind} board, or a validated worked example that demonstrates the same planned concept. Return exactly one representation: this board OR example, never both. Do not omit it or supply an empty placeholder.`
                     : kind === 'scene'
                       ? 'Optional complete live scene. Omit when using example.frames; never insert a placeholder. Text/math objects require nonempty text, matrices require numeric values, plots require a complete plot. Stable IDs identify the same objects across frames.'
                       : `Optional ${kind} board. Omit when unused or when using example.frames; do not fill unused boards with placeholders.`,

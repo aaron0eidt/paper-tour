@@ -147,13 +147,21 @@ test('Plotly rejects resource-loading commands and relayout keys while accepting
   const figure = JSON.parse(measured.figure);
   const withLayout = (layout: object) => ({ ...measured, figure: JSON.stringify({ ...figure, layout }) });
   for (const layout of [
-    { updatemenus: [{ type: 'buttons', buttons: [{ method: 'relayout', args: [{ 'images[0].source': '//attacker.example/pixel' }] }] }] },
+    {
+      updatemenus: [
+        {
+          type: 'buttons',
+          buttons: [{ method: 'relayout', args: [{ 'images[0].source': '//attacker.example/pixel' }] }],
+        },
+      ],
+    },
     { 'images[0].source': '//attacker.example/pixel' },
     { sliders: [{ steps: [{ method: 'relayout', args: ['images[0].source', '//attacker.example/pixel'] }] }] },
     { annotations: [{ text: '//attacker.example/pixel' }] },
     { title: { text: 'url(https:\\attacker.example/pixel)' } },
     { shapes: [{ source: 'https://attacker.example/pixel' }] },
-  ]) assert.ok(plotlyProblems(withLayout(layout)).length, JSON.stringify(layout));
+  ])
+    assert.ok(plotlyProblems(withLayout(layout)).length, JSON.stringify(layout));
   assert.deepEqual(plotlyProblems(withLayout({ title: { text: 'Training data: WMT14' } })), []);
   assert.ok(plotlyProblems({ ...measured, figure: JSON.stringify({ ...figure, frames: [] }) }).length);
 });
@@ -194,7 +202,8 @@ test('named array data errors expose the actual runtime contract for targeted re
   await assert.rejects(renderProgramFrame(broken, 0), /use data\[name\] directly.*iterator method/);
   let repairs = 0;
   const repaired = await authorAndInspectVisual(broken, {
-    narration: 'Halve the values.', evidence: 'Illustrative input.',
+    narration: 'Halve the values.',
+    evidence: 'Illustrative input.',
     repair: async (feedback) => {
       repairs++;
       assert.match(feedback.problems.join(';'), /use data\[name\] directly/);
@@ -205,4 +214,47 @@ test('named array data errors expose the actual runtime contract for targeted re
   if (repaired.kind !== 'program') throw Error('Expected the repaired program');
   const frame = await renderProgramFrame(repaired, 1);
   assert.deepEqual(frame.calculations, [{ label: 'mean', value: [5, 0] }]);
+});
+
+test('rendered visual repairs can improve past three inspections without dropping the visual', async () => {
+  let repairs = 0;
+  const scene = (n: number) => ({ ...attention, code: `({svg})=>svg.scene(svg.text(30,40,'Revision ${n}'))` });
+  const result = await authorAndInspectVisual(scene(0), {
+    narration: 'Explain the mechanism.',
+    evidence: 'Illustrative.',
+    review: async (feedback) => (feedback.attempt < 4 ? ['Move the label clear of the current object.'] : []),
+    repair: async () => scene(++repairs),
+  });
+  assert.equal(repairs, 4);
+  assert.match(result.kind === 'program' ? result.code : '', /Revision 4/);
+});
+
+test('rendered visual repairs stop an unchanged failed state and respect cancellation', async () => {
+  let repairs = 0;
+  await assert.rejects(
+    authorAndInspectVisual(attention, {
+      narration: 'Explain.',
+      evidence: 'Illustrative.',
+      review: async () => ['A label still overlaps.'],
+      repair: async () => {
+        repairs++;
+        return attention;
+      },
+    }),
+    /same failed rendered state/,
+  );
+  assert.equal(repairs, 2);
+  const stop = new AbortController();
+  stop.abort();
+  await assert.rejects(
+    authorAndInspectVisual(attention, {
+      narration: 'Explain.',
+      evidence: 'Illustrative.',
+      signal: stop.signal,
+      repair: async () => {
+        throw Error('Must not repair after cancellation');
+      },
+    }),
+    { name: 'AbortError' },
+  );
 });

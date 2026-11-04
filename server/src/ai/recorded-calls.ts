@@ -40,7 +40,7 @@ export function recordedCalls(client: MuseClient, input: TourGenerationInput, mo
         requestId: null,
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedInputTokens: 0 },
       };
-      completions.push(completion);
+      // Reuse is a workspace event, not a new model call or newly billed completion.
       return completion;
     }
     const callId = randomUUID(),
