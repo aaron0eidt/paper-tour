@@ -20,7 +20,7 @@ function Notices() {
     <Toast.Portal>
       <Toast.Viewport className="ui-toast-viewport">
         {toasts.map((toast) => (
-          <Toast.Root key={toast.id} toast={toast} className="ui-toast" swipeDirection={['down', 'right']}>
+          <Toast.Root key={toast.id} toast={toast} className="ui-toast" swipeDirection={['down', 'left']}>
             <Toast.Content className="ui-toast-content">
               <svg
                 className="ui-toast-mark"

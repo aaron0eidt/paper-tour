@@ -561,8 +561,8 @@ button.ui-status-badge:hover {
 .ui-toast-viewport {
   position: fixed;
   z-index: 1600;
-  right: 24px;
-  bottom: 24px;
+  left: max(24px, env(safe-area-inset-left));
+  bottom: max(24px, env(safe-area-inset-bottom));
   width: min(440px, calc(100vw - 32px));
   margin: 0;
   padding: 0;
@@ -572,7 +572,7 @@ button.ui-status-badge:hover {
 .ui-toast {
   position: absolute;
   bottom: 0;
-  right: 0;
+  left: 0;
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: 14px;
@@ -729,8 +729,8 @@ button.ui-status-badge:hover {
     max-height: calc(100dvh - 24px);
   }
   .ui-toast-viewport {
-    right: 16px;
-    bottom: 16px;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(16px, env(safe-area-inset-bottom));
   }
   .ui-sound-options {
     grid-template-columns: 1fr;
