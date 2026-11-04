@@ -15,6 +15,9 @@ export function modelOutput(events: GenerationEvent[], stopped = false): unknown
   if (output !== undefined && output !== null) return output;
   const draft = events.filter((event) => event.type === 'model.delta').map((event) => String(event.data.delta)).join('');
   if (draft) return draft;
+  if (completed?.data.failed && typeof completed.data.error === 'string') return completed.data.error;
+  if (failed?.data.code === 'visual_validation_failed')
+    return 'The generated visualization failed rendering checks after repair. The tour was interrupted to avoid publishing a broken visual.';
   if (failed) return 'The model request failed before producing any output.';
   if (completed) return 'This request completed without recorded output.';
   return stopped ? 'This request ended without recorded output.' : 'Waiting for model output…';

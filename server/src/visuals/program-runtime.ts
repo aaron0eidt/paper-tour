@@ -16,9 +16,12 @@ export const programRuntime: ProgramRuntimeAdapter = {
     try {
       const result = context.evalCode(script, 'paper-scene.js');
       if (result.error) {
-        const error = context.dump(result.error) as { message?: string };
+        const error = context.dump(result.error) as { message?: string; name?: string };
         result.error.dispose();
-        throw new Error(`Scene execution failed: ${error.message ?? 'invalid program'}`);
+        const hint = error.name === 'TypeError'
+          ? ' Render data is a record of numeric arrays: use data[name] directly. Array.values is an iterator method, not a values field.'
+          : '';
+        throw new Error(`Scene execution failed: ${error.message ?? 'invalid program'}${hint}`);
       }
       const output = context.getString(result.value);
       result.value.dispose();
