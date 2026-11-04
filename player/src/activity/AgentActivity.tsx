@@ -68,6 +68,7 @@ export function AgentActivity({
   const speaking = !historical && playback.speaking && !generating;
   const presence = companionPresence(run, mode, { ...playback, speaking, generating }, !!local?.foreground);
   const busy = presence.mood === 'working';
+  const compactPeek = !showNarration && !busy && presence.mood !== 'attention';
   const sentence =
     showNarration && !historical && !busy && presence.mood !== 'attention'
       ? spokenSentence({ ...playback, speaking }, true)
@@ -180,6 +181,7 @@ export function AgentActivity({
         <button
           type="button"
           className="agent-speech-peek"
+          data-compact={compactPeek || undefined}
           onClick={() => setOpen(true)}
           aria-label="Open agent conversation and activity"
         >
@@ -188,7 +190,7 @@ export function AgentActivity({
             {presence.label}
             <span>{busy && run && !generating ? elapsed(now - Date.parse(run.startedAt)) : '···'}</span>
           </span>
-          <span className="agent-peek-message">{speaking ? speech : presence.message}</span>
+          {!compactPeek && <span className="agent-peek-message">{speaking ? speech : presence.message}</span>}
           {busy && !generating && !!operations?.length && (
             <span className="agent-peek-steps">
               {operations.slice(-3).map((operation) => (
