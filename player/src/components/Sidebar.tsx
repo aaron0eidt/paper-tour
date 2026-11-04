@@ -6,6 +6,7 @@ import { stoppedCopy, writingLabel } from '../partialTour';
 import type { Growth } from '../partialTour';
 import type { Tour } from '../types';
 import { CHECKPOINT_WORDS, checkpointKind } from './checkpointWords';
+import { BrandMark } from '../brand/BrandMark';
 
 interface Props {
   tour: Tour | null;
@@ -51,7 +52,10 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
     <aside id="reader-navigation" className="sidebar" aria-label="Paper navigation">
       <header className="sidebar-head">
         {header}
-        <div className="brand">Paper Tour</div>
+        <div className="brand">
+          <BrandMark size={15} />
+          Paper Tour
+        </div>
         <h1 className="tour-title">{tour?.title?.trim() || docTitle || 'Untitled paper'}</h1>
         {tour && (
           <div

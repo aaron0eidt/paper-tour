@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { getSupabase } from './client';
+import { BrandMark } from '../brand/BrandMark';
 
 type Mode = 'login' | 'signup' | 'reset' | 'password';
 
@@ -185,10 +186,7 @@ export function AuthForm({
 export function PaperMark() {
   return (
     <div className="library-brand">
-      <svg width="28" height="30" viewBox="0 0 28 30" fill="none" aria-hidden="true">
-        <path d="M6 2H19L25 8V28H6V2Z" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M19 2V8H25M2 7V26M10 13H21M10 17H21M10 21H17" stroke="currentColor" strokeWidth="1.5" />
-      </svg>
+      <BrandMark size={30} />
       <span>Paper Tour</span>
     </div>
   );

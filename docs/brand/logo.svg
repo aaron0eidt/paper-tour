@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 112" width="112" height="112" role="img" aria-label="Paper Tour">
+  <title>Paper Tour</title>
+  <defs>
+    <linearGradient id="pt-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7ea6ff"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <radialGradient id="pt-sheen" cx="0.22" cy="0.1" r="0.85">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pt-fold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dfe6fb"/>
+      <stop offset="1" stop-color="#b9c6ee"/>
+    </linearGradient>
+    <linearGradient id="pt-title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7ea6ff"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <filter id="pt-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3.2" flood-color="#2b1b7a" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+  <rect width="112" height="112" rx="28" fill="url(#pt-bg)"/>
+  <rect width="112" height="112" rx="28" fill="url(#pt-sheen)"/>
+  <rect x="0.5" y="0.5" width="111" height="111" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.16"/>
+  <g transform="translate(56 57) scale(1.1) translate(-56 -56)">
+    <g filter="url(#pt-shadow)">
+      <path d="M37 20h28l16 16v50a6 6 0 0 1-6 6H37a6 6 0 0 1-6-6V26a6 6 0 0 1 6-6z" fill="#f5f7fb"/>
+    </g>
+    <path d="M65 20v10a6 6 0 0 0 6 6h10z" fill="url(#pt-fold)"/>
+    <rect x="40" y="29" width="17" height="6" rx="3" fill="url(#pt-title)"/>
+    <rect x="40" y="42" width="32" height="5" rx="2.5" fill="#b4bcd3"/>
+    <rect x="36" y="53" width="40" height="14" rx="4.5" fill="#ffe45c"/>
+    <rect x="40" y="57.5" width="32" height="5" rx="2.5" fill="#3d3f52"/>
+    <rect x="40" y="73" width="23" height="5" rx="2.5" fill="#b4bcd3"/>
+  </g>
+</svg>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/brand/banner.png" alt="Paper Tour: any document, explained on the page." width="100%">
+</p>
+
 # Paper Tour
 
 Paper Tour turns any document into a tutor that reads it with you. It points at the exact sentence, outlines the exact
