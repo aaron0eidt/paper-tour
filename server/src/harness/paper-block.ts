@@ -18,6 +18,9 @@ export function proseSentences(doc: Doc): DocSentence[] {
   return doc.sentences.filter((s) => prose.has(types.get(s.block) ?? ''));
 }
 
+/** Words that only name points: "Punkte: 20", "max. 20 P.", "Total: 30", "(4 BE)". */
+const POINTS_WORD = /^(?:max(?:imal|imum)?|total|gesamt|insgesamt|punkte?|pkt|pts?|points?|marks?|score|bp|be|p)$/iu;
+
 /**
  * The name stored for a task without any points note, which older ingestions kept as its title: "20:" and
  * "25: 5,10,5,5 pts." name nothing, "Simplifying, 4 points" is "Simplifying". Empty when no name is left.
@@ -35,7 +38,10 @@ export function taskTitle(title: string | undefined): string {
     .replace(/[([]\s*[)\]]/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^[\s,;:.\u2013\u2014-]+|[\s,;:.\u2013\u2014-]+$/g, '');
-  return /\p{L}{2,}/u.test(name) ? name : '';
+  // What is left is a title only when it holds a word that is not a number or part of a points note ("Total: 30").
+  const words = name.split(/[\s,;:.()[\]/+%\u2013\u2014-]+/u).filter(Boolean);
+  const note = words.every((word) => /^\d+$/.test(word) || POINTS_WORD.test(word));
+  return /\p{L}{2,}/u.test(name) && !note ? name : '';
 }
 
 /** A task's printed name, without its points or the statement run in after it: "Aufgabe 1: Lineare Gleichungen". */

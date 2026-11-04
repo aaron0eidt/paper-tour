@@ -15,10 +15,32 @@ export interface CardRef {
 }
 export const ARCS = ['problem', 'idea', 'method', 'evidence', 'limits', 'takeaway'] as const;
 export type Arc = (typeof ARCS)[number];
+/** The field a document belongs to; an exercise sheet's solve call picks its worked example by it (exercise-examples.ts). */
+export const SUBJECTS = [
+  'mathematics',
+  'statistics',
+  'physics',
+  'chemistry',
+  'biology',
+  'computer_science',
+  'economics',
+  'engineering',
+  'medicine',
+  'language',
+  'humanities',
+  'law',
+  'other',
+] as const;
+export type Subject = (typeof SUBJECTS)[number];
 export interface PaperCard {
   plan: string;
   /** What kind of document this is; it chooses the tour's arc, tone and board use. */
   doc_type: DocType;
+  /**
+   * The field of the document ("other" when none fits or the card could not say). Optional in the type so that cards
+   * from before the field existed still read; cleanCard and fallbackCard always set it.
+   */
+  subject?: Subject;
   title: string;
   chapter_titles: Record<Arc, string>;
   problem: CardItem;
@@ -89,6 +111,9 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
     required: [
       'plan',
       'doc_type',
+      // The loose schema (the code check) leaves the subject optional: cleanCard falls back to "other" rather than
+      // sending the whole card back for it.
+      ...(strict ? ['subject'] : []),
       'title',
       'chapter_titles',
       'problem',
@@ -104,6 +129,12 @@ export function cardSchema(doc: Doc, sentenceIds: string[], strict = true) {
     properties: {
       plan: { type: 'string', maxLength: 1200 },
       doc_type: { type: 'string', enum: DOC_TYPES },
+      subject: {
+        type: 'string',
+        enum: SUBJECTS,
+        description:
+          'The field the document belongs to, such as mathematics, chemistry or computer_science; other when none fits.',
+      },
       title: short,
       chapter_titles: {
         type: 'object',
@@ -172,6 +203,7 @@ export function fallbackCard(doc: Doc): PaperCard {
   return {
     plan: 'fallback',
     doc_type: guessType(doc),
+    subject: 'other',
     title: (doc.source.title ?? 'A guided tour').slice(0, 80),
     chapter_titles: { ...DEFAULT_CHAPTERS },
     problem: one(prose[0]),
@@ -201,6 +233,7 @@ export function cleanCard(card: PaperCard, doc: Doc): PaperCard {
   return {
     ...card,
     doc_type: DOC_TYPES.includes(card.doc_type) ? card.doc_type : guessType(doc),
+    subject: card.subject && SUBJECTS.includes(card.subject) ? card.subject : 'other',
     chapter_titles: { ...DEFAULT_CHAPTERS, ...card.chapter_titles },
     problem: item(card.problem),
     key_idea: item(card.key_idea),
