@@ -1,8 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { BBox, Doc } from '../../shared/paper';
 import { encodeWav } from '../../shared/voice';
 import type { MuseConfig } from '../src/config';
@@ -355,22 +352,5 @@ test('a document that cannot be read for hints is transcribed without them', asy
     const { service } = voiceLibrary({ ...options, fake });
     assert.equal((await service.transcribe('owner', DOCUMENT, audio)).transcript, 'Was bedeutet das?');
     assert.deepEqual(seen[0].request, base);
-  }
-});
-
-test('a demo paper’s question is transcribed with the demo document’s terms', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'paper-tour-voice-'));
-  try {
-    await mkdir(join(root, 'paper'));
-    await writeFile(join(root, 'paper', 'doc.json'), JSON.stringify(paper));
-    const { fake, seen } = await transport(() => Response.json({ transcript: 'What is the router?' }));
-    const { service } = voiceLibrary({ fake });
-    service.demoRoot = root;
-    assert.equal((await service.demoTranscribe('paper', audio)).transcript, 'What is the router?');
-    assert.deepEqual(seen[0].request.languageBias, ['English']);
-    assert((seen[0].request.keywords as string[]).includes('Fourier'));
-    await assert.rejects(() => service.demoTranscribe('missing', audio), /not found/i);
-  } finally {
-    await rm(root, { recursive: true, force: true });
   }
 });

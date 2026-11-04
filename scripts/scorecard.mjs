@@ -3,7 +3,7 @@
 //   node scripts/scorecard.mjs [--docs <dir>] [--json] <tour folder>...
 // A tour folder holds tour.json. When the tour came from server/run-tour.ts it also holds metadata.json (model calls,
 // tokens, degraded steps, dropped boards, checked exercise lines) and events.json (the seconds the run took and the
-// drafts the code sent back). The document's doc.json is looked up at <dir>/<folder name> (default demo/), then at
+// drafts the code sent back). The document's doc.json is looked up at <dir>/<folder name> (default .data/documents/), then at
 // <dir>/<the tour's paper>, then in the tour folder itself. It is used only when its hash is the one the tour was
 // written against, to check that every ID the tour points at exists and that the numbers on bars, scatter and heatmap
 // boards are printed in the document's text.
@@ -289,7 +289,7 @@ function listCost(metadata) {
 }
 
 /** The scores of one tour folder. A field is null when the file it comes from is not there. */
-export function scoreTour(folder, { docs = join(root, 'demo') } = {}) {
+export function scoreTour(folder, { docs = join(root, '.data/documents') } = {}) {
   const tour = readJson(join(folder, 'tour.json'));
   if (!tour) throw new Error(`${folder}: no tour.json`);
   const metadata = readJson(join(folder, 'metadata.json'));
@@ -519,7 +519,7 @@ const LEGEND = [
 
 function main(argv) {
   const folders = [];
-  let docs = join(root, 'demo');
+  let docs = join(root, '.data/documents');
   let json = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {

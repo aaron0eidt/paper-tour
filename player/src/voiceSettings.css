@@ -2,55 +2,13 @@
   position: relative;
   gap: 7px;
 }
-.playback-options {
-  position: relative;
-  font-size: 12px;
-}
-.playback-options > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  list-style: none;
-  cursor: pointer;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--text);
-  background: var(--panel-2);
-  white-space: nowrap;
-}
-.playback-options > summary::-webkit-details-marker {
-  display: none;
-}
-.playback-options > summary:hover,
-.playback-options[open] > summary {
-  border-color: var(--accent);
-}
 .playback-speed {
   color: var(--muted);
   border-left: 1px solid var(--line);
   padding-left: 8px;
   font-variant-numeric: tabular-nums;
 }
-.playback-panel {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 12px);
-  width: min(340px, calc(100vw - 24px));
-  max-height: min(620px, calc(100dvh - 150px));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  box-shadow: var(--shadow-floating);
-  z-index: 20;
-  display: grid;
-  gap: 14px;
-}
+.playback-panel { display: grid; gap: 14px; }
 .playback-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .playback-panel-close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
 .playback-panel-close:hover { background: var(--surface-hover); color: var(--text); }
@@ -97,7 +55,7 @@
   font-size: 12px;
   color: var(--muted);
 }
-.controls .playback-options :focus-visible {
+.ui-audio-panel :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -140,18 +98,17 @@
   .reader-app .controls .settings { justify-self: end; }
 }
 @media (max-width: 740px) {
-  .playback-options > summary {
+  .ui-audio-trigger {
     padding: 7px;
     gap: 6px;
   }
-  .playback-options > summary > span:not(.playback-speed) {
+  .ui-audio-trigger > span:not(.playback-speed) {
     display: none;
   }
 }
 .playback-panel .speed span {
   display: block;
 }
-.playback-panel .speed input[type="range"] { width: 100%; min-height: 24px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .playback-panel .speed .speed-heading, .playback-panel .speed .speed-scale { display: flex; align-items: center; justify-content: space-between; }
 .speed-heading output { color: var(--text); font-variant-numeric: tabular-nums; }
 .playback-panel .speed .speed-scale { font-size: 10px; color: var(--faint); margin-top: -5px; }
@@ -190,10 +147,6 @@
 .playback-panel .siri-management-body .profile-help { font-size: 11px; line-height: 1.5; }
 .playback-panel .siri-actions { gap: 6px; }
 .playback-panel .siri-actions button { font-size: 11px; }
-@media (max-width: 600px) {
-  .controls .playback-options { position: static; }
-  .playback-panel { position: fixed; left: 12px; right: 12px; width: auto; bottom: calc(var(--audio-controls-height, 84px) + 12px); max-height: calc(100dvh - var(--audio-controls-height, 84px) - 24px); }
-}
 @media (pointer: coarse) { .playback-panel-close { width: 40px; height: 40px; } .siri-management > summary, .audio-reading-settings > summary { min-height: 44px; align-content: center; } }
 
 /* Announce errors without adding a grid row or moving the player/PDF. Details live in Audio. */
@@ -205,7 +158,7 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.playback-options > summary[data-error] {
+.ui-audio-trigger[data-error] {
   color: var(--danger, #b9584f);
   border-color: currentColor;
 }

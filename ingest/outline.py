@@ -56,7 +56,7 @@ def exercise_lines(exercises, blocks, full):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Print the ID outline of a paper folder's doc.json.")
-    ap.add_argument("folder", help="paper folder containing doc.json, e.g. demo/attention")
+    ap.add_argument("folder", help="paper folder containing doc.json, e.g. .data/documents/my-paper")
     ap.add_argument("--page", type=int, help="only list blocks and sentences of this page")
     ap.add_argument("--full", action="store_true", help="do not truncate long texts")
     args = ap.parse_args(argv)

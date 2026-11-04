@@ -737,17 +737,17 @@
   align-items: center;
   gap: 14px;
   max-width: calc(100% - 24px);
-  padding: 9px 10px 9px 14px;
-  border: 1px solid rgba(126,166,255,.3);
-  border-radius: 12px;
-  background: var(--surface-glass);
+  padding: 7px 8px 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel);
   color: var(--text);
-  box-shadow: 0 5px 24px rgba(0,0,0,.25);
+  box-shadow: var(--shadow-floating);
   font-size: 12px;
 }
 .pdf-region-instruction > span { min-width: 0; }
-.pdf-region-instruction button { flex: none; padding: 5px 7px; font-size: 11px; }
-.pdf-region-instruction kbd { margin-left: 5px; font-size: 10px; }
+.pdf-region-instruction .ui-action-button { flex: none; min-width: 0; min-height: 32px; padding: 6px 9px; gap: 8px; font-size: 12px; }
+.pdf-region-instruction kbd { margin: 0; font-size: 10px; }
 @media (max-width: 680px) {
   .ask-kbd { display: none; }
 }

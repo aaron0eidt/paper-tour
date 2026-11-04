@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { DocumentSummary } from '../../../shared/contracts';
 import { apiRequest } from './client';
+import { AnimatedDialog, DialogTitle } from '../ui/controls';
+import { ActionButton } from '../ui/ActionButton';
+import { playInterfaceSound } from '../ui/sound';
 
 export function DocumentDialog({
   document: paper,
@@ -18,22 +21,16 @@ export function DocumentDialog({
   onClose(): void;
   onChanged(): void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(true);
+  const changed = useRef(false);
+  const titleInput = useRef<HTMLInputElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
   const [title, setTitle] = useState(paper.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => { element?.close(); };
-  }, []);
-
-  function close(changed = false) {
-    dialog.current?.close();
-    // A renamed card can disappear from the active search or move when sorted by title.
-    const target = changed ? fallbackFocus : returnFocus;
-    (target?.isConnected ? target : fallbackFocus)?.focus();
-    onClose();
+  function close(updated = false) {
+    changed.current = updated;
+    setOpen(false);
   }
 
   async function submit(event: FormEvent) {
@@ -49,6 +46,7 @@ export function DocumentDialog({
         });
       else await apiRequest(`/api/documents/${paper.id}`, { method: 'DELETE' });
       onChanged();
+      playInterfaceSound('success');
       close(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The document could not be updated. Try again.');
@@ -58,22 +56,30 @@ export function DocumentDialog({
   }
 
   return (
-    <dialog
+    <AnimatedDialog
       className="library-dialog"
-      ref={dialog}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) close();
+      open={open}
+      onOpenChange={(next, details) => {
+        if (busy) { details.cancel(); return; }
+        setOpen(next);
       }}
-      aria-labelledby="document-dialog-title"
+      onOpenChangeComplete={(next) => { if (!next) onClose(); }}
+      popupProps={{
+        initialFocus: mode === 'rename' ? titleInput : cancelButton,
+        finalFocus: () => {
+          // Sorting or filtering can remove the card that opened this dialog.
+          const target = changed.current ? fallbackFocus : returnFocus;
+          return target?.isConnected ? target : fallbackFocus;
+        },
+      }}
     >
       <form onSubmit={(event) => void submit(event)}>
-        <h2 id="document-dialog-title">{mode === 'rename' ? 'Rename paper' : 'Delete paper?'}</h2>
+        <DialogTitle>{mode === 'rename' ? 'Rename paper' : 'Delete paper?'}</DialogTitle>
         {mode === 'rename' ? (
           <label>
             Title
             <input
-              autoFocus
+              ref={titleInput}
               value={title}
               maxLength={300}
               required
@@ -94,20 +100,19 @@ export function DocumentDialog({
           <button
             className="library-button"
             type="button"
-            autoFocus={mode === 'delete'}
+            ref={cancelButton}
             disabled={busy}
             onClick={() => close()}
           >
             Cancel
           </button>
-          <button
+          <ActionButton
             className={`library-button ${mode === 'delete' ? 'danger' : 'primary'}`}
             disabled={busy || (mode === 'rename' && (!title.trim() || title.trim() === paper.title))}
-          >
-            {busy ? 'Please wait…' : mode === 'rename' ? 'Save title' : 'Delete paper'}
-          </button>
+            busy={busy} label={busy ? 'Saving…' : mode === 'rename' ? 'Save title' : 'Delete paper'}
+          />
         </div>
       </form>
-    </dialog>
+    </AnimatedDialog>
   );
 }

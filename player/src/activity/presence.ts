@@ -6,6 +6,8 @@ export interface CompanionPlayback {
   speaking: boolean;
   /** Only foreground synthesis blocks playback; silent lookahead is not a speaking status. */
   generating?: boolean;
+  preparingText?: boolean;
+  preparationError?: string;
   canPlay: boolean;
   words: readonly string[];
   word: number;
@@ -46,6 +48,10 @@ export function companionPresence(
   playback: CompanionPlayback,
   foreground = false,
 ) {
+  if (playback.preparingText)
+    return { mood: 'working' as const, label: 'Preparing spoken text…', message: 'I’m preparing this passage. You can pause to interrupt.' };
+  if (playback.preparationError && !playback.speaking)
+    return { mood: 'attention' as const, label: 'Reading paused', message: `${playback.preparationError} Press play to retry or skip to the next passage.` };
   if (playback.playing && playback.generating)
     return { mood: 'working' as const, label: 'Generating speech…', message: 'I’m preparing the voice for this passage.' };
   if (playback.speaking) return { mood: 'speaking' as const, label: 'Speaking', message: '' };

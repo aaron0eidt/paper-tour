@@ -455,38 +455,6 @@ test('a stored answer needs no free question slot, a model call does', async (t)
   await service.ask(OWNER, DOCUMENT, { question: 'a third question' });
 });
 
-test('demo papers keep their answers apart from library documents', async (t) => {
-  quiet(t);
-  const { mkdtemp, mkdir, rm, writeFile } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const root = await mkdtemp(join(tmpdir(), 'paper-tour-cache-'));
-  try {
-    for (const [name, sha] of [
-      ['paper', 'd'],
-      ['other', 'e'],
-    ] as const) {
-      await mkdir(join(root, name));
-      await writeFile(join(root, name, 'doc.json'), JSON.stringify(makeDoc(sha)));
-    }
-    const { service, state } = library(() => modelAnswer());
-    service.demoRoot = root;
-    const question = { question: 'Why scale the dot products?' };
-    await service.demoAsk('paper', question);
-    await service.demoAsk('paper', { question: 'why scale the dot products?' });
-    assert.equal(state.calls, 1);
-    await service.demoAsk('other', question);
-    await service.ask(OWNER, DOCUMENT, question);
-    assert.equal(state.calls, 3);
-    // A paper edited on disk is a new version.
-    await writeFile(join(root, 'paper', 'doc.json'), JSON.stringify(makeDoc('f')));
-    await service.demoAsk('paper', question);
-    assert.equal(state.calls, 4);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test('the ask route serves the repeat from the store with the same body', async (t) => {
   quiet(t);
   const { service, state } = library(() => modelAnswer());

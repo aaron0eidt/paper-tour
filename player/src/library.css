@@ -247,15 +247,6 @@
   font-size: 13px;
   line-height: 1.6;
 }
-.library-feedback.library-notice {
-  background: var(--accent-soft);
-  border: 1px solid var(--border-accent);
-}
-.library-notice-actions {
-  display: flex;
-  gap: 16px;
-  flex: none;
-}
 .library-toolbar {
   display: flex;
   justify-content: space-between;
@@ -346,6 +337,7 @@
 .library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 252px), 1fr));
+  align-items: start;
   gap: 30px 24px;
 }
 .library-document {
@@ -489,55 +481,6 @@
 }
 .library-document-actions .library-text-button {
   font-size: 12px;
-}
-.library-more {
-  position: relative;
-  margin-left: auto;
-}
-.library-more summary {
-  cursor: pointer;
-  list-style: none;
-  color: var(--muted);
-  padding: 4px 6px;
-  font-size: 14px;
-  letter-spacing: 1px;
-  border-radius: 4px;
-}
-.library-more summary::-webkit-details-marker {
-  display: none;
-}
-.library-more[open] summary,
-.library-more summary:hover {
-  color: var(--text);
-  background: var(--panel-2);
-}
-.library-more > div {
-  position: absolute;
-  right: 0;
-  top: 29px;
-  width: 140px;
-  padding: 5px;
-  background: var(--panel-2);
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  box-shadow: var(--shadow-floating);
-  z-index: 3;
-}
-.library-more > div > button {
-  display: block;
-  width: 100%;
-  padding: 9px 11px;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  font-size: 12px;
-  border-radius: 4px;
-}
-.library-more > div > button:hover {
-  background: var(--surface-hover);
-}
-.library-more > div > button.delete {
-  color: var(--error-ink);
 }
 .library-empty {
   display: grid;
@@ -896,25 +839,7 @@
   }
 }
 
-/* Keep upload context and paper actions readable at every library width. */
-.library-upload-context {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 12px 0 0 !important;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-.library-upload-context strong {
-  font-weight: 500;
-  color: var(--text);
-}
-.library-upload-context a {
-  margin-left: 8px;
-}
-.library-upload-context a,
+/* Keep upload feedback and paper actions readable at every library width. */
 .library-upload-unavailable a {
   color: var(--accent);
   text-underline-offset: 3px;
@@ -964,13 +889,14 @@
   min-width: 0;
 }
 .library-document h3 {
-  min-height: 2.9em;
+  min-height: 0;
+  margin-top: 0;
   width: 100%;
 }
 .library-document-actions {
   width: 100%;
-  margin-top: auto;
-  padding-top: 18px;
+  margin-top: 0;
+  padding-top: 14px;
 }
 .library-document .library-filename {
   max-width: 100%;
@@ -978,6 +904,11 @@
 .library-document .tour-generation {
   width: 100%;
   margin-bottom: 16px;
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
 }
 .library-upload:focus-within {
   border-color: var(--accent);

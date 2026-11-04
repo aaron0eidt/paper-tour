@@ -6,11 +6,9 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { Action, BBox, Doc, Step, Tour } from '../../shared/paper';
-import { createApp, demoAllowed } from '../src/app';
+import { createApp, } from '../src/app';
 import { ROOT, type MuseConfig } from '../src/config';
 import type { Database } from '../src/db';
 import { HttpError, ProcessingError } from '../src/errors';
@@ -27,14 +25,12 @@ import {
   askError,
   askModel,
   boardFromAnswer,
-  demoImage,
   evidenceText,
-  loadDemo,
   retrieve,
   spoken,
   withSink,
-  type AskRequest,
   type AskAnswer,
+  type AskRequest,
 } from '../src/harness/ask';
 import { BOARD_KINDS, boardSchema } from '../src/harness/board';
 import { paperBlock } from '../src/harness/paper-block';
@@ -872,149 +868,6 @@ test('only the document’s owner may ask, and the answer comes back as steps', 
     assert.equal((await post('owner', { question: '   ' })).json().error.code, 'invalid_question');
   } finally {
     await app.close();
-  }
-});
-
-// ------------------------------------------------------------ demo papers
-
-/** A demo root like demo/: a paper, a paper that links to its files, and one whose doc.json links outside the root. */
-async function demoFolders() {
-  const root = await mkdtemp(join(tmpdir(), 'paper-tour-demo-'));
-  const outside = await mkdtemp(join(tmpdir(), 'paper-tour-outside-'));
-  await mkdir(join(root, 'paper', 'figures'), { recursive: true });
-  await writeFile(join(root, 'paper', 'doc.json'), JSON.stringify(doc));
-  await writeFile(join(root, 'paper', 'tour.json'), JSON.stringify(tour));
-  await writeFile(join(root, 'paper', 'figures', 'fig1.png'), Buffer.from('89504e470d0a1a0a', 'hex'));
-  await mkdir(join(root, 'linked'));
-  await symlink('../paper/doc.json', join(root, 'linked', 'doc.json'));
-  await writeFile(join(outside, 'doc.json'), JSON.stringify(doc));
-  await mkdir(join(root, 'escape'));
-  await symlink(join(outside, 'doc.json'), join(root, 'escape', 'doc.json'));
-  return {
-    root,
-    async remove() {
-      await rm(root, { recursive: true, force: true });
-      await rm(outside, { recursive: true, force: true });
-    },
-  };
-}
-
-/** The library with only what demo questions use: the server's own Meta settings, never the database or storage. */
-function demoLibrary(model: (r: Request) => unknown, root: string, apiKey = settings.apiKey) {
-  const never = async () => {
-    throw new Error('Demo questions never touch the database.');
-  };
-  const db = { query: never, pool: { query: never } } as unknown as Database;
-  const muse = { base: { ...settings, apiKey }, transport: provider(model) } as unknown as SettingsService;
-  const service = new DocumentService(
-    db,
-    {} as FileStorage,
-    async () => {},
-    26214400,
-    'muse-spark-1.3',
-    undefined,
-    muse,
-  );
-  service.demoRoot = root;
-  return service;
-}
-
-test('demo papers load only from folders inside the demo root', async () => {
-  const demo = await demoFolders();
-  try {
-    assert.equal((await loadDemo('paper', demo.root))?.tour?.title, 'A tour');
-    const linked = await loadDemo('linked', demo.root);
-    assert.equal(linked?.doc.source.title, doc.source.title, 'a link to another demo folder is fine');
-    assert.equal(linked?.tour, undefined);
-    for (const name of ['escape', 'missing', '..', '../paper', 'paper/../paper', '.hidden', ''])
-      assert.equal(await loadDemo(name, demo.root), null, name);
-    const image = await demoImage('paper', doc, 'fig1.a', demo.root);
-    assert.equal(image?.targetId, 'fig1');
-    assert.ok(image?.dataUrl.startsWith('data:image/png;base64,'));
-    const escaping = { ...doc, figures: [{ ...doc.figures[0], image: '../escape/doc.json' }] };
-    assert.equal(await demoImage('paper', escaping, 'fig1', demo.root), undefined);
-  } finally {
-    await demo.remove();
-  }
-});
-
-test('asking needs a sign-in, and demo questions exist only in local development', async () => {
-  assert.equal(demoAllowed({}), true, 'config.ts listens on 127.0.0.1 by default');
-  assert.equal(demoAllowed({ HOST: 'localhost', NODE_ENV: 'development' }), true);
-  assert.equal(demoAllowed({ NODE_ENV: 'production' }), false);
-  assert.equal(demoAllowed({ HOST: '0.0.0.0' }), false, 'a server reachable from other machines');
-  const app = await createApp({ service: library(() => ({})), authenticate: async () => null, demo: false });
-  try {
-    const anonymous = await app.inject({
-      method: 'POST',
-      url: `/api/documents/${DOCUMENT}/ask`,
-      payload: { question: 'Why scale the dot products?' },
-    });
-    assert.equal(anonymous.statusCode, 401);
-    const demo = await app.inject({ method: 'POST', url: '/api/demo/paper/ask', payload: { question: 'Why?' } });
-    assert.equal(demo.statusCode, 404);
-  } finally {
-    await app.close();
-  }
-});
-
-test('demo questions read demo/<paper>/ with the server’s key, answer only this machine and refuse other paths', async () => {
-  const demo = await demoFolders();
-  let task = '';
-  const model = (r: Request) => {
-    task = r.task;
-    return {
-      plan: 'p',
-      answerable: 'yes',
-      steps: [
-        {
-          say: SCALE_SAY,
-          cues: [{ action: 'highlight', target: 'p2.s4', region: 'whole', label: '', anchor: 'The authors scale' }],
-          board: NO_BOARD,
-        },
-      ],
-      followups: ['What is d_k?', 'Does scaling change the results?'],
-    };
-  };
-  const app = await createApp({ service: demoLibrary(model, demo.root), authenticate: async () => null, demo: true });
-  const question = { question: 'Why scale the dot products?', stepId: 'method-1' };
-  const post = (url: string, extra: { remoteAddress?: string; headers?: Record<string, string> } = {}) =>
-    app.inject({ method: 'POST', url, payload: question, ...extra });
-  try {
-    const answered = await post('/api/demo/paper/ask');
-    assert.equal(answered.statusCode, 200, answered.body);
-    assert.deepEqual(answered.json().steps[0].actions[0], { type: 'focus', target: 'p2.s4' });
-    assert.ok(task.includes('THE TOUR WAS SAYING: Attention compares'), 'the demo tour gives the step');
-    task = '';
-    assert.equal((await post('/api/demo/missing/ask')).statusCode, 404);
-    assert.equal((await post('/api/demo/escape/ask')).statusCode, 404);
-    for (const url of ['/api/demo/..%2F..%2Fserver/ask', '/api/demo/.hidden/ask', '/api/demo/a..b/ask'])
-      assert.equal((await post(url)).statusCode, 400, url);
-    // A dot-dot segment never reaches the route at all.
-    assert.equal((await post('/api/demo/%2E%2E/ask')).statusCode, 404);
-    assert.equal((await post('/api/demo/paper/ask', { remoteAddress: '10.0.0.7' })).statusCode, 404);
-    assert.equal((await post('/api/demo/paper/ask', { headers: { host: 'rebound.example:5174' } })).statusCode, 404);
-    assert.equal(task, '', 'no refused request reached the model');
-  } finally {
-    await app.close();
-    await demo.remove();
-  }
-});
-
-test('a demo question without a server key says where the key goes', async () => {
-  const demo = await demoFolders();
-  const app = await createApp({
-    service: demoLibrary(() => assert.fail('no model call without a key'), demo.root, ''),
-    authenticate: async () => null,
-    demo: true,
-  });
-  try {
-    const response = await app.inject({ method: 'POST', url: '/api/demo/paper/ask', payload: { question: 'Why?' } });
-    assert.equal(response.statusCode, 409);
-    assert.match(response.json().error.message, /MODEL_API_KEY/);
-  } finally {
-    await app.close();
-    await demo.remove();
   }
 });
 

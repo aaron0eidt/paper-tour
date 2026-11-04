@@ -1,3 +1,4 @@
+import { AnimatedSlider } from '../ui/Slider';
 import { useEffect, useRef, useState } from 'react';
 import type { ProgramItem } from '../../../shared/program';
 import type { BoardPlayback } from '../engine';
@@ -15,9 +16,9 @@ export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: 
   parameterValues.current = parameters;
   const [image, setImage] = useState(() => preparedProgramFrame(item, theme) ?? '');
   const [error, setError] = useState('');
-  const worker = useRef<Worker>();
+  const worker = useRef<Worker | undefined>(undefined);
   const request = useRef(0);
-  const pending = useRef<{ t: number; parameters: Record<string, number> }>();
+  const pending = useRef<{ t: number; parameters: Record<string, number> } | undefined>(undefined);
   const busy = useRef(false);
   const send = useRef<() => void>(() => {});
   useEffect(() => setParameters({}), [item]);
@@ -95,14 +96,8 @@ export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: 
                 {p.label}
                 <output>{parameters[p.name] ?? p.value}</output>
               </span>
-              <input
-                type="range"
-                min={p.min}
-                max={p.max}
-                step={p.step}
-                value={parameters[p.name] ?? p.value}
-                onChange={(e) => change(p.name, Number(e.target.value))}
-              />
+              <AnimatedSlider label={p.label} min={p.min} max={p.max} step={p.step}
+                value={parameters[p.name] ?? p.value} onChange={(value) => change(p.name, value)} />
             </label>
           ))}
           {Object.keys(parameters).length > 0 && (

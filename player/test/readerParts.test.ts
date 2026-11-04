@@ -108,6 +108,14 @@ test('keys: typing keeps its keys, and a button keeps only Space and Enter', () 
   eq(keyBelongsTo({}, ' '), false, 'the document itself');
 });
 
+test('keys: portaled choices, menus and modal dialogs keep navigation and typing keys', () => {
+  for (const role of ['combobox', 'menu', 'listbox', 'dialog']) {
+    for (const key of ['ArrowRight', 'Home', 'r', ' ']) {
+      eq(keyBelongsTo(el(`[role="${role}"]`), key), true, `${role} owns ${key}`);
+    }
+  }
+});
+
 // ------------------------------------------------------------------------------------------------ marks
 
 test('marks: the mark the voice is on, and the sweep along it', () => {

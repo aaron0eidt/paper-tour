@@ -8,9 +8,10 @@ const step = (id, say = `${id} says one thing.`) => ({ id, say, actions: [] });
 const tour = (...chapters) => ({ chapters: chapters.map(([id, ...steps]) => ({ id, steps: steps.map((s) => (typeof s === 'string' ? step(s) : s)) })) });
 
 test('the options have defaults, take values, and reject what they do not know', () => {
-  const defaults = parseArgs([]);
+  assert.throws(() => parseArgs([]), /--pdf/);
+  const defaults = parseArgs(['--pdf', 'document.pdf']);
   assert.deepEqual([defaults.keep, defaults.json, defaults.pollMs, defaults.timeoutS], [false, false, 400, 420]);
-  assert.match(defaults.pdf, /demo\/attention\/paper\.pdf$/);
+  assert.match(defaults.pdf, /document\.pdf$/);
   const given = parseArgs(['--pdf', 'a/b.pdf', '--keep', '--poll-ms', '250', '--timeout-s', '90', '--json']);
   assert.deepEqual([given.keep, given.json, given.pollMs, given.timeoutS], [true, true, 250, 90]);
   assert.match(given.pdf, /a\/b\.pdf$/);

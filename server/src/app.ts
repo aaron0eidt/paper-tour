@@ -1,5 +1,5 @@
 import type { ReadingPassageRequest } from '../../shared/reading';
-import type { TourModelSelection, UploadSelection } from '../../shared/contracts';
+import type { ReaderState, TourModelSelection, UploadSelection } from '../../shared/contracts';
 import type { TourProfileDraft } from '../../shared/tourProfiles';
 import { TOUR_STRUCTURES, TOUR_DEPTHS, TOUR_AUDIENCES } from '../../shared/tourProfiles';
 import { pipeUIMessageStreamToResponse } from 'ai';
@@ -14,7 +14,6 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { HttpError } from './errors';
 import type { Library } from './service';
-import type { ReaderState } from '../../shared/contracts';
 import type { CreateConversation } from '../../shared/conversations';
 import type { VisualArtifactService } from './visuals/artifacts';
 import { visualArtifactRoutes } from './visuals/routes';
@@ -23,7 +22,7 @@ import type { SettingsService } from './settings';
 import type { SpeechService } from './speech/service';
 import { speechRoutes } from './speech/routes';
 import { siriRoutes } from './speech/siri-routes';
-import { DEMO_PAPER, answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
+import { answerResponse, type AskAnswer, type AskRequest } from './harness/ask';
 import { snapService, type SnapRequest, type SnapResult, type SnapService } from './snap';
 
 const uuid = { type: 'string', format: 'uuid' };
@@ -101,8 +100,8 @@ interface Options {
   logger?: boolean;
   settings?: SettingsService;
   speech?: SpeechService;
-  /** Questions about demo papers without signing in; defaults to demoAllowed() for this process. */
-  demo?: boolean;
+  /** Native speech management on loopback development servers; defaults to localSpeechAllowed(). */
+  localSpeech?: boolean;
   /** Region snapping (snap.ts); defaults to one built from the service and settings when they can provide it. */
   snap?: SnapService;
   visualArtifacts?: VisualArtifactService;
@@ -110,20 +109,9 @@ interface Options {
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-/**
- * Demo papers can be asked about without signing in, on the server's own Meta key, only in local development: not in
- * production, and with the API listening on a loopback address (config.ts defaults HOST to 127.0.0.1).
- */
-export function demoAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+/** Native speech setup is available only on loopback development servers. */
+export function localSpeechAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.NODE_ENV !== 'production' && LOOPBACK_HOSTS.has((env.HOST ?? '127.0.0.1').trim().toLowerCase());
-}
-
-/** A request from this machine, addressed to a local name (which also turns away DNS rebinding). */
-function fromLocalhost(request: { socket: { remoteAddress?: string }; headers: { host?: string } }): boolean {
-  const address = request.socket.remoteAddress ?? '';
-  const local = address === '::1' || /^(?:::ffff:)?127\.\d+\.\d+\.\d+$/.test(address);
-  const host = (request.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
-  return local && LOOPBACK_HOSTS.has(host);
 }
 
 /** Run a model call that stops when the learner cancels or leaves. */
@@ -726,99 +714,11 @@ export async function createApp(options: Options) {
     },
     { prefix: '/api' },
   );
-  // Demo papers (demo/<paper>/) are not in anyone's library, so this route has no sign-in: it exists only in local
-  // development, answers only this machine, and reads only folders under demo/ (harness/ask.ts, loadDemo).
-  if ((options.demo ?? demoAllowed()) && options.speech) {
+  // Native speech remains available only on the local development server.
+  if ((options.localSpeech ?? localSpeechAllowed()) && options.speech) {
     const siri = options.speech.providers.siri;
     await app.register(async (local) => { siriRoutes(local, siri, options.origins ?? [], true); }, { prefix: '/api/local' });
   }
-  if (options.demo ?? demoAllowed())
-    await app.register(
-      async (demo) => {
-        demo.addHook('onRequest', async (request) => {
-          if (!fromLocalhost(request)) throw new HttpError(404, 'not_found', 'Endpoint not found.');
-        });
-        demo.post<{ Params: { paper: string }; Body: Buffer }>(
-          '/:paper/transcribe',
-          {
-            schema: {
-              params: {
-                type: 'object',
-                required: ['paper'],
-                properties: { paper: { type: 'string', pattern: DEMO_PAPER.source } },
-              },
-            },
-          },
-          async (req, reply) => {
-            if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'invalid_audio', 'Send a WAV recording.');
-            if (!options.service.demoTranscribe)
-              throw new HttpError(503, 'voice_unavailable', 'Voice input is unavailable.');
-            return whileConnected(reply, (signal) =>
-              options.service.demoTranscribe!(req.params.paper, req.body, signal),
-            );
-          },
-        );
-        demo.post<{ Params: { paper: string }; Body: AskRequest }>(
-          '/:paper/ask',
-          {
-            schema: {
-              params: {
-                type: 'object',
-                required: ['paper'],
-                properties: { paper: { type: 'string', pattern: DEMO_PAPER.source } },
-              },
-              body: askBody,
-            },
-          },
-          async (req, reply): Promise<AskAnswer | FastifyReply> => {
-            const ask = options.service.demoAsk?.bind(options.service);
-            if (!ask) throw new HttpError(503, 'ask_unavailable', 'Questions are not available on this server.');
-            return whileConnected(reply, (signal) =>
-              answerResponse(reply, req.headers.accept, () => ask(req.params.paper, req.body, signal)),
-            );
-          },
-        );
-        demo.post<{ Params: { paper: string }; Body: { targetId: string; removeCitations?: boolean } }>(
-          '/:paper/reading-passage',
-          {
-            schema: {
-              params: objectBody({ paper: { type: 'string', pattern: DEMO_PAPER.source } }, ['paper']),
-              body: objectBody({ targetId: text(200), removeCitations: { type: 'boolean' } }, ['targetId']),
-            },
-          },
-          async (req, reply) => {
-            if (!options.service.demoReadingPassage)
-              throw new HttpError(503, 'reading_unavailable', 'Visual readings are unavailable.');
-            return whileConnected(reply, (signal) =>
-              options.service.demoReadingPassage!(
-                req.params.paper,
-                req.body.targetId,
-                signal,
-                req.body.removeCitations,
-              ),
-            );
-          },
-        );
-        demo.post<{ Params: { paper: string }; Body: SnapRequest }>(
-          '/:paper/snap',
-          {
-            schema: {
-              params: {
-                type: 'object',
-                required: ['paper'],
-                properties: { paper: { type: 'string', pattern: DEMO_PAPER.source } },
-              },
-              body: snapBody(),
-            },
-          },
-          async (req, reply): Promise<SnapResult> => {
-            if (!snap) throw new HttpError(503, 'snap_unavailable', 'Snapping is not available on this server.');
-            return whileConnected(reply, (signal) => snap.demoSnap(req.params.paper, req.body, signal));
-          },
-        );
-      },
-      { prefix: '/api/demo' },
-    );
   if (options.spaDir && existsSync(resolve(options.spaDir, 'index.html'))) {
     await app.register(fastifyStatic, {
       root: resolve(options.spaDir),

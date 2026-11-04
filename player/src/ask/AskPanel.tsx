@@ -1,3 +1,4 @@
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useVoiceInput } from './voice';
 import { ConversationHistory } from './ConversationHistory';
 import { useConversations } from './useConversations';
@@ -7,10 +8,6 @@ import { isLibraryConfigured } from '../library/client';
 import { LanguagePicker } from './LanguagePicker';
 import { forgetLocalActivity, localActivity } from '../activity/client';
 import type { ActivityRun } from '../../../shared/agentActivity';
-// The ask bar: a field below the stage that opens into a tray with the tour's suggested questions
-// when it ends, a waiting state, the answer's verdict and follow-ups, and errors in plain words. It does not play
-// answers: the reader plays them as a second tour and sets the tour aside meanwhile ("Back to the tour").
-
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { answerText, askErrorMessage, askQuestion, isCancelled, MAX_HISTORY } from './api';
@@ -98,7 +95,7 @@ const VERDICT: Record<Answerable, string> = {
 };
 const MAX_LINES_PX = 120;
 const sourceKey = (source: AskSource) =>
-  'documentId' in source ? `document:${source.documentId}` : `demo:${source.paper}`;
+  `document:${source.documentId}`;
 
 function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || !!target.closest('input, textarea, select'));
@@ -381,7 +378,7 @@ export function AskPanel(props: AskPanelProps) {
     if (
       (persistent && (sessions.loading || hasConversationHistory)) ||
       !now?.questions.length ||
-      !prefetchPossible(source, import.meta.env)
+      !prefetchPossible(source)
     ) {
       keeper.hold();
       return;
@@ -605,6 +602,7 @@ export function AskPanel(props: AskPanelProps) {
     }
   };
 
+  const reduceMotion = useReducedMotion();
   const empty = !draft.trim();
   const expanded = focused || busy || open || !empty;
   return (
@@ -620,8 +618,10 @@ export function AskPanel(props: AskPanelProps) {
         <div className={`ask-tray${open ? ' open' : ''}`}>
           <div className="ask-tray-clip">{tray.current}</div>
         </div>
+        <AnimatePresence initial={false}>
         {props.selection && !props.selecting && (
-          <div className="ask-selection-chip">
+          <motion.div key="region" className="ask-selection-chip"
+            initial={{ opacity: 0, height: reduceMotion ? 'auto' : 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: reduceMotion ? 'auto' : 0 }} transition={{ duration: 0.16 }}>
             {props.selectionPreview}
             <span>
               <strong>Selected region</strong>
@@ -647,8 +647,9 @@ export function AskPanel(props: AskPanelProps) {
             >
               ×
             </button>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
         <form className="ask-bar" onSubmit={submit}>
           <SparkIcon />
           <textarea
@@ -756,8 +757,10 @@ export function AskPanel(props: AskPanelProps) {
             </button>
           )}
           {/* Nothing to send yet: the bar stays quiet, and the controls before it do not move when it appears. */}
+          <AnimatePresence initial={false}>
           {(busy || !empty) && (
-            <button
+            <motion.button key="send"
+              initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.8 }} transition={{ duration: 0.14 }}
               type="submit"
               className={`ask-send${busy ? ' stop' : ' ready'}`}
               disabled={voiceBusy || props.selecting}
@@ -765,8 +768,9 @@ export function AskPanel(props: AskPanelProps) {
               title={busy ? 'Stop generating answer (Esc)' : 'Ask (Enter)'}
             >
               {busy ? <StopIcon /> : <SendIcon />}
-            </button>
+            </motion.button>
           )}
+          </AnimatePresence>
         </form>
       </div>
       {persistent && (

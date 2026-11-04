@@ -37,10 +37,7 @@
   font-variant-numeric: tabular-nums;
   color: var(--accent, #7ea6ff);
 }
-.visual-parameters input {
-  width: 100%;
-  accent-color: var(--accent, #7ea6ff);
-}
+
 .authored-visual-error {
   padding: 1rem;
   border: 1px solid var(--error-border);

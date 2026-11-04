@@ -1,3 +1,4 @@
+import { Slider } from '@animate-ui/react/primitives/base-ui/slider';
 import { useRef, useState } from 'react';
 import type { KeyboardEvent, PointerEvent } from 'react';
 import type { EngineState, FlatStep } from '../engine';
@@ -38,6 +39,7 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
   // The time under the pointer, while it is over the timeline or drags along it.
   const [aim, setAim] = useState<number | null>(null);
   const dragging = useRef(false);
+  const thumbInput = useRef<HTMLInputElement>(null);
   const total = clock.total;
   const span = Math.max(total, clock.span);
   const elapsed = elapsedAt(clock, state, steps);
@@ -49,15 +51,28 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
   const unwritten = aim !== null && aim > total;
   const shown = aim === null ? elapsed : Math.min(aim, total);
   const seek = (time: number) => {
-    const { index, word } = wordAt(clock, time, steps.map((fs) => fs.words.length));
+    const { index, word } = wordAt(
+      clock,
+      time,
+      steps.map((fs) => fs.words.length),
+    );
     onSeek(index, word);
   };
-  const at = wordAt(clock, shown, steps.map((fs) => fs.words.length));
+  const at = wordAt(
+    clock,
+    shown,
+    steps.map((fs) => fs.words.length),
+  );
   const chapter = steps[at.index]?.chapterIndex ?? 0;
   const where = `${chapter + 1}. ${chapters[chapter] ?? ''}`;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
-    const direction = event.key === 'ArrowRight' || event.key === 'ArrowUp' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 0;
+    const direction =
+      event.key === 'ArrowRight' || event.key === 'ArrowUp'
+        ? 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowDown'
+          ? -1
+          : 0;
     if (direction) (event.shiftKey ? onStep : onSkip)(direction);
     else if (event.key === 'Home') onSeek(0, 0);
     else if (event.key === 'End') onSeek(steps.length - 1, 0);
@@ -68,96 +83,112 @@ export function Timeline({ steps, chapters, clock, state, onSeek, onSkip, onStep
   };
   if (!steps.length || total <= 0) return null;
   return (
-    <div
-      className={`timeline${aim !== null ? ' aiming' : ''}${state.waiting ? ' waiting' : ''}`}
-      ref={track}
-      role="slider"
-      tabIndex={0}
-      aria-label="Tour timeline"
-      aria-orientation="horizontal"
-      aria-valuemin={0}
-      aria-valuemax={Math.round(total)}
-      aria-valuenow={Math.round(elapsed)}
-      aria-valuetext={`Chapter ${chapter + 1} of ${chapters.length}, ${chapters[chapter] ?? ''}, ${formatTime(elapsed)} of ${formatTime(total)}${clock.pending > 0 ? ' so far' : ''}${state.waiting && writingLabel ? `, ${writingLabel.toLowerCase()}` : ''}`}
-      onKeyDown={onKeyDown}
-      onPointerDown={(event) => {
-        if (event.pointerType === 'mouse' && event.button !== 0) return;
-        // Nothing to go to in the part that is not written yet.
-        if (timeOf(event) > total) return;
-        dragging.current = true;
-        event.currentTarget.setPointerCapture(event.pointerId);
-        setAim(timeOf(event));
-      }}
-      onPointerMove={(event) => {
-        // A mouse hovering shows where a click would go; a pen or finger only while it is down.
-        if (dragging.current || event.pointerType === 'mouse') setAim(timeOf(event));
-      }}
-      onPointerUp={(event) => {
-        if (!dragging.current) return;
+    <Slider.Root
+      className="timeline-slider"
+      min={0}
+      max={total}
+      step={0.01}
+      value={shown}
+      onValueChange={(value) => setAim(value)}
+      onValueCommitted={(value) => {
+        seek(value);
         dragging.current = false;
-        seek(Math.min(timeOf(event), total));
-        setAim(event.pointerType === 'mouse' ? timeOf(event) : null);
-        // The keyboard goes back to the reader (Space plays, the arrows step); Tab brings it here again.
-        event.currentTarget.blur();
-      }}
-      onPointerCancel={() => {
-        dragging.current = false;
-        setAim(null);
-      }}
-      onPointerLeave={() => {
-        if (!dragging.current) setAim(null);
+        thumbInput.current?.blur();
       }}
     >
-      {clock.chapters.map((c) => {
-        const fill = Math.min(1, Math.max(0, (shown - c.start) / c.length));
-        return (
-          <div
-            key={c.index}
-            className={`tl-chapter${shown >= c.start && shown < c.start + c.length ? ' current' : ''}`}
-            style={{ left: `${(c.start / span) * 100}%`, width: `${(c.length / span) * 100}%` }}
-          >
-            <div className="tl-rail">
-              <span className="tl-fill" style={{ width: `${fill * 100}%` }} />
+      <Slider.Control
+        className={`timeline${aim !== null ? ' aiming' : ''}${state.waiting ? ' waiting' : ''}`}
+        ref={track}
+        onPointerDownCapture={(event) => {
+          if (event.pointerType === 'mouse' && event.button !== 0) return;
+          if (timeOf(event) > total) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          dragging.current = true;
+        }}
+        onPointerMove={(event) => {
+          // A mouse hovering shows where a click would go; a pen or finger only while it is down.
+          if (dragging.current || event.pointerType === 'mouse') setAim(timeOf(event));
+        }}
+        onPointerUp={(event) => {
+          setAim(event.pointerType === 'mouse' ? timeOf(event) : null);
+        }}
+        onPointerCancel={() => {
+          dragging.current = false;
+          setAim(null);
+        }}
+        onPointerLeave={() => {
+          if (!dragging.current) setAim(null);
+        }}
+      >
+        {clock.chapters.map((c) => {
+          const fill = Math.min(1, Math.max(0, (shown - c.start) / c.length));
+          return (
+            <div
+              key={c.index}
+              className={`tl-chapter${shown >= c.start && shown < c.start + c.length ? ' current' : ''}`}
+              style={{ left: `${(c.start / span) * 100}%`, width: `${(c.length / span) * 100}%` }}
+            >
+              <div className="tl-rail">
+                <span className="tl-fill" style={{ width: `${fill * 100}%` }} />
+                {steps
+                  .filter((fs) => fs.chapterIndex === c.index && fs.index > c.step)
+                  .map((fs) => (
+                    <span
+                      key={fs.index}
+                      className="tl-tick"
+                      style={{ left: `${((clock.steps[fs.index].start - c.start) / c.length) * 100}%` }}
+                    />
+                  ))}
+              </div>
+              {/* A checkpoint pauses where its narration ends; the mark fills once the tour has come that far. */}
               {steps
-                .filter((fs) => fs.chapterIndex === c.index && fs.index > c.step)
-                .map((fs) => (
-                  <span key={fs.index} className="tl-tick" style={{ left: `${((clock.steps[fs.index].start - c.start) / c.length) * 100}%` }} />
-                ))}
+                .filter((fs) => fs.chapterIndex === c.index && fs.checkpoint)
+                .map((fs) => {
+                  const at = clock.steps[fs.index].start + clock.steps[fs.index].speech;
+                  return (
+                    <span
+                      key={fs.index}
+                      className={`tl-pause${shown >= at ? ' reached' : ''}`}
+                      style={{ left: `calc((100% - var(--tl-gap)) * ${Math.min(1, (at - c.start) / c.length)})` }}
+                      aria-hidden="true"
+                    />
+                  );
+                })}
             </div>
-            {/* A checkpoint pauses where its narration ends; the mark fills once the tour has come that far. */}
-            {steps
-              .filter((fs) => fs.chapterIndex === c.index && fs.checkpoint)
-              .map((fs) => {
-                const at = clock.steps[fs.index].start + clock.steps[fs.index].speech;
-                return (
-                  <span
-                    key={fs.index}
-                    className={`tl-pause${shown >= at ? ' reached' : ''}`}
-                    style={{ left: `calc((100% - var(--tl-gap)) * ${Math.min(1, (at - c.start) / c.length)})` }}
-                    aria-hidden="true"
-                  />
-                );
-              })}
+          );
+        })}
+        {/* What is expected of a tour still being written: nothing to play there yet. */}
+        {clock.pending > 0 && (
+          <div
+            className={`tl-chapter tl-pending${state.waiting ? ' waiting' : ''}`}
+            style={{ left: `${(total / span) * 100}%`, width: `${(clock.pending / span) * 100}%` }}
+            aria-hidden="true"
+          >
+            <div className="tl-rail" />
           </div>
-        );
-      })}
-      {/* What is expected of a tour still being written: nothing to play there yet. */}
-      {clock.pending > 0 && (
-        <div
-          className={`tl-chapter tl-pending${state.waiting ? ' waiting' : ''}`}
-          style={{ left: `${(total / span) * 100}%`, width: `${(clock.pending / span) * 100}%` }}
-          aria-hidden="true"
-        >
-          <div className="tl-rail" />
-        </div>
-      )}
-      <span className="tl-thumb" style={{ left: `${(shown / span) * 100}%` }} />
-      {aim !== null && (
-        <span className="tl-tip" style={{ left: `clamp(90px, ${((unwritten ? aim : shown) / span) * 100}%, calc(100% - 90px))` }}>
-          <strong>{unwritten ? writingLabel ?? 'Not written yet' : where}</strong>
-          <span>{unwritten ? 'Not ready to play' : formatTime(shown)}</span>
-        </span>
-      )}
-    </div>
+        )}
+        <Slider.Track className="tl-slider-track" style={{ width: `${(total / span) * 100}%` }}>
+          <Slider.Thumb
+            className="tl-thumb"
+            inputRef={thumbInput}
+            onKeyDown={onKeyDown}
+            aria-label="Tour timeline"
+            aria-valuetext={`Chapter ${chapter + 1} of ${chapters.length}, ${chapters[chapter] ?? ''}, ${formatTime(elapsed)} of ${formatTime(total)}${clock.pending > 0 ? ' so far' : ''}${state.waiting && writingLabel ? `, ${writingLabel.toLowerCase()}` : ''}`}
+          />
+        </Slider.Track>
+        {aim !== null && (
+          <span
+            className="tl-tip"
+            style={{ left: `clamp(90px, ${((unwritten ? aim : shown) / span) * 100}%, calc(100% - 90px))` }}
+          >
+            <strong>{unwritten ? (writingLabel ?? 'Not written yet') : where}</strong>
+            <span>{unwritten ? 'Not ready to play' : formatTime(shown)}</span>
+          </span>
+        )}
+      </Slider.Control>
+    </Slider.Root>
   );
 }

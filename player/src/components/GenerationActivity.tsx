@@ -1,3 +1,4 @@
+import { Tabs } from '@animate-ui/react/primitives/base-ui/tabs';
 import { TokenCounts } from './TokenCounts';
 import { activityEvents, modelOutput } from './activityEvents';
 import { AgentOrb, AgentStream } from './AgentStream';
@@ -41,6 +42,7 @@ export function GenerationActivity({
   label = 'Tour assistant',
   active = false,
   openRequest = 0,
+  trigger,
 }: {
   documentId: string;
   generationId: string;
@@ -49,6 +51,7 @@ export function GenerationActivity({
   label?: string;
   active?: boolean;
   openRequest?: number;
+  trigger?(open: () => void): import('react').ReactNode;
 }) {
   const [run, setRun] = useState<AgentRun | null>(null);
   const [controlling, setControlling] = useState(false);
@@ -67,7 +70,7 @@ export function GenerationActivity({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [open]);
-  const lastRunStatus = useRef<string>();
+  const lastRunStatus = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (
       open &&
@@ -273,10 +276,12 @@ export function GenerationActivity({
   const text = view === 'details' ? payloadText(payload) : '';
   return (
     <div className="generation-activity">
-      <button type="button" className="activity-launch" onClick={() => setOpen(true)}>
-        <AgentOrb active={working} />
-        {label}
-      </button>
+      {trigger ? trigger(() => setOpen(true)) : (
+        <button type="button" className="activity-launch" onClick={() => setOpen(true)}>
+          <AgentOrb active={working} />
+          {label}
+        </button>
+      )}
       <dialog
         ref={dialog}
         className="activity-dialog"
@@ -355,13 +360,12 @@ export function GenerationActivity({
                 </details>
               )}
             </section>
-            <div className="activity-view-switch" role="group" aria-label="Activity view">
-              <button type="button" aria-pressed={view === 'stream'} onClick={() => setView('stream')}>
-                Live activity
-              </button>
-              <button type="button" aria-pressed={view === 'details'} onClick={() => setView('details')}>
-                Technical details
-              </button>
+            <Tabs.Root className="activity-tabs" value={view} onValueChange={(value) => setView(value as 'stream' | 'details')}>
+            <div className="activity-view-switch">
+              <Tabs.List className="activity-tab-list" aria-label="Activity view" activateOnFocus>
+                <Tabs.Tab value="stream">Live activity</Tabs.Tab>
+                <Tabs.Tab value="details">Technical details</Tabs.Tab>
+              </Tabs.List>
               {attemptCount > 1 && (
                 <label className="activity-history">
                   <input
@@ -383,6 +387,7 @@ export function GenerationActivity({
                   : run.reason || 'Progress saved. Resume when ready.'}
               </p>
             )}
+            <Tabs.Panel className="activity-tab-panel" key={view} value={view} data-view={view}>
             {view === 'stream' ? (
               <>
                 {error && <p role="status">{error}</p>}
@@ -659,6 +664,8 @@ export function GenerationActivity({
                 </div>
               </>
             )}
+            </Tabs.Panel>
+            </Tabs.Root>
           </div>
         )}
       </dialog>

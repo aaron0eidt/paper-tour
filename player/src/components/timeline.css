@@ -310,3 +310,10 @@
     animation: none;
   }
 }
+
+.timeline-slider { position: absolute; z-index: 3; left: 0; right: 0; top: -9px; height: 18px; }
+.timeline-slider > .timeline { position: relative; inset: auto; width: 100%; height: 18px; }
+.tl-slider-track { position: absolute; left: 0; top: 0; height: 18px; pointer-events: none; }
+.timeline .tl-thumb { top: 50%; margin: 0; transform: none; transition: none; pointer-events: auto; }
+.timeline:is(:hover, :focus-within, .aiming) .tl-thumb { transform: none; }
+.timeline:focus-within .tl-rail { outline: 2px solid var(--accent); outline-offset: 2px; }

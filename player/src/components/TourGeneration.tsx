@@ -8,6 +8,9 @@ import { isTourGenerationActive, tourGenerationCopy } from '../library/tourGener
 import { useModelCatalog } from '../library/useModelCatalog';
 import { useSettings } from '../library/useSettings';
 import { canUseModel } from '../library/modelChoices';
+import { StatusBadge } from '../ui/StatusBadge';
+import { ActionButton } from '../ui/ActionButton';
+import { AnimatedPopover } from '../ui/controls';
 import '../tourGeneration.css';
 
 export interface TourGenerationProps {
@@ -17,6 +20,7 @@ export interface TourGenerationProps {
   canGenerate?: boolean;
   onOpenTour?(tourId: string): void;
   compact?: boolean;
+  card?: boolean;
   toolbar?: boolean;
   activityRequest?: number;
   /** Only the reader asks how to explain a new paper; library cards stay passive. */
@@ -31,10 +35,12 @@ export function TourGeneration({
   canGenerate = true,
   onOpenTour,
   compact = false,
+  card = false,
   toolbar = false,
   activityRequest,
   promptOnOpen = false,
 }: TourGenerationProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [creating, setCreating] = useState<null | { regenerate: boolean }>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,27 +88,14 @@ export function TourGeneration({
     }
   }
 
-  return (
-    <>
-      <section
-        className={`tour-generation ${copy.kind}${compact ? ' compact' : ''}${toolbar ? ' in-toolbar' : ''}`}
-        aria-label="Guided tour"
-        aria-busy={active || requesting}
-      >
-        {(!compact || current?.status !== 'ready') && (
-          <div className="tour-generation-content" aria-live="polite" title={`${copy.title} ${copy.detail}`}>
-            <strong>{requesting ? 'Starting your tour…' : copy.title}</strong>
-            <p>{copy.detail}</p>
-            {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
-              <progress
-                aria-label="Images reviewed for the tour"
-                value={Math.min(current.imagesTotal, Math.max(0, current.imagesDone))}
-                max={current.imagesTotal}
-              />
-            )}
-          </div>
-        )}
-        {current && (
+  const panel = (
+    <section
+      className={`tour-generation ${copy.kind}${compact ? ' compact' : ''}${toolbar ? ' in-toolbar' : ''}`}
+      aria-label="Guided tour"
+      aria-busy={active || requesting}
+    >
+      <div className="tour-generation-content" aria-live="polite">
+        {current ? (
           <GenerationActivity
             key={current.id}
             documentId={documentId}
@@ -111,22 +104,48 @@ export function TourGeneration({
             active={active || requesting}
             openRequest={activityRequest}
             onChanged={onChanged}
-            label={toolbar ? 'Activity' : undefined}
+            trigger={(open) => (
+              <StatusBadge
+                label={requesting ? 'Starting your tour…' : copy.title}
+                tone={copy.kind}
+                detail={copy.detail}
+                busy={active || requesting}
+                onClick={open}
+              />
+            )}
+          />
+        ) : (
+          <StatusBadge
+            label={requesting ? 'Starting your tour…' : copy.title}
+            tone={copy.kind}
+            detail={copy.detail}
+            busy={requesting}
           />
         )}
+        {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
+          <progress
+            aria-label="Images reviewed for the tour"
+            value={Math.min(current.imagesTotal, Math.max(0, current.imagesDone))}
+            max={current.imagesTotal}
+          />
+        )}
+      </div>
+      {card && <p>{copy.detail}</p>}
+      <div className="generation-actions">
         {error && (
           <p className="tour-generation-error" role="alert" title={error}>
             {error}
           </p>
         )}
         {copy.action && canGenerate && (
-          <button
+          <ActionButton
+            className="generation-action"
             type="button"
-            disabled={requesting || !validChoice}
+            busy={requesting}
+            label={requesting ? 'Starting…' : copy.action}
+            disabled={!validChoice}
             onClick={() => setCreating({ regenerate: false })}
-          >
-            {requesting ? 'Starting…' : copy.action}
-          </button>
+          />
         )}
         {current?.status === 'ready' && current.tourId && onOpenTour && (
           <button type="button" onClick={() => onOpenTour(current.tourId!)}>
@@ -143,30 +162,74 @@ export function TourGeneration({
             {requesting ? 'Starting…' : 'New tour'}
           </button>
         )}
-        {canGenerate && (
-          <div className="tour-generation-extra">
-            {current?.status === 'needs_configuration' && (
-              <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>
-                Connect Meta in Profile &amp; Settings →
-              </a>
-            )}
-            {(models.error || profile.error) && (
-              <p role="alert">
-                Could not load your model settings.{' '}
-                <button
-                  type="button"
-                  onClick={() => {
-                    models.refresh();
-                    profile.refresh();
-                  }}
+      </div>
+      {canGenerate && (
+        <div className="tour-generation-extra">
+          {current?.status === 'needs_configuration' && (
+            <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>
+              Connect Meta in Profile &amp; Settings →
+            </a>
+          )}
+          {(models.error || profile.error) && (
+            <p role="alert">
+              Could not load your model settings.{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  models.refresh();
+                  profile.refresh();
+                }}
+              >
+                Retry
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+
+  return (
+    <>
+      {card ? (
+        <AnimatedPopover
+          label="Guided tour status"
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          openOnHover
+          side="top"
+          className="library-tour-popover"
+          trigger={
+            <button
+              type="button"
+              className="library-tour-trigger"
+              data-tone={copy.kind}
+              aria-label={`${copy.title}: tour details`}
+            >
+              {active || requesting ? (
+                <span className="ui-spinner" aria-hidden="true" />
+              ) : (
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  aria-hidden="true"
                 >
-                  Retry
-                </button>
-              </p>
-            )}
-          </div>
-        )}
-      </section>
+                  <circle cx="10" cy="10" r="8" />
+                  <path d="M10 5v6m0 3v1" />
+                </svg>
+              )}
+            </button>
+          }
+        >
+          {panel}
+        </AnimatedPopover>
+      ) : (
+        panel
+      )}
       {creating && (
         <TourProfileDialog
           current={current?.profile}

@@ -87,19 +87,19 @@ const answer: AskAnswer = {
   followups: ['What next?'],
 };
 
-function app(demoAsk: (paper: string, request: unknown, signal?: AbortSignal) => Promise<AskAnswer>) {
+function app(ask: (paper: string, request: unknown, signal?: AbortSignal) => Promise<AskAnswer>) {
   return createApp({
-    service: { demoAsk } as unknown as Library,
-    authenticate: async () => null,
-    demo: true,
+    service: { ask } as unknown as Library,
+    authenticate: async () => 'owner',
+    localSpeech: true,
   });
 }
 const post = (server: Awaited<ReturnType<typeof app>>, accept?: string) =>
   server.inject({
     method: 'POST',
-    url: '/api/demo/paper/ask',
+    url: '/api/documents/11111111-1111-4111-8111-111111111111/ask',
     payload: { question: 'Why?' },
-    ...(accept ? { headers: { accept } } : {}),
+    headers: { authorization: 'Bearer valid', ...(accept ? { accept } : {}) },
   });
 const lines = (body: string): AnswerEvent[] =>
   body

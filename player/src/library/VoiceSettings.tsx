@@ -12,6 +12,7 @@ import { useBrowserVoices } from '../narration/useBrowserVoices';
 import { useVoicePreview } from '../narration/useVoicePreview';
 import { voiceId } from '../narration/voices';
 import { PaperMark } from './AuthForm';
+import { BackLink } from '../ui/navigation';
 import '../profileSettings.css';
 import './voiceSettingsPage.css';
 
@@ -185,9 +186,7 @@ export function VoiceSettings() {
     <div className="library">
       <header className="library-header">
         <PaperMark />
-        <a className="library-text-button" href={`${import.meta.env.BASE_URL}?settings=profile`}>
-          ‹ Back to settings
-        </a>
+        <BackLink href={`${import.meta.env.BASE_URL}?settings=profile`} label="Back to settings" />
       </header>
       <main className="library-main voices-main">
         <div className="library-heading">

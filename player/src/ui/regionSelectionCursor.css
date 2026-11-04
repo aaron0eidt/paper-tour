@@ -1,0 +1,16 @@
+.region-selection-cursor { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.region-selection-cursor-mark { width: 24px; height: 24px; }
+/* The crosshair's centre, rather than its bounding box, marks the exact PDF coordinate. */
+.region-selection-cursor-mark svg { display: block; transform: translate(-50%, -50%); }
+.region-selection-cursor-label {
+  width: max-content;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 3px 10px #0002;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}

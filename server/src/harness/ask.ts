@@ -41,14 +41,12 @@ import { currentSink, StepScanner } from './ask-stream';
 import { activityTask, currentActivity } from '../ai/activity-context';
 
 // Preserve the existing Q&A API while keeping search and source I/O independent of authoring.
-export { ANSWERABLE } from './ask-types';
-export type { Answerable, AskAnswer, AskRequest, AskTurn } from './ask-types';
+export { figureImage } from './ask-assets';
 export { bm25, evidenceText, findStep, namedElements, namedExercise, retrieve, searchTerms } from './ask-retrieval';
 export type { Passage, Retrieval } from './ask-retrieval';
-export { DEMO_PAPER, DEMO_ROOT, demoImage, demoSelectionImages, figureImage, loadDemo } from './ask-assets';
-export type { DemoPaper } from './ask-assets';
+export { ANSWERABLE } from './ask-types';
+export type { Answerable, AskAnswer, AskRequest, AskTurn } from './ask-types';
 
-export { CUE_ACTIONS, answerProviderSchema, answerSchema, askContext, askInstructions } from './ask-authoring';
 export {
   answerBoardProblems,
   answerVisualProblems,
@@ -56,11 +54,12 @@ export {
   buildAnswer,
   buildSteps,
   readySteps,
-  spoken,
+  spoken
 } from './ask-answer';
 export type { AnswerContext, BoardRules } from './ask-answer';
+export { answerProviderSchema, answerSchema, askContext, askInstructions, CUE_ACTIONS } from './ask-authoring';
 export { answerBoardSchema, shownBoards } from './ask-boards';
-export { NDJSON, StepScanner, answerResponse, currentSink, withSink } from './ask-stream';
+export { answerResponse, currentSink, NDJSON, StepScanner, withSink } from './ask-stream';
 export type { AnswerEvent, StepSink } from './ask-types';
 
 const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 'muse_refused']);
@@ -391,17 +390,15 @@ export function askModel(model: unknown, allowTraining: boolean, fallback: strin
   return known?.tourCompatible && (allowTraining || !known.contributor) ? id : fallback;
 }
 
-/** Model failures in plain words for the learner; a key problem points to the settings, or for demos to the .env. */
-export function askError(error: unknown, demo = false): unknown {
+/** Model failures in plain words for the learner; a key problem points to the settings, with a link to settings. */
+export function askError(error: unknown): unknown {
   if (error instanceof VisualValidationError) return new HttpError(422, error.code, error.publicMessage);
   if (!(error instanceof ProcessingError)) return error;
   if (['muse_not_configured', 'muse_auth_failed'].includes(error.code))
     return new HttpError(
       409,
       'model_not_configured',
-      demo
-        ? 'Demo questions use the server’s Meta API key: set MODEL_API_KEY in the root .env.'
-        : 'Check your Meta API key under Profile & Settings, then ask again.',
+      'Check your Meta API key under Profile & Settings, then ask again.',
     );
   if (error.code === 'muse_rate_limited')
     return new HttpError(429, 'model_busy', 'The model is busy right now. Ask again in a moment.');

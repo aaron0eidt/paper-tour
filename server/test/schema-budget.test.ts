@@ -1,7 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { Doc } from '../../shared/paper';
 import { ARC_SPECS, arcSchema, arcTourPlan, fallbackArcPlan, type ArcType } from '../src/harness/arcs';
 import { paperPlan, type Preset, type TourPlan } from '../src/harness/beats';
@@ -177,13 +175,6 @@ function holdsBudget(label: string, doc: Doc) {
     `${label}: schemas past the provider's limits (room ${ENUM_ROOM} of ${ENUM_BUDGET} values, 15000 characters per long enum)`,
   );
 }
-
-const lease = resolve(import.meta.dirname, '../../demo/eval-lease/doc.json');
-
-test('every call schema of the 63-page lease fits the provider enum budget', { skip: !existsSync(lease) }, () => {
-  const doc = JSON.parse(readFileSync(lease, 'utf8')) as Doc;
-  holdsBudget('lease', doc);
-});
 
 for (const kind of ['paper', 'contract', 'slides', 'sheet'] as const)
   test(`every call schema of a synthetic 100-page ${kind} fits the provider enum budget`, () => {

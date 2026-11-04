@@ -21,7 +21,7 @@ export function usePartialTour(
   const held = useRef<HeldPartial | null>(null);
   const settled = useRef(onSettled);
   settled.current = onSettled;
-  const followed = useRef<string | undefined>();
+  const followed = useRef<string | undefined>(undefined);
   const key = source?.key;
   useEffect(() => {
     if (!source) return;

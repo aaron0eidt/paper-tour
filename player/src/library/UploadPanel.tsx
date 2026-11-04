@@ -4,6 +4,7 @@ import { Upload } from 'tus-js-client';
 import type { UploadReservation } from '../../../shared/contracts';
 import { apiRequest, getAccessToken, storageUploadEndpoint } from './client';
 import { UploadValidationError, uploadErrorMessage } from './uploadErrors';
+import { ActionButton } from '../ui/ActionButton';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 type UploadStage = 'idle' | 'checking' | 'uploading' | 'finishing' | 'canceling' | 'failed';
@@ -277,15 +278,14 @@ export function UploadPanel({
             Retry upload
           </button>
         )}
-        {stage === 'idle' && (
-          <button
+        {stage !== 'failed' && (
+          <ActionButton
             type="button"
-            className="library-button primary"
             disabled={!canUpload}
+            busy={busy}
+            label={busy ? stage === 'uploading' ? `${progress}% uploaded` : stage === 'checking' ? 'Checking…' : stage === 'canceling' ? 'Canceling…' : 'Saving…' : 'Choose PDF'}
             onClick={() => input.current?.click()}
-          >
-            Choose PDF
-          </button>
+          />
         )}
         {stage !== 'idle' && (
           <button

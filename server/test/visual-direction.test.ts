@@ -1,11 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { ROOT } from '../src/config';
 import { validateVisualDirection, visualFrame, checkComponents } from '../src/muse/visual-direction';
 import { materializeTour, validateDraft, type TourDraft } from '../src/muse/schema';
-import type { Doc, Tour, Region } from '../../shared/paper';
+import type { Doc, Region } from '../../shared/paper';
 const doc: Doc = {
   schema: 'paper-tour/doc@0.1',
   source: { file: 'x.pdf', sha256: 'a'.repeat(64), num_pages: 1, generator: 'test' },
@@ -127,34 +124,6 @@ test('existing panel IDs keep their coordinate frame when the source is their co
     { id: 'fig1.b', region: right },
   ]);
   assert.throws(() => checkComponents([{ label: 'Invalid', region: [0.8, 0.8, 0.2, 0.2] }]), /positive area/);
-});
-test('the original handcrafted MVP figure direction remains the quality reference', () => {
-  const original = JSON.parse(
-    readFileSync(resolve(ROOT, 'server/test/fixtures/attention-handcrafted.tour.json'), 'utf8'),
-  ) as Tour;
-  const steps = original.chapters.flatMap((c) => c.steps);
-  const annotations = steps
-    .flatMap((s) => s.actions)
-    .filter((a) => a.type === 'box' && a.target === 'fig1' && a.label && a.region);
-  const components = annotations.map((a) => ({
-    label: a.type === 'box' ? a.label! : '',
-    region: 'region' in a ? a.region! : left,
-  }));
-  const reference: TourDraft = {
-    title: original.title,
-    chapters: original.chapters.map((c) => ({
-      ...c,
-      steps: c.steps.map((s) => ({ ...s, source: 'fig1', evidence: ['fig1'] })),
-    })),
-  };
-  assert.doesNotThrow(() =>
-    validateVisualDirection(
-      reference,
-      { ...doc, figures: [{ ...doc.figures[0], panels: [] }] },
-      { fig1: { readable: true, components } },
-    ),
-  );
-  assert(steps.flatMap((s) => s.actions).filter((a) => (a.at_word ?? 0) > 0).length > 80);
 });
 
 test('a prose anchor cannot silently change a visual camera coordinate frame', () => {

@@ -7,11 +7,9 @@ type Mode = 'login' | 'signup' | 'reset' | 'password';
 export function AuthForm({
   recovering = false,
   onRecovered,
-  onOpenDemo,
 }: {
   recovering?: boolean;
   onRecovered(): void;
-  onOpenDemo(): void;
 }) {
   const [mode, setMode] = useState<Mode>(recovering ? 'password' : 'login');
   const [email, setEmail] = useState('');
@@ -179,11 +177,6 @@ export function AuthForm({
           )}
         </form>
         <p className="library-auth-footnote">Your documents are private to your account.</p>
-        {import.meta.env.DEV && (
-          <button className="library-text-button" type="button" onClick={onOpenDemo}>
-            Open local demo
-          </button>
-        )}
       </section>
     </div>
   );

@@ -223,17 +223,8 @@
   border-radius: 3px;
   background: var(--bg);
 }
-.agent-speech summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
-}
-.agent-speech details[open] summary {
-  margin-bottom: 12px;
-}
-
 /* The transcript takes the space left by the dialog's fixed header and current action. */
-.activity-body > .agent-stream {
+.activity-tab-panel > .agent-stream {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -268,30 +259,20 @@
 .agent-speech code {
   background: var(--bg);
 }
-.agent-message-more > summary {
-  list-style: none;
+/* Message expansion keeps a single transcript, measured rather than duplicated. */
+.agent-message-height > div { display: flow-root; }
+.agent-message-height { margin-inline: -3px; padding-inline: 3px; }
+.activity-dialog .agent-message-toggle {
+  min-width: 0; margin-top: 8px; padding: 4px 0; border: 0; background: transparent;
+  color: var(--accent-ink); font-size: 11px; justify-content: start;
 }
-.agent-message-more > summary::-webkit-details-marker {
-  display: none;
+.activity-dialog .agent-message-toggle:hover { background: transparent; color: var(--accent); }
+.agent-entry { min-width: 0; }
+.agent-entry-title > span { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.agent-entry-title small { flex-shrink: 0; }
+.agent-entry-mark > svg { margin-top: 7px; }
+.agent-feed { overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.agent-message-more:not([data-expanded]) .agent-message-height p {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
-.agent-message-preview {
-  display: block;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.65;
-  margin-bottom: 8px;
-}
-.agent-message-toggle {
-  color: var(--accent);
-  font-size: 11px;
-}
-.agent-message-more[open] .agent-message-preview {
-  display: none;
-}
-.agent-message-more[open] .agent-message-toggle {
-  font-size: 0;
-}
-.agent-message-more[open] .agent-message-toggle::after {
-  content: 'Collapse message';
-  font-size: 11px;
-}
+.agent-stream .agent-follow { position: absolute; white-space: nowrap; max-width: calc(100% - 20px); }

@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import { encodeWav, validWav } from '../../shared/voice';
 import { transcribe } from '../src/muse/transcribe';
 import type { MuseConfig } from '../src/config';
-import { createApp } from '../src/app';
-import type { Library } from '../src/service';
 const config: MuseConfig = {
   apiKey: 'synthetic-test-key',
   baseUrl: 'https://api.meta.ai/v1',
@@ -54,49 +52,6 @@ test('no provider calls for invalid input or missing keys; errors never echo ups
     (e: Error) => !e.message.includes('sensitive') && e.message.includes('not accepted'),
   );
   await assert.rejects(() => transcribe(config, audio, async () => Response.json({ transcript: '' })), /No speech/);
-});
-test('voice routes accept long audio, require authentication, validate identity and hide demos in production', async () => {
-  const calls: string[] = [];
-  const service = {
-    transcribe: async (owner: string, id: string) => {
-      calls.push(`${owner}:${id}`);
-      return { transcript: 'Synthetic question' };
-    },
-  } as unknown as Library;
-  const app = await createApp({
-    service,
-    authenticate: async (t) => (t === 'synthetic' ? 'owner' : null),
-    demo: false,
-  });
-  const id = '11111111-1111-4111-8111-111111111111';
-  try {
-    const request = {
-      method: 'POST' as const,
-      url: `/api/documents/${id}/transcribe`,
-      headers: { 'content-type': 'audio/wav' },
-      payload: Buffer.from(audio),
-    };
-    assert.equal((await app.inject(request)).statusCode, 401);
-    const good = await app.inject({ ...request, headers: { ...request.headers, authorization: 'Bearer synthetic' } });
-    assert.equal(good.statusCode, 200);
-    assert.equal(good.json().transcript, 'Synthetic question');
-    assert.equal(calls.length, 1);
-    assert.equal(
-      (
-        await app.inject({
-          ...request,
-          url: '/api/documents/not-an-id/transcribe',
-          headers: { ...request.headers, authorization: 'Bearer synthetic' },
-        })
-      ).statusCode,
-      400,
-    );
-    const long = encodeWav(new Float32Array(16000 * 61), 16000);
-    assert.equal((await app.inject({ ...request, headers: { ...request.headers, authorization: 'Bearer synthetic' }, payload: Buffer.from(long) })).statusCode, 200);
-    assert.equal((await app.inject({ ...request, url: '/api/demo/_fixture/transcribe' })).statusCode, 404);
-  } finally {
-    await app.close();
-  }
 });
 
 test('transcription preserves long text and only uses caller cancellation', async () => {

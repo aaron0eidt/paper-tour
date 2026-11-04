@@ -34,7 +34,7 @@ export function siriRoutes(api: FastifyInstance, siri: SiriRuntime, origins: str
     return request.body.action === 'pause' ? siri.pause() : siri.start(request.body.voiceId);
   });
   if (!local) return;
-  // Keyless demo: this endpoint can only use native Siri, never a server's paid cloud keys.
+  // Local speech: this endpoint can only use native Siri, never a server's paid cloud keys.
   const version = randomUUID();
   api.get('/speech/settings', async (): Promise<SpeechSettings> => {
     const status = await siri.status();

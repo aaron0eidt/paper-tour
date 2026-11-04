@@ -134,7 +134,7 @@
   border-color: var(--border-accent);
 }
 /* Keep the audio controls usable while the automatic transcript bubble is open. */
-.reader-app:has(.playback-options[open]) .agent-speech-peek {
+.reader-app:has(.ui-audio-trigger[data-popup-open]) .agent-speech-peek {
   visibility: hidden;
   pointer-events: none;
 }
@@ -701,4 +701,9 @@
 .reader-agent-anchor[data-panel='sheet'] .agent-speech-peek[data-compact] {
   top: auto;
   bottom: calc(100% + var(--agent-bubble-gap, 14px));
+}
+/* Keep the status dot and word marker clear of Auto Height's clipping edge. */
+.agent-peek-content {
+  margin-inline: -4px;
+  padding-inline: 4px;
 }

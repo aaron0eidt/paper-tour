@@ -12,6 +12,9 @@ import type {
   TourProfileSnapshot,
   TourStructure,
 } from '../../../shared/tourProfiles';
+import { AnimatedDialog, DialogTitle } from '../ui/controls';
+import { ActionButton } from '../ui/ActionButton';
+import { ChoicePicker } from './ChoicePicker';
 import './tourProfiles.css';
 
 interface Props {
@@ -24,7 +27,9 @@ interface Props {
 }
 /** Creation and reusable instructions live here; the floating question dock stays focused on reading. */
 export function TourProfileDialog({ current, model, busy, firstTour = false, onCreate, onClose }: Props) {
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(true);
+  const returnFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const close = () => setOpen(false);
   const [catalog, setCatalog] = useState<TourProfileCatalog | null>(null);
   const [selection, setSelection] = useState(current?.id ?? 'concept-led');
   const [depth, setDepth] = useState<TourDepth>(current?.depth ?? 'standard');
@@ -36,15 +41,6 @@ export function TourProfileDialog({ current, model, busy, firstTour = false, onC
   const [saving, setSaving] = useState(false);
   const selected = catalog?.profiles.find((p) => p.id === selection);
   const locked = busy || saving;
-  useEffect(() => {
-    const element = dialog.current;
-    const focus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    element?.showModal();
-    return () => {
-      element?.close();
-      focus?.focus();
-    };
-  }, []);
   useEffect(() => {
     const abort = new AbortController();
     setLoading(true);
@@ -119,20 +115,14 @@ export function TourProfileDialog({ current, model, busy, firstTour = false, onC
   const patch = (changes: Partial<TourProfileDraft>) =>
     setEditing((value) => (value ? { ...value, draft: { ...value.draft, ...changes } } : value));
   return (
-    <dialog
-      ref={dialog}
-      className="tour-profile-dialog"
-      aria-labelledby="tour-profile-heading"
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!locked) onClose();
-      }}
-    >
+    <AnimatedDialog className="tour-profile-dialog" open={open}
+      onOpenChange={(next, details) => { if (locked) details.cancel(); else setOpen(next); }}
+      onOpenChangeComplete={(next) => { if (!next) onClose(); }} popupProps={{ finalFocus: returnFocus }}>
       <header>
         <div>
-          <h2 id="tour-profile-heading">
+          <DialogTitle>
             {editing ? (editing.id ? 'Edit profile' : 'Save a tour profile') : firstTour ? 'How would you like to explore this paper?' : 'Create a tour'}
-          </h2>
+          </DialogTitle>
           <p>
             {editing
               ? 'Reusable teaching instructions. Saving an edit creates a new revision.'
@@ -141,7 +131,7 @@ export function TourProfileDialog({ current, model, busy, firstTour = false, onC
                 : 'Choose how this paper should be explained. Existing tours are kept.'}
           </p>
         </div>
-        <button type="button" disabled={locked} onClick={onClose}>
+        <button type="button" disabled={locked} onClick={close}>
           Close
         </button>
       </header>
@@ -170,15 +160,10 @@ export function TourProfileDialog({ current, model, busy, firstTour = false, onC
           </label>
           <label>
             Structure
-            <select
-              value={editing.draft.structure}
-              disabled={locked}
-              onChange={(event) => patch({ structure: event.target.value as TourStructure })}
-            >
-              <option value="concepts">Concept-led</option>
-              <option value="overview">Overview</option>
-              <option value="paper">In paper order</option>
-            </select>
+            <ChoicePicker value={editing.draft.structure} label="Structure" disabled={locked}
+              onChange={(structure: TourStructure) => patch({ structure })} options={[
+                { value: 'concepts', label: 'Concept-led' }, { value: 'overview', label: 'Overview' }, { value: 'paper', label: 'In paper order' },
+              ]} />
           </label>
           <label>
             Teaching instructions
@@ -206,38 +191,20 @@ export function TourProfileDialog({ current, model, busy, firstTour = false, onC
             >
               Cancel edit
             </button>
-            <button className="primary" disabled={locked || !editing.draft.name.trim()}>
-              {saving ? 'Saving…' : editing.id ? 'Save new revision' : 'Save profile'}
-            </button>
+            <ActionButton busy={saving} label={saving ? 'Saving…' : editing.id ? 'Save new revision' : 'Save profile'} disabled={locked || !editing.draft.name.trim()} />
           </footer>
         </form>
       ) : (
         <form onSubmit={(event) => void create(event)}>
           <label>
             Tour type
-            <select
-              autoFocus
-              value={selection}
-              disabled={locked || loading || !catalog}
-              onChange={(event) => {
-                setSelection(event.target.value);
-                const profile = catalog?.profiles.find((p) => p.id === event.target.value);
-                if (profile) {
-                  setDepth(profile.depth);
-                  setAudience(profile.audience);
-                }
-              }}
-            >
-              {!catalog && (
-                <option value="concept-led">{loading ? 'Loading profiles…' : 'Profiles unavailable'}</option>
-              )}
-              {catalog?.profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                  {profile.builtin ? '' : ` · revision ${profile.revision}`}
-                </option>
-              ))}
-            </select>
+            <ChoicePicker value={selection} label="Tour type" disabled={locked || loading || !catalog}
+              options={catalog?.profiles.map((profile) => ({ value: profile.id, label: profile.name, badge: profile.builtin ? undefined : `revision ${profile.revision}` })) ?? [{ value: 'concept-led', label: loading ? 'Loading profiles…' : 'Profiles unavailable' }]}
+              onChange={(next) => {
+                setSelection(next);
+                const profile = catalog?.profiles.find((item) => item.id === next);
+                if (profile) { setDepth(profile.depth); setAudience(profile.audience); }
+              }} />
           </label>
           {selected && (
             <>
@@ -257,23 +224,15 @@ export function TourProfileDialog({ current, model, busy, firstTour = false, onC
           <div className="tour-profile-options">
             <label>
               Explanation depth
-              <select value={depth} disabled={locked} onChange={(event) => setDepth(event.target.value as TourDepth)}>
-                <option value="quick">Brief</option>
-                <option value="standard">Standard</option>
-                <option value="deep">In depth</option>
-              </select>
+              <ChoicePicker<TourDepth> value={depth} label="Explanation depth" disabled={locked} onChange={setDepth} options={[
+                { value: 'quick', label: 'Brief' }, { value: 'standard', label: 'Standard' }, { value: 'deep', label: 'In depth' },
+              ]} />
             </label>
             <label>
               Reader familiarity
-              <select
-                value={audience}
-                disabled={locked}
-                onChange={(event) => setAudience(event.target.value as TourAudience)}
-              >
-                <option value="general">New to the subject</option>
-                <option value="familiar">Some background</option>
-                <option value="expert">Experienced</option>
-              </select>
+              <ChoicePicker<TourAudience> value={audience} label="Reader familiarity" disabled={locked} onChange={setAudience} options={[
+                { value: 'general', label: 'New to the subject' }, { value: 'familiar', label: 'Some background' }, { value: 'expert', label: 'Experienced' },
+              ]} />
             </label>
           </div>
           <p>
@@ -286,15 +245,13 @@ export function TourProfileDialog({ current, model, busy, firstTour = false, onC
             </p>
           )}
           <footer>
-            <button type="button" disabled={locked} onClick={onClose}>
+            <button type="button" disabled={locked} onClick={close}>
               {firstTour ? 'Read PDF first' : 'Cancel'}
             </button>
-            <button className="primary" disabled={locked || loading || !selected}>
-              {busy ? 'Starting…' : 'Create tour'}
-            </button>
+            <ActionButton busy={busy} label={busy ? 'Starting…' : 'Create tour'} disabled={locked || loading || !selected} />
           </footer>
         </form>
       )}
-    </dialog>
+    </AnimatedDialog>
   );
 }

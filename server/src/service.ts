@@ -52,16 +52,12 @@ import type { MuseConfig } from './config';
 import type { SettingsService } from './settings';
 import {
   answerQuestion,
-  currentSink,
-  withSink,
   askError,
   askModel,
-  findStep,
-  demoImage,
-  demoSelectionImages,
-  DEMO_ROOT,
+  currentSink,
   figureImage,
-  loadDemo,
+  findStep,
+  withSink,
   type AskAnswer,
   type AskRequest,
 } from './harness/ask';
@@ -107,7 +103,6 @@ export interface Library {
   createConversation?(owner: string, documentId: string, input: CreateConversation): Promise<Conversation>;
   renameConversation?(owner: string, documentId: string, id: string, title: string): Promise<Conversation>;
   transcribe?(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
-  demoTranscribe?(paper: string, audio: Uint8Array, signal?: AbortSignal): Promise<{ transcript: string }>;
   agentRun?(owner: string, id: string, runId: string): Promise<AgentRun>;
   controlAgent?(owner: string, id: string, runId: string, action: 'pause' | 'resume' | 'cancel'): Promise<AgentRun>;
   list(owner: string): Promise<DocumentSummary[]>;
@@ -152,15 +147,7 @@ export interface Library {
     request: ReadingPassageRequest,
     signal?: AbortSignal,
   ): Promise<ReadingPassage>;
-  demoReadingPassage?(
-    paper: string,
-    targetId: string,
-    signal?: AbortSignal,
-    removeCitations?: boolean,
-  ): Promise<ReadingPassage>;
   ask?(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
-  /** Local development only: a question about demo/<paper>/ without an account (see app.ts). */
-  demoAsk?(paper: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer>;
 }
 
 /** What one question needs to be answered: the document, the question and where to find its images and key. */
@@ -175,7 +162,6 @@ interface AnswerInput {
   image(): Promise<TourImage | undefined>;
   images(): Promise<TourImage[]>;
   signal?: AbortSignal;
-  demo?: boolean;
   purpose?: 'reading';
 }
 
@@ -774,10 +760,8 @@ export class DocumentService implements Library {
       imageUrl: asset ? await this.storage.sign(asset.storage_path) : null,
     };
   }
-  /** Questions in flight per owner, and for all demo papers together: each one is a paid model call. */
+  /** Questions in flight per owner: each one is a paid model call. */
   private readonly asking = new Map<string, number>();
-  /** Where demo papers are read from (demo/ in the repository); tests point it at a temporary folder. */
-  demoRoot = DEMO_ROOT;
   /** A question about one of the owner's documents, answered as a short micro-tour (harness/ask.ts). */
   private readingCache?: ReadingSpeechCache;
   async readingPassage(
@@ -879,51 +863,6 @@ export class DocumentService implements Library {
       },
       signal,
     );
-  }
-
-  async demoReadingPassage(
-    paper: string,
-    targetId: string,
-    signal?: AbortSignal,
-    removeCitations?: boolean,
-  ): Promise<ReadingPassage> {
-    const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
-    const block = readingObject(demo.doc, targetId);
-    const page = demo.doc.pages.find((p) => p.n === block.page)!;
-    const settings = this.askSettings();
-    const config = settings.base;
-    if (block.kind === 'prose')
-      return prepareReadingPassage({
-        client: new MuseClient(config, settings.transport),
-        doc: demo.doc,
-        targetId,
-        language: config.language,
-        removeCitations,
-        signal,
-      });
-    const answer = await this.demoAsk(
-      paper,
-      {
-        question: readingExplanationQuestion(
-          block.kind,
-          block.id,
-          readingCaption(demo.doc, block.id),
-          readingContinuity(demo.doc, block.id),
-        ),
-        selection: {
-          page: block.page,
-          rect: [
-            block.bbox[0] / page.width,
-            block.bbox[1] / page.height,
-            block.bbox[2] / page.width,
-            block.bbox[3] / page.height,
-          ],
-        },
-      },
-      signal,
-      'reading',
-    );
-    return readingAnswerPassage(targetId, answer);
   }
 
   async ask(owner: string, id: string, request: AskRequest, signal?: AbortSignal): Promise<AskAnswer> {
@@ -1099,34 +1038,6 @@ export class DocumentService implements Library {
       throw error;
     }
   }
-  /**
-   * A question about a demo paper (demo/<paper>/) without an account, on the server's own Meta key and model. Only
-   * local development exposes it (app.ts).
-   */
-  async demoAsk(paper: string, request: AskRequest, signal?: AbortSignal, purpose?: 'reading'): Promise<AskAnswer> {
-    const settings = this.askSettings();
-    const asked = askedRequest(request);
-    const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
-    validateAskedSelection(asked, demo.doc);
-    const model = askModel(settings.base.model, false, this.tourModel);
-    return this.answer('demo', {
-      documentId: paper,
-      doc: demo.doc,
-      tour: demo.tour,
-      request: asked,
-      model,
-      muse: async () => ({ ...settings.base, model }),
-      image: () =>
-        asked.selection ? Promise.resolve(undefined) : demoImage(paper, demo.doc, asked.figureId, this.demoRoot),
-      images: () =>
-        asked.selection
-          ? demoSelectionImages(paper, demo.doc, asked.selection, this.demoRoot, signal)
-          : Promise.resolve([]),
-      signal,
-      demo: true,
-      purpose,
-    });
-  }
   /** Terms and language of the documents asked about by voice, by analysis; a few, since each is read once. */
   private readonly hints = new Map<string, VoiceHints>();
   async transcribe(owner: string, id: string, audio: Uint8Array, signal?: AbortSignal) {
@@ -1136,16 +1047,6 @@ export class DocumentService implements Library {
       audio,
       async () => (await this.askSettings().resolveMuse(owner)).config,
       (language) => this.libraryHints(document, language),
-      signal,
-    );
-  }
-  async demoTranscribe(paper: string, audio: Uint8Array, signal?: AbortSignal) {
-    const demo = (await loadDemo(paper, this.demoRoot)) ?? missing();
-    return this.voice(
-      'demo',
-      audio,
-      async () => this.askSettings().base,
-      async (language) => voiceHints(demo.doc, language),
       signal,
     );
   }
@@ -1215,7 +1116,7 @@ export class DocumentService implements Library {
       console.log(
         JSON.stringify({
           event: 'question_cached',
-          ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
+          documentId: input.documentId,
           source,
           steps: answer.steps.length,
         }),
@@ -1232,7 +1133,7 @@ export class DocumentService implements Library {
       const [config, image, images] = await activityTask('Load source context and images', 'source', () =>
         Promise.all([input.muse(), input.image(), input.images()]),
       );
-      if (!config.apiKey) throw askError(new ProcessingError('muse_not_configured', 'No Meta API key.'), input.demo);
+      if (!config.apiKey) throw askError(new ProcessingError('muse_not_configured', 'No Meta API key.'));
       const { answer, completions } = await answerQuestion({
         client: new MuseClient(config, this.askSettings().transport),
         doc: input.doc,
@@ -1248,7 +1149,7 @@ export class DocumentService implements Library {
       console.log(
         JSON.stringify({
           event: 'question_answered',
-          ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
+          documentId: input.documentId,
           model: input.model,
           answerable: answer.answerable,
           steps: answer.steps.length,
@@ -1263,13 +1164,13 @@ export class DocumentService implements Library {
       console.warn(
         JSON.stringify({
           event: 'question_failed',
-          ...(input.demo ? { demo: input.documentId } : { documentId: input.documentId }),
+          documentId: input.documentId,
           code: error instanceof ProcessingError || error instanceof HttpError ? error.code : 'unknown',
           durationMs: Date.now() - started,
           cancelled: input.signal?.aborted === true,
         }),
       );
-      throw askError(error, input.demo);
+      throw askError(error);
     } finally {
       const left = (this.asking.get(key) ?? 1) - 1;
       if (left > 0) this.asking.set(key, left);

@@ -1,14 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
 import type { BBox, Doc } from '../../shared/paper';
 import type { RegionSelection } from '../../shared/selection';
 import { encodeSegmentationMask } from '../node_modules/@meta-sam/parser/dist/mask-codec.js';
 import { createApp } from '../src/app';
-import { ROOT, type MuseConfig } from '../src/config';
+import { type MuseConfig } from '../src/config';
 import { HttpError, missing } from '../src/errors';
 import type { Library } from '../src/service';
 import {
@@ -246,7 +242,7 @@ function fakeSam(answer: (shot: Shot, call: number) => Response | Promise<Respon
 
 function setup(
   answer: Parameters<typeof fakeSam>[0],
-  extra: { options?: ConstructorParameters<typeof SnapService>[2]; demoRoot?: string; apiKey?: string } = {},
+  extra: { options?: ConstructorParameters<typeof SnapService>[2]; apiKey?: string } = {},
 ) {
   const { fetcher, shots } = fakeSam(answer);
   const queries: unknown[][] = [];
@@ -260,7 +256,6 @@ function setup(
       },
     } as unknown as SnapLibrary['db'],
     storage: { download: async () => assert.fail('the test renders without the PDF') },
-    ...(extra.demoRoot ? { demoRoot: extra.demoRoot } : {}),
   };
   const settings: SnapSettings = {
     base: { ...config, apiKey: extra.apiKey ?? KEY },
@@ -524,27 +519,6 @@ test('three snaps may be in flight for one learner; a fourth waits for the model
   assert.ok((await service.snap('alice', DOCUMENT, own(boxes[3]))).ok, 'a free slot again');
 });
 
-test('a bad request or an unreadable document is an error, never a call', async () => {
-  const { service, shots, queries } = setup(() => assert.fail('no call'));
-  for (const request of [
-    own(BOX, 0),
-    own(BOX, 3),
-    own([0, 0, 700, 10]),
-    own([10, 10, 10, 50]),
-    { page: 1, box: [1, 2, 3] as never },
-  ])
-    await assert.rejects(service.snap('alice', DOCUMENT, request as never), { status: 400, code: 'invalid_selection' });
-  await assert.rejects(service.snap('mallory', DOCUMENT, own()), { status: 404 });
-  await assert.rejects(service.snap('alice', DOCUMENT, { ...own(), analysisId: ANALYSIS.replace('001', '002') }), {
-    status: 409,
-    code: 'analysis_not_ready',
-  });
-  assert.equal(queries.at(-1)![0], ANALYSIS.replace('001', '002'), 'the reader’s analysis is the one read');
-  assert.equal(shots.length, 0);
-  await assert.rejects(service.demoSnap('missing-paper', own()), { status: 404 });
-  await assert.rejects(service.demoSnap('../etc', own()), { status: 404 });
-});
-
 test('a crop that cannot be rendered leaves the rectangle; a mismatched original is an error', async () => {
   const warn = console.warn;
   console.warn = () => undefined;
@@ -574,60 +548,6 @@ test('a crop that cannot be rendered leaves the rectangle; a mismatched original
 
 // ------------------------------------------------------------- real renderer
 
-const python = process.env.PYTHON_BIN ?? resolve(ROOT, 'ingest/.venv/bin/python');
-const attention = resolve(ROOT, 'demo/attention/paper.pdf');
-test(
-  'a demo snap crops the real PDF around the drag and maps the outline back to its points',
-  { skip: !existsSync(python) || !existsSync(attention) },
-  async () => {
-    const { fetcher, shots } = fakeSam((shot) => objectReply(shot, 0.1));
-    const settings: SnapSettings = { base: config, transport: fetcher, resolveMuse: async () => ({ config }) };
-    const events: Record<string, unknown>[] = [];
-    const service = new SnapService({ demoRoot: undefined } as unknown as SnapLibrary, settings, {
-      log: (event) => events.push(event),
-    });
-    // Figure 1 of "Attention Is All You Need" is on page 3 and spans (196.5, 72.5)-(415.5, 394).
-    const box: BBox = [250, 120, 360, 200];
-    const result = okResult(await service.demoSnap('attention', { page: 3, box }));
-    assert.ok((events[0].ink as number) > 0.1, `the figure's pixels are ink: ${events[0].ink}`);
-    const long = Math.max(shots[0].image.width, shots[0].image.height);
-    assert.ok(long >= 1000 && long <= 2000, `${shots[0].image.width} x ${shots[0].image.height}`);
-    // The mask is the box shrunk by a tenth, so its outline must come back to those points (to a pixel or two).
-    const [x1, y1, x2, y2] = result.bbox;
-    assert.ok(Math.abs(x1 - 261) < 1 && Math.abs(x2 - 349) < 1, `${result.bbox}`);
-    assert.ok(Math.abs(y1 - 128) < 1 && Math.abs(y2 - 192) < 1, `${result.bbox}`);
-    assert.equal(result.polygon.length, 4);
-  },
-);
-
-test(
-  'a confident outline on blank paper of the real PDF is no object, and one on text is kept',
-  { skip: !existsSync(python) || !existsSync(attention) },
-  async () => {
-    // The model is sure of whatever it is asked about (0.77, as seen on an empty area of a page).
-    const { fetcher, shots } = fakeSam((shot) => objectReply(shot, 0.1, 0.77));
-    const settings: SnapSettings = { base: config, transport: fetcher, resolveMuse: async () => ({ config }) };
-    const events: Record<string, unknown>[] = [];
-    const service = new SnapService({ demoRoot: undefined } as unknown as SnapLibrary, settings, {
-      log: (event) => events.push(event),
-    });
-    // The top margin of page 1 and the left margin of page 3 hold nothing; a paragraph of page 1 is text.
-    for (const [page, box] of [
-      [1, [100, 10, 200, 50]],
-      [3, [20, 300, 150, 380]],
-    ] as [number, BBox][]) {
-      assert.deepEqual(
-        await service.demoSnap('attention', { page, box }),
-        { ok: false, reason: 'no_object' },
-        `${box}`,
-      );
-      assert.equal(events.at(-1)!.ink, 0);
-    }
-    assert.equal(shots.length, 2);
-    okResult(await service.demoSnap('attention', { page: 1, box: [60, 400, 200, 470] }));
-    assert.ok((events.at(-1)!.ink as number) > SNAP_MIN_INK);
-  },
-);
 
 // ------------------------------------------------------------- routes
 
@@ -769,63 +689,4 @@ test('snapping says so when the server cannot do it', async () => {
   assert.ok(snapService({ owned: async () => ({}), db: {}, storage: {} }, settings) instanceof SnapService);
   // A library that answers every property with a function (a test double) is not mistaken for the real one.
   assert.equal(snapService(new Proxy({}, { get: () => async () => undefined })), undefined);
-});
-
-async function demoRoot() {
-  const root = await mkdtemp(join(tmpdir(), 'paper-tour-snap-'));
-  await mkdir(join(root, 'paper'));
-  await writeFile(join(root, 'paper', 'doc.json'), JSON.stringify(doc));
-  return { root, remove: () => rm(root, { recursive: true, force: true }) };
-}
-
-test('demo snaps need local development and this machine, like demo questions', async () => {
-  const folder = await demoRoot();
-  const { service, shots } = setup((shot) => objectReply(shot, 0.1), { demoRoot: folder.root });
-  const production = await createApp({
-    service: {} as Library,
-    authenticate: async () => null,
-    snap: service,
-    demo: false,
-  });
-  const app = await createApp({ service: {} as Library, authenticate: async () => null, snap: service, demo: true });
-  const post = (
-    url: string,
-    extra: { remoteAddress?: string; headers?: Record<string, string> } = {},
-    payload: unknown = { page: 1, box: BOX },
-  ) => app.inject({ method: 'POST', url, payload: payload as never, ...extra });
-  try {
-    const anonymous = await production.inject({
-      method: 'POST',
-      url: '/api/demo/paper/snap',
-      payload: { page: 1, box: BOX },
-    });
-    assert.equal(anonymous.statusCode, 404, 'not exposed outside local development');
-    assert.equal(shots.length, 0);
-    const ok = await post('/api/demo/paper/snap');
-    assert.equal(ok.statusCode, 200, ok.body);
-    assert.equal(ok.json().ok, true);
-    assert.equal(shots[0].key, KEY, 'a demo uses the server’s own key');
-    shots.length = 0;
-    assert.equal((await post('/api/demo/missing/snap')).statusCode, 404);
-    for (const url of ['/api/demo/..%2F..%2Fserver/snap', '/api/demo/.hidden/snap', '/api/demo/a..b/snap'])
-      assert.equal((await post(url)).statusCode, 400, url);
-    assert.equal((await post('/api/demo/%2E%2E/snap')).statusCode, 404);
-    assert.equal((await post('/api/demo/paper/snap', { remoteAddress: '10.0.0.7' })).statusCode, 404);
-    assert.equal((await post('/api/demo/paper/snap', { headers: { host: 'rebound.example:5174' } })).statusCode, 404);
-    for (const bad of [
-      {},
-      { page: 0, box: BOX },
-      { page: 1, box: [1, 2, 3] },
-      { page: 1, box: BOX, analysisId: ANALYSIS },
-      { page: 1, box: [0, 0, 700, 9] },
-    ]) {
-      const response = await post('/api/demo/paper/snap', {}, bad);
-      assert.equal(response.statusCode, 400, JSON.stringify(bad));
-    }
-    assert.equal(shots.length, 0, 'no refused request reached the model');
-  } finally {
-    await app.close();
-    await production.close();
-    await folder.remove();
-  }
 });

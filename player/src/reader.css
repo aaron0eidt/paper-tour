@@ -221,12 +221,6 @@
   }
 }
 @media (max-width: 860px) {
-  .reader-app {
-    grid-template-columns: 1fr;
-  }
-  .reader-app > .sidebar {
-    display: none;
-  }
   .reader-mobile-back {
     display: block;
   }
@@ -269,9 +263,6 @@
   font-size: 12px;
   text-decoration: none;
 }
-.reader-app-toolbar .reader-navigation-toggle {
-  display: none;
-}
 .reader-settings-button {
   width: 34px;
   padding: 0;
@@ -294,8 +285,8 @@
   line-height: 1.5;
 }
 .reader-reading-options p { color: var(--muted); margin: 6px 0 10px; }
-.reader-reading-options label { display: flex; gap: 7px; align-items: center; margin: 8px 0; }
-.reader-reading-options button {
+.reader-reading-options label { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: 10px 0; cursor: pointer; }
+.reader-reading-options button:not(.ui-switch) {
   margin-top: 6px;
   padding: 6px 9px;
   border: 1px solid var(--line);
@@ -306,20 +297,6 @@
   cursor: pointer;
 }
 .playback-panel .reader-reading-options { padding: 0 0 12px; margin-bottom: 12px; }
-.reader-reading-notice {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  z-index: 3;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
-}
 @media (max-width: 600px) {
   .reader-app-toolbar { gap: 7px; padding-inline: 10px; }
 }
@@ -434,23 +411,6 @@
   }
 }
 @media (max-width: 860px) {
-  .reader-app-toolbar {
-    grid-column: 1;
-  }
-  .reader-app-toolbar .reader-navigation-toggle {
-    display: inline-flex;
-    flex: 0 0 auto;
-  }
-  .reader-app.navigation-open > .sidebar {
-    display: flex;
-    position: fixed;
-    z-index: 20;
-    top: 54px;
-    bottom: 0;
-    left: 0;
-    width: min(320px, calc(100vw - 36px));
-    box-shadow: 8px 0 24px rgb(0 0 0 / 30%);
-  }
   .reader-mobile-back {
     display: none;
   }
@@ -467,5 +427,4 @@
   .reader-app .ask-tray-clip { max-height: 58px; }
   .reader-app .sidebar-head { padding: 8px 12px; }
   .reader-app .reader-tabs { margin-bottom: 6px; }
-  .reader-app.navigation-open > .sidebar { top: 40px; }
 }

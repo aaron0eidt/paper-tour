@@ -1,7 +1,7 @@
 // Writes a tour for one document with the same generator the worker uses, without the app or Supabase.
 // Run from server/ with MODEL_API_KEY in the root .env (each run makes real Meta API calls):
-//   node --import tsx run-tour.ts <preset> <out> [folder] [document id] [language]
-// The folder holds the PDF and its doc.json (ingest/ingest.py <pdf> --out <folder>); the default is the demo paper.
+//   node --import tsx run-tour.ts <preset> <out> <folder> [document id] [language]
+// The folder holds the PDF and its doc.json (ingest/ingest.py <pdf> --out <folder>).
 // Images are prepared as the worker prepares them (ingest/tour_assets.py), into <out>/images.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -11,8 +11,8 @@ import { HarnessTourGenerator } from './src/harness/generator';
 import type { TourImage } from './src/tour-generator';
 import type { Doc } from '../shared/paper';
 
-const [preset = 'standard', out, folderArg = '../demo/attention', idArg, language] = process.argv.slice(2);
-if (!out) throw new Error('usage: run-tour.ts <preset> <out> [folder] [document id] [language]');
+const [preset = 'standard', out, folderArg, idArg, language] = process.argv.slice(2);
+if (!out || !folderArg) throw new Error('usage: run-tour.ts <preset> <out> <folder> [document id] [language]');
 const folder = resolve(folderArg);
 const doc = JSON.parse(readFileSync(resolve(folder, 'doc.json'), 'utf8')) as Doc;
 const pdf = resolve(folder, doc.source.file);

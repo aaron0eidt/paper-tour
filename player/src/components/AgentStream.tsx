@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { AutoHeight } from '@animate-ui/react/primitives/effects/auto-height';
+import { ActionButton } from '../ui/ActionButton';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { GenerationEvent } from '../../../shared/activity';
 import { generationTimeline } from '../../../shared/generationTimeline';
 import { parseNote } from '../markup';
@@ -32,6 +34,28 @@ function AgentMessage({ text }: { text: string }) {
     </>
   );
 }
+function ExpandableMessage({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  const preview = `${text.slice(0, 220).replace(/\s+\S*$/, '')}…`;
+  return (
+    <div className="agent-message-more" data-expanded={expanded || undefined}>
+      <AutoHeight className="agent-message-height" deps={[expanded, text]}>
+        <div id={id}>
+          <AgentMessage text={expanded ? text : preview} />
+        </div>
+      </AutoHeight>
+      <ActionButton
+        className="agent-message-toggle"
+        label={expanded ? 'Show less' : 'Read full message'}
+        aria-expanded={expanded}
+        aria-controls={id}
+        onClick={() => setExpanded((value) => !value)}
+      />
+    </div>
+  );
+}
+
 export function AgentStream({ events, status }: { events: GenerationEvent[]; status: string }) {
   const entries = useMemo(() => generationTimeline(events), [events]);
   const feed = useRef<HTMLDivElement>(null);
@@ -63,10 +87,20 @@ export function AgentStream({ events, status }: { events: GenerationEvent[]; sta
         {entries.map((entry) => (
           <article key={entry.id} className={`agent-entry ${entry.kind} ${entry.state}`}>
             <span className="agent-entry-mark" aria-hidden="true">
-              {entry.kind === 'model' ? (
+              {entry.kind === 'model' && entry.state === 'running' ? (
                 <AgentOrb active={active && entry.state === 'running'} />
               ) : entry.state === 'done' ? (
-                '✓'
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="m4 10 4 4 8-9" />
+                </svg>
               ) : entry.state === 'failed' ? (
                 '!'
               ) : (
@@ -75,7 +109,7 @@ export function AgentStream({ events, status }: { events: GenerationEvent[]; sta
             </span>
             <div className="agent-entry-content">
               <div className="agent-entry-title">
-                <span>
+                <span title={entry.title}>
                   {entry.kind === 'model' && entry.text && entry.title === 'Working with the paper'
                     ? 'Tour assistant'
                     : entry.title}
@@ -96,15 +130,7 @@ export function AgentStream({ events, status }: { events: GenerationEvent[]; sta
               {entry.text && (
                 <div className="agent-speech">
                   {entry.state !== 'running' && entry.text.length > 280 ? (
-                    <details className="agent-message-more">
-                      <summary>
-                        <span className="agent-message-preview">
-                          {entry.text.slice(0, 220).replace(/\s+\S*$/, '')}…
-                        </span>
-                        <span className="agent-message-toggle">Read full message</span>
-                      </summary>
-                      <AgentMessage text={entry.text} />
-                    </details>
+                    <ExpandableMessage text={entry.text} />
                   ) : (
                     <AgentMessage text={entry.text} />
                   )}
@@ -116,17 +142,16 @@ export function AgentStream({ events, status }: { events: GenerationEvent[]; sta
         ))}
       </div>
       {!following && (
-        <button
+        <ActionButton
           type="button"
-          className="agent-follow"
+          className="library-button agent-follow"
+          label={active ? 'Follow live activity ↓' : 'Jump to latest ↓'}
           onClick={() => {
             follow.current = true;
             setFollowing(true);
             if (feed.current) feed.current.scrollTop = feed.current.scrollHeight;
           }}
-        >
-          {active ? 'Follow live activity ↓' : 'Jump to latest ↓'}
-        </button>
+        />
       )}
     </section>
   );

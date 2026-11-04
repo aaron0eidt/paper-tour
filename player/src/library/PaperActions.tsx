@@ -1,62 +1,53 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
+import { Menu } from '@animate-ui/react/primitives/base-ui/menu';
+import { UI_EXIT, UI_SPRING } from '../ui/motion';
+import { playInterfaceSound } from '../ui/sound';
 
-/** Native disclosure semantics; dismissing it never steals focus from the next clicked control. */
-export function PaperActions({ title, onRename, onDelete }: {
+export function PaperActions({
+  title,
+  onRename,
+  onDelete,
+}: {
   title: string;
   onRename(trigger: HTMLElement): void;
   onDelete(trigger: HTMLElement): void;
 }) {
-  const details = useRef<HTMLDetailsElement>(null);
-  const trigger = useRef<HTMLElement>(null);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const element = details.current;
-    if (!open || !element) return;
-    const dismissOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !element.contains(event.target)) element.open = false;
-    };
-    const dismissWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      element.open = false;
-      trigger.current?.focus();
-    };
-    const page = element.ownerDocument;
-    page.addEventListener('pointerdown', dismissOutside);
-    page.addEventListener('keydown', dismissWithEscape);
-    return () => {
-      page.removeEventListener('pointerdown', dismissOutside);
-      page.removeEventListener('keydown', dismissWithEscape);
-    };
-  }, [open]);
-
-  function choose(action: (trigger: HTMLElement) => void) {
-    if (!details.current || !trigger.current) return;
-    details.current.open = false;
-    trigger.current.focus();
-    action(trigger.current);
-  }
-
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
-    <details
-      className="library-more"
-      name="paper-actions"
-      ref={details}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
+    <Menu.Root
+      onOpenChange={(open) => {
+        if (open) playInterfaceSound('open');
       }}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary ref={trigger} aria-label={`Actions for ${title}`}>•••</summary>
-      <div>
-        <button type="button" onClick={() => choose(onRename)}>
-          Rename
-        </button>
-        <button type="button" className="delete" onClick={() => choose(onDelete)}>
-          Delete
-        </button>
-      </div>
-    </details>
+      <Menu.Trigger ref={trigger} className="ui-menu-trigger" aria-label={`Actions for ${title}`}>
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <circle cx="4" cy="10" r="1.5" />
+          <circle cx="10" cy="10" r="1.5" />
+          <circle cx="16" cy="10" r="1.5" />
+        </svg>
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner className="ui-menu-positioner" sideOffset={6} align="end" collisionPadding={12}>
+          <Menu.Popup className="ui-menu" transition={UI_SPRING} exitTransition={UI_EXIT}>
+            <Menu.Item
+              className="ui-menu-item"
+              onClick={() => {
+                if (trigger.current) onRename(trigger.current);
+              }}
+            >
+              Rename
+            </Menu.Item>
+            <Menu.Item
+              className="ui-menu-item delete"
+              onClick={() => {
+                if (trigger.current) onDelete(trigger.current);
+              }}
+            >
+              Delete
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

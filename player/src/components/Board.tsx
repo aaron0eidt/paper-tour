@@ -208,7 +208,7 @@ const BoardView = memo(function BoardView({
  * On a board too small for its item (under the stage on a phone), scrolls the body so the parts in
  * focus are in view. Only the body scrolls: scrollIntoView would also move the dock's clipped overflow.
  */
-function useFocusInView(ref: RefObject<HTMLElement>, focus: number | null): void {
+function useFocusInView(ref: RefObject<HTMLElement | null>, focus: number | null): void {
   useEffect(() => {
     const body = ref.current;
     const parts = body ? [...body.querySelectorAll('.is-focus')].map((el) => el.getBoundingClientRect()) : [];
@@ -238,7 +238,7 @@ function useFocusInView(ref: RefObject<HTMLElement>, focus: number | null): void
 }
 
 /** The element's content-box size in px, kept up to date; null before the first layout. */
-function useBoxSize<T extends HTMLElement>(): [RefObject<T>, { width: number; height: number } | null] {
+function useBoxSize<T extends HTMLElement>(): [RefObject<T | null>, { width: number; height: number } | null] {
   const ref = useRef<T>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   useLayoutEffect(() => {
@@ -321,7 +321,7 @@ const ONE_LINE_FIT = 0.82;
 const MIN_FIT = 0.55;
 
 /** Fits the rendered formula to the element's width: --fit scales its font, .is-wrapped lets it break. */
-function useFitWidth(ref: RefObject<HTMLElement>, html: string | null): void {
+function useFitWidth(ref: RefObject<HTMLElement | null>, html: string | null): void {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !html) return;

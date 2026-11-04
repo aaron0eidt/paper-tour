@@ -1,3 +1,10 @@
+import { ReaderNavigation, ReaderNavigationProvider, ReaderNavigationToggle, useReaderNavigation } from './ui/ReaderNavigation';
+import { AnimatedSwitch } from './ui/controls';
+import { motion, useReducedMotion } from 'motion/react';
+import { setNarrationSoundGate } from './ui/sound';
+import { UI_SPRING } from './ui/motion';
+import { StatusBadge } from './ui/StatusBadge';
+import { ChoicePicker } from './components/ChoicePicker';
 import { isPdfOpen, usePdfDocument, retirePdf } from './pdfLifetime';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Camera, fitWidthView, frameFor, initialView, project, readingScale, revealView, slideView } from './camera';
@@ -7,11 +14,11 @@ import { useReadingSpeech } from './useReadingSpeech';
 import { AgentActivity } from './activity/AgentActivity';
 import { getMaxAutoZoom, getNarrationDisplay, narrationSurfaces, subscribeReadingPreferences } from './readerPreferences';
 import { EMPTY_BOARD, TourEngine, boardPlayback } from './engine';
-import type { CameraCommand, EngineState } from './engine';
+import type { CameraCommand, EngineState, OverlayEntry } from './engine';
 import { layoutDeck, layoutPages } from './layout';
 import { clampSlide, readerMode, stepSlides, stepsBySlide } from './deck';
 import { coverVisible, lengthLabel, readerTitle, recapVisible } from './tourSummary';
-import { loadManifest, loadPaper } from './load';
+import { loadManifest } from './load';
 import type { Loaded } from './load';
 import { createNarrator, SilentNarrator, useBrowserVoices, speechAvailable } from './narration';
 import { useSpeechSettings } from './narration/useSpeechSettings';
@@ -52,9 +59,7 @@ import {
   tourSourceKey,
   withPlayableSteps,
 } from './partialTour';
-import { readGrowthPlan, simulatedSource } from './dev/growth';
 import type { DocumentManifest, ReaderState, SearchHit, TourPartialView } from '../../shared/contracts';
-import type { OverlayEntry } from './engine';
 import { positionFromView, viewFromPosition } from './readerState';
 import { AskPanel } from './ask/AskPanel';
 import type { AskContext } from './ask/AskPanel';
@@ -72,7 +77,6 @@ import './reader.css';
 type Prepared = ReturnType<typeof prepareTour>;
 
 interface Params {
-  paper: string;
   silent: boolean;
   /** URL speed multiplier, for testing (?rate=4). */
   rate: number;
@@ -80,10 +84,8 @@ interface Params {
 
 function readParams(): Params {
   const q = new URLSearchParams(location.search);
-  const paper = q.get('paper') ?? 'attention';
   const rate = Number(q.get('rate'));
   return {
-    paper: /^[\w.-]+$/.test(paper) && !paper.startsWith('.') ? paper : 'attention',
     silent: q.get('silent') === '1',
     rate: Number.isFinite(rate) && rate > 0 ? Math.min(8, Math.max(0.1, rate)) : 1,
   };
@@ -139,7 +141,11 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-export function Reader({ documentId, onBack }: { documentId?: string; onBack(): void }) {
+export function Reader(props: { documentId: string; onBack(): void }) {
+  return <ReaderNavigationProvider><ReaderContent {...props} /></ReaderNavigationProvider>;
+}
+
+function ReaderContent({ documentId, onBack }: { documentId: string; onBack(): void }) {
   const params = useMemo(readParams, []);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadedAnalysisId, setLoadedAnalysisId] = useState<string | undefined>();
@@ -166,17 +172,18 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
-  const [navigationOpen, setNavigationOpen] = useState(false);
+  const { isMobile: navigationMobile, openMobile, setOpenMobile: setNavigationOpen } = useReaderNavigation();
+  const navigationOpen = navigationMobile && openMobile;
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selection, setSelection] = useState<OverlayEntry[]>([]);
   const [regionSelection, setRegionSelection] = useState<RegionSelection | null>(null);
   const [selectingRegion, setSelectingRegion] = useState(false);
-  // Asking is open wherever there is a document to ask about: a library document by its ID, a demo by its folder.
+  // Questions belong to the current private library document.
   const askSource = useMemo<AskSource>(
-    () => (documentId ? { documentId } : { paper: params.paper }),
-    [documentId, params.paper],
+    () => ({ documentId }),
+    [documentId],
   );
   const readingSpeech = useReadingSpeech(askSource, loadedAnalysisId, readingOptions.removeCitations);
   const prepareReading = useRef(readingSpeech.prepare);
@@ -186,7 +193,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     setRegionSelection(null);
     setSelectingRegion(false);
     selectionCheckpoint.current = null;
-  }, [documentId, params.paper]);
+  }, [documentId]);
   const [currentPage, setCurrentPage] = useState(1);
   const currentPageRef = useRef(1);
   currentPageRef.current = currentPage;
@@ -196,7 +203,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const restoredView = useRef(false);
   const savedPosition = useRef<ReaderState | null>(null);
   const loadedRef = useRef<Loaded | null>(null);
-  const loadedAnalysisRef = useRef<string | undefined>();
+  const loadedAnalysisRef = useRef<string | undefined>(undefined);
   const manifestRef = useRef<DocumentManifest | null>(null);
   const checkpointRef = useRef<ReaderState | null>(null);
   const accessTokenRef = useRef<string | null>(null);
@@ -237,11 +244,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       loading = true;
       let fetchingManifest = !!documentId;
       try {
-        if (!documentId) {
-          accept(await loadPaper(params.paper));
-          if (alive) setFatal(null);
-          return;
-        }
         const pinnedTour = activeTour ?? manifestRef.current?.selectedTour?.id;
         const next = await apiRequest<DocumentManifest>(
           `/api/documents/${documentId}/manifest${pinnedTour ? `?tourId=${encodeURIComponent(pinnedTour)}` : ''}`,
@@ -317,7 +319,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       alive = false;
       clearInterval(interval);
     };
-  }, [params.paper, documentId, activeTour, onBack, manifestRefresh]);
+  }, [documentId, documentId, activeTour, onBack, manifestRefresh]);
 
   useEffect(() => {
     if (!documentId) return;
@@ -353,35 +355,27 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   usePdfDocument(loaded?.pdf);
 
   // A tour still being written plays from its first steps. While its generation runs, the leading steps come from the
-  // partial endpoint (a demo simulates them, dev/growth.ts) and the reader follows them; the finished tour comes through
+  // partial endpoint and the reader follows them; the finished tour comes through
   // the manifest and takes their place without a break.
   const generation = manifest?.tourGeneration ?? null;
-  const simulation = useMemo(
-    () => (import.meta.env.DEV && !documentId ? readGrowthPlan(new URLSearchParams(location.search)) : null),
-    [documentId],
-  );
-  const [simulated, setSimulated] = useState(false);
   // A saved tour on screen is never taken over by one being written: the learner opens that one when it is done.
   const tourOnScreen = !!manifest?.selectedTour;
   const hasDoc = !!loaded?.doc;
-  const demoTour = simulation ? (loaded?.tour ?? null) : null;
   const generationId = generation?.id;
   const following = !!documentId && !!generationId && !tourOnScreen && hasDoc && isTourGenerationActive(generation);
   const source = useMemo<PartialSource | null>(() => {
-    if (import.meta.env.DEV && simulation) return demoTour ? simulatedSource(demoTour, simulation) : null;
     if (!following || !documentId || !generationId) return null;
     return {
       key: generationId,
       fetch: (held, signal) =>
         apiRequest<TourPartialView>(partialPath(documentId, generationId, held), { signal }),
     };
-  }, [simulation, !!demoTour, following, documentId, generationId]);
-  const follow = usePartialTour(source, `${generation?.status}:${generation?.stage}`, (status) => {
-    if (simulation) setSimulated(status === 'ready');
-    else setManifestRefresh((value) => value + 1);
+  }, [following, documentId, generationId]);
+  const follow = usePartialTour(source, `${generation?.status}:${generation?.stage}`, () => {
+    setManifestRefresh((value) => value + 1);
   });
   const status = currentStatus(generation?.status, follow.status);
-  const finishedTour = simulation ? (simulated ? demoTour : null) : (loaded?.tour ?? null);
+  const finishedTour = loaded?.tour ?? null;
   const partialTour = useMemo(
     () => (tourOnScreen ? null : playablePartial(follow.held, loaded?.doc ?? null)),
     [tourOnScreen, follow.held, loaded?.doc],
@@ -391,7 +385,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const fromPartial = !readAloud && !finishedTour && !!partialTour;
   const growth = fromPartial ? growthOf(follow.held, status) : null;
   const growing = !!growth && growth.phase !== 'stopped';
-  const sourceKey = readAloud ? `reading:${loadedAnalysisId ?? params.paper}|${readingOptions.removeCitations}|${readingOptions.includeReferences}` : tourSourceKey(manifest?.selectedTour?.id, !!finishedTour, generationId);
+  const sourceKey = readAloud ? `reading:${loadedAnalysisId ?? documentId}|${readingOptions.removeCitations}|${readingOptions.includeReferences}` : tourSourceKey(manifest?.selectedTour?.id, !!finishedTour, generationId);
 
   // The tour says what the document is: a lecture plays as a deck, one slide at a time; anything else as a paper.
   const deck = useMemo(() => readerMode(tourSource, loaded?.sizes ?? []) === 'deck', [tourSource?.doc_type, loaded?.sizes]);
@@ -430,6 +424,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   const mainState = useSyncExternalStore(engine?.subscribe ?? noSubscribe, engine?.getState ?? idleState);
   const answerState = useSyncExternalStore(answer?.subscribe ?? noSubscribe, answer?.getState ?? idleState);
   const state = answer ? answerState : mainState;
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    setNarrationSoundGate(state.status === 'playing');
+    return () => setNarrationSoundGate(false);
+  }, [state.status]);
   const active = answer ?? engine;
   const applySpeechPreferences = useCallback(async (preferences: SpeechPreferences) => {
     if (speechUpdating.current) return;
@@ -942,7 +941,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   );
   const saveRef = useRef(save);
   saveRef.current = save;
-  const pendingSave = useRef<ReturnType<typeof setTimeout>>();
+  const pendingSave = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const tourCheckpoint = useRef({
     tourId: selectedTourId,
     stepId: mainState.status === 'idle' ? null : (engine?.steps[mainState.index]?.step.id ?? null),
@@ -1084,7 +1083,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 .slice(0, 30)
                 .map(
                   (sentence): SearchHit => ({
-                    ref: { documentId: params.paper, analysisId: 'demo', elementId: sentence.id },
+                    ref: { documentId: documentId, analysisId: manifest?.docAnalysisId ?? '', elementId: sentence.id },
                     kind: 'sentence',
                     page: sentence.page,
                     text: sentence.text,
@@ -1102,7 +1101,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       alive = false;
       clearTimeout(timer);
     };
-  }, [query, loaded?.doc, documentId, manifest?.docAnalysisId, params.paper]);
+  }, [query, loaded?.doc, documentId, manifest?.docAnalysisId]);
 
   useEffect(() => () => camera.destroy(), [camera]);
 
@@ -1373,7 +1372,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
         <>
           <h2>Contents</h2>
           {loaded?.doc?.sections.map((section) => (
-            <button className="reader-outline-item" key={section.id} onClick={() => navigateTo(section.id)}>
+            <button data-sidebar="menu-button" className="reader-outline-item" key={section.id} onClick={() => navigateTo(section.id)}>
               <span>{section.title}</span>
               <small>{section.page}</small>
             </button>
@@ -1405,21 +1404,12 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   );
 
   return (
-    <div className={`app reader-app${navigationOpen ? ' navigation-open' : ''}`}>
+    <div className="app reader-app">
       <header className="reader-app-toolbar">
         <button className="reader-library-button" onClick={back}>
           ‹ <span>Library</span>
         </button>
-        <button
-          type="button"
-          className="reader-navigation-toggle"
-          aria-controls="reader-navigation"
-          aria-expanded={navigationOpen}
-          aria-label={navigationOpen ? 'Close paper navigation' : 'Open paper navigation'}
-          onClick={() => setNavigationOpen((open) => !open)}
-        >
-          Contents
-        </button>
+        <ReaderNavigationToggle />
         <div className="reader-tour-actions">
           {' '}
           {documentId && manifest && (manifest.tourGeneration || !manifest.tours.length) && (
@@ -1471,6 +1461,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           </a>
         )}
       </header>
+      <ReaderNavigation>
       <Sidebar
         tour={tab === 'tour' ? (engine?.tour ?? null) : null}
         steps={steps}
@@ -1491,6 +1482,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
           <>
             <div className="reader-tabs">
               <button className={tab === 'document' ? 'active' : ''} onClick={() => setTab('document')}>
+                {tab === 'document' && <motion.span className="ui-reader-tab-indicator" layoutId="reader-active-tab" transition={reduceMotion ? { duration: 0 } : UI_SPRING} />}
                 Document
               </button>
               <button
@@ -1498,37 +1490,22 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 className={tab === 'tour' ? 'active' : ''}
                 onClick={() => { setReadAloud(false); setTab('tour'); }}
               >
+                {tab === 'tour' && <motion.span className="ui-reader-tab-indicator" layoutId="reader-active-tab" transition={reduceMotion ? { duration: 0 } : UI_SPRING} />}
                 Tour
               </button>
             </div>
             {!readAloud && (manifest?.tours.length ?? 0) > 1 && manifest && (
               <label className="reader-tour-picker">
                 Saved tour
-                <select
-                  title={manifest.tours.find((tour) => tour.id === manifest.selectedTour?.id)?.title}
-                  value={manifest.selectedTour?.id ?? ''}
-                  onChange={(event) => {
-                    leaveAnswer();
-                    engine?.pause();
-                    setSelection([]);
-                    savedPosition.current = null;
-                    picked.current = event.target.value;
-                    setReadAloud(false);
-                    setActiveTour(event.target.value);
-                    setTab('tour');
-                  }}
-                >
-                  <option value="" disabled>
-                    Select a tour
-                  </option>
-                  {manifest.tours.map((tour, index) => (
-                    <option key={tour.id} value={tour.id}>
-                      {manifest.tours.length > 1 ? `v${manifest.tours.length - index} · ` : ''}
-                      {tour.profile ? `${tour.profile.name} · ${tour.profile.depth} · ` : ''}
-                      {tour.title}
-                    </option>
-                  ))}
-                </select>
+                <ChoicePicker label="Saved tour" value={manifest.selectedTour?.id ?? ''}
+                  options={[
+                    { value: '', label: 'Select a tour', disabled: true },
+                    ...manifest.tours.map((tour, index) => ({ value: tour.id, label: `${manifest.tours.length > 1 ? `v${manifest.tours.length - index} · ` : ''}${tour.title}`,
+                      detail: tour.profile ? `${tour.profile.name} · ${tour.profile.depth}` : undefined })),
+                  ]} onChange={(id) => {
+                    leaveAnswer(); engine?.pause(); setSelection([]); savedPosition.current = null;
+                    picked.current = id; setReadAloud(false); setActiveTour(id); setTab('tour');
+                  }} />
               </label>
             )}
           </>
@@ -1537,6 +1514,7 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
       >
         {loaded && <Problems problems={problems} defaultOpen />}
       </Sidebar>
+      </ReaderNavigation>
 
       <main className="main">
         <div className="reader-toolbar">
@@ -1640,17 +1618,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
             {deck ? 'Fit slide' : 'Fit width'}
           </button>
           {!!selection.length && <button onClick={() => setSelection([])}>Clear selection</button>}
-          {manifest?.analysis && (
-            <span className="reader-status" role="status" title={manifest.analysis.warnings.join('\n')}>
-              {manifest.analysis.status === 'processing'
-                ? 'Analyzing…'
-                : manifest.analysis.status === 'queued'
-                  ? 'Analysis queued'
-                  : manifest.analysis.status === 'limited'
-                    ? 'Analysis notes'
-                    : manifest.analysis.status === 'failed'
-                      ? 'Analysis failed'
-                      : 'Ready'}
+          {manifest?.analysis && manifest.analysis.status !== 'ready' && (
+            <span className="reader-status" role="status"><StatusBadge
+              label={manifest.analysis.status === 'processing' ? 'Analyzing…' : manifest.analysis.status === 'queued' ? 'Analysis queued' : manifest.analysis.status === 'limited' ? 'Analysis notes' : 'Analysis failed'}
+              tone={manifest.analysis.status === 'failed' ? 'failed' : manifest.analysis.status === 'limited' ? 'limited' : 'pending'}
+              busy={manifest.analysis.status === 'processing'} detail={manifest.analysis.warnings.join('\n') || undefined} />
             </span>
           )}
           <button
@@ -1685,6 +1657,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               mode={answer || away ? 'answer' : readAloud ? 'reading' : 'tour'}
               playback={{
                 playing: state.status === 'playing',
+                preparingText: readAloud && !answer && !away && readingSpeech.busy,
+                preparationError: readAloud && !answer && !away ? readingSpeech.error ?? undefined : undefined,
                 generating: state.status === 'playing' && state.speechStatus === 'generating',
                 speaking: state.status === 'playing' && state.speechStatus !== 'generating' && state.word >= 0 && !state.preview,
                 canPlay: !!active?.steps.length && (!away || !!answer),
@@ -1720,12 +1694,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 onSelectRegion={acceptRegionSelection}
                 onCancelSelection={cancelRegionSelection}
               />
-              {readAloud && (readingSpeech.busy || readingSpeech.error) && (
-                <div className="reader-reading-notice" role="status">
-                  {readingSpeech.busy ? 'Preparing the spoken text… Pause to interrupt.'
-                    : `Reading paused: ${readingSpeech.error} Press play to retry or skip to the next passage.`}
-                </div>
-              )}
               {coverOpen && engine && clock && (
                 <TourCover
                   tour={engine.tour}
@@ -1861,18 +1829,20 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               {state.speechTiming === 'estimated' && <small>Word highlighting and word seeking use estimated audio timing.</small>}
               {state.speechTiming === 'provider' && <small>Word highlighting follows provider timestamps.</small>}
               {(speech.error || speechUpdateError) && <small role="alert">{speechUpdateError ?? speech.error}</small>}
-              <a href={`${import.meta.env.BASE_URL}?settings=profile#speech`}>Configure voices and keys</a>
-              <a href={`${import.meta.env.BASE_URL}?settings=voices`}>Compare, rank and download voices</a>
+              <div className="ui-audio-links">
+                <a href={`${import.meta.env.BASE_URL}?settings=profile#speech`}><svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 6h14M3 14h14M7 3v6m6 2v6" /></svg>Voice settings</a>
+                <a href={`${import.meta.env.BASE_URL}?settings=voices`}><svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 7v6m4-9v12m4-14v16m4-11v6" /></svg>Voice library</a>
+              </div>
             </div>}
             readingSettings={readAloud ? (
               <div className="reader-reading-options">
                 <strong>Original paper text</strong>
                 <p>The model prepares the original prose word for word, cleaning layout and citation markers only. Equations, tables and figures receive detailed explanations and visual annotations using the PDF and context. Authors, affiliations and page metadata are skipped.</p>
                 {!speechAvailable() && (!speech.data || speech.data.preferences.provider === 'browser') && <p role="alert">Speech synthesis is unavailable in this browser. Open this document in a browser with text-to-speech to hear it.</p>}
-                <label><input type="checkbox" checked={readingOptions.removeCitations}
-                  onChange={(e) => setReadingOptions((o) => ({ ...o, removeCitations: e.target.checked }))} /> Skip citation markers</label>
-                <label><input type="checkbox" checked={readingOptions.includeReferences}
-                  onChange={(e) => setReadingOptions((o) => ({ ...o, includeReferences: e.target.checked }))} /> Read bibliography</label>
+                <label><span>Skip citation markers</span><AnimatedSwitch checked={readingOptions.removeCitations}
+                  onCheckedChange={(removeCitations) => setReadingOptions((o) => ({ ...o, removeCitations }))} /></label>
+                <label><span>Read bibliography</span><AnimatedSwitch checked={readingOptions.includeReferences}
+                  onCheckedChange={(includeReferences) => setReadingOptions((o) => ({ ...o, includeReferences }))} /></label>
                 <button onClick={() => {
                   leaveAnswer();
                   if (engine && loaded?.doc) { engine.goTo(readingStepOnPage(engine.tour, loaded.doc, currentPageRef.current)); engine.play(); }
