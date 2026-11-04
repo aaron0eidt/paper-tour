@@ -125,7 +125,10 @@ instructions, and "choose IDs and labels only from the lists you are given".
 4. **Plan the visuals of the whole tour.** One call at `medium` effort sees every step and chooses each step's board
    (or none). Code enforces the diversity limits: each kind at most once (a formula or a plot twice), at most 60% of the
    steps with a board, the opening step's choice kept and counted. Every change it makes is recorded. Without a usable
-   plan each step keeps the board its kind suggests.
+   plan each step keeps the board its kind suggests. For a lecture deck the call is told that the learner sees every
+   slide (it lists them, the pictures marked): a board builds on a slide (the mechanism behind its picture, a worked
+   case with numbers of its own, the next step, a contrast or what-if) and never redraws it, and a table on a slide
+   gets no ready board, since it is on screen.
 5. **Direct the steps in parallel.** Each step is one call (a pool of 6, in tour order, a detail waiting for its
    overview) with a schema whose enums list only the IDs that step may use: its sentences, figures and parts of figures.
    The model cannot name anything else. An exercise part is solved, checked numerically and taught in
@@ -137,10 +140,10 @@ instructions, and "choose IDs and labels only from the lists you are given".
    German) it flags three: a layout fixture, the fish "Arrivals within 5 cm" and the ants "Synchrony in tiny versus
    huge", which only paraphrases its narration. The same check holds the method visual of an exercise part, but not
    yet the frames of a worked example or the boards of an answer to a question, which are drawn in calls of their
-   own); the model corrects its whole answer up to twice, with every fault listed, a board's faults of every kind in
-   one turn. What still fails is dropped and recorded, not
-   published: a step keeps its narration and page cues and loses the board, example or pen marks (`degrade.ts`), and a
-   step without usable narration takes the fallback step or, for a detail, is omitted. At the end, a board that
+   own); a board of a slide step is held against its slide too (`slide-copy.ts`, below); the model corrects its whole
+   answer up to twice, with every fault listed, a board's faults of every kind in one turn. What still fails is
+   dropped and recorded, not published: a step keeps its narration and page cues and loses the board, example or pen
+   marks (`degrade.ts`), and a step without usable narration takes the fallback step or, for a detail, is omitted. At the end, a board that
    repeats an earlier step's data or fails a check of the whole tour goes with its cues. A tour fails only when its
    other contents do. Every loss has its cause (`shared/coverage.ts`): the model took too long (`slow`), what
    it wrote failed the checks (`checks`), its answer could not be used (`invalid`), it would only repeat earlier content
@@ -149,6 +152,16 @@ instructions, and "choose IDs and labels only from the lists you are given".
    `reason`, `degraded` with `causes`, and `leftOut`) and in the tour itself (`left_out`), from which the reader's cover
    and recap say briefly which steps and worked examples were left out and why (a lost visual or pen mark is not
    worth a learner's attention there), and the activity checklist says it per step.
+   **A board that redraws its slide** (`slide-copy.ts`): the learner reads the slide's title, bullets, table cells and the
+   text inside its figures, so a slide step's board whose words, labels and numbers are mostly printed there adds nothing
+   and is sent back like any failed board ("the board copies the slide; show what the slide leaves out"), then dropped
+   if it still copies. The share counts the board's words (title, labels, names) and its numeric values once each, a value
+   as three words (a topic's words return on every board about it; its values only on a copy), a single digit only when
+   the slide does not print it, and a program's or plotly figure's data as values; a board with fewer than 6 words and
+   values is not judged. The flag is at 0.65. Papers, sheets and the other kinds of document are not held to it (only a
+   slide step carries the slide's text). Code cannot read a picture: a slide with little text lets a board of its picture
+   pass, and the direction task steers that case. The narration of a slide step is also sent back once when it opens by
+   announcing its slides ("these slides ..."), which every step of a lecture did when told to say first what its slides do.
 7. **Time limits** (`pace.ts`). Each call has a limit by name (the card 40 s, the claims 60 s, the opening visual 20 s,
    a step 30 s at low effort and below and 45 s at medium and above). A call that outlives it fails as `muse_slow` and
    is asked again at once, for less: a slow step degrades instead of vanishing. Each such try reasons one rung less (a

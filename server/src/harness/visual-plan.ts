@@ -2,6 +2,7 @@ import type { Doc, DocFigure } from '../../../shared/paper';
 import type { Beat } from './beats';
 import { BOARD_KINDS, LEGACY_BOARD_KINDS, type BoardKind } from './board';
 import type { PaperCard } from './card';
+import { slideCards, slideLine } from './deck';
 import { unitTaskLines } from './unit-task';
 import { baseRowName, gridOf, resultTable, tableText, tableViews, type TableView } from './tables';
 
@@ -52,6 +53,8 @@ export const plannableBeats = (beats: Beat[]) =>
  */
 export interface PlanOptions {
   sheet?: boolean;
+  /** A lecture deck: the learner sees every slide, so a board builds on it (deckPlanTask). */
+  deck?: boolean;
   settled?: boolean;
   adaptive?: boolean;
 }
@@ -267,8 +270,39 @@ ${kinds}
 
 const kindsList = () => KINDS_ORDER.map((kind) => `   - ${kind}: ${KINDS_HELP[kind]}`).join('\n');
 
-export function visualPlanTask(language: string, { sheet, settled, adaptive }: PlanOptions = {}): string {
+/**
+ * The task of the plan call for a lecture deck (notes/HARNESS.md, "Check in code"): the learner sees each slide, with
+ * its bullets, table, plot and picture, and the narration explains it. A board is no second copy: it goes beyond the slide.
+ */
+function deckPlanTask(language: string, adaptive = false): string {
+  return `TASK: design the side-board visuals of this lecture's tour, which is narrated in ${JSON.stringify(language)}.
+Each step teaches a slide or a few neighbouring ones. The learner sees them on screen: their bullets, tables, plots,
+diagrams and pictures, and the narration explains them. The side board is not a second copy of a slide. It builds on it.
+1. A board is worth drawing where a step's point needs what the slide leaves out. It is one of these:
+   - the mechanism behind the slide's picture: what happens inside, step by step, or why it comes out that way;
+   - a worked case with numbers of your own, marked illustrative, where the slide only states the rule;
+   - the next step or the consequence that the slide does not show;
+   - a contrast or a what-if: change one thing and see what moves.
+2. Never plan a board that redraws a slide: its bullets as boxes, its table or the numbers it prints as bars or points,
+   its diagram or picture as a flow or a scene. A slide that is a picture already shows its subject: plan what lies
+   beneath or beyond it. None is right when the slide and the narration carry the point; the tour then teaches on the
+   slide. A bars or scatter board can only copy numbers the slides print, so choose one only to set numbers of
+   different slides side by side.
+3. The kinds and what they are for:
+${kindsList()}
+4. ${
+    adaptive
+      ? 'There is no quota of boards or kinds; fewer, stronger boards beat many weak ones.'
+      : 'Fewer, stronger boards beat many weak ones. Each kind once in the tour (a formula or a plot twice).'
+  }
+5. "idea" says ${adaptive ? 'what the learner sees that the slide does not show, and what it explains' : `in one sentence (at most ${IDEA_WORDS} words) what the learner sees that the slide does not show`}.
+   "data" says exactly which numbers, symbols or labels it uses${adaptive ? '' : ` (at most ${DATA_WORDS} words)`}: numbers the slides print as printed, anything else marked illustrative. Labels are real items, never "item 1".
+6. Answer with one entry per step, in tour order. For none, leave "idea" and "data" empty.`;
+}
+
+export function visualPlanTask(language: string, { sheet, deck, settled, adaptive }: PlanOptions = {}): string {
   if (sheet) return sheetPlanTask(language, adaptive);
+  if (deck) return deckPlanTask(language, adaptive);
   const kinds = kindsList();
   return `TASK: design the side-board visuals of this tour, which is narrated in ${JSON.stringify(language)}.
 For each step decide whether a visual would make the step's point click, and which one. A visual must show what the
@@ -366,6 +400,7 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc, settle
     '',
     beats.some((beat) => beat.unit) ? 'THE TASKS OF THE SHEET, in order:' : 'STEPS OF THE TOUR, in order:',
   ];
+  const slides = beats.some((beat) => beat.slides) ? slideCards(doc) : [];
   const tables: DocFigure[] = [];
   const listed = (table: DocFigure | undefined) => {
     if (!table || !gridOf(table)) return undefined;
@@ -388,9 +423,16 @@ export function visualPlanBrief(card: PaperCard, beats: Beat[], doc: Doc, settle
         `  already planned (leave it out of your answer${ahead.flexible ? '' : '; it counts toward the limits'}): ${visualLine(ahead)}`,
       );
     lines.push(`  the point: ${beat.point}`);
-    if (beat.notes?.length) lines.push(...beat.notes.map((note) => `  ${note}`));
+    // A slide step lists its slides as the learner sees them, which is what its board must go beyond.
+    if (beat.slides)
+      lines.push(
+        '  the slides on screen:',
+        ...beat.slides.flatMap((n) => (slides[n - 1] ? [`    ${slideLine(slides[n - 1], 200)}`] : [])),
+      );
+    const notes = (beat.notes ?? []).filter((note) => !(beat.slides && note.startsWith('MORE SLIDES IN THIS STEP')));
+    if (notes.length) lines.push(...notes.map((note) => `  ${note}`));
     if (figure) lines.push(`  on ${figure.kind} ${figure.number}, page ${figure.page}: ${trimmed(figure.caption)}`);
-    if (listed(figure)) lines.push('  its rows and columns are listed under TABLES below');
+    if (!beat.slides && listed(figure)) lines.push('  its rows and columns are listed under TABLES below');
     if (equation)
       lines.push(
         `  on ${equation.number ? `equation (${equation.number})` : 'an equation without a printed number'}, page ${equation.page}: ${trimmed(equation.text, 160)}`,
@@ -580,7 +622,8 @@ export function tableSteps(beats: Beat[], doc: Doc): TableStep[] {
   const views = new Map<string, TableView[]>();
   const steps: TableStep[] = [];
   for (const beat of beats) {
-    if (beat.unit) continue;
+    // A slide's table is on screen already: a chart of its own numbers would only redraw it.
+    if (beat.unit || beat.slides) continue;
     const figure = beat.target ? doc.figures.find((f) => f.id === beat.target) : undefined;
     const numbers = [...beat.evidence, ...(beat.boardEvidence ?? [])].map((id) => sentences.get(id) ?? '').join('\n');
     const table = beat.target

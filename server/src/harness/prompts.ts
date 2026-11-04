@@ -390,10 +390,13 @@ export interface DirectOptions {
 
 /** How a slide step speaks: the lecturer's explanation, connected into the story, never the bullets read out. */
 const SLIDE_VOICE = [
-  'LECTURER VOICE: explain these slides as the lecturer would say them aloud, spoken to the learner as a tutor about "the lecture" and "this slide", never as the lecturer\'s own "I". The first sentence says what these slides do in the story of the lecture. Then give the because and the so-what the slides leave unsaid (why it matters, what it costs, what it sets up); the learner reads the bullets, so never list them or reword them.',
+  'LECTURER VOICE: explain these slides as the lecturer would say them aloud, spoken to the learner as a tutor about "the lecture" and "this slide", never as the lecturer\'s own "I". Begin with the idea itself, in whatever way fits it, never with "these slides" or "this slide". The learner reads the bullets, so never list them or reword them: give the because and the so-what they leave unsaid (why it matters, what it costs, what it sets up).',
   'Connect this step to the one before it in one clause and never recap an earlier step. Name an earlier slide only when the brief gives a CALLBACK, and then say its number once ("slide 13"). Add at most one small example or analogy, labelled as one.',
-  'A slide that is mostly an image (code, a plot, a table, a diagram) is explained from its attached image: what the code does and why, in plain words and never line by line; what the axes and marks of a plot show and what to notice in them; what a table compares. State only what the image shows, and leave out what you cannot read.',
+  'A slide that is mostly an image (code, a plot, a table, a diagram) is explained from its attached image: what the picture shows and what it means, in plain words and never line by line; what its parts or axes stand for, what to notice, what follows from it. Point the marks at the part you explain, never at the whole picture. State only what the image shows, and leave out what you cannot read.',
 ];
+/** What the board of a slide step is for: the learner sees the slide, so the board goes beyond it (slide-copy.ts holds it to that). */
+const SLIDE_BOARD =
+  'BOARD OF A SLIDE: the learner sees the slide, so the board never redraws its bullets, table, plot or picture, nor plots the numbers it prints. It builds on the slide with what the slide leaves out: the mechanism behind its picture, a worked case with numbers of your own (labelled illustrative), the next step, or a contrast or what-if.';
 
 export function directTask(
   language: string,
@@ -413,7 +416,7 @@ export function directTask(
     'Prose: narrate and cue in PDF order, premises first. Announce returns. Maths follows operation order.',
   ];
   if (move) rules.push(MOVE_RULES);
-  if (slides) rules.push(...SLIDE_VOICE);
+  if (slides) rules.push(...SLIDE_VOICE, ...(!bare && actions.includes('board_focus') ? [SLIDE_BOARD] : []));
   rules.push(
     'Trace operation order only from visible arrows or the mathematical expression and supporting text. Spatial position alone is not execution order. If the order is uncertain, describe the relationship without inventing first/then steps.',
   );

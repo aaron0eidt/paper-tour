@@ -462,6 +462,24 @@ export function namesCallback(say: string, beat: Beat, doc: Doc): boolean {
   });
 }
 
+/** The words that open a narration about its slides ("these slides", "diese Folien"), in the languages of the harness. */
+const SLIDE_OPENING = new RegExp(
+  `^\\s*(?:(?:these|those|this|the|the next|the following|diese|die|ces|cette|estas|esta|queste|questa)\\s+(?:\\d+\\s+)?(?:slides?|folien|folie|diapositives?|diapositivas?|diapositiva|diapositive)|(?:folien|slides?)\\s+\\d+)(?![\\p{L}\\p{N}])`,
+  'iu',
+);
+
+/**
+ * A narration that opens by announcing its slides, as the steps of a lecture all do when told to say what their slides do
+ * first, so that the tour reads as one template. The repair asks for the idea itself; code does not dictate how.
+ */
+export function slideOpeningProblems(say: string): string[] {
+  return SLIDE_OPENING.test(say)
+    ? [
+        'Do not open by announcing the slides ("these slides ...", "this slide ..."): begin with the idea itself, in your own way, and let the voice vary from step to step.',
+      ]
+    : [];
+}
+
 /**
  * The tour of a deck: one step per planned group of slides, in the deck's order, in chapters named after the deck's own
  * sections. Each step points at its lead slide's text, sees the pages of its slides, and carries the lecture's story, so

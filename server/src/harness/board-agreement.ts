@@ -21,7 +21,7 @@ const wordsOf = (s: string) =>
     .match(/\p{L}+|\p{N}+/gu) ?? [];
 const STOP = new Set([...STOP_WORDS].map(fold));
 /** What two words must share to be one term: the folded word, lightly stemmed. */
-const keyOf = (word: string) => stem(fold(word));
+export const keyOf = (word: string) => stem(fold(word));
 /** The words that carry a text's content: no function words, single letters or numbers. */
 const content = (s: string) => wordsOf(s).filter((w) => w.length > 1 && !STOP.has(fold(w)) && !/^\d+$/.test(w));
 
@@ -30,7 +30,7 @@ const list = (x: unknown): any[] => (Array.isArray(x) ? x : []);
 const str = (x: unknown): string => (typeof x === 'string' ? x : '');
 
 /** Words a board takes from the harness or uses to join its labels; they name no operation or quantity. */
-const GENERIC = new Set(
+export const GENERIC = new Set(
   `illustrative illustrativ illustratif illustrativo ilustrativo illustratief illustration example beispiel exemple
   ejemplo esempio exemplo voorbeeld unchecked ungepruft verifie comprobar verificare verificado gecontroleerd board case
   value score step overview shape against versus vs among within across via per`
@@ -47,6 +47,8 @@ export interface BoardTerms {
   /** The dimensions of a shapes board: a hit when said, never a miss, and no operation. */
   sizes: string[];
   numbers: string[];
+  /** The same numbers by value: every way a narration may say one value is a group (0.804 is also "80 percent"). */
+  values: string[][];
 }
 
 const GREEK_NAMES = `alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau
@@ -280,7 +282,7 @@ function numberForms(value: number): string[] {
 }
 
 /** The words and numbers a piece of LaTeX prints: \text and function names are words, Greek letters are named. */
-function latexTerms(latex: string): Omit<BoardTerms, 'sizes'> {
+function latexTerms(latex: string): Omit<BoardTerms, 'sizes' | 'values'> {
   const out = { core: [] as string[], items: [] as string[], numbers: [] as string[] };
   let rest = latex.replace(TEXT_COMMAND, (_, text: string) => {
     out.core.push(...content(text).filter((w) => !isCardinal(fold(w))));
@@ -306,23 +308,29 @@ function latexTerms(latex: string): Omit<BoardTerms, 'sizes'> {
 
 /** Everything a board prints that a listener would hear named, by kind. Reads an unchecked board as well. */
 export function boardTerms(item: BoardItem): BoardTerms {
-  const out: BoardTerms = { core: [], items: [], sizes: [], numbers: [] };
+  const out: BoardTerms = { core: [], items: [], sizes: [], numbers: [], values: [] };
+  /** One number, by every form a narration may say it in. */
+  const addNumber = (...forms: string[]) => {
+    out.numbers.push(...forms);
+    out.values.push(forms);
+  };
   /** The words of a label; the numbers it prints or spells go to the numbers, since a narration says them either way. */
   const read = (label: unknown) => {
     const text = str(label);
-    out.numbers.push(...printedNumbers(text), ...spelledNumbers(wordsOf(text).map(fold)));
+    for (const n of [...printedNumbers(text), ...spelledNumbers(wordsOf(text).map(fold))]) addNumber(n);
     return content(text).filter((w) => !isCardinal(fold(w)));
   };
   const label = (...labels: unknown[]) => out.core.push(...labels.flatMap(read));
   const named = (...labels: unknown[]) => out.items.push(...labels.flatMap(read));
-  const values = (...numbers: unknown[]) =>
-    out.numbers.push(...numbers.flatMap((n) => (typeof n === 'number' ? numberForms(n) : [])));
+  const values = (...numbers: unknown[]) => {
+    for (const n of numbers) if (typeof n === 'number') addNumber(...numberForms(n));
+  };
   const math = (latex: unknown, into: 'core' | 'sizes' = 'core') => {
     const terms = latexTerms(str(latex));
     out[into].push(...terms.core);
     out.items.push(...terms.items);
     // A dimension of 1 makes a vector: no narration is about it.
-    out.numbers.push(...(into === 'sizes' ? terms.numbers.filter((n) => n !== '1') : terms.numbers));
+    for (const n of into === 'sizes' ? terms.numbers.filter((n) => n !== '1') : terms.numbers) addNumber(n);
   };
   label(item.title);
   switch (item.kind) {
