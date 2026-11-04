@@ -63,37 +63,66 @@ The 10-29 tour of MIT 18.05 problem set 2 shows the gaps:
 
 These are the classic moves of a tutor: understand the problem, recall what is needed, plan, carry out the plan
 step by step with reasons, then look back (Polya). They are taught as a worked example with self-explanation and
-signalling (Renkl, Chi, Mayer).
+signalling (Renkl, Chi, Mayer). The model chooses which moves a part needs; the table lists what each one does.
 
 | Step | Says | Page | Board |
 |---|---|---|---|
-| 1. Task | What is given, what is asked, and the kind of answer ("a mass in grams") | givens blue, the question yellow, a figure or formula circled | — |
-| 2. Background (when needed) | The concept or law the part rests on: what it is in plain words, why this part needs it, one everyday picture | — | the law term by term (formula board) |
-| 3. Try (checkpoint) | What to try first; up to 3 hints, from a nudge to almost the answer, none with the result | the question stays marked | — |
-| 4. Plan | The method in order and why it fits | — | the method visual (setup, diagram, tree, grid), else the rule |
+| 1. Task | The situation and what we are after, in the tutor's own words, and the kind of answer ("a mass in grams") | givens blue, the question yellow, a figure or formula circled | — |
+| 2. Toolkit (the first part of a task) | The formulas, definitions or laws the task needs: what each does, how it works intuitively (a tiny example or an everyday picture) and how it will answer the task's questions | — | the law term by term (formula board) |
+| 3. Try (checkpoint, only with a real first move) | What to try first; up to 3 hints, from a nudge to almost the answer, none with the result | the question stays marked | — |
+| 4. Plan (only when the steps do not say it) | The method in order and why it fits | — | the method visual (setup, diagram, tree, grid), else the rule |
 | 5. Steps 1..n | One move per step: what we do and why it works | — | the line, built term by term, under the earlier lines of the part |
 | 6. Answer and check | The result in words, how we know it is right (substitute back, units, size, special case), the common mistake | the question turns green | the answer line under the working, then the check line; ✓ on lines code verified |
 
 **Forms of a part:**
 
-- **Full:** all six steps. This is the first part of a task in a standard tour, and every part in a deep tour.
-- **Follow-on:** a later part of a task. It has no background, since it was given in part a; the method is short.
-- **Compact:** for a quick tour or a long sheet. Task and method share a step, then the try, at most 3 lines, and the
-  last line also carries the answer and a short check.
+- **Full:** all the moves. This is the first part of a task in a standard tour, and every part in a deep tour.
+- **Follow-on:** a later part of a task. Its toolkit is mostly given with the first part (which sees the later parts'
+  text for that), so it has a tool only for an idea the parts before did not need; the method is short.
+- **Compact:** for a quick tour or a long sheet. Its tool and its method are said inside the task step, then the try, at
+  most 3 lines, and the last line also carries the answer and a short check.
 
-**Background is given once per concept in a tour.** Code normalises the concept name. A later part that needs the
-same concept drops its background step, which is decided in tour order so that partial tours and the final tour agree.
+**A tool is given once per tour.** Code compares each tool by its name (normalised) and by its formula, so that two
+parts that name one law differently still share it. A later part that needs a tool the tour has given recalls it in one
+sentence of its task step (the model writes that "recall" with the tool), with the law back on the board, and has no tool
+step. The decision is made in tour order, so that partial tours and the final tour agree.
 
 **Lengths:**
 
 | Preset | Most steps in a tour | Most solution lines per part |
 |---|---|---|
-| quick | 24 | 3 |
-| standard | 48 | 5 |
-| deep | 72 | 7 |
+| quick | 60 | 3 |
+| standard | 100 | 5 |
+| deep | 160 | 7 |
 
 Parts that do not fit are named in the takeaway as "not covered", and every task keeps at least its first part. A
 sheet is a working session, not an overview: chapters are tasks, and the learner jumps between them.
+
+## Flow (2026-11-04)
+
+Aaron watched a sheet tour and said it needed "a general flow": the task number is not said before every part, "1 is the
+question" is not the opening of every task, the tour goes over what is given (the formulas, what they do, how they work
+intuitively and how they answer the questions), and it is not templated. The cause was in the solve call: its fields fixed
+the read-out ("what is given, what is asked"), the background came only when a student "may not have it ready", every
+part had a checkpoint and a method, the steps were always task, try, steps, and the worked examples opened with "We are
+given ...", which the model copies. Of the 25 tasks of the German test sheet, each opened "Gegeben sind ..., gesucht
+ist ...", then "Versuche zuerst ...", then two "Wir ..." steps.
+
+- **Toolkit.** `background` is now `tools` (up to two for a full part, one otherwise): each has a name, the plain words
+  (what it does, an intuition and how it answers the question), a one-sentence recall and the law on the board. The first
+  part of a task is shown the later parts it teaches (`Unit.ahead`) so that its toolkit covers the task; later parts add a
+  tool only for an idea the earlier parts did not give. The compact form says its tool inside the task step.
+- **Free moves.** The checkpoint (empty prompt), the method (empty say), the check and the pitfall are all optional; the
+  model picks them per part and the step count within the preset's cap. A method visual whose part has no method step
+  gets its narration from the visual call, so the picture still has a host.
+- **Examples.** Six examples that differ in shape: one to two tools, with and without checkpoint and method, two to four
+  lines, none opening with "Given" or "We are given", each step opening differently, and a follow-on part (the second
+  example for a part that goes on from an earlier one).
+- **Code checks** (`exercise-voice.ts`): a narration that opens with a templated opening ("Given", "We are given",
+  "Gegeben ist", "Gesucht ist", and the equivalents in French, Spanish, Italian, Portuguese, Dutch, Russian, Chinese,
+  Japanese, Korean and Arabic) or with a task label ("In exercise 3", "Aufgabe 4.2 b", "Part b asks"), and a later part
+  that names its own task or part, are sent back with the words they opened with, once, with the other repairs. The
+  first part of a task may name it once. A part that is still templated after its repair is taught all the same.
 
 ## Subjects
 
@@ -148,9 +177,9 @@ The tour never fails because of one part.
 
 ## Work split (2026-11-03)
 
-- **Tutor flow** (exercise.ts, exercise-examples.ts, card.ts, the sheet parts of generator.ts, visual-plan.ts sheet
-  help, doctype.ts tone):
-  - the solve schema v2, the six steps and three forms, background dedupe;
+- **Tutor flow** (exercise.ts, exercise-examples.ts, exercise-voice.ts, card.ts, the sheet parts of generator.ts,
+  visual-plan.ts sheet help, doctype.ts tone):
+  - the solve schema v3, the moves and three forms, the toolkit and its dedupe;
   - lengths, the adaptive fallback, and the subject.
 - **Board** (shared/paper.ts and tour.schema.json done; player Board.tsx and board.css, server board.ts):
   - the working kept above the current line (`before`), the ✓ (`verified`);

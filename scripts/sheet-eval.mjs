@@ -3,8 +3,8 @@
 //   node scripts/sheet-eval.mjs [--json] <tour folder>:<sheet folder>:<answers.json> ...
 // The tour folder holds tour.json (and metadata.json when it came from server/run-tour.ts), the sheet folder the
 // sheet's doc.json, and answers.json is the sheet's key (eval/sheets/<slug>.answers.json). For every taught part it
-// compares the numbers of the tour's answer with the key's, and it counts what a tutor's tour should have: background,
-// checkpoints, pictures, verified lines.
+// compares the numbers of the tour's answer with the key's, and it counts what a tutor's tour should have: toolkit
+// steps (the tools of a task; older tours call them background), checkpoints, pictures, verified lines.
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,6 +57,9 @@ function unitOf(doc, item) {
   return part?.id ?? null;
 }
 
+/** A step that teaches a tool (a formula, definition or law): "-tool-1", or "-background" in the tours before the toolkit. */
+const isToolkit = (id) => id.endsWith('-background') || /-tool-\d+$/.test(id);
+
 /** The steps of one unit, in tour order. */
 const unitSteps = (tour, id) =>
   tour.chapters.flatMap((c) => c.steps).filter((s) => s.id === `${id}-task` || s.id.startsWith(`${id}-`));
@@ -85,7 +88,7 @@ export function scoreSheet(tour, doc, key, metadata = null) {
       part: item.part,
       unit: id,
       steps: steps.length,
-      background: steps.some((s) => s.id.endsWith('-background')),
+      toolkit: steps.filter((s) => isToolkit(s.id)).length,
       checkpoint: steps.some((s) => s.checkpoint),
       answer: answer.slice(0, 160),
       key: item.answer,
@@ -105,7 +108,7 @@ export function scoreSheet(tour, doc, key, metadata = null) {
     keyed: items.length,
     mapped: items.filter((i) => i.unit).length,
     taught: taught.length,
-    background: all.filter((s) => s.id.endsWith('-background')).length,
+    toolkit: all.filter((s) => isToolkit(s.id)).length,
     checkpoints: all.filter((s) => s.checkpoint).length,
     pictures: [...new Set(boards.filter((b) => b.kind !== 'formula').map((b) => b.kind))],
     pictureCount: boards.filter((b) => b.kind !== 'formula').length,
@@ -129,20 +132,20 @@ function table(score) {
     `${score.steps} steps, about ${score.minutes} min of narration`,
     `parts taught ${score.taught}/${score.parts} (key ${score.mapped}/${score.keyed} mapped)`,
     `answers right ${score.correct}/${score.scored} (partial ${score.partial})`,
-    `background ${score.background}, checkpoints ${score.checkpoints}`,
+    `toolkit ${score.toolkit}, checkpoints ${score.checkpoints}`,
     `pictures ${score.pictureCount} (${score.pictures.join(', ') || 'none'})`,
     `formula lines ${score.lines}, verified ${score.verified}, with working above ${score.working}`,
     `checker ok ${score.checks[0]}, failed ${score.checks[1]}, unknown ${score.checks[2]}`,
   ].join(' · ');
   const rows = score.items.map(
     (i) =>
-      `| ${i.task}${i.part ? ` ${i.part})` : ''} | ${i.steps} | ${i.background ? 'yes' : ''} | ${i.steps <= 1 ? 'not taught' : (i.correct ?? '?')} | ${i.answer.replace(/\|/g, '/').slice(0, 90)} | ${String(i.key).replace(/\|/g, '/').slice(0, 60)} |`,
+      `| ${i.task}${i.part ? ` ${i.part})` : ''} | ${i.steps} | ${i.toolkit || ''} | ${i.steps <= 1 ? 'not taught' : (i.correct ?? '?')} | ${i.answer.replace(/\|/g, '/').slice(0, 90)} | ${String(i.key).replace(/\|/g, '/').slice(0, 60)} |`,
   );
   return [
     head,
     summary,
     '',
-    '| part | steps | background | answer | tour says | key |',
+    '| part | steps | toolkit | answer | tour says | key |',
     '|---|---|---|---|---|---|',
     ...rows,
   ].join('\n');
@@ -166,7 +169,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(scores.map(table).join('\n\n'));
     const total = (key) => scores.reduce((n, s) => n + s[key], 0);
     console.log(
-      `\nAll sheets: parts taught ${total('taught')}/${total('parts')}, answers right ${total('correct')}/${total('scored')} (partial ${total('partial')}), steps ${total('steps')}, background ${total('background')}, pictures ${total('pictureCount')}, verified lines ${total('verified')}/${total('lines')}, checker ok ${scores.reduce((n, s) => n + s.checks[0], 0)} of ${scores.reduce((n, s) => n + s.checks[0] + s.checks[1] + s.checks[2], 0)}`,
+      `\nAll sheets: parts taught ${total('taught')}/${total('parts')}, answers right ${total('correct')}/${total('scored')} (partial ${total('partial')}), steps ${total('steps')}, toolkit ${total('toolkit')}, pictures ${total('pictureCount')}, verified lines ${total('verified')}/${total('lines')}, checker ok ${scores.reduce((n, s) => n + s.checks[0], 0)} of ${scores.reduce((n, s) => n + s.checks[0] + s.checks[1] + s.checks[2], 0)}`,
     );
   }
 }

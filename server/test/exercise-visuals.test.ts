@@ -500,15 +500,38 @@ test('in the compact form the visual opens the first solution step and its line 
   assert.deepEqual(boards(steps[1]), []);
 });
 
-test('a part with no step to show it keeps its solution as it was', () => {
+test('a part whose steps say the method has the visual narrate it; with no narration at all it keeps its solution as it was', () => {
   const u = unit('ex1.a');
   const bare = { ...solved(), method: { say: '', line: null } };
-  assert.equal(hasVisualHost(u, bare), false);
+  // The visual call writes the method's narration, which becomes the method step; the schema asks for it only then.
+  assert.equal(hasVisualHost(u, bare), true);
+  assert.deepEqual((unitVisualSchema('heatmap', true) as any).required, ['plan', 'heatmap', 'focus', 'say']);
+  assert.deepEqual((unitVisualSchema('heatmap') as any).required, ['plan', 'heatmap', 'focus']);
+  const told = unitVisualTask('en-US', unitBrief(u, sheet), planned as StepVisual & { visual: 'heatmap' }, bare);
+  assert.match(told, /THE METHOD IS NOT NARRATED YET: write its narration in "say"/);
+  const NARRATION = 'Ten thousand people sorted by sick and positive show the sick people on top and the healthy people below.';
+  const drawn = cleanUnitVisual({ ...draw(grid(), [{ target: 'row-1', anchor: 'the sick people' }]), say: NARRATION }, 'heatmap', u, sheet, bare, planned);
+  assert.deepEqual(drawn.problems, []);
+  assert.equal(drawn.visual!.say, NARRATION);
+  assert.deepEqual(drawn.visual!.focus, [{ part: 0, anchor: 'the sick people' }]);
+  const shown = unitSteps(u, bare, [ok, ok, ok], 'en-US', drawn.visual);
+  const method = shown.find((x) => x.id === 'ex1.a-method')!;
+  assert.equal(method.say, NARRATION);
+  assert.deepEqual(boards(method), ['heatmap']);
+  assert.deepEqual(
+    shown.map((x) => x.id),
+    ['ex1.a-task', 'ex1.a-try', 'ex1.a-method', 'ex1.a-step-1', 'ex1.a-step-2', 'ex1.a-answer'],
+  );
+  // A narration that is missing or too short sends the visual back; a part with its own method narration needs none.
+  assert.deepEqual(cleanUnitVisual(draw(), 'heatmap', u, sheet, bare, planned).problems, ['say: narrate the method in at least 8 words']);
+  assert.deepEqual(cleanUnitVisual({ ...draw(), say: 'A grid.' }, 'heatmap', u, sheet, bare, planned).problems, ['say: narrate the method in at least 8 words']);
+  assert.equal(cleanUnitVisual(draw(grid(), [{ target: 'row-1', anchor: 'the sick people' }]), 'heatmap', u, sheet, solved(), planned).visual!.say, undefined);
+  // Without a narration of its own the part has no method step at all, and the picture is not shown.
   const visual = { item: grid() as never, focus: [] };
-  const steps = unitSteps(u, bare, [ok, ok, ok], 'en-US', visual);
-  assert.ok(steps.every((x) => !boards(x).includes('heatmap')));
-  // Compact without a checkpoint: the method is said inside the task step, before any pause, so nothing shows.
+  assert.ok(unitSteps(u, bare, [ok, ok, ok], 'en-US', visual).every((x) => !boards(x).includes('heatmap')));
+  // Compact: the method joins the first solution line after the checkpoint, so it needs its own narration and a checkpoint.
   const compact = planUnits(units, 'quick').taught.find((x) => x.id === 'ex1.a')!;
+  assert.equal(hasVisualHost(compact, { ...solved(compact), method: { say: '', line: null } }), false);
   const noCoach = { ...solved(compact), coach: null };
   assert.equal(hasVisualHost(compact, noCoach), false);
   assert.ok(unitSteps(compact, noCoach, [ok, ok, ok], 'en-US', visual).every((x) => !boards(x).includes('heatmap')));

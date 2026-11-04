@@ -1,17 +1,26 @@
 import type { Subject } from './card';
 import type { SolveKind } from './exercise';
 
-// The worked examples of the solve call (notes/TUTOR.md, "Subjects"): a weak model copies the format and depth of its
-// example, so each subject gets one complete part in schema v2 (read, background with its formula, a method, granular
-// solution lines, the answer, a check with its check line, a pitfall, a checkpoint whose hints never give the result),
-// and every call also gets a short explanation part. The sentence IDs are made up, as in any example for a different
-// exercise; a test holds each example to the same checks as a real answer.
+// The worked examples of the solve call (notes/TUTOR.md, "Subjects" and "Flow"): a weak model copies the format, the
+// depth and the openings of its example, so each subject gets one complete first part of a task in schema v3 (read, the
+// tools with their laws, a checkpoint whose hints never give the result, a method when the steps do not say it, granular
+// solution lines, the answer, a check with its check line, a pitfall), a short explanation part comes with it, and a part
+// that goes on from an earlier one gets a follow-on part. They differ on purpose: the tools are one or two, the checkpoint
+// and the method come and go, the steps are three or four and open in different ways, and none opens with "Given" or "We
+// are given". The sentence IDs are made up, as in any example for a different exercise; a test holds each example to the
+// same checks as a real answer.
 
 /** A board line of an example: its LaTeX, and the terms the narration lights up with the phrase that names each. */
 export interface ExampleLine {
   title: string;
   latex: string;
   terms: { latex: string; label: string; anchor: string }[];
+}
+export interface ExampleTool {
+  concept: string;
+  say: string;
+  recall: string;
+  formula: ExampleLine;
 }
 export interface SolveExample {
   plan: string;
@@ -24,7 +33,7 @@ export interface SolveExample {
     asked_anchor: string;
     marks: { target: string; anchor: string }[];
   };
-  background: { concept: string; say: string; formula: ExampleLine };
+  tools: ExampleTool[];
   method: { say: string; formula: ExampleLine };
   steps: (ExampleLine & { say: string; sure: boolean })[];
   answer: ExampleLine & { say: string };
@@ -40,40 +49,40 @@ export type ExampleKind = 'maths' | 'chemistry' | 'physics' | 'computer_science'
 
 const none: ExampleLine = { title: '', latex: '', terms: [] };
 
-/** A quadratic equation: the formula as the background, four moves, a check by substitution. */
+/** A quadratic equation: one tool, a checkpoint, no method step (the steps say it), four moves, a check by substitution. */
 const MATHS: SolveExample = {
   plan: '2x^2 - 3x - 5 = 0, so a = 2, b = -3, c = -5. Discriminant: b^2 - 4ac = 9 + 40 = 49, and sqrt(49) = 7. Then x = (3 ± 7)/4, so x = 10/4 = 5/2 or x = -4/4 = -1. Check x = -1: 2 + 3 - 5 = 0, and x = 5/2: 12.5 - 7.5 - 5 = 0.',
   kind: 'calculation',
   read: {
-    say: 'We are given the quadratic equation two x squared minus three x minus five equals zero, and we are asked for all values of x that solve it. The answer is up to two numbers.',
+    say: 'The equation two x squared minus three x minus five equals zero is quadratic, and we want every x that makes it true. Expect at most two numbers.',
     given: ['p2.s4'],
-    given_anchor: 'quadratic equation two x squared',
+    given_anchor: 'two x squared minus three',
     asked: ['p2.s5'],
-    asked_anchor: 'all values of x',
+    asked_anchor: 'every x that makes it true',
     marks: [],
   },
-  background: {
-    concept: 'The quadratic formula',
-    say: 'A quadratic equation has the form a x squared plus b x plus c equals zero. Its solutions are the places where a parabola crosses the x-axis, like a thrown ball landing on the ground. The quadratic formula gives both crossing places from the three coefficients.',
-    formula: {
-      title: 'Quadratic formula',
-      latex: 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}',
-      terms: [
-        { latex: '\\pm', label: 'two solutions', anchor: 'both crossing places' },
-        { latex: 'b^2 - 4ac', label: 'the discriminant', anchor: 'three coefficients' },
-      ],
+  tools: [
+    {
+      concept: 'The quadratic formula',
+      say: 'An equation of the form a x squared plus b x plus c equals zero asks where a parabola crosses the x-axis, like a ball landing on the ground. The quadratic formula turns the three coefficients straight into both crossing points, and here it hands us every x we are after.',
+      recall: 'Again the quadratic formula, which turns the three coefficients into the crossing points.',
+      formula: {
+        title: 'Quadratic formula',
+        latex: 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}',
+        terms: [
+          { latex: '\\pm', label: 'two solutions', anchor: 'both crossing points' },
+          { latex: 'b^2 - 4ac', label: 'the discriminant', anchor: 'three coefficients' },
+        ],
+      },
     },
-  },
-  method: {
-    say: 'We read off the coefficients a, b and c, work out the discriminant under the root, and put everything into the formula. The plus and the minus sign give the two solutions, and we check them in the original equation.',
-    formula: none,
-  },
+  ],
+  method: { say: '', formula: none },
   steps: [
     {
       title: 'Read the coefficients',
-      latex: 'a = 2,\; b = -3,\; c = -5',
-      terms: [{ latex: 'b = -3', label: 'coefficient of x', anchor: 'b equals minus three' }],
-      say: 'We compare the equation with the general form. The number in front of x squared gives a equals two. The number in front of x gives b equals minus three, and the plain number gives c equals minus five.',
+      latex: 'a = 2,\\; b = -3,\\; c = -5',
+      terms: [{ latex: 'b = -3', label: 'coefficient of x', anchor: 'b is minus three' }],
+      say: 'Match the equation with the general form. The number in front of x squared is a, so a is two; in front of x sits b, and b is minus three; standing alone is c, minus five.',
       sure: true,
     },
     {
@@ -83,24 +92,24 @@ const MATHS: SolveExample = {
         { latex: '(-3)^2', label: 'b squared', anchor: 'minus three squared' },
         { latex: '49', label: 'the discriminant', anchor: 'forty-nine' },
       ],
-      say: 'Next the discriminant under the root. Minus three squared is nine, and four times two times minus five is minus forty. Nine minus minus forty is nine plus forty, which is forty-nine.',
+      say: 'Under the root goes b squared minus four a c. Minus three squared is nine, and four times two times minus five is minus forty, so nine plus forty makes forty-nine.',
       sure: true,
     },
     {
       title: 'Put into the formula',
       latex: 'x = \\frac{3 \\pm \\sqrt{49}}{4} = \\frac{3 \\pm 7}{4}',
       terms: [{ latex: '3 \\pm 7', label: 'three plus or minus seven', anchor: 'plus or minus seven' }],
-      say: 'Now we put the numbers into the formula. Minus b is three, the square root of forty-nine is seven, and two a is four. So x is three plus or minus seven, divided by four.',
+      say: 'Forty-nine has a clean root, seven. So x is three plus or minus seven, all over four, since two a is four.',
       sure: true,
     },
     {
       title: 'Split the two cases',
-      latex: 'x_1 = \\frac{3 + 7}{4} = \\frac{5}{2},\; x_2 = \\frac{3 - 7}{4} = -1',
+      latex: 'x_1 = \\frac{3 + 7}{4} = \\frac{5}{2},\\; x_2 = \\frac{3 - 7}{4} = -1',
       terms: [
-        { latex: '\\frac{3 + 7}{4}', label: 'plus case', anchor: 'with the plus sign' },
-        { latex: '\\frac{3 - 7}{4}', label: 'minus case', anchor: 'with the minus sign' },
+        { latex: '\\frac{3 + 7}{4}', label: 'plus case', anchor: 'ten over four' },
+        { latex: '\\frac{3 - 7}{4}', label: 'minus case', anchor: 'minus four over four' },
       ],
-      say: 'We split the plus or minus into two cases. With the plus sign, ten divided by four gives five halves. With the minus sign, minus four divided by four gives minus one.',
+      say: 'The plus sign gives ten over four, which is five halves. The minus sign gives minus four over four, which is minus one.',
       sure: true,
     },
   ],
@@ -111,16 +120,16 @@ const MATHS: SolveExample = {
       { latex: '\\frac{5}{2}', label: 'first solution', anchor: 'x equals five halves' },
       { latex: '-1', label: 'second solution', anchor: 'x equals minus one' },
     ],
-    say: 'So the equation has two solutions: x equals five halves, and x equals minus one.',
+    say: 'So the equation has two solutions: x equals five halves, or x equals minus one.',
   },
   check: {
-    say: 'We put minus one back into the original equation. Two times one is two, minus three times minus one adds three, and minus five finishes it: two plus three minus five is zero.',
+    say: 'Put minus one back in: two times one is two, minus three times minus one adds three, and minus five closes it, so two plus three minus five is zero, as it should be.',
     latex: '2 \\cdot (-1)^2 - 3 \\cdot (-1) - 5 = 2 + 3 - 5 = 0',
   },
   pitfall:
     'Forgetting the sign of b: here b is minus three, so minus b is plus three, while b squared is still plus nine.',
   try: {
-    prompt: 'Before we calculate, what are a, b and c in this equation, and what number do you get under the root?',
+    prompt: 'Before the formula does its work, what are a, b and c here, and what number lands under the root?',
     hints: [
       'Match the numbers in front of x squared, in front of x and standing alone with a, b and c, and watch their signs.',
       'Work out b squared minus four times a times c; with a negative b, b squared is still positive.',
@@ -131,32 +140,45 @@ const MATHS: SolveExample = {
   questions: ['Why does the formula give two solutions?', 'What happens if the number under the root is negative?'],
 };
 
-/** Stoichiometry: grams to moles, the mole ratio of the equation, moles to grams, with units and a size check. */
+/** Stoichiometry: two tools, a method that lays out the path, grams to moles to grams with units and a size check. */
 const CHEMISTRY: SolveExample = {
   plan: 'm(H2) = 4.0 g, M(H2) = 2.02 g/mol, so n(H2) = 1.98 mol. 2 H2 + O2 -> 2 H2O gives n(H2O) = n(H2). M(H2O) = 18.02 g/mol, so m(H2O) = 35.7 g, about 36 g. Check: 4.0 g * 18.02/2.02 = 35.7 g.',
   kind: 'calculation',
   read: {
-    say: 'Hydrogen burns completely in excess oxygen, and we are given four point zero grams of hydrogen. We are asked for the mass of water that forms. The answer is a mass in grams.',
+    say: 'Four point zero grams of hydrogen burn completely in oxygen, and the question is how much water that makes, in grams.',
     given: ['p3.s2'],
     given_anchor: 'four point zero grams of hydrogen',
     asked: ['p3.s3'],
-    asked_anchor: 'mass of water',
+    asked_anchor: 'how much water',
     marks: [],
   },
-  background: {
-    concept: 'The mole and molar mass',
-    say: 'The mole is a counting unit for particles, like a dozen for eggs, and the molar mass tells us how many grams one mole weighs. The reaction equation counts particles, but the task gives grams, so we must convert between the two.',
-    formula: {
-      title: 'Amount of substance',
-      latex: 'n = \\frac{m}{M}',
-      terms: [
-        { latex: 'n', label: 'amount in moles', anchor: 'counting unit' },
-        { latex: '\\frac{m}{M}', label: 'mass over molar mass', anchor: 'molar mass tells us' },
-      ],
+  tools: [
+    {
+      concept: 'The mole and molar mass',
+      say: 'The mole is a counting unit for particles, like a dozen for eggs, and the molar mass says how many grams one mole weighs. Dividing a mass by the molar mass gives the number of moles, which is the language the reaction equation speaks.',
+      recall: 'Again moles: a mass divided by the molar mass gives the amount of substance.',
+      formula: {
+        title: 'Amount of substance',
+        latex: 'n = \\frac{m}{M}',
+        terms: [
+          { latex: 'n', label: 'amount in moles', anchor: 'counting unit' },
+          { latex: '\\frac{m}{M}', label: 'mass over molar mass', anchor: 'molar mass says' },
+        ],
+      },
     },
-  },
+    {
+      concept: 'Mole ratio of a balanced equation',
+      say: 'The coefficients of a balanced equation count molecules, and so they count moles too: two hydrogen go with one oxygen and make two water. Like a recipe, they tell how much of one ingredient goes with another.',
+      recall: 'Again the mole ratio: the coefficients of the balanced equation compare the moles of different substances.',
+      formula: {
+        title: 'Balanced reaction',
+        latex: '\\ce{2H2 + O2 -> 2H2O}',
+        terms: [{ latex: '\\ce{2H2 + O2 -> 2H2O}', label: 'balanced reaction', anchor: 'two hydrogen go with' }],
+      },
+    },
+  ],
   method: {
-    say: 'The equation connects moles, not grams. So we turn the grams of hydrogen into moles, use the mole ratio of the balanced equation to get the moles of water, and turn those back into grams.',
+    say: 'The equation speaks in moles but the task gives grams, so we convert the grams of hydrogen into moles, carry them over to moles of water, and turn those back into grams.',
     formula: {
       title: 'The conversion path',
       latex: 'm(\\ce{H2}) \\to n(\\ce{H2}) \\to n(\\ce{H2O}) \\to m(\\ce{H2O})',
@@ -168,10 +190,10 @@ const CHEMISTRY: SolveExample = {
   },
   steps: [
     {
-      title: 'Balanced equation',
-      latex: '\\ce{2H2 + O2 -> 2H2O}',
-      terms: [{ latex: '\\ce{2H2 + O2 -> 2H2O}', label: 'balanced reaction', anchor: 'mole ratio' }],
-      say: 'First the balanced equation. Two molecules of hydrogen react with one of oxygen to give two of water, so hydrogen and water are in the mole ratio two to two, which is one to one.',
+      title: 'Mole ratio',
+      latex: 'n(\\ce{H2O}) : n(\\ce{H2}) = 2 : 2 = 1 : 1',
+      terms: [{ latex: '1 : 1', label: 'one to one', anchor: 'one to one' }],
+      say: 'First the balanced equation, which gives the mole ratio. Two hydrogen react with one oxygen to give two water, so hydrogen and water stand two to two, which is one to one.',
       sure: true,
     },
     {
@@ -185,14 +207,14 @@ const CHEMISTRY: SolveExample = {
         },
         { latex: '1.98\\,\\mathrm{mol}', label: 'amount of hydrogen', anchor: 'one point nine eight moles' },
       ],
-      say: 'Now we convert the hydrogen to moles. We divide the mass, four point zero grams, by the molar mass of hydrogen, two point zero two grams per mole. That gives one point nine eight moles.',
+      say: 'Next, grams to moles: divide the mass, four point zero grams, by the molar mass of hydrogen, two point zero two grams per mole. That gives one point nine eight moles.',
       sure: true,
     },
     {
       title: 'Moles of water',
       latex: 'n(\\ce{H2O}) = n(\\ce{H2}) = 1.98\\,\\mathrm{mol}',
       terms: [{ latex: 'n(\\ce{H2O})', label: 'amount of water', anchor: 'moles of water' }],
-      say: 'The mole ratio is one to one, so the water has the same number of moles as the hydrogen. We get one point nine eight moles of water.',
+      say: 'The ratio is one to one, so water forms in the same number of moles as hydrogen burned: one point nine eight moles of water.',
       sure: true,
     },
     {
@@ -202,7 +224,7 @@ const CHEMISTRY: SolveExample = {
         { latex: '18.02\\,\\mathrm{g/mol}', label: 'molar mass of water', anchor: 'molar mass of water' },
         { latex: '35.7\\,\\mathrm{g}', label: 'mass in grams', anchor: 'thirty-five point seven grams' },
       ],
-      say: 'Last we convert back to grams. We multiply the moles by the molar mass of water, eighteen point zero two grams per mole, and get thirty-five point seven grams.',
+      say: 'Back to grams: multiply by the molar mass of water, eighteen point zero two grams per mole. That makes thirty-five point seven grams.',
       sure: true,
     },
   ],
@@ -231,65 +253,58 @@ const CHEMISTRY: SolveExample = {
   questions: ['Why do we convert to moles first?', 'What changes if oxygen were the limiting reagent?'],
 };
 
-/** Free fall: one law solved for the unknown, numbers with units, a check by putting the result back. */
+/** Free fall: one law solved for the unknown, three lines, no method step, numbers with units, a check by putting the result back. */
 const PHYSICS: SolveExample = {
   plan: 'h = 20 m, g = 9.81 m/s^2, v0 = 0. h = 1/2 g t^2, so t^2 = 2h/g = 4.08 s^2 and t = 2.02 s. Check: 1/2 * 9.81 * 2.02^2 = 20.0 m.',
   kind: 'calculation',
   read: {
-    say: 'A ball is dropped from rest from a height of twenty metres, and air resistance is ignored. We are asked how long it takes to reach the ground. The answer is a time in seconds.',
+    say: 'A ball is dropped from rest at a height of twenty metres, air resistance ignored: how long does it take to hit the ground? The answer is a time in seconds.',
     given: ['p4.s2'],
     given_anchor: 'dropped from rest',
     asked: ['p4.s3'],
-    asked_anchor: 'how long it takes',
+    asked_anchor: 'how long does it take',
     marks: [],
   },
-  background: {
-    concept: 'Free fall with constant acceleration',
-    say: 'In free fall, gravity speeds an object up by the same amount every second, about nine point eight one metres per second more each second. Starting from rest, the distance fallen grows with the square of the time, like a stone dropped from a bridge.',
-    formula: {
-      title: 'Distance in free fall',
-      latex: 'h = \\frac{1}{2} g t^2',
-      terms: [
-        { latex: 'h', label: 'distance fallen', anchor: 'distance fallen' },
-        { latex: 'g', label: 'gravitational acceleration', anchor: 'gravity speeds' },
-        { latex: 't^2', label: 'time squared', anchor: 'square of the time' },
-      ],
+  tools: [
+    {
+      concept: 'Free fall with constant acceleration',
+      say: 'In free fall, gravity adds the same speed every second, about nine point eight one metres per second more each time. From rest, the distance fallen grows with the square of the time, like a stone dropped from a bridge. That law links height and time, which is what we need.',
+      recall: 'Again the free-fall law: from rest, the distance fallen grows with the square of the time.',
+      formula: {
+        title: 'Distance in free fall',
+        latex: 'h = \\frac{1}{2} g t^2',
+        terms: [
+          { latex: 'h', label: 'distance fallen', anchor: 'distance fallen' },
+          { latex: 'g', label: 'gravitational acceleration', anchor: 'gravity adds' },
+          { latex: 't^2', label: 'time squared', anchor: 'square of the time' },
+        ],
+      },
     },
-  },
-  method: {
-    say: 'We know the height and that the ball starts at rest, and we want the time. So we solve the free-fall law for t, then put in the numbers with their units and take the square root.',
-    formula: none,
-  },
+  ],
+  method: { say: '', formula: none },
   steps: [
     {
       title: 'Solve for t squared',
       latex: 't^2 = \\frac{2h}{g}',
       terms: [{ latex: '\\frac{2h}{g}', label: 'two h over g', anchor: 'two h over g' }],
-      say: 'We solve the law for t squared: multiply both sides by two and divide by g. This gives t squared equals two h over g.',
+      say: 'Solve the law for t squared first: multiply both sides by two and divide by g, so t squared equals two h over g.',
       sure: true,
     },
     {
       title: 'Insert the numbers',
-      latex: 't^2 = \\frac{2 \\cdot 20\\,\\mathrm{m}}{9.81\\,\\mathrm{m/s^2}}',
+      latex: 't^2 = \\frac{2 \\cdot 20\\,\\mathrm{m}}{9.81\\,\\mathrm{m/s^2}} = 4.08\\,\\mathrm{s^2}',
       terms: [
-        { latex: '2 \\cdot 20\\,\\mathrm{m}', label: 'twice the height', anchor: 'twice the height' },
         { latex: '9.81\\,\\mathrm{m/s^2}', label: 'gravitational acceleration', anchor: 'nine point eight one' },
+        { latex: '4.08\\,\\mathrm{s^2}', label: 'time squared', anchor: 'four point zero eight' },
       ],
-      say: 'Now we put in the numbers. Twice the height is two times twenty metres, and g is nine point eight one metres per second squared.',
-      sure: true,
-    },
-    {
-      title: 'Evaluate',
-      latex: 't^2 = 4.08\\,\\mathrm{s^2}',
-      terms: [{ latex: '4.08\\,\\mathrm{s^2}', label: 'time squared', anchor: 'four point zero eight' }],
-      say: 'The metres cancel against the metres in g and leave seconds squared. Forty divided by nine point eight one is four point zero eight, so t squared is four point zero eight seconds squared.',
+      say: 'With the numbers in, the metres cancel against the metres in g and leave seconds squared. Forty over nine point eight one is four point zero eight.',
       sure: true,
     },
     {
       title: 'Take the square root',
       latex: 't = \\sqrt{4.08\\,\\mathrm{s^2}} = 2.02\\,\\mathrm{s}',
       terms: [{ latex: '2.02\\,\\mathrm{s}', label: 'time in seconds', anchor: 'two point zero two seconds' }],
-      say: 'Finally we take the square root, because we want t, not t squared. The square root of four point zero eight seconds squared is two point zero two seconds.',
+      say: 'Last comes the square root, because we want t and not t squared: the root of four point zero eight seconds squared is two point zero two seconds.',
       sure: true,
     },
   ],
@@ -300,13 +315,13 @@ const PHYSICS: SolveExample = {
     say: 'So the ball needs about two seconds to reach the ground, rounded to two significant figures.',
   },
   check: {
-    say: 'We put the time back into the law. Half of nine point eight one times four point zero eight is about twenty metres, the height we started with.',
+    say: 'Put the time back into the law. Half of nine point eight one times four point zero eight is about twenty metres, the height we started with.',
     latex: '\\frac{1}{2} \\cdot 9.81\\,\\mathrm{m/s^2} \\cdot (2.02\\,\\mathrm{s})^2 = 20.0\\,\\mathrm{m}',
   },
   pitfall:
     'Forgetting the square root at the end, which leaves t squared, or forgetting the factor two when solving for t squared.',
   try: {
-    prompt: 'Before we put in numbers, how would you rearrange the free-fall law to get the time on its own?',
+    prompt: 'Before any numbers go in, how would you rearrange the law to get the time on its own?',
     hints: [
       'The time appears squared, with a factor in front of it. Which operations undo that?',
       'Multiply both sides by two and divide by g, so that t squared stands alone.',
@@ -317,36 +332,39 @@ const PHYSICS: SolveExample = {
   questions: ['Why does the mass of the ball not matter?', 'How long would it take on the Moon?'],
 };
 
-/** A trace of binary search: one row of the trace table per line. */
+/** A trace of binary search: one tool, a method that names the two ends, one row of the trace table per line. */
 const COMPUTER_SCIENCE: SolveExample = {
   plan: 'a = [1, 3, 5, 7, 9, 11], target 7. lo = 0, hi = 5, mid = 2, a[2] = 5 < 7, so lo = 3. mid = 4, a[4] = 9 > 7, so hi = 3. mid = 3, a[3] = 7: found at index 3 after 3 probes.',
   kind: 'trace',
   read: {
-    say: 'We are given the sorted array one, three, five, seven, nine, eleven, and we search for the value seven with binary search. We are asked to trace the search. The answer is the index where seven is found and the number of probes.',
+    say: 'The sorted array one, three, five, seven, nine, eleven is searched for the value seven with binary search, and we trace every probe. The answer is the index where seven sits and how many probes it took.',
     given: ['p5.s2'],
-    given_anchor: 'sorted array',
+    given_anchor: 'sorted array one',
     asked: ['p5.s3'],
-    asked_anchor: 'trace the search',
+    asked_anchor: 'trace every probe',
     marks: [],
   },
-  background: {
-    concept: 'Binary search on a sorted array',
-    say: 'Binary search looks for a value in a sorted list by checking the middle element and throwing away the half that cannot contain it, like finding a name in a phone book by opening it in the middle. The trace follows exactly this halving.',
-    formula: {
-      title: 'The middle index',
-      latex: '\\text{mid} = \\left\\lfloor \\frac{\\text{lo} + \\text{hi}}{2} \\right\\rfloor',
-      terms: [
-        { latex: '\\text{mid}', label: 'middle position', anchor: 'checking the middle' },
-        {
-          latex: '\\frac{\\text{lo} + \\text{hi}}{2}',
-          label: 'average of both ends',
-          anchor: 'opening it in the middle',
-        },
-      ],
+  tools: [
+    {
+      concept: 'Binary search on a sorted array',
+      say: 'Binary search checks the middle element and throws away the half that cannot hold the value, like finding a name in a phone book by opening it in the middle. The trace we are asked for is exactly this halving, probe by probe.',
+      recall: 'Again binary search: probe the middle and drop the half that cannot hold the value.',
+      formula: {
+        title: 'The middle index',
+        latex: '\\text{mid} = \\left\\lfloor \\frac{\\text{lo} + \\text{hi}}{2} \\right\\rfloor',
+        terms: [
+          { latex: '\\text{mid}', label: 'middle position', anchor: 'checks the middle' },
+          {
+            latex: '\\frac{\\text{lo} + \\text{hi}}{2}',
+            label: 'average of both ends',
+            anchor: 'opening it in the middle',
+          },
+        ],
+      },
     },
-  },
+  ],
   method: {
-    say: 'We keep two ends, lo and hi, of the range that can still hold seven. Each probe looks at the middle, compares it with seven, and moves one end past the middle until the middle element is seven.',
+    say: 'Two ends, lo and hi, mark the range that can still hold seven. Each probe compares the middle with seven and moves one end past it, until the middle is seven.',
     formula: none,
   },
   steps: [
@@ -357,7 +375,7 @@ const COMPUTER_SCIENCE: SolveExample = {
         { latex: '\\text{lo} = 0', label: 'left end', anchor: 'lo is zero' },
         { latex: '\\text{hi} = 5', label: 'right end', anchor: 'hi is five' },
       ],
-      say: 'We start with the whole array. The left end lo is zero and the right end hi is five, because we count positions from zero.',
+      say: 'Start with the whole array: lo is zero and hi is five, since we count positions from zero.',
       sure: true,
     },
     {
@@ -367,7 +385,7 @@ const COMPUTER_SCIENCE: SolveExample = {
         { latex: 'a[2] = 5 < 7', label: 'five is too small', anchor: 'five is smaller than seven' },
         { latex: '\\text{lo} = 3', label: 'new left end', anchor: 'lo moves to three' },
       ],
-      say: 'The middle is zero plus five, divided by two, rounded down to two. The element at index two is five, and five is smaller than seven, so seven must be to the right and lo moves to three.',
+      say: 'The middle of zero and five, rounded down, is two. The element at index two is five, and five is smaller than seven, so seven lies to the right and lo moves to three.',
       sure: true,
     },
     {
@@ -377,14 +395,14 @@ const COMPUTER_SCIENCE: SolveExample = {
         { latex: 'a[4] = 9 > 7', label: 'nine is too big', anchor: 'nine is larger than seven' },
         { latex: '\\text{hi} = 3', label: 'new right end', anchor: 'hi moves to three' },
       ],
-      say: 'Now lo is three and hi is five, so the middle is four. The element at index four is nine, and nine is larger than seven, so seven must be to the left and hi moves to three.',
+      say: 'Now lo is three and hi is five, so the middle is four. Nine sits there, and nine is larger than seven, so hi moves to three.',
       sure: true,
     },
     {
       title: 'Third probe',
       latex: '\\text{mid} = 3:\\; a[3] = 7 \\;\\Rightarrow\\; \\text{found}',
       terms: [{ latex: 'a[3] = 7', label: 'the target', anchor: 'element at index three' }],
-      say: 'Now lo and hi are both three, so the middle is three. The element at index three is seven, which is the value we search for, so the search stops.',
+      say: 'With lo and hi both at three, the middle is three, and the element at index three is seven. Found, so the search stops.',
       sure: true,
     },
   ],
@@ -398,7 +416,7 @@ const COMPUTER_SCIENCE: SolveExample = {
     say: 'So seven is at index three, counting from zero, and binary search needed three probes.',
   },
   check: {
-    say: 'We look at the array again: counting from zero, the elements are one, three, five, seven, so index three holds seven. A search from the left would have needed four probes, binary search needed three.',
+    say: 'Look at the array again: counting from zero, the elements are one, three, five, seven, so index three holds seven. A search from the left would have needed four probes, binary search needed three.',
     latex: 'a[3] = 7',
   },
   pitfall: 'Mixing up zero-based and one-based positions: seven is at index three, but it is the fourth element.',
@@ -414,40 +432,40 @@ const COMPUTER_SCIENCE: SolveExample = {
   questions: ['Why does binary search need a sorted array?', 'How many probes does it need for a million elements?'],
 };
 
-/** A short explanation: the board grows into the argument, each line a few words. */
+/** A short explanation: one tool, no checkpoint and no method step (nothing to try first), the board grows into the argument. */
 const EXPLANATION: SolveExample = {
   plan: 'Ice floats because it is less dense than liquid water. Freezing makes water expand by about nine percent, so the same mass takes more volume and the density is lower: 917 against 1000 kg/m^3. A body less dense than the liquid floats.',
   kind: 'explanation',
   read: {
-    say: 'We are given the everyday fact that ice floats on liquid water, and we are asked to explain why. The answer is an explanation in words, built on the idea of density.',
+    say: 'Ice floats on liquid water, which is odd for a solid, and we are asked to explain why. The answer is a short explanation in words, built on one idea: density.',
     given: ['p6.s2'],
     given_anchor: 'ice floats on liquid water',
     asked: ['p6.s3'],
     asked_anchor: 'asked to explain why',
     marks: [],
   },
-  background: {
-    concept: 'Density and floating',
-    say: 'Density is mass per volume. A body floats when it is less dense than the liquid, because the liquid pushes up with the weight of the water it displaces, like a cork bobbing on a pond.',
-    formula: {
-      title: 'Density',
-      latex: '\\rho = \\frac{m}{V}',
-      terms: [
-        { latex: '\\rho', label: 'density', anchor: 'Density is mass' },
-        { latex: '\\frac{m}{V}', label: 'mass per volume', anchor: 'mass per volume' },
-      ],
+  tools: [
+    {
+      concept: 'Density and floating',
+      say: 'Density is mass per volume. A body floats when it is less dense than the liquid, because the liquid pushes up with the weight of the water it displaces, like a cork bobbing on a pond. So our explanation has to compare two densities.',
+      recall: 'Again density, the mass per volume: the less dense body floats.',
+      formula: {
+        title: 'Density',
+        latex: '\\rho = \\frac{m}{V}',
+        terms: [
+          { latex: '\\rho', label: 'density', anchor: 'Density is mass' },
+          { latex: '\\frac{m}{V}', label: 'mass per volume', anchor: 'mass per volume' },
+        ],
+      },
     },
-  },
-  method: {
-    say: 'We compare the density of ice with the density of liquid water, because the less dense body floats. So we first ask what freezing does to the volume.',
-    formula: none,
-  },
+  ],
+  method: { say: '', formula: none },
   steps: [
     {
       title: 'Freezing makes room',
       latex: '\\text{water freezes} \\;\\Rightarrow\\; \\text{volume grows}',
       terms: [{ latex: '\\text{volume grows}', label: 'ice takes more room', anchor: 'more room' }],
-      say: 'When water freezes, its molecules lock into an open crystal pattern with gaps. The same mass then takes up about nine percent more room.',
+      say: 'When water freezes, its molecules lock into an open crystal pattern full of gaps. The same mass then takes up about nine percent more room.',
       sure: true,
     },
     {
@@ -457,14 +475,14 @@ const EXPLANATION: SolveExample = {
         { latex: '\\rho_{\\text{ice}}', label: 'density of ice', anchor: 'density of ice' },
         { latex: '\\rho_{\\text{water}}', label: 'density of water', anchor: 'liquid water' },
       ],
-      say: 'Density is mass divided by volume, so the same mass in a bigger volume gives a smaller density. The density of ice is about nine hundred seventeen kilograms per cubic metre, and liquid water about one thousand.',
+      say: 'The same mass in a bigger volume means less mass per volume. So the density of ice is about nine hundred seventeen kilograms per cubic metre, while liquid water has about one thousand.',
       sure: true,
     },
     {
       title: 'So ice floats',
       latex: '\\rho_{\\text{ice}} < \\rho_{\\text{water}} \\;\\Rightarrow\\; \\text{ice floats}',
       terms: [{ latex: '\\text{ice floats}', label: 'the conclusion', anchor: 'ice floats' }],
-      say: 'A body that is less dense than the liquid floats. So the ice floats, with about nine tenths of it below the surface.',
+      say: 'A body less dense than the liquid floats, so ice floats, with about nine tenths of it below the surface.',
       sure: true,
     },
   ],
@@ -480,17 +498,64 @@ const EXPLANATION: SolveExample = {
   },
   pitfall:
     'Saying ice floats because it is cold or light; what matters is the density, the mass per volume, not the mass alone.',
-  try: {
-    prompt:
-      'Before we explain it, what do you think happens to the room a fixed amount of water takes when it freezes?',
-    hints: [
-      'Think about the water molecules when they freeze into a solid crystal: do they sit closer together or further apart?',
-      'If the same mass takes up more room, what happens to its mass per volume?',
-      'Now compare that value for ice with the value for liquid water: which is smaller, and what does that mean for floating?',
-    ],
-  },
+  try: { prompt: '', hints: [] },
   check_note: 'Please check this step yourself.',
   questions: ['Why does water expand when it freezes?', 'Why does a lake freeze from the top down?'],
+};
+
+/**
+ * A part that goes on from the one before: it continues from the mean part a found, says no number, lists no givens, gives
+ * no tool (the task's toolkit came with part a) and has no checkpoint and no method step: two lines and the answer.
+ */
+export const FOLLOW_ON: SolveExample = {
+  plan: 'Study hours 8, 10, 12, 9, 11, 13, 7, 10 with mean 10. Deviations -2, 0, 2, -1, 1, 3, -3, 0; squares 4, 0, 4, 1, 1, 9, 9, 0 sum to 28. s^2 = 28/7 = 4 h^2 and s = 2 h. Check: values lie mostly within 2 h of the mean.',
+  kind: 'calculation',
+  read: {
+    say: 'How far do the eight values scatter around that mean of ten hours? That is what the sample variance measures, and its square root, the standard deviation, gives it back in hours.',
+    given: [],
+    given_anchor: '',
+    asked: ['p7.s4'],
+    asked_anchor: 'sample variance',
+    marks: [],
+  },
+  tools: [],
+  method: { say: '', formula: none },
+  steps: [
+    {
+      title: 'Squared distances',
+      latex: '\\sum_i (x_i - 10)^2 = 4 + 0 + 4 + 1 + 1 + 9 + 9 + 0 = 28',
+      terms: [{ latex: '28', label: 'sum of squares', anchor: 'add up to twenty-eight' }],
+      say: 'Subtract ten from each value and square it. The distances are two, zero, two, one, one, three, three and zero, so their squares add up to twenty-eight.',
+      sure: true,
+    },
+    {
+      title: 'Variance and deviation',
+      latex: 's^2 = \\frac{28}{7} = 4\\,\\mathrm{h^2},\\quad s = \\sqrt{4} = 2\\,\\mathrm{h}',
+      terms: [
+        { latex: '\\frac{28}{7}', label: 'sum over n minus one', anchor: 'divide by seven' },
+        { latex: '2\\,\\mathrm{h}', label: 'standard deviation', anchor: 'back to hours' },
+      ],
+      say: 'Now divide by seven, one less than the eight students, since a sample variance divides by n minus one. That leaves four squared hours, and the root takes us back to hours: two.',
+      sure: true,
+    },
+  ],
+  answer: {
+    title: 'Result',
+    latex: 's^2 = 4\\,\\mathrm{h^2},\\; s = 2\\,\\mathrm{h}',
+    terms: [
+      { latex: '4\\,\\mathrm{h^2}', label: 'sample variance', anchor: 'four squared hours' },
+      { latex: '2\\,\\mathrm{h}', label: 'standard deviation', anchor: 'two hours' },
+    ],
+    say: 'So the sample variance is four squared hours, and the standard deviation is two hours.',
+  },
+  check: {
+    say: 'Two hours is a plausible spread: most values lie within two hours of the mean, and only seven and thirteen reach three away.',
+    latex: '\\sqrt{28 / 7} = 2',
+  },
+  pitfall: 'Dividing by eight instead of seven: a sample variance divides by n minus one.',
+  try: { prompt: '', hints: [] },
+  check_note: 'Please check this step yourself.',
+  questions: ['Why divide by n minus one?', 'What does a standard deviation of two hours tell us?'],
 };
 
 export const EXAMPLES: Record<ExampleKind, SolveExample> = {
@@ -550,10 +615,12 @@ export function exampleKind(subject: Subject | undefined, text = ''): ExampleKin
 }
 
 /**
- * The examples of a solve call: the subject's own and the short explanation (the only one for a subject whose parts
- * are explanations). `text` is the part's text, which names the example when the subject does not.
+ * The examples of a solve call: the subject's own (the only one for a subject whose parts are explanations) and, for the
+ * first part of a task, the short explanation, for a part that goes on from an earlier one the follow-on part. `text` is
+ * the part's text, which names the example when the subject does not.
  */
-export function exampleFor(subject?: Subject, text = ''): SolveExample[] {
+export function exampleFor(subject?: Subject, text = '', entry = true): SolveExample[] {
   const kind = exampleKind(subject, text);
-  return kind === 'explanation' ? [EXAMPLES.explanation] : [EXAMPLES[kind], EXAMPLES.explanation];
+  const own = kind === 'explanation' ? [EXAMPLES.explanation] : [EXAMPLES[kind], ...(entry ? [EXAMPLES.explanation] : [])];
+  return entry ? own : [...own, FOLLOW_ON];
 }

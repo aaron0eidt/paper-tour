@@ -16,6 +16,7 @@ import type { Beat, PlanChapter, Preset, TourPlan } from './beats';
 import type { PaperCard, Subject } from './card';
 import { TONE } from './doctype';
 import { exampleFor } from './exercise-examples';
+import { voiceProblems, type Spoken } from './exercise-voice';
 import { taskName } from './paper-block';
 import { idEnum, pick } from './schema-budget';
 import type { UnitVisual } from './exercise-visual';
@@ -23,14 +24,16 @@ import { unitTaskLines } from './unit-task';
 import type { LineCheck } from './verify';
 
 // The tutor for exercise sheets (notes/TUTOR.md, notes/HARNESS.md, "Tutor"): each taught part gets one solve call that
-// reads the task, recalls the background it rests on, names the method and writes the solution as lines of maths, a
-// check and the common mistake; code checks the lines' LaTeX and their maths, and turns the part into the steps of a
-// tutor: the task (givens and question highlighted), the background (once per concept in a tour), the checkpoint, the
-// method, one board line per solution step built term by term under the earlier lines, and the answer with its check.
-// A part comes in three forms (full, follow-on, compact); when the tour is tight the method joins the first solution
-// line and the answer the last one. Before the solution comes a checkpoint (coach mode): the learner tries first, with
-// up to three hints that go from a nudge to almost the answer and never contain the result, and the steps after it
-// reveal the solution.
+// reads the task, picks the tools it needs (formulas, definitions, laws), names the method and writes the solution as
+// lines of maths, a check and the common mistake; code checks the lines' LaTeX and their maths and how the part speaks
+// (exercise-voice.ts), and turns the part into the steps of a tutor: the task (givens and question highlighted), the
+// toolkit (once per tool in a tour, later parts recall it in a sentence), the checkpoint when there is a first move to
+// try, the method when the steps do not say it, one board line per solution step built term by term under the earlier
+// lines, and the answer with its check. A part comes in three forms (full, follow-on, compact); when the tour is tight
+// the toolkit and the method join the task step and the answer the last one. A part after the first of its task goes on
+// from the part before and never names its number. Before the solution comes a checkpoint (coach mode): the learner
+// tries first, with up to three hints that go from a nudge to almost the answer and never contain the result, and the
+// steps after it reveal the solution.
 
 /** How deeply the tour teaches a part: all the tutor's moves, a later part of a task, or the tight form. */
 export type PartForm = 'full' | 'follow' | 'compact';
@@ -54,15 +57,24 @@ export interface Unit {
   /** Most solution steps on the board. */
   steps: number;
   /**
-   * Full: all the tutor's moves. Follow-on: a later part of a task, with no background (it was given with part a) and
-   * a short method. Compact, when the tour is tight: the method joins the first solution step and the answer the last.
+   * Full: all the tutor's moves. Follow-on: a later part of a task, whose toolkit is mostly given with its first part
+   * and whose method is short. Compact, when the tour is tight: the tool and the method join the task step or the first
+   * solution step, and the answer the last.
    */
   form: PartForm;
+  /** For the first part of a task: the later parts of the task the tour teaches, whose tools its toolkit covers. */
+  ahead?: DocExercisePart[];
+  /** Its place among the parts the tour teaches: the solve call suggests a different way in to neighbouring parts. */
+  way?: number;
 }
+
+/** Whether the part starts its task (its first part, or a task without parts): it sets the scene, later parts go on. */
+export const startsTask = (unit: Pick<Unit, 'task' | 'part'>) =>
+  !unit.part || unit.task.parts[0]?.id === unit.part.id;
 
 /**
  * Tour length for a sheet by preset: longer than a paper's, since a solution step is short, and long enough for the
- * tutor's whole flow (background, checkpoint and method) on the first part of every task of a typical sheet.
+ * tutor's whole flow (tools, checkpoint and method) on the first part of every task of a typical sheet.
  */
 export const SHEET_STEPS: Record<Preset, number> = { quick: 60, standard: 100, deep: 160 };
 /** Most solution lines of a part, and fewest when the tour is tight. */
@@ -76,11 +88,15 @@ export const COACH_HINT_MAX = 200;
 /** Most sentences (or formulas) of a task a solve call may cite from. */
 const UNIT_IDS = 400;
 const COACH_HINTS = 3;
+/** Most tools a part gives, as separate steps: the compact form says its one tool inside the task step. */
+const TOOLS_MAX: Record<PartForm, number> = { full: 2, follow: 1, compact: 1 };
 /**
- * Steps of a part besides its solution steps: the task, the background, the checkpoint, the method and the answer; a
- * follow-on part has no background; the compact form only the task and the checkpoint, since the method joins the first
- * solution step and the answer the last. The background counts although a routine part has none, so that a tour never
- * grows past its preset.
+ * Steps of a part besides its solution steps: the task, the tools, the checkpoint, the method and the answer. A full part
+ * counts one tool; a second tool is paid for by the checkpoint or the method that the part leaves out, which the part's
+ * own choice of moves makes the rule (a routine part has no tool, a one-line part no checkpoint). A follow-on part counts
+ * no tool: its first part gave the toolkit, and it has the task, the checkpoint, the method and the answer. The compact
+ * form counts only the task, which says its tool, and the checkpoint, since the method joins the first solution step and
+ * the answer the last. So a tour does not grow past its preset but by a few steps.
  */
 export const unitOverhead = (unit: Pick<Unit, 'form'>) => ({ full: 5, follow: 4, compact: 2 })[unit.form];
 
@@ -166,8 +182,24 @@ export function planUnits(units: Unit[], preset: Preset): { taught: Unit[]; skip
   const kept = new Set(chosen);
   return {
     taught: units.flatMap((u, i) =>
-      kept.has(i) ? [{ ...u, steps: Math.min(lines || STEP_FLOOR, most(forms[i])), form: forms[i] }] : [],
-    ),
+      kept.has(i)
+        ? [
+            {
+              ...u,
+              steps: Math.min(lines || STEP_FLOOR, most(forms[i])),
+              form: forms[i],
+              // The tools of the parts that follow the first one are given with it, so its toolkit sees them.
+              ...(startsTask(u) && u.part
+                ? {
+                    ahead: units.flatMap((o, j) =>
+                      j > i && kept.has(j) && o.task === u.task && o.part ? [o.part] : [],
+                    ),
+                  }
+                : {}),
+            },
+          ]
+        : [],
+    ).map((u, way) => ({ ...u, way })),
     skipped: units.filter((_, i) => !kept.has(i)),
   };
 }
@@ -225,12 +257,27 @@ export function exercisePlan(card: PaperCard, doc: Doc, preset: Preset): TourPla
 
 // ------------------------------------------------------------------------------------------- solve call
 
-/** The solve call's brief: the part's text with IDs, the maths only the page shows, and the parts before it. */
-export function unitBrief(unit: Unit, doc: Doc): string {
+/**
+ * The solve call's brief: the part's text with IDs, the maths only the page shows, and the parts before it. With `ahead`
+ * it also lists the later parts the tour teaches after the first part of a task, so that its toolkit covers the task.
+ */
+export function unitBrief(unit: Unit, doc: Doc, ahead = false): string {
   const points = unit.part?.points ?? unit.task.points;
+  const blocks = new Map(doc.blocks.map((b) => [b.id, b]));
+  const text = new Map(doc.sentences.map((s) => [s.id, s.text]));
+  const later = ahead && startsTask(unit) ? (unit.ahead ?? []) : [];
   return [
     `EXERCISE: ${unit.name}${points !== undefined ? `, ${points} points` : ''}`,
     ...unitTaskLines(unit, doc),
+    ...(later.length
+      ? [
+          'LATER PARTS OF THIS TASK, taught after this one (for the toolkit only, do not solve them):',
+          ...later.map(
+            (p) =>
+              `${p.label}) ${(blocks.get(p.blocks[0])?.sentences ?? []).map((id) => text.get(id) ?? '').join(' ')}`,
+          ),
+        ]
+      : []),
     `The page${unit.pages.length > 1 ? 's' : ''} with this exercise ${unit.pages.length > 1 ? 'are' : 'is'} attached.`,
   ].join('\n');
 }
@@ -247,7 +294,7 @@ export const SOLVE_KINDS = [
   'trace',
 ] as const;
 export type SolveKind = (typeof SOLVE_KINDS)[number];
-/** Longest background concept name and common mistake, in characters. */
+/** Longest tool name and common mistake, in characters. */
 const CONCEPT_MAX = 60;
 const PITFALL_MAX = 160;
 
@@ -306,9 +353,9 @@ export function solveSchema(unit: Unit, strict = true): object {
       required: string[];
       properties: Record<string, object>;
     };
-    // The checkpoint and the tutor's extras (the kind, the background, the check and the common mistake) are optional
-    // and cleaned by hand: an answer without them is still a solution.
-    const extras = ['try', 'kind', 'background', 'check', 'pitfall'];
+    // The checkpoint and the tutor's extras (the kind, the tools, the check and the common mistake) are optional and
+    // cleaned by hand: an answer without them is still a solution.
+    const extras = ['try', 'kind', 'tools', 'check', 'pitfall'];
     return {
       ...loose,
       required: loose.required.filter((key) => !extras.includes(key)),
@@ -325,7 +372,10 @@ export function solveSchema(unit: Unit, strict = true): object {
       plan: { type: 'string', maxLength: 6000, description: 'Solve the exercise here first and check the result.' },
       kind: { type: 'string', enum: [...SOLVE_KINDS], description: 'What this part asks for.' },
       read: object({
-        say: words(55, 'What is given, what is asked and the kind of answer, in 20-50 spoken words.'),
+        say: words(
+          55,
+          'How the part opens, in 20-50 spoken words: the situation and what we are after, in your own words.',
+        ),
         given: { type: 'array', maxItems: 3, items: sentence },
         given_anchor: anchor,
         asked: { type: 'array', minItems: 1, maxItems: 2, items: sentence },
@@ -336,22 +386,32 @@ export function solveSchema(unit: Unit, strict = true): object {
           items: object({ target: { $ref: '#/$defs/mathId' }, anchor }),
         },
       }),
-      background: object({
-        concept: {
-          type: 'string',
-          maxLength: CONCEPT_MAX,
-          description: 'The concept, law or definition this part rests on; empty when it needs no background.',
-        },
+      tools: {
+        type: 'array',
+        maxItems: TOOLS_MAX[unit.form],
+        description: 'The formulas, definitions or laws this part needs; empty for routine algebra.',
+        items: object({
+          concept: {
+            type: 'string',
+            minLength: 1,
+            maxLength: CONCEPT_MAX,
+            description: 'The tool, in the usual words for it.',
+          },
+          say: words(
+            55,
+            'What the tool does, how it works intuitively (a tiny example or an everyday picture) and how it answers the question, in 25-55 spoken words; never the result.',
+          ),
+          recall: words(25, 'One sentence of 8-25 words that reminds a student who met this tool earlier.'),
+          formula: line(0, 4, 0),
+        }),
+      },
+      method: object({
         say: {
           type: 'string',
-          maxLength: 50 * 9,
+          maxLength: 45 * 9,
           description:
-            'The concept in plain words, why this part needs it and one everyday picture, in 20-50 spoken words; never solves the part. Empty without a concept.',
+            'The idea or method and why it fits, in 15-45 spoken words. Empty when the steps already say it.',
         },
-        formula: line(0, 4, 0),
-      }),
-      method: object({
-        say: words(45, 'The idea or method and why it fits, in 15-45 spoken words.'),
         formula: line(0, 4, 0),
       }),
       steps: {
@@ -388,10 +448,9 @@ export function solveSchema(unit: Unit, strict = true): object {
       try: object({
         prompt: {
           type: 'string',
-          minLength: 1,
           maxLength: COACH_PROMPT_MAX,
           description:
-            'What the learner should try before seeing the solution, in 1-2 spoken sentences; never the result.',
+            'What the learner should try before seeing the solution, in 1-2 spoken sentences; never the result. Empty when the part has no real first move to try.',
         },
         hints: {
           type: 'array',
@@ -427,10 +486,29 @@ function withoutMaxItems(node: unknown): object {
   return out;
 }
 
+/**
+ * Ways to open a part that the solve call suggests, one for each part in turn, so that neighbouring parts do not open
+ * alike: a model told only to "go on from the part before" opens every follow-on with "With the mean known, ...".
+ */
+const WAYS_IN = [
+  'with a small picture of the situation',
+  'with the question we want answered',
+  'with what is known and what is still missing',
+  'with why the task is worth doing',
+  'with the first thing a tutor would notice about it',
+];
+const WAYS_ON = [
+  'with a short link word and the new question ("Now ...", "Next ...", "Jetzt ...")',
+  'with the new question itself, no link word',
+  'with what is still missing after the part before',
+  'with what is different from the part before',
+  'with the result we just got, used as the new starting point',
+];
+
 /** What a tutor does with one part (notes/TUTOR.md); the solve call's TASK line adds it to the sheet's general tone. */
 const TUTOR_MOVES =
-  'Work through the part as a tutor would: name what is given and asked, recall what is needed, plan, take one move ' +
-  'per step and say why, then check the result.';
+  'Work through the part as a tutor would at a whiteboard: set the scene, go over the tools it needs, take one move ' +
+  'per step and say why, then check the result. Choose the moves each part needs; no two parts have to look alike.';
 
 /**
  * The solve call's task: the tutor's moves as rules, then the worked examples of the part's subject (exercise-examples.ts)
@@ -438,47 +516,36 @@ const TUTOR_MOVES =
  */
 export function solveTask(language: string, brief: string, unit: Unit, subject?: Subject): string {
   const lang = JSON.stringify(language);
+  const entry = startsTask(unit);
+  const tools = TOOLS_MAX[unit.form];
   const rules = [
     `Solve the exercise yourself in "plan" first, step by step, and check the result, for example by substituting it.
    Solving is your own work: the document gives the task, you give the solution.`,
     `"kind" is what this part asks for: calculation, derivation, proof, explanation, chemical_equation (balance or complete
    a reaction), choice (pick or judge options), sketch (draw or construct) or trace (follow an algorithm or a process).`,
-    `READ. "read.say" says what is given, what is asked and the kind of answer expected ("a mass in grams", "a proof", "a
-   probability"). "given" and "asked" are the IDs of the sentences that state them; each anchor is a 2-6 word phrase
-   copied from "read.say" where you name them. When the givens are a formula or matrix listed under MATHS, add one
-   "marks" entry for it.`,
-    unit.form === 'full'
-      ? `BACKGROUND. "background" is what a tutor recalls before starting, and only when this part rests on a concept, law
-   or definition a student may not have ready (Bayes' rule, a molar mass, free fall, binary search). Leave "concept",
-   "say" and the formula's latex empty for routine algebra and for anything the student has surely met. "concept" names
-   it in at most ${CONCEPT_MAX} characters, in the usual words for it. "say" is 20-50 spoken words: the concept in plain
-   words, why this part needs it and one everyday picture or example; it never solves the part and never states its
-   result. "formula" writes the law or definition in general form (such as pV = nRT) with 0-4 terms, each anchored in
-   "background.say"; leave its latex empty when there is none.`
-      : `BACKGROUND. This part comes after the first part of its task, which gave the background, or the tour is short:
-   leave "background.concept", "background.say" and the formula's latex empty.`,
-    `TRY. "try" is the learner's turn: the tour stops after the task and the learner attempts the part before the solution
-   is shown. "try.prompt" says in 1-2 spoken sentences in ${lang} what to try first, as a question or a first move, never
-   the result. "try.hints" are 1-3 hints in ${lang} that go from a nudge to almost the answer: the first points at the
-   idea or the question to ask, the second names the method or rule and the first move, the third carries out the first
-   step but stops short of the result. No hint and not the prompt may contain the final result or the "answer" line.
-   After a background step, ask for the first use of the background on this part, not for the concept the background
-   just explained: "solve the law for t before putting in numbers", not "which law connects these quantities?".`,
-    `METHOD. "method.say" is the plan in order and why it fits${unit.form === 'full' ? ', in 15-45 spoken words' : ': one or two short sentences'}.
-   "method.formula" shows the rule you use, such as a formula from the lecture, with 1-4 terms; leave its latex and terms
-   empty when no rule helps.`,
-    `STEPS. "steps" are 1-${unit.steps} steps in order, ONE move per step: one thing is done to the line before it, and its
-   "say" tells what is done and why it works. Each "latex" is ONE line that KaTeX renders: the line on the board after
-   that step, such as "2x = 12", never prose. Write maths as maths. Write chemistry with \\ce{...} (mhchem), such as
-   \\ce{2H2 + O2 -> 2H2O}, and units as \\,\\mathrm{g/mol}; never use siunitx macros such as \\SI or \\si. For an
-   explanation or a proof a line may be a short statement in \\text{...} of at most 8 words, so that the board grows into
-   the argument. Write each line so it can be checked on its own: restate a given equation, function or matrix in the first
-   line that uses it.`,
+    `VOICE. Speak in ${lang} as a tutor does at a whiteboard, never from a template. Never open a narration with "Given",
+   "We are given", "Gegeben ist" or "In exercise 3". ${
+     entry
+       ? "Say the task's number once at most, never as the first words."
+       : "This part goes on from the part before: never say the task's or the part's number and never list the givens again."
+   } For this part a way in could be to open ${(entry ? WAYS_IN : WAYS_ON)[(unit.way ?? 0) % WAYS_IN.length]}.`,
+    `READ. "read.say" opens ${entry ? 'the task' : 'the part'} in your own words: ${
+      entry
+        ? 'the situation and what we are after'
+        : 'what this part asks, from where the part before left off'
+    }, and the kind of answer ("a mass in grams", "a proof"). "given" and "asked" are the IDs of the sentences that state them; each anchor is a 2-6 word phrase copied from "read.say" where you name them. When the givens are a formula or matrix listed under MATHS, add one "marks" entry for it.`,
+    `TOOLS. "tools" are the formulas, definitions or laws ${
+      entry
+        ? `a student needs for this task (its later parts are listed too)`
+        : `this part needs that the earlier parts did not give`
+    }, at most ${tools}; none for routine algebra or what the student has surely met. "concept" is the usual name. "say" is 25-55 spoken words: what the tool does, how it works intuitively (a tiny example or an everyday picture) and how we use it to answer the question; it never solves the part or states its result. "recall" is one sentence of 8-25 words that reminds a student who met the tool earlier. "formula" writes the law in general form (such as pV = nRT), or a tiny example, with 0-4 terms each anchored in "say"; its latex is empty when there is none.`,
+    `TRY. "try" is the learner's turn: the tour stops after the tools and the learner attempts the first move before the solution is shown. Give it only when there is a real first move worth trying; for a one-line part or a lookup leave "try.prompt" and "try.hints" empty. "try.prompt" says in 1-2 spoken sentences in ${lang} what to try first, as a question or a first move, never the result. "try.hints" are 1-3 hints in ${lang} that go from a nudge to almost the answer: the first points at the idea or the question to ask, the second names the method or rule and the first move, the third carries out the first step but stops short of the result. No hint and not the prompt may contain the final result or the "answer" line. After a tool step, ask for the first use of the tool on this part, not for the concept the tool just explained: "solve the law for t before putting in numbers", not "which law connects these quantities?".`,
+    `METHOD. "method.say" is the plan in order and why it fits${unit.form === 'full' ? ', in 15-45 spoken words' : ': one or two short sentences'}; leave it empty when the steps already say it. "method.formula" shows the rule you use with 1-4 terms; leave its latex and terms empty when no rule helps.`,
+    `STEPS. "steps" are 1-${unit.steps} steps in order, as many as the work needs, ONE move per step: one thing is done to the line before it, and its "say" tells what is done and why it works. Each "latex" is ONE line that KaTeX renders: the line on the board after that step, such as "2x = 12", never prose. Write maths as maths. Write chemistry with \\ce{...} (mhchem), such as \\ce{2H2 + O2 -> 2H2O}, and units as \\,\\mathrm{g/mol}; never use siunitx macros such as \\SI or \\si. For an explanation or a proof a line may be a short statement in \\text{...} of at most 8 words, so that the board grows into the argument. Write each line so it can be checked on its own: restate a given equation, function or matrix in the first line that uses it.`,
     `Each line's "terms" are 1-3 parts of it to light up while you speak: copied character for character from its
    latex, a complete symbol or group (a whole \\ce{...} group, never a part of one), with a label of at most 5 words and
    an anchor copied from that step's "say".`,
-    `Each step's "say" explains in 10-45 spoken words what you do and why it works. Read symbols aloud ("x squared",
-   "the determinant of A"), never as LaTeX.`,
+    `Each step's "say" explains in 10-45 spoken words what you do and why it works, and the steps do not all begin alike. Read symbols aloud ("x squared", "the determinant of A"), never as LaTeX.`,
     `"sure" is false when you are not certain a step is right. Never guess silently: an honest "not sure" is better.`,
     `ANSWER. "answer" is the final result as one line of LaTeX, and its "say" states it in words with a one-line summary.`,
     `CHECK. "check.say" is 10-35 spoken words on how we know the answer is right: substitute it back, look at the units,
@@ -490,18 +557,18 @@ export function solveTask(language: string, brief: string, unit: Unit, subject?:
     `"questions" are two short questions in ${lang} a learner might ask about this exercise, such as why a step works.`,
     ...(unit.form === 'compact'
       ? [
-          `Keep "read.say" and "method.say" short: the tour plays them as one step. The tour also says "answer.say" and
+          `Keep "read.say", the tool's "say" and "method.say" short: the tour plays them as one step. The tour also says "answer.say" and
    "check.say" right after the last step, whose line shows the result. There, "answer.say" is one short summary
    sentence without the result, and "check.say" one short check.`,
         ]
       : []),
   ];
-  const examples = exampleFor(subject, brief);
+  const examples = exampleFor(subject, brief, entry);
   return [
     `TASK: teach ONE exercise in ${lang}. ${TONE.exercise_sheet} ${TUTOR_MOVES}`,
     brief,
     ...rules.map((rule, i) => `${i + 1}. ${rule}`),
-    `EXAMPLES for different exercises (copy their format, not their length: this part has at most ${unit.steps} steps, and the last one shows the result):`,
+    `EXAMPLES for different exercises (copy their moves, not their words or length: this part has at most ${unit.steps} steps, and the last one shows the result):`,
     ...examples.map((example) => JSON.stringify(example)),
   ].join('\n');
 }
@@ -520,6 +587,13 @@ export interface Coach {
   prompt: string;
   hints: string[];
 }
+/** A formula, definition or law the part needs: what it does, a sentence to recall it with, and the law on the board. */
+export interface Tool {
+  concept: string;
+  say: string;
+  recall: string;
+  line: BoardLine | null;
+}
 export interface Solution {
   /** What the part asks for. */
   kind: SolveKind;
@@ -532,8 +606,9 @@ export interface Solution {
     mark?: string;
     markAnchor: string;
   };
-  /** The concept the part rests on, in plain words, with the law or definition on the board; the concept is '' without one. */
-  background: { concept: string; say: string; line: BoardLine | null };
+  /** The tools the part needs, each in plain words with its law on the board; none for routine algebra. */
+  tools: Tool[];
+  /** The plan in words, with the rule on the board; '' when the steps already say it. */
   method: { say: string; line: BoardLine | null };
   steps: (BoardLine & { say: string; sure: boolean })[];
   answer: BoardLine & { say: string };
@@ -660,21 +735,32 @@ function cleanCoach(raw: unknown, answer: string, given: string, printed: string
 }
 
 const isRaw = (v: unknown): v is Raw => typeof v === 'object' && v !== null && !Array.isArray(v);
-const NO_BACKGROUND: Solution['background'] = { concept: '', say: '', line: null };
 
 /**
- * The background the part rests on: its concept, the plain words, and the law on the board when it renders (a formula
- * that fails its LaTeX check is dropped, not fatal). Only a full part has one, and it comes before the checkpoint, so
- * words that give the result away leave it out.
+ * The tools the part needs: the name, the plain words and the law on the board when it renders (a formula that fails its
+ * LaTeX check is dropped, not fatal). A tool comes before the checkpoint, so words that give the result away leave it
+ * out, and so does one the part has already (the same name or law). A recall that is no sentence or gives the result away
+ * is left empty: the tool is then not recalled by a later part.
  */
-function cleanBackground(raw: unknown, form: PartForm, answer: string, given: string): Solution['background'] {
-  const entry = isRaw(raw) ? raw : {};
-  const concept = clean(entry.concept).slice(0, CONCEPT_MAX);
-  const say = clean(entry.say);
-  if (form !== 'full' || !concept || spoken(say) < 8 || leaksResult(say, answer, given)) return NO_BACKGROUND;
-  const formula = isRaw(entry.formula) ? entry.formula : {};
-  const line = clean(formula.latex) ? boardLine(formula, 'background.formula', [], 4, 0) : null;
-  return { concept, say, line: line?.board ? line : null };
+function cleanTools(raw: unknown, form: PartForm, answer: string, given: string): Tool[] {
+  const tools: Tool[] = [];
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (!isRaw(entry)) continue;
+    const concept = clean(entry.concept).slice(0, CONCEPT_MAX);
+    const say = clean(entry.say);
+    const recall = clean(entry.recall);
+    if (!concept || spoken(say) < 8 || leaksResult(say, answer, given)) continue;
+    const formula = isRaw(entry.formula) ? entry.formula : {};
+    const line = clean(formula.latex) ? boardLine(formula, 'tool.formula', [], 4, 0) : null;
+    const tool: Tool = {
+      concept,
+      say,
+      recall: spoken(recall) >= 3 && !leaksResult(recall, answer, given) ? recall : '',
+      line: line?.board ? line : null,
+    };
+    if (!tools.some((other) => toolKeys(other).some((key) => toolKeys(tool).includes(key)))) tools.push(tool);
+  }
+  return tools.slice(0, TOOLS_MAX[form]);
 }
 
 /** The check of the answer: what we say, and the line that shows it when it renders; nothing without the words. */
@@ -747,17 +833,19 @@ export function cleanSolution(
   const solution: Solution = {
     kind: SOLVE_KINDS.find((kind) => kind === v.kind) ?? 'calculation',
     read,
-    background: cleanBackground(v.background, unit.form, answer.latex, given),
+    tools: cleanTools(v.tools, unit.form, answer.latex, given),
     method,
     steps,
     answer,
     check: cleanCheck(v.check),
     pitfall: spoken(pitfall) >= 3 && pitfall.length <= PITFALL_MAX * 1.5 ? pitfall : '',
-    coach: cleanCoach(v.try, answer.latex, given, printed),
+    // A part of one line has no first move to try: the line is the move.
+    coach: steps.length > 1 ? cleanCoach(v.try, answer.latex, given, printed) : null,
     checkNote: clean(v.check_note),
     questions: (v.questions as string[]).map(clean).filter(Boolean).slice(0, 2),
   };
   if (spoken(answer.say) < 5) problems.push('answer.say: state the result in at least 5 words');
+  problems.push(...voiceProblems(spokenFields(solution), unit, startsTask(unit)));
   const usable = spoken(read.say) >= 8 && spoken(answer.say) >= 5 && steps.some((s) => spoken(s.say) >= 5);
   return { solution: usable ? solution : null, problems };
 }
@@ -772,18 +860,32 @@ export const solutionLines = (s: Solution) => [
 export const lineName = (s: Solution, i: number) =>
   i < s.steps.length ? `step ${i + 1}` : i === s.steps.length ? 'answer' : 'check';
 
-/** One repair turn: the exact problems with the board lines and the maths, and the rest of the answer kept. */
+/** The narrations of a part, named as the repair turn names them; those that set the scene may not open with "Given". */
+function spokenFields(s: Solution): Spoken[] {
+  const field = (name: string, say: string, opens = false): Spoken[] => (say ? [{ name, say, opens }] : []);
+  return [
+    ...field('read.say', s.read.say, true),
+    ...s.tools.flatMap((t, i) => [...field(`tools[${i}].say`, t.say, true), ...field(`tools[${i}].recall`, t.recall)]),
+    ...field('method.say', s.method.say, true),
+    ...field('try.prompt', s.coach?.prompt ?? ''),
+    ...s.steps.flatMap((step, i) => field(`step ${i + 1}`, step.say)),
+    ...field('answer.say', s.answer.say),
+    ...field('check.say', s.check.say),
+  ];
+}
+
+/** One repair turn: the exact problems with the board lines, the maths and the way the part speaks, and the rest kept. */
 export function solutionRepair(previous: unknown, problems: string[]): MuseMessage[] {
   return [
     { role: 'assistant', content: JSON.stringify(previous) },
     {
       role: 'user',
       content: [
-        'Some lines cannot be shown or do not check out:',
+        'Some lines cannot be shown, do not check out or are worded in a way the tour does not use:',
         ...problems.map((p) => `- ${p}`),
-        'Check those lines again (the steps, the answer and the check line) and return the complete answer with them',
-        'fixed. If a step is right as it is, keep it and set "sure" honestly. If the check line is wrong, correct it, or',
-        'leave "check.say" and "check.latex" empty. Keep everything else.',
+        'Fix those and return the complete answer. Check the steps, the answer and the check line again; if a step is',
+        'right as it is, keep it and set "sure" honestly. If the check line is wrong, correct it, or leave "check.say"',
+        'and "check.latex" empty. Reword a narration only as far as the problem says, and keep everything else.',
       ].join('\n'),
     },
   ];
@@ -818,11 +920,13 @@ export function conceptKey(concept: string): string {
 }
 
 /**
- * The key of the background the part's steps give (conceptKey of its concept), or '' when they give none: only a full
- * part has the background step. The tour gives each concept once, so a later part with the same key drops the step.
+ * The keys a tool is known by in a tour: its concept (conceptKey) and its law written out, so that two parts that name
+ * one tool differently still share it. The tour gives each tool once; a later part with a key already given recalls it.
  */
-export const backgroundKey = (unit: Pick<Unit, 'form'>, s: Solution) =>
-  unit.form === 'full' ? conceptKey(s.background.concept) : '';
+export const toolKeys = (tool: Pick<Tool, 'concept' | 'line'>): string[] => {
+  const law = tool.line ? flatten(tool.line.latex) : '';
+  return [conceptKey(tool.concept), ...(law.length >= 5 ? [`law:${law}`] : [])];
+};
 
 /** How a line comes onto the board: its verdict, the lines it follows, and the words it comes in at and lights terms to. */
 interface BoardOptions {
@@ -834,14 +938,17 @@ interface BoardOptions {
 
 /**
  * The steps that teach one part; `checks` are the verifier's verdicts on the solution lines, in order (solutionLines).
- * The steps are the tutor's moves: the task; the background, in the full form and when the part rests on a concept; the
- * checkpoint; the method; one step per solution line, its board line under the part's earlier lines; the answer, which
- * also says how we know it is right and the common mistake, and shows the check line under the answer. A line code
- * verified carries a check mark. The compact form joins the method to the first solution step and the answer to the last.
- * A method visual (exercise-visual.ts) shows with the method, after the checkpoint: on the method step, or in the compact
- * form on the first solution step, where the line's board follows it once the method has been said. It replaces the rule
- * the method step would show; the solution lines stay formula boards. The tour's language no longer matters to the
- * steps (a line the code could not verify carries no tag), so `_language` is kept only for the callers.
+ * The steps are the tutor's moves: the task, which sets the scene; the tools the part needs, each in a step of its own and
+ * with its law on the board, term by term (a tool the tour has already given, whose keys are in `seen`, is recalled in a
+ * sentence of the task step instead); the checkpoint, when the part has a first move to try; the method, when the steps do
+ * not say it; one step per solution line, its board line under the part's earlier lines; the answer, which also says how
+ * we know it is right and the common mistake, and shows the check line under the answer. A line code verified carries a
+ * check mark. The compact form says its tool inside the task step, and joins the method to the first solution step and
+ * the answer to the last. A method visual (exercise-visual.ts) shows with the method, after the checkpoint: on the method
+ * step, or in the compact form on the first solution step, where the line's board follows it once the method has been
+ * said. It replaces the rule the method step would show; the solution lines stay formula boards. The tour's language no
+ * longer matters to the steps (a line the code could not verify carries no tag), so `_language` is kept only for the
+ * callers.
  */
 export function unitSteps(
   unit: Unit,
@@ -849,6 +956,7 @@ export function unitSteps(
   checks: LineCheck[],
   _language: string,
   visual?: UnitVisual | null,
+  seen: ReadonlySet<string> = new Set(),
 ): Step[] {
   const compact = unit.form === 'compact';
   const camera: Action = { type: 'focus', target: unit.blocks[0] };
@@ -911,24 +1019,41 @@ export function unitSteps(
   const coach = s.coach && answerCheck?.status !== 'failed' ? s.coach : null;
   // With a checkpoint the method must not be heard before the learner has tried: it opens the solution instead.
   const methodFirst = compact && Boolean(coach) && Boolean(s.method.say);
-  const taskSay = compact && s.method.say && !coach ? `${read.say} ${s.method.say}` : read.say;
-  const task: Action[] = [camera, ...(compact && !coach ? board(s.method.line, taskSay) : [])];
+  // A tool the tour has met is recalled in a sentence of the task step; the others are said, in a step of their own (in
+  // the compact form inside the task step, where the method also joins when there is no checkpoint).
+  const met = (tool: Tool) => toolKeys(tool).some((key) => seen.has(key));
+  const fresh = s.tools.filter((tool) => !met(tool));
+  const pieces: { say: string; line: BoardLine | null }[] = [
+    { say: read.say, line: null },
+    ...s.tools.flatMap((tool) => (met(tool) && tool.recall ? [{ say: tool.recall, line: tool.line }] : [])),
+    ...(compact ? fresh.map((tool) => ({ say: tool.say, line: tool.line })) : []),
+    ...(compact && s.method.say && !coach ? [{ say: s.method.say, line: s.method.line }] : []),
+  ];
+  // Each piece's board comes in at the word its sentence starts, and its terms light up until the next board replaces it.
+  const starts = pieces.map((_, i) => pieces.slice(0, i).reduce((n, p) => n + splitWords(p.say).length, 0));
+  const taskSay = pieces.map((p) => p.say).join(' ');
+  const shown = pieces.flatMap((p, i) => (p.line?.board ? [i] : []));
+  const task: Action[] = [
+    camera,
+    ...shown.flatMap((i, k) => board(pieces[i].line, taskSay, { from: starts[i], until: starts[shown[k + 1]] })),
+  ];
   if (read.given.length)
     task.push({ type: 'highlight', targets: read.given, color: 'blue', ...at(taskSay, read.givenAnchor) });
   if (read.asked.length)
     task.push({ type: 'highlight', targets: read.asked, color: 'yellow', ...at(taskSay, read.askedAnchor) });
   if (read.mark) task.push({ type: 'circle', target: read.mark, color: 'blue', ...at(taskSay, read.markAnchor) });
   const steps: Step[] = [{ id: `${unit.id}-task`, say: taskSay, actions: task }];
-  // What a tutor recalls before the learner tries: the concept in plain words, with its law written term by term.
-  if (backgroundKey(unit, s)) {
-    const actions = [camera, ...board(s.background.line, s.background.say)];
-    steps.push({
-      id: `${unit.id}-background`,
-      say: s.background.say,
-      actions,
-      ...(actions.length > 1 ? { hold_ms: BOARD_HOLD_MS } : {}),
+  // What a tutor goes over before the learner tries: each tool in plain words, with its law written term by term.
+  if (!compact)
+    fresh.forEach((tool, n) => {
+      const actions = [camera, ...board(tool.line, tool.say)];
+      steps.push({
+        id: `${unit.id}-tool-${n + 1}`,
+        say: tool.say,
+        actions,
+        ...(actions.length > 1 ? { hold_ms: BOARD_HOLD_MS } : {}),
+      });
     });
-  }
   // Your turn: the tour stops here with the question still marked, and the next steps reveal the solution.
   if (coach)
     steps.push({
@@ -940,11 +1065,13 @@ export function unitSteps(
       ],
       checkpoint: { prompt: coach.prompt, hints: coach.hints },
     });
-  if (!compact && s.method.say) {
-    const actions = [camera, ...(visual ? sketch(visual, s.method.say) : board(s.method.line, s.method.say))];
+  // A part whose steps say the method has no method step, unless a method visual comes with its own narration.
+  const methodSay = s.method.say || visual?.say || '';
+  if (!compact && methodSay) {
+    const actions = [camera, ...(visual ? sketch(visual, methodSay) : board(s.method.line, methodSay))];
     steps.push({
       id: `${unit.id}-method`,
-      say: s.method.say,
+      say: methodSay,
       actions,
       ...(actions.length > 1 ? { hold_ms: BOARD_HOLD_MS } : {}),
     });

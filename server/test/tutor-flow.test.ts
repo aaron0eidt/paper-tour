@@ -22,7 +22,6 @@ import { SUBJECTS } from '../src/harness/card';
 import {
   SHEET_STEPS,
   SOLVE_KINDS,
-  backgroundKey,
   cleanSolution,
   conceptKey,
   exerciseUnits,
@@ -32,12 +31,22 @@ import {
   solutionLines,
   solveSchema,
   solveTask,
+  startsTask,
+  toolKeys,
+  unitBrief,
   unitFallback,
   unitOverhead,
   unitSteps,
   type Unit,
 } from '../src/harness/exercise';
-import { EXAMPLES, exampleFor, exampleKind } from '../src/harness/exercise-examples';
+import { opensTemplated } from '../src/harness/exercise-voice';
+import {
+  EXAMPLES,
+  FOLLOW_ON,
+  exampleFor,
+  exampleKind,
+  type ExampleLine,
+} from '../src/harness/exercise-examples';
 import type { LineCheck, MathVerifier } from '../src/harness/verify';
 
 // The tutor flow for exercise sheets (notes/TUTOR.md): the solve schema v2 (kind, background, check, pitfall), the
@@ -122,34 +131,41 @@ const OWN = {
 } as const;
 const BACKGROUND_SAY =
   'An equation is like a balanced scale, so whatever we do to one side we must also do to the other side.';
+const RECALL_SAY = 'Again the balanced scale: whatever we do on one side, we do on the other.';
+/** The law of a tool by its concept: two tools of one tour are two when their laws differ. */
+const lawOf = (concept: string) =>
+  /divid/i.test(concept) ? 'a = b \\;\\Rightarrow\\; \\frac{a}{c} = \\frac{b}{c}' : 'a = b \\;\\Rightarrow\\; a + c = b + c';
 
-/** A scripted answer in schema v2; the part's background is the given concept, or none. */
+/** A scripted answer in schema v3; the part's tool is the given concept, or none. */
 function solution(id: keyof typeof OWN = 'ex1.a', concept = 'Equal operations on both sides', extra: object = {}) {
   return {
     plan: '3x - 7 = 2x + 5, x = 12',
     kind: 'calculation',
     read: {
-      say: 'We are given an equation in x, and we are asked to find the value of x. The answer is one number.',
+      say: 'Here is an equation in x, and we want the value of x that makes it true. The answer is one number.',
       given: OWN[id].given,
       given_anchor: 'an equation in x',
       asked: OWN[id].asked,
-      asked_anchor: 'asked to find the value',
+      asked_anchor: 'the value of x',
       marks: [],
     },
-    background: concept
-      ? {
-          concept,
-          say: BACKGROUND_SAY,
-          formula: {
-            title: 'Same move on both sides',
-            latex: 'a = b \\;\\Rightarrow\\; a + c = b + c',
-            terms: [
-              term('a = b', 'balanced sides', 'balanced scale'),
-              term('a + c = b + c', 'still balanced', 'we must also do'),
-            ],
+    tools: concept
+      ? [
+          {
+            concept,
+            say: BACKGROUND_SAY,
+            recall: RECALL_SAY,
+            formula: {
+              title: 'Same move on both sides',
+              latex: lawOf(concept),
+              terms: [
+                term('a = b', 'balanced sides', 'balanced scale'),
+                term(lawOf(concept).split('\\Rightarrow\\; ')[1], 'still balanced', 'we must also do'),
+              ],
+            },
           },
-        }
-      : { concept: '', say: '', formula: { title: '', latex: '', terms: [] } },
+        ]
+      : [],
     method: {
       say: 'We do the same on both sides, so the two sides stay equal at every step.',
       formula: { title: '', latex: '', terms: [] },
@@ -194,9 +210,9 @@ function solution(id: keyof typeof OWN = 'ex1.a', concept = 'Equal operations on
     ...extra,
   };
 }
-/** The same answer as a model that knows nothing of schema v2 would give it. */
+/** The same answer as a model that knows nothing of schema v3 would give it. */
 function plainSolution(id: keyof typeof OWN = 'ex1.a') {
-  const { kind: _kind, background: _background, check: _check, pitfall: _pitfall, ...plain } = solution(id);
+  const { kind: _kind, tools: _tools, check: _check, pitfall: _pitfall, ...plain } = solution(id);
   return plain;
 }
 
@@ -213,14 +229,14 @@ const formulaOf = (action: Extract<Action, { type: 'board' }>) => action.item as
 
 // ----------------------------------------------------------------------------------------------- the solve schema
 
-test('schema v2: the strict schema asks for the kind, the background, the check and the pitfall', () => {
+test('schema v3: the strict schema asks for the kind, the tools, the check and the pitfall', () => {
   const unit = unitOf('standard', 'ex1.a');
   const strict = solveSchema(unit) as { required: string[]; properties: Record<string, any>; $defs: any };
   assert.deepEqual(strict.required, [
     'plan',
     'kind',
     'read',
-    'background',
+    'tools',
     'method',
     'steps',
     'answer',
@@ -241,35 +257,41 @@ test('schema v2: the strict schema asks for the kind, the background, the check 
     'sketch',
     'trace',
   ]);
-  const background = strict.properties.background;
-  assert.deepEqual(background.required, ['concept', 'say', 'formula']);
-  assert.equal(background.properties.concept.maxLength, 60);
-  assert.equal(background.properties.say.minLength, undefined, 'the background may be empty');
-  assert.equal(background.properties.formula.properties.terms.maxItems, 4);
-  assert.equal(background.properties.formula.properties.terms.minItems, 0);
+  // The toolkit: up to two tools in a full part, one in a follow-on or compact part, and none for routine algebra.
+  const tools = strict.properties.tools;
+  assert.equal(tools.maxItems, 2);
+  assert.equal(tools.minItems, undefined, 'the toolkit may be empty');
+  assert.deepEqual(tools.items.required, ['concept', 'say', 'recall', 'formula']);
+  assert.equal(tools.items.properties.concept.maxLength, 60);
+  assert.equal(tools.items.properties.formula.properties.terms.maxItems, 4);
+  assert.equal(tools.items.properties.formula.properties.terms.minItems, 0);
+  assert.equal((solveSchema(unitOf('standard', 'ex1.b')) as any).properties.tools.maxItems, 1);
+  assert.equal((solveSchema(unitOf('quick', 'ex1.a')) as any).properties.tools.maxItems, 1);
+  // The checkpoint and the method are the part's choice: both may be empty.
+  assert.equal(strict.properties.try.properties.prompt.minLength, undefined, 'a part may have no checkpoint');
+  assert.equal(strict.properties.method.properties.say.minLength, undefined, 'a part may have no method step');
   assert.deepEqual(strict.properties.check.required, ['say', 'latex']);
   assert.equal(strict.properties.pitfall.maxLength, 160);
   // The strict schema keeps the ID enums of the part's own sentences.
   assert.deepEqual(strict.$defs.sentenceId.enum, unit.sentences);
 });
 
-test('schema v2: the loose schema takes an answer without the new fields, and the part is a usable solution', () => {
+test('schema v3: the loose schema takes an answer without the new fields, and the part is a usable solution', () => {
   const unit = unitOf('standard', 'ex1.a');
   const loose = solveSchema(unit, false) as { required: string[]; properties: Record<string, any> };
-  for (const key of ['kind', 'background', 'check', 'pitfall', 'try']) assert.ok(!loose.required.includes(key), key);
+  for (const key of ['kind', 'tools', 'check', 'pitfall', 'try']) assert.ok(!loose.required.includes(key), key);
   for (const key of ['plan', 'read', 'method', 'steps', 'answer', 'check_note', 'questions'])
     assert.ok(loose.required.includes(key), key);
   const { solution: kept, problems } = cleanSolution(plainSolution(), unit, sheet);
   assert.deepEqual(problems, []);
   assert.equal(kept?.kind, 'calculation');
-  assert.deepEqual(kept?.background, { concept: '', say: '', line: null });
+  assert.deepEqual(kept?.tools, []);
   assert.deepEqual(kept?.check, { say: '', line: null });
   assert.equal(kept?.pitfall, '');
-  assert.equal(backgroundKey(unit, kept!), '');
   assert.deepEqual(solutionLines(kept!), ['x - 7 = 5', 'x = 12', 'x = 12']);
   // Junk in the new fields is not fatal either.
   const junk = cleanSolution(
-    { ...plainSolution(), kind: 7, background: 'none', check: [], pitfall: null },
+    { ...plainSolution(), kind: 7, tools: 'none', check: [], pitfall: null },
     unit,
     sheet,
   );
@@ -277,7 +299,7 @@ test('schema v2: the loose schema takes an answer without the new fields, and th
   assert.equal(junk.solution.kind, 'calculation');
 });
 
-test('schema v2: the new fields are cleaned like the others', () => {
+test('schema v3: the new fields are cleaned like the others', () => {
   const unit = unitOf('standard', 'ex1.a');
   const kept = cleanSolution(
     solution('ex1.a', '  Equal   operations on both sides ', {
@@ -288,36 +310,58 @@ test('schema v2: the new fields are cleaned like the others', () => {
     sheet,
   ).solution!;
   assert.equal(kept.kind, 'proof');
-  assert.equal(kept.background.concept, 'Equal operations on both sides');
-  assert.equal(kept.background.say, BACKGROUND_SAY);
-  assert.equal(kept.background.line?.latex, 'a = b \\;\\Rightarrow\\; a + c = b + c');
-  assert.deepEqual(kept.background.line?.anchors, ['balanced scale', 'we must also do']);
+  const [tool] = kept.tools;
+  assert.equal(tool.concept, 'Equal operations on both sides');
+  assert.equal(tool.say, BACKGROUND_SAY);
+  assert.equal(tool.recall, RECALL_SAY);
+  assert.equal(tool.line?.latex, 'a = b \\;\\Rightarrow\\; a + c = b + c');
+  assert.deepEqual(tool.line?.anchors, ['balanced scale', 'we must also do']);
   assert.equal(kept.check.line?.latex, '3 \\cdot 12 - 7 = 2 \\cdot 12 + 5');
   assert.deepEqual(kept.check.line?.board?.terms, []);
   assert.equal(kept.pitfall, 'Subtracting on one side only.');
   // The concept is cut to 60 characters, an unknown kind is a calculation.
   const long = cleanSolution(solution('ex1.a', 'Very long concept names '.repeat(6), { kind: 'magic' }), unit, sheet);
-  assert.equal(long.solution!.background.concept.length, 60);
+  assert.equal(long.solution!.tools[0].concept.length, 60);
   assert.equal(long.solution!.kind, 'calculation');
-  // A background formula that fails its LaTeX check is dropped; the words and the concept stay, and it is no problem.
+  // A tool formula that fails its LaTeX check is dropped; the words and the concept stay, and it is no problem.
   const broken = solution('ex1.a');
-  broken.background.formula.latex = 'a = \\notacommand b';
+  broken.tools[0].formula.latex = 'a = \\notacommand b';
   const dropped = cleanSolution(broken, unit, sheet);
   assert.deepEqual(dropped.problems, []);
-  assert.equal(dropped.solution!.background.line, null);
-  assert.equal(dropped.solution!.background.concept, 'Equal operations on both sides');
-  // A background of too few words, or one that gives the result away before the checkpoint, is dropped whole.
-  assert.equal(
-    cleanSolution(solution('ex1.a', 'Balance', { background: { ...broken.background, say: 'A scale.' } }), unit, sheet)
-      .solution!.background.concept,
-    '',
+  assert.equal(dropped.solution!.tools[0].line, null);
+  assert.equal(dropped.solution!.tools[0].concept, 'Equal operations on both sides');
+  // A tool of too few words, or one that gives the result away before the checkpoint, is dropped whole; a recall that gives
+  // it away or is no sentence is left empty and the tool stays.
+  assert.deepEqual(
+    cleanSolution(
+      solution('ex1.a', 'Balance', { tools: [{ ...broken.tools[0], say: 'A scale.' }] }),
+      unit,
+      sheet,
+    ).solution!.tools,
+    [],
   );
   const leaking = solution('ex1.a');
-  leaking.background.say = 'An equation is a balanced scale, and in this one x ends up as twelve.';
-  assert.equal(cleanSolution(leaking, unit, sheet).solution!.background.concept, '');
-  // A later part of a task and a compact part have no background.
-  assert.equal(solved(unitOf('standard', 'ex1.b')).background.concept, '');
-  assert.equal(solved(unitOf('quick', 'ex1.a')).background.concept, '');
+  leaking.tools[0].say = 'An equation is a balanced scale, and in this one x ends up as twelve.';
+  assert.deepEqual(cleanSolution(leaking, unit, sheet).solution!.tools, []);
+  const recalling = solution('ex1.a');
+  recalling.tools[0].recall = 'Again the scale, so x is twelve.';
+  assert.equal(cleanSolution(recalling, unit, sheet).solution!.tools[0].recall, '');
+  recalling.tools[0].recall = 'Scale.';
+  assert.equal(cleanSolution(recalling, unit, sheet).solution!.tools[0].recall, '');
+  // A full part keeps two tools, a later part and a compact part one, and a tool the part already has is dropped.
+  const another = {
+    ...solution('ex1.a', 'Dividing by a number').tools[0],
+    say: 'Dividing both sides by one number keeps the balance, like cutting both loads in the same ratio.',
+  };
+  const two = { tools: [solution().tools[0], another, { ...another, concept: 'A third tool', formula: { ...another.formula, latex: 'a + b = b + a' } }] };
+  assert.deepEqual(
+    cleanSolution(solution('ex1.a', undefined, two), unit, sheet).solution!.tools.map((t) => t.concept),
+    ['Equal operations on both sides', 'Dividing by a number'],
+  );
+  assert.equal(solved(unitOf('standard', 'ex1.b'), two).tools.length, 1);
+  assert.equal(solved(unitOf('quick', 'ex1.a'), two).tools.length, 1);
+  const twice = { tools: [solution().tools[0], { ...solution().tools[0], concept: 'The balance rule' }] };
+  assert.equal(solved(unit, twice).tools.length, 1, 'the same law under another name is one tool');
   // A check with too few words has no line either; a check line that does not render is left out without a problem.
   const mute = solution('ex1.a', undefined, { check: { say: 'Fine.', latex: '1 = 1' } });
   assert.deepEqual(cleanSolution(mute, unit, sheet).solution!.check, { say: '', line: null });
@@ -368,6 +412,10 @@ test('too many solution lines: the first ones stay and the last one, which carri
     single.steps.map((step) => step.latex),
     ['x = 12'],
   );
+  // A part of one line has no first move to try: its checkpoint is left out, one of two lines keeps it.
+  assert.equal(single.coach, null);
+  assert.ok(cleanSolution(long('ex1.a'), { ...quick, steps: 2 }, sheet).solution!.coach);
+  assert.ok(cleanSolution(solution('ex1.a'), unitOf('standard', 'ex1.a'), sheet).solution!.coach);
 });
 
 test('schema v2: the check line goes to the verifier after the answer, and the repair turn names it', () => {
@@ -385,11 +433,12 @@ test('schema v2: the check line goes to the verifier after the answer, and the r
 /** The sentences of the examples' tasks, so that the strict schema accepts their IDs. */
 const examplesUnit = {
   id: 'ex',
-  sentences: ['p2.s4', 'p2.s5', 'p3.s2', 'p3.s3', 'p4.s2', 'p4.s3', 'p5.s2', 'p5.s3', 'p6.s2', 'p6.s3'],
+  sentences: ['p2.s4', 'p2.s5', 'p3.s2', 'p3.s3', 'p4.s2', 'p4.s3', 'p5.s2', 'p5.s3', 'p6.s2', 'p6.s3', 'p7.s4'],
   maths: [] as string[],
   blocks: ['p2.b1'],
   steps: 4,
   form: 'full',
+  task: { id: 'ex1', number: '1', parts: [{ id: 'ex1.a', label: 'a' }] },
 } as unknown as Unit;
 /** What each example's task says, which no hint of it may repeat the result of. */
 const TASKS: Record<string, string> = {
@@ -399,20 +448,20 @@ const TASKS: Record<string, string> = {
     'A ball is dropped from rest from a height of 20 m. Air resistance is ignored. How long does it take to reach the ground?',
   computer_science: 'Given the sorted array [1, 3, 5, 7, 9, 11], trace binary search for the value 7.',
   explanation: 'Ice floats on liquid water. Explain why.',
+  follow_on: 'The weekly study hours of eight students are 8, 10, 12, 9, 11, 13, 7 and 10. b) Find the sample variance and the standard deviation.',
 };
 const spokenWords = (text: string) => splitWords(text).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+const allExamples = { ...EXAMPLES, follow_on: FOLLOW_ON };
 
-test('every worked example fits schema v2 exactly: the strict schema, the LaTeX checks, the anchors and the lengths', () => {
+test('every worked example fits schema v3 exactly: the strict schema, the LaTeX checks, the anchors and the lengths', () => {
   const validate = new Ajv2020({ strict: false, allErrors: true }).compile(solveSchema(examplesUnit));
   assert.deepEqual(Object.keys(EXAMPLES), ['maths', 'chemistry', 'physics', 'computer_science', 'explanation']);
-  for (const [name, example] of Object.entries(EXAMPLES)) {
+  for (const [name, example] of Object.entries(allExamples)) {
     assert.ok(validate(example), `${name}: ${JSON.stringify(validate.errors?.slice(0, 3))}`);
     assert.ok(SOLVE_KINDS.includes(example.kind), name);
-    assert.ok(example.steps.length >= 3 && example.steps.length <= 4, `${name}: three or four granular steps`);
-    assert.equal(example.try.hints.length, 3, name);
+    assert.ok(example.steps.length >= 2 && example.steps.length <= 4, `${name}: two to four granular steps`);
     assert.ok(example.pitfall && example.pitfall.length <= 160, name);
     assert.ok(example.check.latex, `${name}: a check line`);
-    assert.ok(example.background.formula.latex, `${name}: a background formula`);
     // The words each field asks for.
     const within = (label: string, text: string, fewest: number, most: number) =>
       assert.ok(
@@ -420,14 +469,17 @@ test('every worked example fits schema v2 exactly: the strict schema, the LaTeX 
         `${name} ${label}: ${spokenWords(text)} words`,
       );
     within('read.say', example.read.say, 20, 50);
-    within('background.say', example.background.say, 20, 50);
-    within('method.say', example.method.say, 15, 45);
+    if (example.method.say) within('method.say', example.method.say, 15, 45);
+    example.tools.forEach((tool, i) => {
+      within(`tools[${i}].say`, tool.say, 25, 55);
+      within(`tools[${i}].recall`, tool.recall, 8, 25);
+    });
     example.steps.forEach((step, i) => within(`step ${i + 1}`, step.say, 10, 45));
     within('check.say', example.check.say, 10, 35);
     // Every line renders, every term is a placeable piece of it and every anchor is in its narration.
     const lines: [string, { title: string; latex: string; terms: any[] }, string, number][] = [
-      ['background.formula', example.background.formula, example.background.say, 0],
       ['method.formula', example.method.formula, example.method.say, 0],
+      ...example.tools.map((tool, i): [string, ExampleLine, string, number] => [`tools[${i}]`, tool.formula, tool.say, 0]),
       ...example.steps.map((step, i): [string, typeof step, string, number] => [`step ${i + 1}`, step, step.say, 1]),
       ['answer', example.answer, example.answer.say, 1],
     ];
@@ -437,18 +489,20 @@ test('every worked example fits schema v2 exactly: the strict schema, the LaTeX 
       for (const t of line.terms) assert.notEqual(findAnchor(say, t.anchor), null, `${name} ${label}: ${t.anchor}`);
     }
     assert.deepEqual(checkFormula({ latex: example.check.latex, terms: [] }, { minTerms: 0 }).problems, [], name);
-    for (const anchor of [example.read.given_anchor, example.read.asked_anchor])
+    for (const anchor of [example.read.given_anchor, example.read.asked_anchor].filter(Boolean))
       assert.notEqual(findAnchor(example.read.say, anchor), null, `${name}: ${anchor}`);
-    // Nothing before the solution gives the result away.
-    for (const text of [example.try.prompt, ...example.try.hints, example.background.say])
+    // The checkpoint is the part's choice: a part that has one has three hints, and none gives the result away.
+    if (example.try.prompt) assert.equal(example.try.hints.length, 3, name);
+    else assert.deepEqual(example.try.hints, [], name);
+    for (const text of [example.try.prompt, ...example.try.hints, ...example.tools.map((tool) => tool.say), ...example.tools.map((tool) => tool.recall)])
       assert.equal(leaksResult(text, example.answer.latex, TASKS[name]), false, `${name}: ${text}`);
-    // The background plays right before the checkpoint, which asks for its first use on this part: no prompt or hint
-    // repeats four words in a row of what the background just said.
+    // The last tool plays right before the checkpoint, which asks for its first use on this part: no prompt or hint
+    // repeats four words in a row of what the tool just said.
     const grams = (text: string, n = 4) => {
       const w = text.toLowerCase().match(/\p{L}+/gu) ?? [];
       return new Set(w.slice(0, Math.max(0, w.length - n + 1)).map((_, i) => w.slice(i, i + n).join(' ')));
     };
-    const said = grams(example.background.say);
+    const said = grams(example.tools.at(-1)?.say ?? '');
     for (const text of [example.try.prompt, ...example.try.hints])
       assert.deepEqual(
         [...grams(text)].filter((g) => said.has(g)),
@@ -458,17 +512,44 @@ test('every worked example fits schema v2 exactly: the strict schema, the LaTeX 
   }
 });
 
-test('every worked example is a solution the code accepts, with its background, check and pitfall', () => {
+test('the worked examples differ in shape, and none of them speaks from a template', () => {
+  const shapes = Object.entries(allExamples).map(([name, example]) => ({
+    name,
+    tools: example.tools.length,
+    try: Boolean(example.try.prompt),
+    method: Boolean(example.method.say),
+    steps: example.steps.length,
+  }));
+  // Different numbers of tools, with and without a checkpoint or a method step, and more than one length of working.
+  assert.ok(new Set(shapes.map((x) => x.tools)).size >= 3, JSON.stringify(shapes));
+  assert.ok(shapes.some((x) => x.try) && shapes.some((x) => !x.try), 'with and without a checkpoint');
+  assert.ok(shapes.some((x) => x.method) && shapes.some((x) => !x.method), 'with and without a method step');
+  assert.ok(new Set(shapes.map((x) => x.steps)).size >= 3, 'different numbers of lines');
+  for (const [name, example] of Object.entries(allExamples)) {
+    for (const say of [example.read.say, ...example.tools.map((tool) => tool.say), example.method.say].filter(Boolean))
+      assert.equal(opensTemplated(say), false, `${name}: ${say}`);
+    // No two examples open alike, and no example's steps all open with one word.
+    const firsts = example.steps.map((step) => step.say.split(' ')[0].toLowerCase());
+    assert.ok(new Set(firsts).size > Math.floor(firsts.length / 2), `${name}: ${firsts}`);
+  }
+  const openings = Object.values(allExamples).map((example) => example.read.say.split(' ').slice(0, 2).join(' ').toLowerCase());
+  assert.equal(new Set(openings).size, openings.length, `the openings differ: ${openings}`);
+});
+
+test('every worked example is a solution the code accepts, with its tools, check and pitfall', () => {
   const unit = { ...examplesUnit, form: 'full' as const };
-  for (const [name, example] of Object.entries(EXAMPLES)) {
-    const { solution: kept, problems } = cleanSolution(example, unit);
+  const later = { ...unit, task: { ...unit.task, parts: [{ id: 'ex0', label: 'a' }, { id: 'ex1.b', label: 'b' }] }, part: { id: 'ex1.b', label: 'b' } } as unknown as Unit;
+  for (const [name, example] of Object.entries(allExamples)) {
+    // The follow-on example is a part that goes on from an earlier one; the others open their task.
+    const { solution: kept, problems } = cleanSolution(example, name === 'follow_on' ? later : unit);
     assert.deepEqual(problems, [], name);
     assert.ok(kept, name);
     assert.equal(kept.kind, example.kind);
-    assert.ok(kept.background.concept && kept.background.line?.board, `${name}: the background and its law`);
+    assert.equal(kept.tools.length, example.tools.length, `${name}: the tools`);
+    for (const tool of kept.tools) assert.ok(tool.line?.board && tool.recall, `${name}: the tool and its law`);
     assert.ok(kept.check.line?.board, `${name}: the check line`);
     assert.equal(kept.pitfall, example.pitfall);
-    assert.equal(kept.coach?.hints.length, 3, `${name}: three hints`);
+    assert.equal(kept.coach?.hints.length ?? 0, example.try.hints.length, `${name}: the checkpoint`);
     assert.equal(kept.steps.length, example.steps.length);
   }
 });
@@ -517,46 +598,62 @@ test('the example comes from the card’s subject, then from the part’s text, 
   assert.equal(exampleKind(undefined, 'Hello World. In case of doubt, ask.'), 'maths');
   // The subject wins over the text.
   assert.deepEqual(chosen('mathematics', 'a flask of H2O'), ['maths', 'explanation']);
+  // A part that goes on from an earlier one sees the follow-on part in place of the explanation.
+  assert.deepEqual(exampleFor('chemistry', '', false), [EXAMPLES.chemistry, FOLLOW_ON]);
+  assert.deepEqual(exampleFor('law', '', false), [EXAMPLES.explanation, FOLLOW_ON]);
+  assert.deepEqual(exampleFor('law', '', true), [EXAMPLES.explanation]);
 });
 
 test('the solve task teaches the tutor’s moves and shows the examples of the subject', () => {
   const unit = unitOf('standard', 'ex1.a');
   const text = solveTask('en-US', 'EXERCISE: Problem 1, part a)', unit, 'chemistry');
   assert.ok(text.startsWith('TASK: teach ONE exercise in "en-US". Speak as a patient tutor'));
-  assert.match(text, /take one move per step and say why, then check the result/);
-  // The examples are for the format, not the length: the part has at most its own number of lines.
+  assert.match(text, /set the scene, go over the tools it needs, take one move per step and say why, then check the result/);
+  // The examples are for the moves, not the length: the part has at most its own number of lines.
   assert.match(
     text,
-    /EXAMPLES for different exercises \(copy their format, not their length: this part has at most 5 steps/,
+    /EXAMPLES for different exercises \(copy their moves, not their words or length: this part has at most 5 steps/,
   );
   assert.ok(text.includes(JSON.stringify(EXAMPLES.chemistry)));
   assert.ok(text.includes(JSON.stringify(EXAMPLES.explanation)));
   assert.ok(!text.includes(JSON.stringify(EXAMPLES.maths)));
-  // The moves: the kind, what is given and asked, the background, the plan, one move per step, the check, the pitfall.
+  assert.ok(!text.includes(JSON.stringify(FOLLOW_ON)));
+  // The moves: the kind, the voice, the opening, the tools, the checkpoint, the plan, one move per step, the check.
   for (const pattern of [
     /"kind" is what this part asks for/,
-    /the kind of answer expected \("a mass in grams", "a proof", "a\s+probability"\)/,
-    /BACKGROUND\. "background" is what a tutor recalls/,
-    /never solves the part/,
+    /Never open a narration with "Given",\s+"We are given", "Gegeben ist" or "In exercise 3"/,
+    /Say the task's number once at most, never as the first words/,
+    /READ\. "read\.say" opens the task in your own words: the situation and what we are after/,
+    /the kind of answer \("a mass in grams", "a proof"\)/,
+    /TOOLS\. "tools" are the formulas, definitions or laws a student needs for this task \(its later parts are listed too\), at most 2/,
+    /how it works intuitively \(a tiny example or an everyday picture\) and how we use it to answer the question/,
+    /never solves the part or states its result/,
+    /"recall" is one sentence of 8-25 words that reminds a student who met the tool earlier/,
+    /Give it only when there is a real first move worth trying/,
+    /leave it empty when the steps already say it/,
     /ONE move per step/,
     /\\ce\{\.\.\.\} \(mhchem\)/,
     /\\,\\mathrm\{g\/mol\}/,
     /never use siunitx macros such as \\SI or \\si/,
     /short statement in \\text\{\.\.\.\} of at most 8 words/,
+    /the steps do not all begin alike/,
     /"check\.say" is 10-35 spoken words/,
     /PITFALL\. "pitfall" is one sentence of at most 160 characters/,
     /"try" is the learner's turn/,
     /No hint and not the prompt may contain the final result/,
-    /After a background step, ask for the first use of the background on this part, not for the concept/,
+    /After a tool step, ask for the first use of the tool on this part, not for the concept/,
     /"sure" is false when you are not certain/,
   ])
     assert.match(text, pattern);
-  // A later part and a compact part are told to leave the background empty; the compact one also keeps the narration short.
+  // A later part goes on from the part before: no number, no givens again, one tool at most, and the follow-on example.
   const follow = solveTask('en-US', 'EXERCISE: x', unitOf('standard', 'ex1.b'));
-  assert.match(follow, /leave "background\.concept", "background\.say" and the formula's latex empty/);
-  assert.doesNotMatch(follow, /BACKGROUND\. "background" is what a tutor recalls/);
+  assert.match(follow, /This part goes on from the part before: never say the task's or the part's number/);
+  assert.match(follow, /READ\. "read\.say" opens the part in your own words: what this part asks, from where the part/);
+  assert.match(follow, /this part needs that the earlier parts did not give, at most 1/);
+  assert.doesNotMatch(follow, /Say the task's number once at most/);
+  assert.ok(follow.includes(JSON.stringify(FOLLOW_ON)) && !follow.includes(JSON.stringify(EXAMPLES.explanation)));
   const compact = solveTask('en-US', 'EXERCISE: x', unitOf('quick', 'ex1.a'));
-  assert.match(compact, /Keep "read\.say" and "method\.say" short/);
+  assert.match(compact, /Keep "read\.say", the tool's "say" and "method\.say" short/);
   // Where the last line shows the result, the answer is one summary sentence and the check one check, not two checks.
   assert.match(
     compact,
@@ -570,18 +667,50 @@ test('the solve task teaches the tutor’s moves and shows the examples of the s
   );
 });
 
+test('neighbouring parts are suggested different ways in, so that a tour does not open every follow-on alike', () => {
+  const taughtUnits = planUnits(exerciseUnits(sheet), 'standard').taught;
+  assert.deepEqual(taughtUnits.map((u) => u.way), [0, 1, 2, 3]);
+  const way = (unit: Unit) => /a way in could be to open ([^.]*(?:\([^)]*\))?[^.]*)\./.exec(solveTask('en-US', 'EXERCISE: x', unit))?.[1];
+  // The first parts of tasks and the parts that go on from an earlier one are suggested different openings.
+  const first = way(unitOf('standard', 'ex1.a'));
+  const second = way(unitOf('standard', 'ex1.b'));
+  const third = way(unitOf('standard', 'ex2'));
+  assert.ok(first && second && third);
+  assert.equal(new Set([first, second, third]).size, 3);
+  assert.match(second, /^with the new question itself|link word|still missing|different|result we just got/);
+  // A suggestion for a part that goes on never says a number, and the rule says it is only a way in.
+  assert.doesNotMatch(solveTask('en-US', 'EXERCISE: x', unitOf('standard', 'ex1.b')), /With x known/);
+  // The rotation wraps around, and a part with no place has the first way.
+  assert.equal(way({ ...unitOf('standard', 'ex2'), way: 5 }), way({ ...unitOf('standard', 'ex2'), way: 0 }));
+  assert.equal(way({ ...unitOf('standard', 'ex2'), way: undefined }), way({ ...unitOf('standard', 'ex2'), way: 0 }));
+});
+
+test('only the first part of a task sees the later parts, for the toolkit', () => {
+  const first = unitOf('standard', 'ex1.a');
+  assert.deepEqual(first.ahead?.map((p) => p.id), ['ex1.b']);
+  assert.ok(startsTask(first) && !startsTask(unitOf('standard', 'ex1.b')) && startsTask(unitOf('standard', 'ex2')));
+  assert.equal(unitOf('standard', 'ex1.b').ahead, undefined);
+  const brief = unitBrief(first, sheet, true);
+  assert.match(brief, /LATER PARTS OF THIS TASK, taught after this one \(for the toolkit only, do not solve them\):\nb\) b\) Check your solution by substituting it\./);
+  assert.doesNotMatch(unitBrief(first, sheet), /LATER PARTS/, 'the visual plan reads the brief without them');
+  assert.doesNotMatch(unitBrief(unitOf('standard', 'ex1.b'), sheet, true), /LATER PARTS/);
+  // A part the tour leaves out is not listed.
+  const quick = planUnits(exerciseUnits(sheet), 'quick').taught.find((u) => u.id === 'ex1.a')!;
+  assert.deepEqual(quick.ahead?.map((p) => p.id), ['ex1.b']);
+});
+
 // ----------------------------------------------------------------------------------------------- the forms of a part
 
 const ids = (steps: Step[]) => steps.map((step) => step.id);
 
-test('the full form is the task, the background, your turn, the method, the solution lines and the answer', () => {
+test('the full form is the task, the tools, your turn, the method, the solution lines and the answer', () => {
   const unit = unitOf('standard', 'ex1.a');
   assert.equal(unit.form, 'full');
   const s = solved(unit);
   const steps = unitSteps(unit, s, [ok, ok, ok, ok], 'en-US');
   assert.deepEqual(ids(steps), [
     'ex1.a-task',
-    'ex1.a-background',
+    'ex1.a-tool-1',
     'ex1.a-try',
     'ex1.a-method',
     'ex1.a-step-1',
@@ -589,16 +718,16 @@ test('the full form is the task, the background, your turn, the method, the solu
     'ex1.a-answer',
   ]);
   assert.equal(unitOverhead(unit), 5);
-  // The background says its words, with the law on the board term by term and lit up where the narration names it.
-  const background = steps[1];
-  assert.equal(background.say, BACKGROUND_SAY);
-  assert.deepEqual(types(background), ['focus', 'board', 'board_focus', 'board_focus']);
-  const board = formulaOf(boardsOf(background)[0]);
+  // The tool says its words, with the law on the board term by term and lit up where the narration names it.
+  const tool = steps[1];
+  assert.equal(tool.say, BACKGROUND_SAY);
+  assert.deepEqual(types(tool), ['focus', 'board', 'board_focus', 'board_focus']);
+  const board = formulaOf(boardsOf(tool)[0]);
   assert.equal(board.latex, 'a = b \\;\\Rightarrow\\; a + c = b + c');
   assert.equal(board.title, 'Same move on both sides');
   assert.equal(board.before, undefined);
   assert.equal(board.verified, undefined);
-  const lit = background.actions.filter((a) => a.type === 'board_focus');
+  const lit = tool.actions.filter((a) => a.type === 'board_focus');
   assert.deepEqual(
     lit.map((a) => a.type === 'board_focus' && [a.part, a.at_word]),
     [
@@ -606,30 +735,59 @@ test('the full form is the task, the background, your turn, the method, the solu
       [1, findAnchor(BACKGROUND_SAY, 'we must also do')],
     ],
   );
-  assert.equal(background.hold_ms, 800);
-  // The background comes before the checkpoint and says nothing of the result; the checkpoint is the only pause.
-  assert.ok(!/twelve|12/.test(`${steps[0].say} ${background.say}`));
+  assert.equal(tool.hold_ms, 800);
+  // The tools come before the checkpoint and say nothing of the result; the checkpoint is the only pause.
+  assert.ok(!/twelve|12/.test(`${steps[0].say} ${tool.say}`));
   assert.equal(steps.filter((step) => step.checkpoint).length, 1);
-  // Without a concept there is no background step; nor when the answer failed (no pause then either).
-  const bare = { ...s, background: { concept: '', say: '', line: null } };
+  // Without a tool there is no tool step; without a checkpoint no pause; without a method no method step, and the
+  // answer still stands; nor is there a pause when the answer failed.
+  const bare = { ...s, tools: [] };
   assert.deepEqual(ids(unitSteps(unit, bare, [ok, ok, ok, ok], 'en-US')).slice(0, 3), [
     'ex1.a-task',
     'ex1.a-try',
     'ex1.a-method',
   ]);
+  const free = unitSteps(unit, { ...s, tools: [], coach: null, method: { say: '', line: null } }, [ok, ok, ok, ok], 'en-US');
+  assert.deepEqual(ids(free), ['ex1.a-task', 'ex1.a-step-1', 'ex1.a-step-2', 'ex1.a-answer']);
   const failed = unitSteps(unit, s, [ok, ok, { status: 'failed', problem: 'no' }, ok], 'en-US');
-  assert.deepEqual(ids(failed).slice(0, 3), ['ex1.a-task', 'ex1.a-background', 'ex1.a-method']);
+  assert.deepEqual(ids(failed).slice(0, 3), ['ex1.a-task', 'ex1.a-tool-1', 'ex1.a-method']);
+  // Two tools are two steps, each with its own board.
+  const other = { ...s.tools[0], concept: 'Dividing by a number', say: 'Dividing both sides by one number keeps the balance, like cutting both loads alike.' };
+  const two = unitSteps(unit, { ...s, tools: [s.tools[0], other] }, [ok, ok, ok, ok], 'en-US');
+  assert.deepEqual(ids(two).slice(0, 4), ['ex1.a-task', 'ex1.a-tool-1', 'ex1.a-tool-2', 'ex1.a-try']);
+  assert.equal(two[2].say, other.say);
 });
 
-test('a later part of a task is taught as a follow-on: no background, the same steps', () => {
+test('a tool the tour has met is recalled in a sentence of the task step, not given again', () => {
+  const unit = unitOf('standard', 'ex1.a');
+  const s = solved(unit);
+  const seen = new Set(toolKeys(s.tools[0]));
+  const steps = unitSteps(unit, s, [ok, ok, ok, ok], 'en-US', null, seen);
+  assert.deepEqual(ids(steps), ['ex1.a-task', 'ex1.a-try', 'ex1.a-method', 'ex1.a-step-1', 'ex1.a-step-2', 'ex1.a-answer']);
+  // The sentence follows the opening, and the law comes back on the board when the sentence starts.
+  assert.equal(steps[0].say, `${s.read.say} ${RECALL_SAY}`);
+  const [recalled] = boardsOf(steps[0]);
+  assert.equal(formulaOf(recalled).latex, s.tools[0].line!.latex);
+  assert.equal(recalled.at_word, splitWords(s.read.say).length);
+  // Only a term the recall names lights up, and only after the sentence has started.
+  const lit = steps[0].actions.flatMap((a) => (a.type === 'board_focus' ? [a.at_word ?? 0] : []));
+  assert.ok(lit.every((word) => word >= splitWords(s.read.say).length), JSON.stringify(steps[0].actions));
+  // Keys the tour has not met leave the tool as it was; a tool is known by its concept and by its law.
+  assert.deepEqual(ids(unitSteps(unit, s, [ok, ok, ok, ok], 'en-US', null, new Set(['another tool']))).slice(0, 2), ['ex1.a-task', 'ex1.a-tool-1']);
+  assert.equal(toolKeys(s.tools[0])[0], 'equal operations on both sides');
+  assert.ok(toolKeys(s.tools[0])[1].startsWith('law:'));
+  const byLaw = new Set(toolKeys({ concept: 'The balance rule', line: s.tools[0].line }));
+  assert.ok(unitSteps(unit, s, [ok, ok, ok, ok], 'en-US', null, byLaw).every((step) => !step.id.endsWith('-tool-1')));
+  // A tool without a recall sentence is not said again either.
+  const mute = { ...s, tools: [{ ...s.tools[0], recall: '' }] };
+  assert.equal(unitSteps(unit, mute, [ok, ok, ok, ok], 'en-US', null, seen)[0].say, s.read.say);
+});
+
+test('a later part of a task goes on from the one before: its own tool, if any, and the same steps', () => {
   const unit = unitOf('standard', 'ex1.b');
   assert.equal(unit.form, 'follow');
   assert.equal(unitOverhead(unit), 4);
-  // Even a background the model gave is not played: it was given with part a.
-  const s = { ...solved(unit), background: solved(unitOf('standard', 'ex1.a')).background };
-  assert.ok(s.background.concept);
-  assert.equal(backgroundKey(unit, s), '');
-  assert.deepEqual(ids(unitSteps(unit, s, [ok, ok, ok, ok], 'en-US')), [
+  assert.deepEqual(ids(unitSteps(unit, solved(unit, { tools: [] }), [ok, ok, ok, ok], 'en-US')), [
     'ex1.b-task',
     'ex1.b-try',
     'ex1.b-method',
@@ -637,9 +795,16 @@ test('a later part of a task is taught as a follow-on: no background, the same s
     'ex1.b-step-2',
     'ex1.b-answer',
   ]);
+  const withTool = solved(unit, { tools: solution('ex1.b').tools });
+  assert.equal(withTool.tools.length, 1);
+  assert.deepEqual(ids(unitSteps(unit, withTool, [ok, ok, ok, ok], 'en-US')).slice(0, 3), [
+    'ex1.b-task',
+    'ex1.b-tool-1',
+    'ex1.b-try',
+  ]);
 });
 
-test('the compact form joins the method to the first line and the answer and its check to the last', () => {
+test('the compact form says its tool in the task step and joins the method to the first line and the answer to the last', () => {
   const unit = unitOf('quick', 'ex1.a');
   assert.equal(unit.form, 'compact');
   assert.equal(unitOverhead(unit), 2);
@@ -657,13 +822,24 @@ test('the compact form joins the method to the first line and the answer and its
     color: 'green',
     at_word: splitWords(lead).length,
   });
-  // Neither a background nor a check line is played in the compact form.
-  assert.ok(steps.every((step) => !step.id.endsWith('-background')));
+  // The tool is no step of its own: its words follow the opening in the task step, and its law comes onto the board where
+  // they start, with its terms lit up. No check line is played in the compact form.
+  assert.ok(steps.every((step) => !step.id.includes('-tool-')));
+  assert.equal(steps[0].say, `${s.read.say} ${s.tools[0].say}`);
+  const [law] = boardsOf(steps[0]);
+  assert.equal(formulaOf(law).latex, s.tools[0].line!.latex);
+  assert.equal(law.at_word, splitWords(s.read.say).length);
+  const lit = steps[0].actions.flatMap((a) => (a.type === 'board_focus' ? [a.at_word ?? 0] : []));
+  assert.equal(lit.length, 2);
+  assert.ok(lit.every((word) => word >= splitWords(s.read.say).length), 'the terms light up as the tool is said');
   assert.ok(steps.every((step) => boardsOf(step).every((action) => formulaOf(action).latex !== s.check.line!.latex)));
-  // Without a checkpoint the method joins the task step.
+  // Without a checkpoint the method joins the task step, after the tool, with its own board when it has a rule.
   const noCoach = unitSteps(unit, { ...s, coach: null }, [ok, ok, ok, ok], 'en-US');
   assert.deepEqual(ids(noCoach), ['ex1.a-task', 'ex1.a-step-1', 'ex1.a-step-2']);
-  assert.ok(noCoach[0].say.endsWith(s.method.say));
+  assert.equal(noCoach[0].say, `${s.read.say} ${s.tools[0].say} ${s.method.say}`);
+  // A tool the tour has met is recalled in a sentence there; without a tool the task step is the opening alone.
+  assert.equal(unitSteps(unit, s, [ok, ok, ok, ok], 'en-US', null, new Set(toolKeys(s.tools[0])))[0].say, `${s.read.say} ${RECALL_SAY}`);
+  assert.equal(unitSteps(unit, { ...s, tools: [] }, [ok, ok, ok, ok], 'en-US')[0].say, s.read.say);
 });
 
 test('the answer step says the result, how we know it is right and the common mistake, with the check line under the answer', () => {
@@ -828,11 +1004,12 @@ test('a concept is compared by a normalised key: case, accents, punctuation and 
   assert.equal(conceptKey('The'), 'the', 'a name is never emptied');
   assert.equal(conceptKey(''), '');
   assert.notEqual(conceptKey('Free fall'), conceptKey('Free energy'));
-  // Only a full part has a background step, so only a full part has a key.
-  const full = unitOf('standard', 'ex1.a');
-  assert.equal(backgroundKey(full, solved(full)), 'equal operations on both sides');
-  assert.equal(backgroundKey({ form: 'follow' }, solved(full)), '');
-  assert.equal(backgroundKey({ form: 'compact' }, solved(full)), '');
+  // A tool is known by its concept's key and by its law; a short law is no key.
+  const [tool] = solved(unitOf('standard', 'ex1.a')).tools;
+  assert.equal(toolKeys(tool)[0], 'equal operations on both sides');
+  assert.deepEqual(toolKeys({ concept: 'The Mole', line: null }), ['mole']);
+  assert.equal(toolKeys({ concept: 'Mole', line: { ...tool.line!, latex: 'n = m' } }).length, 1);
+  assert.equal(toolKeys({ concept: 'Mole', line: { ...tool.line!, latex: 'n = \\frac{m}{M}' } }).length, 2);
 });
 
 // ---------------------------------------------------------------------------------------------------- the lengths
@@ -1208,8 +1385,8 @@ const input = (doc: Doc): TourGenerationInput => ({
 });
 const stepsOfTour = (tour: Tour) => tour.chapters.flatMap((c) => c.steps);
 
-test('the background of a concept is taught once per tour, in tour order, in partial tours and in the final one', async () => {
-  // Part a of task 1 finishes last, so the later tasks are solved before the part whose background they repeat.
+test('a tool is taught once per tour, in tour order, and later parts recall it in a sentence, in partial tours and in the final one', async () => {
+  // Part a of task 1 finishes last, so the later tasks are solved before the part whose tool they repeat.
   const requests: Request[] = [];
   const partials: { ready: number; planned: number; tour: Tour }[] = [];
   const concepts = {
@@ -1234,27 +1411,36 @@ test('the background of a concept is taught once per tour, in tour order, in par
     },
   });
   const all = ids(stepsOfTour(result.tour));
-  const backgrounds = all.filter((id) => id.endsWith('-background'));
-  // Part b is a follow-on, task 2 repeats the first concept, task 3 has its own.
-  assert.deepEqual(backgrounds, ['ex1.a-background', 'ex3-background']);
+  const tools = all.filter((id) => id.includes('-tool-'));
+  // Part b is a follow-on that repeats the first tool, task 2 repeats it too, task 3 has its own.
+  assert.deepEqual(tools, ['ex1.a-tool-1', 'ex3-tool-1']);
   assert.ok(all.includes('ex2-try') && all.includes('ex1.b-try'));
+  const step = (id: string) => stepsOfTour(result.tour).find((s) => s.id === id)!;
   assert.deepEqual(
     result.tour.chapters.find((c) => c.id === 'ex2')!.steps.map((s) => s.id),
     ['ex2-task', 'ex2-try', 'ex2-method', 'ex2-step-1', 'ex2-step-2', 'ex2-answer'],
   );
-  // Every partial tour is a prefix of the final one, so its backgrounds are the final tour's.
+  // The repeat is one sentence after the opening, with the law back on the board; the first time is the whole tool.
+  assert.ok(step('ex2-task').say.endsWith(RECALL_SAY) && step('ex1.b-task').say.endsWith(RECALL_SAY));
+  assert.ok(!step('ex1.a-task').say.includes(RECALL_SAY) && step('ex1.a-tool-1').say === BACKGROUND_SAY);
+  assert.equal(boardsOf(step('ex2-task')).length, 1);
+  // Every partial tour is a prefix of the final one, so its tools are the final tour's.
   assert.ok(partials.length >= 1);
   for (const part of partials) {
     const mine = ids(stepsOfTour(part.tour));
     assert.deepEqual(mine, all.slice(0, mine.length));
-    assert.ok(!mine.includes('ex2-step-1') || mine.includes('ex1.a-background'));
+    assert.ok(!mine.includes('ex2-step-1') || mine.includes('ex1.a-tool-1'));
   }
   assert.equal(ids(stepsOfTour(partials.at(-1)!.tour)).length, all.length);
-  // The planned count is an upper bound: a background that is not played only shortens the tour.
+  // The planned count is an upper bound: a tool that is not played only shortens the tour.
   assert.ok(partials.at(-1)!.planned >= all.length);
+  // Part a of task 1 asks for the later part's tools, the others do not.
+  const asked = (id: keyof typeof OWN) => requests.find((r) => r.name === 'exercise_solution' && unitOfRequest(r) === id)!;
+  assert.match(asked('ex1.a').task, /LATER PARTS OF THIS TASK/);
+  assert.doesNotMatch(asked('ex1.b').task, /LATER PARTS OF THIS TASK/);
 });
 
-test('a concept whose first part could not be taught is taught by the next part that needs it', async () => {
+test('a tool whose first part could not be taught is taught by the next part that needs it', async () => {
   const model = sheetModel({ 'ex1.a': 'Balance', ex2: 'Balance', ex3: 'Balance' });
   const { tour, metadata } = await new HarnessTourGenerator(
     settings,
@@ -1264,11 +1450,64 @@ test('a concept whose first part could not be taught is taught by the next part 
   ).generate(input(sheet));
   const all = ids(stepsOfTour(tour));
   assert.deepEqual(
-    all.filter((id) => id.endsWith('-background')),
-    ['ex2-background'],
+    all.filter((id) => id.includes('-tool-')),
+    ['ex2-tool-1'],
   );
   assert.deepEqual(metadata.fallbackBeats, ['exercise-ex1.a']);
   assert.ok(all.includes('ex1.a-task') && !all.includes('ex1.a-try'));
+});
+
+test('a part that speaks from a template is sent back once with the words it opened with; the repaired part is taught', async () => {
+  const templated = (id: keyof typeof OWN) =>
+    solution(id, '', {
+      read: { ...solution(id).read, say: 'Given the equation three x minus seven, we are asked to find the value of x.' },
+    });
+  const requests: Request[] = [];
+  const events: string[] = [];
+  const model = sheetModel({});
+  // The first answer for ex1.a opens with "Given"; the first answer for ex1.b names its part; the repairs are fine.
+  const result = await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider((r) => {
+      const id = r.name === 'exercise_solution' ? unitOfRequest(r) : undefined;
+      const repair = r.task.includes('worded in a way the tour does not use');
+      if (id === 'ex1.a' && !repair) return templated(id);
+      if (id === 'ex1.b' && !repair)
+        return solution(id, '', {
+          steps: solution(id).steps.map((step, i) => (i ? step : { ...step, say: `${step.say} That is part b done.` })),
+        });
+      return model(r);
+    }, requests),
+    verifier,
+  ).generate({
+    ...input(sheet),
+    onEvent: async (type, data) => {
+      if (type === 'solution.checked') events.push(JSON.stringify(data));
+    },
+  });
+  const repairs = requests.filter((r) => r.name === 'exercise_solution' && r.task.includes('worded in a way'));
+  assert.equal(repairs.length, 2, 'one repair turn for each part');
+  const forA = repairs.find((r) => unitOfRequest(r) === 'ex1.a')!;
+  assert.match(forA.task, /- read\.say opens with "Given the equation three x": no template/);
+  const forB = repairs.find((r) => unitOfRequest(r) === 'ex1.b')!;
+  assert.match(forB.task, /- step 1 names its task or part \("part b"\): this part goes on from the part before/);
+  assert.match(forB.task, /Reword a narration only as far as the problem says/);
+  // The repaired answers are the ones taught.
+  const all = stepsOfTour(result.tour);
+  assert.ok(!all.find((s) => s.id === 'ex1.a-task')!.say.startsWith('Given'));
+  assert.ok(!all.find((s) => s.id === 'ex1.b-step-1')!.say.includes('part b'));
+  assert.equal(requests.filter((r) => r.name === 'exercise_solution' && unitOfRequest(r) === 'ex1.a').length, 2);
+  assert.ok(events.some((e) => /opens with/.test(e)), 'the problems are in the events');
+  // A part that still speaks from the template after its repair is taught all the same, never dropped.
+  const stubborn = await new HarnessTourGenerator(
+    settings,
+    'standard',
+    provider((r) => (r.name === 'exercise_solution' && unitOfRequest(r) === 'ex1.a' ? templated('ex1.a') : model(r))),
+    verifier,
+  ).generate(input(sheet));
+  assert.deepEqual(stubborn.metadata.fallbackBeats, []);
+  assert.ok(ids(stepsOfTour(stubborn.tour)).includes('ex1.a-answer'));
 });
 
 test('the card’s subject chooses the worked example of the solve call, and the check line is verified after the answer', async () => {
@@ -1298,7 +1537,10 @@ test('the card’s subject chooses the worked example of the solve call, and the
   for (const solve of solves) {
     assert.ok(solve.brief.includes('patient tutor') && solve.brief.includes('take one move per step'));
     assert.ok(solve.brief.includes(JSON.stringify(EXAMPLES.chemistry)));
-    assert.ok(solve.brief.includes(JSON.stringify(EXAMPLES.explanation)));
+    // The first part of a task sees the explanation too, a part that goes on from an earlier one the follow-on part.
+    const later = unitOfRequest(solve) === 'ex1.b';
+    assert.equal(solve.brief.includes(JSON.stringify(EXAMPLES.explanation)), !later);
+    assert.equal(solve.brief.includes(JSON.stringify(FOLLOW_ON)), later);
     assert.ok(!solve.brief.includes(JSON.stringify(EXAMPLES.maths)));
   }
   // The verifier saw the steps, the answer and then the check line; the repair turn named the failing check line.

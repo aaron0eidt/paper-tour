@@ -98,7 +98,6 @@ import {
   type Direction,
 } from './direct';
 import {
-  backgroundKey,
   cleanSolution,
   exercisePlan,
   lineName,
@@ -106,6 +105,7 @@ import {
   solutionRepair,
   solveSchema,
   solveTask,
+  toolKeys,
   unitBrief,
   unitFallback,
   unitOverhead,
@@ -165,8 +165,12 @@ type BeatResult =
       steps: Step[];
       solved: boolean;
       checks: LineCheck[];
-      /** The concept the part's background step teaches (conceptKey), when it has one: the tour gives each concept once. */
-      background?: string;
+      /** The keys of the tools the part gives (toolKeys): the tour gives each tool once, later parts recall it. */
+      tools?: string[];
+      /** How many tools the part gives, as the tour's metadata counts them. */
+      toolCount?: number;
+      /** The part's steps for the tools the tour has already given (their keys); `steps` is the part with none given. */
+      rebuild?: (seen: ReadonlySet<string>) => Step[];
       visual?: BoardKind;
       degraded?: Degraded;
       omission?: Omission;
@@ -863,7 +867,7 @@ export class HarnessTourGenerator implements TourGenerator {
         {
           role: 'user',
           content: [
-            { type: 'text', text: solveTask(language, unitBrief(unit, doc), unit, card!.subject) },
+            { type: 'text', text: solveTask(language, unitBrief(unit, doc, true), unit, card!.subject) },
             ...imageParts(pages),
           ],
         },
@@ -955,10 +959,15 @@ export class HarnessTourGenerator implements TourGenerator {
         ];
         for (let attempt = 0; attempt < 2 && !drawn; attempt++) {
           try {
-            const completion = await call(ask, 'exercise_visual', unitVisualSchema(kind), 8_000, 'medium', signal, {
-              id: beat.id,
-              label: beat.point,
-            });
+            const completion = await call(
+              ask,
+              'exercise_visual',
+              unitVisualSchema(kind, !best.solution.method.say),
+              8_000,
+              'medium',
+              signal,
+              { id: beat.id, label: beat.point },
+            );
             const checked = cleanUnitVisual(completion.value, kind, unit, doc, best.solution, planned);
             await input.onEvent?.('exercise.visual', {
               beat: beat.id,
@@ -1004,12 +1013,19 @@ export class HarnessTourGenerator implements TourGenerator {
         }
       }
       await progress('writing', ++directed, beats.length);
-      const background = backgroundKey(unit, best.solution);
+      const { solution, checks } = best;
+      const tools = solution.tools.flatMap(toolKeys);
       return {
-        steps: unitSteps(unit, best.solution, best.checks, language, drawn),
+        steps: unitSteps(unit, solution, checks, language, drawn),
         solved: true,
-        checks: best.checks,
-        ...(background ? { background } : {}),
+        checks,
+        ...(tools.length
+          ? {
+              tools,
+              toolCount: solution.tools.length,
+              rebuild: (seen: ReadonlySet<string>) => unitSteps(unit, solution, checks, language, drawn, seen),
+            }
+          : {}),
         ...(drawn ? { visual: drawn.item.kind } : {}),
         ...(planned && planned.visual !== 'none' && !drawn
           ? {
@@ -1403,20 +1419,22 @@ export class HarnessTourGenerator implements TourGenerator {
     const quickChecks: { id: string; chapter: string; kind: string; hints: number }[] = [];
     const siteAt = new Map(sites.map((site) => [site.beats.at(-1)!, site]));
     /**
-     * Whether an earlier exercise part (a lower beat index) already taught the background concept: the tour gives each
-     * concept once, in tour order, so that partial tours and the final tour agree. It reads only the results before `i`.
+     * The tools the parts before beat `i` gave: the tour gives each tool once, in tour order, so that partial tours and the
+     * final tour agree. It reads only the results before `i`.
      */
-    const taught = (i: number, concept: string) => {
+    const toolsBefore = (i: number) => {
+      const given = new Set<string>();
       for (let j = 0; j < i; j++) {
         const earlier = results[j];
-        if (earlier && 'steps' in earlier && earlier.background === concept) return true;
+        if (earlier && 'steps' in earlier) for (const key of earlier.tools ?? []) given.add(key);
       }
-      return false;
+      return given;
     };
     const ownSteps = (i: number, result: BeatResult): Step[] => {
       if ('steps' in result) {
-        const repeated = result.background !== undefined && taught(i, result.background);
-        return repeated ? result.steps.filter((step) => step.id !== `${beats[i].unit!.id}-background`) : result.steps;
+        if (!result.rebuild) return result.steps;
+        const seen = toolsBefore(i);
+        return result.tools!.some((key) => seen.has(key)) ? result.rebuild(seen) : result.steps;
       }
       if (beats[i].detail && !result.direction) return [];
       const step = beatStep(beats[i], result.targets, result.direction, doc);
@@ -1819,6 +1837,7 @@ export class HarnessTourGenerator implements TourGenerator {
                     ok: count('ok'),
                     failed: count('failed'),
                     unknown: count('unknown'),
+                    ...(result.toolCount ? { tools: result.toolCount } : {}),
                     ...(result.visual ? { visual: result.visual } : {}),
                   },
                 ];

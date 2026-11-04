@@ -571,11 +571,11 @@ function solution(unit: string) {
     return {
       plan: 'det = 1 * (-1) - 2 * 3 = -7',
       read: {
-        say: 'We are given a two by two matrix with rows one two and three minus one, and we are asked for its determinant.',
+        say: 'A two by two matrix with rows one two and three minus one is printed, and we want its determinant.',
         given: ['p1.s7'],
         given_anchor: 'a two by two matrix',
         asked: ['p1.s7'],
-        asked_anchor: 'asked for its determinant',
+        asked_anchor: 'we want its determinant',
         marks: [{ target: 'p1.b8', anchor: 'rows one two' }],
       },
       method: {
@@ -619,12 +619,12 @@ function solution(unit: string) {
     plan: '3x - 7 = 2x + 5, x = 12',
     read: {
       say: a
-        ? 'We are given the equation three x minus seven equals two x plus five, and we are asked to solve it for x.'
-        : 'We take the solution from part a, x equals twelve, and are asked to check it in both sides of the equation.',
+        ? 'Three x minus seven equals two x plus five, and we want to solve it for x.'
+        : 'With the solution from part a, x equals twelve, we check it in both sides of the equation.',
       given: ['p1.s3'],
       given_anchor: a ? 'three x minus seven' : 'solution from part a',
       asked: [a ? 'p1.s4' : 'p1.s5'],
-      asked_anchor: a ? 'asked to solve it' : 'asked to check it',
+      asked_anchor: a ? 'we want to solve it' : 'we check it',
       marks: [],
     },
     method: {
@@ -706,8 +706,9 @@ test('an exercise sheet is taught part by part: the task, the method, each solut
   const task = step('ex1.a-task');
   assert.deepEqual(task.actions[0], { type: 'focus', target: 'p1.b4' });
   assert.deepEqual(task.actions.slice(1), [
-    { type: 'highlight', targets: ['p1.s3'], color: 'blue', at_word: findAnchor(task.say, 'three x minus seven')! },
-    { type: 'highlight', targets: ['p1.s4'], color: 'yellow', at_word: findAnchor(task.say, 'asked to solve it')! },
+    // The givens are named in the first words, so they light up with the step.
+    { type: 'highlight', targets: ['p1.s3'], color: 'blue' },
+    { type: 'highlight', targets: ['p1.s4'], color: 'yellow', at_word: findAnchor(task.say, 'we want to solve it')! },
   ]);
   // Each solution line is a formula built term by term, lit up when the narration names it, with a pause after it.
   const first = step('ex1.a-step-1');

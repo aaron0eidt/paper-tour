@@ -1,4 +1,4 @@
-import type { BoardItem, Doc } from '../../../shared/paper';
+import { splitWords, type BoardItem, type Doc } from '../../../shared/paper';
 import { findAnchor } from './assemble';
 import { agreementCheck } from './board-agreement';
 import { boardPart, boardPartIds, boardSchema, checkBoard, type BoardKind } from './board';
@@ -19,16 +19,19 @@ export interface UnitVisual {
   item: BoardItem;
   /** A board part (the index boardPart gives) and the phrase of the method's narration that names it, in word order. */
   focus: { part: number; anchor: string }[];
+  /** The narration of the method, when the part had none of its own (the steps said it): the visual call wrote it. */
+  say?: string;
 }
 /** The most parts the narration lights up. */
 export const UNIT_FOCUS_MAX = 3;
 
 /**
- * Whether a part has a step to show its visual: the method step, or in the compact form (the method joins the first
- * solution line) the first solution line, which follows the checkpoint. A part with no method narration has none.
+ * Whether a part has a step to show its visual: the method step (a part whose steps say the method has none, so the visual
+ * call narrates it), or in the compact form (the method joins the first solution line) the first solution line, which
+ * follows the checkpoint and needs the part's own method narration.
  */
 export const hasVisualHost = (unit: Unit, solution: Solution) =>
-  Boolean(solution.method.say) && (unit.form !== 'compact' || Boolean(solution.coach));
+  unit.form !== 'compact' || (Boolean(solution.method.say) && Boolean(solution.coach));
 
 /** The task text and the maths of a part as the learner reads them: the numbers its givens print. */
 function givenText(unit: Unit, doc: Doc): string {
@@ -50,13 +53,27 @@ export function visualEvidence(unit: Unit, doc: Doc, solution: Solution, visual:
   );
 }
 
-/** The response schema of the visual call: the planned board, and up to three parts for the narration to light up. */
-export function unitVisualSchema(kind: BoardKind) {
+/**
+ * The response schema of the visual call: the planned board, and up to three parts for the narration to light up. With
+ * `narrate` (the part has no method narration) it also writes the narration of the method.
+ */
+export function unitVisualSchema(kind: BoardKind, narrate = false) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['plan', kind, 'focus'],
+    required: ['plan', kind, 'focus', ...(narrate ? ['say'] : [])],
     properties: {
+      ...(narrate
+        ? {
+            say: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 45 * 9,
+              description:
+                'The narration of the method while the board is shown, in 15-45 spoken words: what the board shows and the first move; never the result.',
+            },
+          }
+        : {}),
       plan: {
         type: 'string',
         maxLength: 600,
@@ -113,7 +130,9 @@ export function unitVisualTask(
     `TASK: draw ONE side-board visual for the method of an exercise, in ${JSON.stringify(language)}. ${TONE.exercise_sheet}`,
     brief,
     visualLine(visual),
-    `THE METHOD AS IT IS NARRATED (the board appears while this is spoken): ${solution.method.say}`,
+    solution.method.say
+      ? `THE METHOD AS IT IS NARRATED (the board appears while this is spoken): ${solution.method.say}`
+      : `THE METHOD IS NOT NARRATED YET: write its narration in "say", in the language of the task; the board appears while it is spoken, and the "focus" anchors are copied from it.`,
     `THE SOLUTION LINES (the board shows them right after this step, one by one):\n${lines.join('\n')}`,
     `THE ANSWER, which your board must not show: ${solution.answer.latex}`,
     ...rules.map((rule, i) => `${i + 1}. ${rule}`),
@@ -140,7 +159,10 @@ export function cleanUnitVisual(
   const given = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   if (given[kind] === undefined || given[kind] === null)
     return { visual: null, problems: [`draw the planned ${kind} board in "${kind}"`] };
-  const said = solution.method.say;
+  const own = typeof given.say === 'string' ? given.say.replace(/\s+/g, ' ').trim() : '';
+  const said = solution.method.say || own;
+  if (!solution.method.say && splitWords(said).length < 8)
+    return { visual: null, problems: ['say: narrate the method in at least 8 words'] };
   const check = agreementCheck(
     groundedCheck(checkBoard(kind, given[kind], visualEvidence(unit, doc, solution, visual)), false),
     said,
@@ -178,5 +200,5 @@ export function cleanUnitVisual(
     })
     .slice(0, UNIT_FOCUS_MAX)
     .map(({ part, anchor }) => ({ part, anchor }));
-  return { visual: { item: check.item, focus }, problems: [] };
+  return { visual: { item: check.item, focus, ...(solution.method.say ? {} : { say: said }) }, problems: [] };
 }

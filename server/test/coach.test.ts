@@ -524,7 +524,7 @@ test('a sheet announces its tour part by part, counting the steps of a part befo
   });
   assert.ok(partials.length >= 1);
   const total = steps(result.tour).length;
-  // Planned: the overview, each part's task, background, checkpoint, method, solution steps and answer, and the takeaway.
+  // Planned: the overview, each part's task, tools, checkpoint, method, solution steps and answer, and the takeaway.
   const taught = planUnits(exerciseUnits(english), 'standard').taught;
   assert.deepEqual(
     taught.map((u) => [u.form, u.steps]),
