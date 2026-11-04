@@ -1,3 +1,4 @@
+import { ActionButton } from '../ui/ActionButton';
 import { RegionSelectionCursor } from '../ui/RegionSelectionCursor';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
@@ -408,7 +409,7 @@ export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, s
         </div>
         <div className="pdf-region-instruction" role="status">
           <span>Drag over a figure, equation or passage</span>
-          <button type="button" onClick={onCancelSelection}>Cancel <kbd>Esc</kbd></button>
+          <ActionButton type="button" label="Cancel" shortcut="Esc" className="library-button" aria-keyshortcuts="Escape" onClick={onCancelSelection} />
         </div>
       </>}
     </div>

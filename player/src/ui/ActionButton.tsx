@@ -9,12 +9,14 @@ export function ActionButton({
   busy = false,
   success = false,
   className = 'library-button primary',
+  shortcut,
   disabled,
   ...props
 }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
   label: string;
   busy?: boolean;
   success?: boolean;
+  shortcut?: string;
 }) {
   const reduce = useReducedMotion();
   return (
@@ -40,6 +42,7 @@ export function ActionButton({
         </AnimatePresence>
       </span>
       <span className="ui-sr-only">{label}</span>
+      {shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
       <AnimatePresence>
         {(busy || success) && (
           <motion.span
