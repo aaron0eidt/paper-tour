@@ -29,3 +29,35 @@
   .reader-app-toolbar .reader-navigation-toggle > span:last-child { display: none; }
 }
 .reader-app.reader-app > .reader-app-toolbar { grid-column: 1 / -1; }
+
+/* Quiet, theme-aware scrollbars keep both sidebar tabs and mobile sheets consistent. */
+.reader-navigation-content :is(.chapters, .document-navigation, .problems-list) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+.reader-navigation-content :is(.chapters, .document-navigation, .problems-list):is(:hover, :focus-within) {
+  scrollbar-color: var(--muted) transparent;
+}
+@supports selector(::-webkit-scrollbar) {
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list),
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list):is(:hover, :focus-within) {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list)::-webkit-scrollbar { width: 10px; height: 10px; }
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list)::-webkit-scrollbar-track { background: transparent; }
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list)::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    border-radius: 99px;
+    background-clip: padding-box;
+  }
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list):is(:hover, :focus-within)::-webkit-scrollbar-thumb { background-color: var(--muted); }
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list)::-webkit-scrollbar-button { display: none; }
+}
+@media (forced-colors: active) {
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list) { scrollbar-color: auto; }
+  .reader-navigation-content :is(.chapters, .document-navigation, .problems-list)::-webkit-scrollbar-thumb { background-color: CanvasText; }
+}
