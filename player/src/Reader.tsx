@@ -1618,10 +1618,10 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
             {deck ? 'Fit slide' : 'Fit width'}
           </button>
           {!!selection.length && <button onClick={() => setSelection([])}>Clear selection</button>}
-          {manifest?.analysis && (
+          {manifest?.analysis && manifest.analysis.status !== 'ready' && (
             <span className="reader-status" role="status"><StatusBadge
-              label={manifest.analysis.status === 'processing' ? 'Analyzing…' : manifest.analysis.status === 'queued' ? 'Analysis queued' : manifest.analysis.status === 'limited' ? 'Analysis notes' : manifest.analysis.status === 'failed' ? 'Analysis failed' : 'PDF ready'}
-              tone={manifest.analysis.status === 'failed' ? 'failed' : manifest.analysis.status === 'limited' ? 'limited' : manifest.analysis.status === 'ready' ? 'ready' : 'pending'}
+              label={manifest.analysis.status === 'processing' ? 'Analyzing…' : manifest.analysis.status === 'queued' ? 'Analysis queued' : manifest.analysis.status === 'limited' ? 'Analysis notes' : 'Analysis failed'}
+              tone={manifest.analysis.status === 'failed' ? 'failed' : manifest.analysis.status === 'limited' ? 'limited' : 'pending'}
               busy={manifest.analysis.status === 'processing'} detail={manifest.analysis.warnings.join('\n') || undefined} />
             </span>
           )}

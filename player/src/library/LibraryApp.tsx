@@ -502,7 +502,9 @@ function DocumentCard({
         )}
       </button>
       <div className="library-document-body">
-        <StatusBadge label={status.label} tone={status.kind} busy={item.analysisStatus === 'processing'} />
+        {status.kind !== 'ready' && (
+          <StatusBadge label={status.label} tone={status.kind} busy={item.analysisStatus === 'processing'} />
+        )}
         <h3 title={item.originalFilename}>
           <button type="button" onClick={onOpen} disabled={!canOpen}>
             {item.title}

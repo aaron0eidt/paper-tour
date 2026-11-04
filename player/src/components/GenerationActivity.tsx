@@ -41,6 +41,7 @@ export function GenerationActivity({
   label = 'Tour assistant',
   active = false,
   openRequest = 0,
+  trigger,
 }: {
   documentId: string;
   generationId: string;
@@ -49,6 +50,7 @@ export function GenerationActivity({
   label?: string;
   active?: boolean;
   openRequest?: number;
+  trigger?(open: () => void): import('react').ReactNode;
 }) {
   const [run, setRun] = useState<AgentRun | null>(null);
   const [controlling, setControlling] = useState(false);
@@ -273,10 +275,12 @@ export function GenerationActivity({
   const text = view === 'details' ? payloadText(payload) : '';
   return (
     <div className="generation-activity">
-      <button type="button" className="activity-launch" onClick={() => setOpen(true)}>
-        <AgentOrb active={working} />
-        {label}
-      </button>
+      {trigger ? trigger(() => setOpen(true)) : (
+        <button type="button" className="activity-launch" onClick={() => setOpen(true)}>
+          <AgentOrb active={working} />
+          {label}
+        </button>
+      )}
       <dialog
         ref={dialog}
         className="activity-dialog"

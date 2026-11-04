@@ -9,11 +9,13 @@ export function StatusBadge({
   tone = 'idle',
   detail,
   busy = false,
+  onClick,
 }: {
   label: string;
   tone?: StatusTone;
   detail?: string;
   busy?: boolean;
+  onClick?(): void;
 }) {
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
@@ -60,7 +62,7 @@ export function StatusBadge({
           {label}
         </motion.span>
       </AnimatePresence>
-      {detail && (
+      {(detail || onClick) && (
         <svg
           width="11"
           height="11"
@@ -75,6 +77,20 @@ export function StatusBadge({
       )}
     </>
   );
+  if (onClick)
+    return (
+      <button
+        type="button"
+        className="ui-status-badge"
+        data-tone={tone}
+        aria-label={`${label}: open activity`}
+        aria-haspopup="dialog"
+        title={detail}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
   if (!detail)
     return (
       <span className="ui-status-badge" data-tone={tone}>

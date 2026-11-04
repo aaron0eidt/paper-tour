@@ -96,25 +96,8 @@ export function TourGeneration({
         aria-label="Guided tour"
         aria-busy={active || requesting}
       >
-        {(!compact || current?.status !== 'ready') && (
-          <div className="tour-generation-content" aria-live="polite" title={`${copy.title} ${copy.detail}`}>
-            <StatusBadge
-              label={requesting ? 'Starting your tour…' : copy.title}
-              tone={copy.kind}
-              detail={copy.detail}
-              busy={active || requesting}
-            />
-            {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
-              <progress
-                aria-label="Images reviewed for the tour"
-                value={Math.min(current.imagesTotal, Math.max(0, current.imagesDone))}
-                max={current.imagesTotal}
-              />
-            )}
-          </div>
-        )}
-        <div className="generation-actions">
-          {current && (
+        <div className="tour-generation-content" aria-live="polite">
+          {current ? (
             <GenerationActivity
               key={current.id}
               documentId={documentId}
@@ -123,9 +106,33 @@ export function TourGeneration({
               active={active || requesting}
               openRequest={activityRequest}
               onChanged={onChanged}
-              label="Activity"
+              trigger={(open) => (
+                <StatusBadge
+                  label={requesting ? 'Starting your tour…' : copy.title}
+                  tone={copy.kind}
+                  detail={copy.detail}
+                  busy={active || requesting}
+                  onClick={open}
+                />
+              )}
+            />
+          ) : (
+            <StatusBadge
+              label={requesting ? 'Starting your tour…' : copy.title}
+              tone={copy.kind}
+              detail={copy.detail}
+              busy={requesting}
             />
           )}
+          {current?.status === 'generating' && current.stage === 'images' && current.imagesTotal > 0 && (
+            <progress
+              aria-label="Images reviewed for the tour"
+              value={Math.min(current.imagesTotal, Math.max(0, current.imagesDone))}
+              max={current.imagesTotal}
+            />
+          )}
+        </div>
+        <div className="generation-actions">
           {error && (
             <p className="tour-generation-error" role="alert" title={error}>
               {error}

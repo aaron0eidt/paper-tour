@@ -337,6 +337,7 @@
 .library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 252px), 1fr));
+  align-items: start;
   gap: 30px 24px;
 }
 .library-document {
@@ -888,13 +889,14 @@
   min-width: 0;
 }
 .library-document h3 {
-  min-height: 2.9em;
+  min-height: 0;
+  margin-top: 0;
   width: 100%;
 }
 .library-document-actions {
   width: 100%;
-  margin-top: auto;
-  padding-top: 18px;
+  margin-top: 0;
+  padding-top: 14px;
 }
 .library-document .library-filename {
   max-width: 100%;
