@@ -1,6 +1,6 @@
 import { ReaderNavigation, ReaderNavigationProvider, ReaderNavigationToggle, useReaderNavigation } from './ui/ReaderNavigation';
 import { AnimatedSwitch } from './ui/controls';
-import { motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { setNarrationSoundGate } from './ui/sound';
 import { UI_SPRING } from './ui/motion';
 import { StatusBadge } from './ui/StatusBadge';
@@ -1694,41 +1694,45 @@ function ReaderContent({ documentId, onBack }: { documentId: string; onBack(): v
                 onSelectRegion={acceptRegionSelection}
                 onCancelSelection={cancelRegionSelection}
               />
-              {coverOpen && engine && clock && (
-                <TourCover
-                  tour={engine.tour}
-                  steps={engine.steps.length}
-                  length={lengthLabel(clock.total)}
-                  resumeAt={restored !== null ? restored + 1 : null}
-                  growth={growth}
-                  onStart={() => {
-                    setSelection([]);
-                    if (restored !== null && restored > 0) engine.goTo(0);
-                    engine.play();
-                  }}
-                  onResume={() => engine.play()}
-                  onBrowse={() => setCoverGone(true)}
-                />
-              )}
-              {endOpen && engine && (
-                <TourEnd
-                  tour={engine.tour}
-                  stopped={playable?.phase === 'stopped' ? playable : null}
-                  questions={loaded?.doc ? openQuestions(engine.tour.suggested_questions, asked) : []}
-                  ready={readyQuestions}
-                  onReplayChapter={(step) => {
-                    setSelection([]);
-                    engine.goTo(step);
-                    engine.play();
-                  }}
-                  onReplay={() => {
-                    setSelection([]);
-                    engine.play();
-                  }}
-                  onAsk={(question) => setAskRequest((last) => ({ id: (last?.id ?? 0) + 1, question }))}
-                  onClose={() => setEndGone(true)}
-                />
-              )}
+              <AnimatePresence>
+                {coverOpen && engine && clock && (
+                  <TourCover
+                    key="tour-cover"
+                    tour={engine.tour}
+                    steps={engine.steps.length}
+                    length={lengthLabel(clock.total)}
+                    resumeAt={restored !== null ? restored + 1 : null}
+                    growth={growth}
+                    onStart={() => {
+                      setSelection([]);
+                      if (restored !== null && restored > 0) engine.goTo(0);
+                      engine.play();
+                    }}
+                    onResume={() => engine.play()}
+                    onBrowse={() => setCoverGone(true)}
+                  />
+                )}
+                {endOpen && engine && (
+                  <TourEnd
+                    key="tour-end"
+                    tour={engine.tour}
+                    stopped={playable?.phase === 'stopped' ? playable : null}
+                    questions={loaded?.doc ? openQuestions(engine.tour.suggested_questions, asked) : []}
+                    ready={readyQuestions}
+                    onReplayChapter={(step) => {
+                      setSelection([]);
+                      engine.goTo(step);
+                      engine.play();
+                    }}
+                    onReplay={() => {
+                      setSelection([]);
+                      engine.play();
+                    }}
+                    onAsk={(question) => setAskRequest((last) => ({ id: (last?.id ?? 0) + 1, question }))}
+                    onClose={() => setEndGone(true)}
+                  />
+                )}
+              </AnimatePresence>
               {loaded?.doc && (!readAloud || !!away) && (
                 <div className="ask-lane">
                   {coachStep?.checkpoint && (

@@ -3,7 +3,9 @@
 // when they show.
 
 import { useEffect, useRef, useState } from 'react';
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
+import { motion, useIsPresent, useReducedMotion } from 'motion/react';
+import { UI_EXIT, UI_SPRING } from '../ui/motion';
 import { coverageNote } from '../../../shared/coverage';
 import { chapterTakeaways, docTypeLabel, stepsLabel } from '../tourSummary';
 import { stoppedCopy } from '../partialTour';
@@ -11,6 +13,35 @@ import type { Growth } from '../partialTour';
 import type { Tour } from '../types';
 import { PlayIcon } from './icons';
 import './tourCards.css';
+
+/** Shared presence animation; the reader keeps exiting cards mounted until it finishes. */
+function TourCardLayer({ children, className, label }: { children: ReactNode; className: string; label: string }) {
+  const reducedMotion = useReducedMotion();
+  const present = useIsPresent();
+  return (
+    <motion.div
+      className="tour-layer"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: UI_EXIT }}
+      transition={{ duration: 0.2 }}
+      inert={!present}
+      aria-hidden={!present || undefined}
+    >
+      <motion.section
+        className={`tour-card ${className}`}
+        role="region"
+        aria-label={label}
+        initial={{ scale: reducedMotion ? 1 : 0.96, y: reducedMotion ? 0 : 8 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: reducedMotion ? 1 : 0.96, y: reducedMotion ? 0 : 4, transition: UI_EXIT }}
+        transition={UI_SPRING}
+      >
+        {children}
+      </motion.section>
+    </motion.div>
+  );
+}
 
 const MAX_LISTED = 8;
 
@@ -56,8 +87,7 @@ export function TourCover({ tour, steps, length, resumeAt, growth, onStart, onRe
   const resuming = !!resumeAt && resumeAt > 1;
   const [list, more] = useScrollCue<HTMLOListElement>(chapters.length);
   return (
-    <div className="tour-layer">
-      <section className="tour-card cover" role="region" aria-label="About this tour">
+    <TourCardLayer className="cover" label="About this tour">
         {type && <p className="tour-eyebrow">{type}</p>}
         <h2 className="tour-title-text">{tour.title}</h2>
         <p className="tour-meta">
@@ -93,8 +123,7 @@ export function TourCover({ tour, steps, length, resumeAt, growth, onStart, onRe
             </button>
           )}
         </div>
-      </section>
-    </div>
+    </TourCardLayer>
   );
 }
 
@@ -155,8 +184,7 @@ export function TourEnd({ tour, stopped, questions, ready = [], onReplayChapter,
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="tour-layer">
-      <section className="tour-card end" role="region" aria-label="Tour recap">
+    <TourCardLayer className="end" label="Tour recap">
         <button type="button" className="tour-close" onClick={onClose} aria-label="Close the recap" title="Close">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
             <path d="M6.5 6.5l11 11m0-11l-11 11" />
@@ -217,7 +245,6 @@ export function TourEnd({ tour, stopped, questions, ready = [], onReplayChapter,
             </div>
           </div>
         )}
-      </section>
-    </div>
+    </TourCardLayer>
   );
 }
