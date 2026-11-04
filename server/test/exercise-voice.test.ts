@@ -162,12 +162,13 @@ test('the repair turn quotes the field and the words it opens with', () => {
   assert.deepEqual(voiceProblems([], first, true), []);
 });
 
-test('two steps of a part in a row that open with the same word are sent back, once', () => {
+test('a part whose three or more steps all open with the same word is sent back, once', () => {
   const steps = (...says: string[]) => says.map((say, i) => field(say, `step ${i + 1}`));
   const [problem] = voiceProblems(steps('Wir teilen durch drei.', 'Wir setzen ein.', 'Wir prüfen es.'), first, true);
   assert.equal(voiceProblems(steps('Wir teilen durch drei.', 'Wir setzen ein.', 'Wir prüfen es.'), first, true).length, 1);
-  assert.match(problem, /^step 2 and the step before it both open with "wir": vary how the steps begin$/);
-  // Different words, the same word apart, one-letter words and fields that are no steps are fine.
+  assert.match(problem, /^all 3 steps open with "wir": vary how the steps begin$/);
+  // Two steps alike (a repair is a whole solve call), different words, one-letter words and fields that are no steps are fine.
+  assert.deepEqual(voiceProblems(steps('Wir teilen durch drei.', 'Wir setzen ein.'), first, true), []);
   assert.deepEqual(voiceProblems(steps('Wir teilen.', 'Jetzt setzen wir ein.', 'Wir prüfen es.'), first, true), []);
   assert.deepEqual(voiceProblems(steps('x ist drei.', 'x ist jetzt vier.'), first, true), []);
   assert.deepEqual(voiceProblems([field('Dann teilen wir.', 'method.say'), field('Dann setzen wir ein.', 'answer.say')], first, true), []);

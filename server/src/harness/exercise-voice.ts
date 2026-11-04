@@ -5,7 +5,7 @@ import type { Unit } from './exercise';
 // with, so code holds the narration to it: a spoken field that opens with a templated opening or with a task label, and a
 // later part that names its own task or part, are sent back for one repair turn. The checks cover the languages the
 // harness reads (language.ts) and are light on purpose: they look at how a narration begins and at labels, never at what
-// it explains. Two steps of a part in a row that open with the same word ("Wir ... Wir ...") are sent back too.
+// it explains. A part whose steps all open with the same word ("Wir ... Wir ... Wir ...") is sent back too.
 
 const END = String.raw`(?![\p{L}\p{N}])`;
 const START = String.raw`^[\s"'“”„«»(\-–—]*`;
@@ -91,14 +91,12 @@ export function voiceProblems(fields: Spoken[], unit: Pick<Unit, 'part'>, entry:
       ({ name, say }) =>
         `${name} opens with ${head(say)}: no template; start with the situation or the question in your own words`,
     );
-  // Steps in a row that open with the same word: the moves of a part do not all begin alike.
+  // A part whose three or more steps all open with the same word ("Wir ... Wir ... Wir ...") reads as a template. Two
+  // steps alike are left be: each repair is a whole solve call, and a long sheet has to fit its time.
   const steps = fields.filter(({ name }) => /^step \d+$/.test(name));
-  const same = (a: string, b: string) => openingWord(a).length > 1 && openingWord(a) === openingWord(b);
-  const twice = steps.find(({ say }, i) => i > 0 && same(say, steps[i - 1].say));
-  if (twice)
-    problems.push(
-      `${twice.name} and the step before it both open with "${openingWord(twice.say)}": vary how the steps begin`,
-    );
+  const word = steps.length >= 3 ? openingWord(steps[0].say) : '';
+  if (word.length > 1 && steps.every(({ say }) => openingWord(say) === word))
+    problems.push(`all ${steps.length} steps open with "${word}": vary how the steps begin`);
   const named = fields.map(({ name, say }) => ({ name, labels: labelsIn(say, unit.part?.label) }));
   const count = named.reduce((n, { labels }) => n + labels.length, 0);
   if (!entry)
