@@ -162,7 +162,7 @@ export function ControlBar({
 
   return (
     <footer ref={controlsRef} className={`controls${showNarration ? '' : ' without-captions'}`}>
-      {state.speechError && <p className="speech-error" role="alert">{state.speechError}</p>}
+      {state.speechError && <span className="speech-error-announcement" role="alert">{state.speechError}</span>}
       <Timeline
         steps={steps}
         chapters={chapters}
@@ -253,7 +253,7 @@ export function ControlBar({
       <div className="settings">
         {unclear && <NotClear {...unclear} />}
         <details className="playback-options" ref={audioPanel}>
-          <summary aria-label="Audio settings" title="Voice and playback speed">
+          <summary aria-label={state.speechError ? 'Audio settings: playback needs attention' : 'Audio settings'} data-error={!!state.speechError || undefined} title={state.speechError ?? 'Voice and playback speed'}>
             <svg
               width="17"
               height="17"
@@ -279,6 +279,7 @@ export function ControlBar({
                 <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
               </button>
             </div>
+            {state.speechError && <p className="speech-error" role="alert">{state.speechError}</p>}
             {speechSettings}
             {onVoiceChange && !current?.step.audio && (
               <label className="voice-setting">
