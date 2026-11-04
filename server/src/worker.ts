@@ -11,7 +11,7 @@ import { Database, type Db } from './db';
 import { ProcessingError } from './errors';
 import type { FileStorage } from './storage';
 import { indexElements } from './elements';
-import { ensureTourGeneration } from './tour-worker';
+import { ensureTourGeneration, tourEngine } from './tour-worker';
 import type { Enqueue } from './service';
 const execute = promisify(execFile);
 export interface ProcessResult {
@@ -291,7 +291,7 @@ export class AnalysisWorker {
         document.tour_model,
         false,
         false,
-        this.config.agent?.enabled ? 'agent' : 'legacy',
+        tourEngine(p.doc, Boolean(this.config.agent?.enabled)),
       );
     }
   }
