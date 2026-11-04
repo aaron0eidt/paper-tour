@@ -38,6 +38,7 @@ export function useActivityPlacement(root: RefObject<HTMLElement | null>) {
         '--agent-dock-clearance': placement.bottom,
         '--agent-dock-right': placement.right,
         '--agent-bubble-gap': placement.bubbleGap,
+        '--agent-card-gap': placement.cardGap,
         '--agent-card-room': placement.room,
         '--agent-card-width': placement.width,
         '--agent-sheet-top': placement.sheetTop,

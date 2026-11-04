@@ -190,6 +190,7 @@
   border-radius: 3px;
 }
 .reader-agent-card {
+  bottom: calc(100% + var(--agent-card-gap, var(--agent-bubble-gap, 14px)));
   width: min(366px, var(--agent-card-width, calc(100vw - 42px)));
   max-height: min(700px, var(--agent-card-room, calc(100dvh - 220px)));
   display: flex;
@@ -582,9 +583,9 @@
   display: none;
 }
 
-/* A small footer holds the character beside artwork, instead of drawing over the plot. */
+/* A footer holds the character and its bubble under the artwork, instead of drawing over the plot. */
 .board-frame.with-agent-board {
-  --agent-footer: 104px;
+  --agent-footer: 128px;
 }
 .board-frame.with-agent-board > .reader-agent-anchor {
   --agent-edge: 14px;
@@ -596,17 +597,12 @@
   width: min(366px, calc(var(--board-w) - 34px));
 }
 .board-frame.with-agent-board .agent-speech-peek {
-  right: calc(100% + 12px);
-  bottom: 4px;
-  width: min(270px, calc(var(--board-w) - var(--agent-size) - 60px));
+  right: 0;
+  bottom: calc(100% + 9px);
+  width: min(270px, calc(var(--board-w) - 34px));
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.5;
-}
-.board-frame.with-agent-board .agent-speech-peek::after {
-  right: -7px;
-  bottom: 30px;
-  transform: rotate(-45deg);
 }
 .board-frame.with-agent-board .agent-peek-status {
   margin-bottom: 3px;
@@ -619,7 +615,7 @@
 }
 @container board-split (orientation: portrait) or (max-width: 560px) {
   .board-frame.with-agent-board {
-    --agent-footer: 78px;
+    --agent-footer: 118px;
   }
   .board-frame.with-agent-board > .reader-agent-anchor {
     --agent-size: 56px;
@@ -629,7 +625,7 @@
     width: min(366px, calc(100cqw - 32px));
   }
   .board-frame.with-agent-board .agent-speech-peek {
-    width: min(290px, calc(100cqw - var(--agent-size) - 60px));
+    width: min(290px, calc(100cqw - 32px));
     font-size: 11px;
   }
 }

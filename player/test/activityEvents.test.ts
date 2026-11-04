@@ -132,6 +132,14 @@ test('expanding a composer keeps the sphere stationary when there is room beside
   // The bubble clears the tray even though the sphere itself does not move.
   assert.equal(frame.bottom - expanded.bottom - 80 - expanded.bubbleGap, 586);
 });
+test('a tall tray off to the left leaves the bubble right above the sphere', () => {
+  const frame = { left: 0, right: 1440, top: 0, bottom: 800, width: 1440 };
+  const tray = { left: 300, right: 1010, top: 520, bottom: 780, width: 710 };
+  const placement = companionPlacement(frame, tray, 64, 18, 14, false);
+  assert.equal(placement.beside, true);
+  assert.equal(placement.bubbleGap, 14);
+  assert.equal(placement.cardGap, 14);
+});
 test('narrow layouts stack above the composer and short layouts keep the popup inside the reader', () => {
   const frame = { left: 0, right: 400, top: 100, bottom: 800, width: 400 };
   const composer = { left: 12, right: 388, top: 680, bottom: 788, width: 376 };
