@@ -804,3 +804,30 @@ button.ui-status-badge:hover {
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+
+.ui-theme-toggler {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 140ms, border-color 140ms, color 140ms;
+}
+.ui-theme-toggler:hover { background: var(--panel-2); color: var(--text); border-color: var(--border-strong); }
+.ui-theme-toggler:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ui-theme-toggler:disabled { opacity: .5; cursor: default; }
+.ui-theme-toggler svg { display: block; pointer-events: none; }
+@media (max-width: 480px) {
+  .library-header { gap: 12px; }
+  .library-brand { gap: 8px; white-space: nowrap; font-size: 16px; }
+  .library-account { gap: 8px; }
+  .library-settings-link { padding-inline: 10px; }
+  .library-settings-link > span { display: none; }
+}

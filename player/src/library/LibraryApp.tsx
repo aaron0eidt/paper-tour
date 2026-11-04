@@ -10,6 +10,7 @@ import { TourGeneration } from '../components/TourGeneration';
 import { useModelCatalog } from './useModelCatalog';
 import { TourModelControl } from '../ui/TourModelControl';
 import { AccountMenu } from '../ui/navigation';
+import { ThemeToggle } from '../ui/ThemeToggle';
 import { StatusBadge, type StatusTone } from '../ui/StatusBadge';
 import { useSettings, settingsChanged } from './useSettings';
 import { ProfileSettings } from './ProfileSettings';
@@ -207,6 +208,7 @@ function AuthenticatedLibrary({
       <header className="library-header">
         <PaperMark />
         <div className="library-account">
+          <ThemeToggle />
           <a
             className="library-settings-link"
             href={`${import.meta.env.BASE_URL}?settings=profile`}
