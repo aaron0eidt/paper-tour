@@ -34,12 +34,14 @@ export function AnimatedPopover({
   onOpenChange,
   label,
   side = 'bottom',
+  openOnHover = false,
 }: {
   trigger: ReactElement;
   children: ReactNode;
   className?: string;
   label: string;
   side?: 'top' | 'bottom';
+  openOnHover?: boolean;
   open: boolean;
   onOpenChange(open: boolean): void;
 }) {
@@ -51,7 +53,7 @@ export function AnimatedPopover({
         playInterfaceSound(next ? 'open' : 'close');
       }}
     >
-      <Popover.Trigger render={trigger} />
+      <Popover.Trigger render={trigger} openOnHover={openOnHover} delay={250} closeDelay={200} />
       <Popover.Portal>
         <Popover.Positioner
           side={side}

@@ -43,10 +43,7 @@ export function LibraryApp({ onOpenDocument }: Props) {
             ⌁
           </div>
           <h1>A home for your papers.</h1>
-          <p>
-            Connect the library to save PDFs, prepare their contents, and keep your reading progress across
-            visits.
-          </p>
+          <p>Connect the library to save PDFs, prepare their contents, and keep your reading progress across visits.</p>
           <section>
             <h2>Connect your library</h2>
             <p>
@@ -361,9 +358,7 @@ function AuthenticatedLibrary({
                 />
               )}
               {option.label}
-              {!loading && (
-                <span>{documents.filter((paper) => matchesLibraryFilter(paper, option.id)).length}</span>
-              )}
+              {!loading && <span>{documents.filter((paper) => matchesLibraryFilter(paper, option.id)).length}</span>}
             </button>
           ))}
         </div>
@@ -517,16 +512,6 @@ function DocumentCard({
           <span>Added {formatDate(item.createdAt)}</span>
         </p>
         {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
-        {canOpen && item.tourGeneration?.status !== 'ready' && item.tourGeneration && (
-          <TourGeneration
-            documentId={item.id}
-            generation={item.tourGeneration}
-            onChanged={onTourChanged}
-            canGenerate={analysisReady || !!item.tourGeneration}
-            onOpenTour={() => onOpen()}
-            compact
-          />
-        )}
         <div className="library-document-actions">
           <button type="button" className="library-open-button" disabled={!canOpen} onClick={onOpen}>
             Open paper{' '}
@@ -542,6 +527,17 @@ function DocumentCard({
               <path d="M4 10h12m-5-5 5 5-5 5" />
             </svg>
           </button>
+          {canOpen && item.tourGeneration?.status !== 'ready' && item.tourGeneration && (
+            <TourGeneration
+              documentId={item.id}
+              generation={item.tourGeneration}
+              onChanged={onTourChanged}
+              canGenerate={analysisReady || !!item.tourGeneration}
+              onOpenTour={() => onOpen()}
+              compact
+              card
+            />
+          )}
           {item.analysisStatus === 'failed' && canOpen && (
             <button type="button" className="library-text-button" disabled={busy} onClick={onRetry}>
               {busy ? 'Restarting…' : 'Retry analysis'}
@@ -556,7 +552,5 @@ function DocumentCard({
 
 function formatDate(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.valueOf())
-    ? ''
-    : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return Number.isNaN(date.valueOf()) ? '' : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }

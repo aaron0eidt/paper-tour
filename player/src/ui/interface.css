@@ -768,3 +768,39 @@ button.ui-status-badge:hover {
     border-right-color: currentColor;
   }
 }
+
+/* Tour recovery stays in the action row; its detail never changes card height. */
+.library-tour-trigger {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+.library-tour-trigger[data-tone='failed'] { color: var(--error-ink); }
+.library-tour-trigger:hover, .library-tour-trigger[data-popup-open] {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+}
+.library-tour-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.library-tour-popover { width: min(320px, calc(100vw - 32px)); padding: 14px; }
+.library-tour-popover .tour-generation.compact {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.library-tour-popover .ui-status-badge { max-width: 100%; white-space: normal; text-align: left; }
+.library-document h3 button {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
