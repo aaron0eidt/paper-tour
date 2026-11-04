@@ -1,0 +1,225 @@
+% Gebrauchsinformation (patient information leaflet) for a FICTIONAL medicine "Beispielin 400 mg Filmtabletten".
+% Test document, not a real leaflet: the product, the active substance and the company do not exist. German, 3 pages.
+% Features: numbered sections 1-6 as in real leaflets, dosage table by age and body weight, side effects by frequency,
+% warnings, missed dose, storage, contents of the pack.
+\documentclass[9.5pt,a4paper]{extarticle}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[scaled=0.95]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[ngerman]{babel}
+\usepackage[margin=2.0cm,top=2.3cm,bottom=2.3cm]{geometry}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{needspace}
+\usepackage{microtype}
+
+\definecolor{pharma}{HTML}{0B6E4F}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\renewcommand{\arraystretch}{1.18}
+\setlist{leftmargin=1.3em, itemsep=0.1em, topsep=0.2em}
+
+\titleformat{\section}{\large\bfseries\color{pharma}}{\thesection.}{0.5em}{}[{\color{pharma}\titlerule}]
+\titleformat{\subsection}{\bfseries}{}{0pt}{}
+\titlespacing*{\section}{0pt}{1.1em}{0.4em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.1em}
+\renewcommand{\thesection}{\arabic{section}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\small\textbf{Beispielin 400 mg Filmtabletten}}
+\fancyhead[R]{\small Gebrauchsinformation: Information für Anwender}
+\fancyfoot[L]{\scriptsize\textbf{TESTDOKUMENT:} fiktives Arzneimittel, keine echte Packungsbeilage, nicht zur Anwendung bestimmt.}
+\fancyfoot[R]{\scriptsize Seite \thepage{} von \pageref{LastPage}}
+
+\newcommand{\wichtig}[1]{\begin{tcolorbox}[colback=pharma!8, colframe=pharma, boxrule=0.6pt, arc=2pt, left=7pt, right=7pt,
+  top=4pt, bottom=4pt]#1\end{tcolorbox}}
+
+\begin{document}
+
+% ---- Kopf ----------------------------------------------------------------------------------
+{\Large\bfseries Gebrauchsinformation: Information für Anwender}\\[0.3em]
+{\fontsize{20}{24}\selectfont\bfseries\color{pharma} Beispielin 400 mg Filmtabletten}\\[0.2em]
+{\large Wirkstoff: Probanol}
+
+\vspace{0.2em}
+\wichtig{\textbf{Lesen Sie die gesamte Packungsbeilage sorgfältig durch, bevor Sie mit der Einnahme dieses
+Arzneimittels beginnen, denn sie enthält wichtige Informationen.}
+\begin{itemize}
+  \item Heben Sie die Packungsbeilage auf. Vielleicht möchten Sie diese später nochmals lesen.
+  \item Wenn Sie weitere Fragen haben, wenden Sie sich an Ihren Arzt oder Apotheker.
+  \item Dieses Arzneimittel wurde Ihnen persönlich verschrieben. Geben Sie es nicht an Dritte weiter.
+  \item Wenn Sie sich nach 3 Tagen nicht besser oder gar schlechter fühlen, wenden Sie sich an Ihren Arzt.
+\end{itemize}}
+
+\subsection*{Was in dieser Packungsbeilage steht}
+\begin{enumerate}[label=\arabic*., itemsep=0pt]
+  \item Was ist Beispielin und wofür wird es angewendet?
+  \item Was sollten Sie vor der Einnahme von Beispielin beachten?
+  \item Wie ist Beispielin einzunehmen?
+  \item Welche Nebenwirkungen sind möglich?
+  \item Wie ist Beispielin aufzubewahren?
+  \item Inhalt der Packung und weitere Informationen
+\end{enumerate}
+
+% ---- 1 ------------------------------------------------------------------------------------------
+\section{Was ist Beispielin und wofür wird es angewendet?}
+Beispielin enthält den Wirkstoff Probanol. Probanol gehört zu einer Gruppe von Arzneimitteln, die Schmerzen lindern
+und Fieber senken.
+
+Beispielin wird angewendet zur kurzzeitigen Behandlung von leichten bis mäßig starken Schmerzen, wie
+Kopfschmerzen, Zahnschmerzen oder Regelschmerzen, und von Fieber.
+
+% ---- 2 ------------------------------------------------------------------------------------------
+\section{Was sollten Sie vor der Einnahme von Beispielin beachten?}
+\subsection*{Beispielin darf nicht eingenommen werden,}
+\begin{itemize}
+  \item wenn Sie allergisch gegen Probanol oder einen der in Abschnitt 6 genannten sonstigen Bestandteile dieses
+        Arzneimittels sind;
+  \item wenn Sie in den letzten 3 Monaten der Schwangerschaft sind (ab der 28.\ Schwangerschaftswoche);
+  \item wenn Sie schon einmal ein Magen- oder Darmgeschwür oder eine Magen-Darm-Blutung hatten;
+  \item wenn Sie an einer schweren Leber-, Nieren- oder Herzschwäche leiden;
+  \item bei Kindern unter 12 Jahren oder mit einem Körpergewicht unter 40 kg.
+\end{itemize}
+
+\subsection*{Warnhinweise und Vorsichtsmaßnahmen}
+Sprechen Sie vor der Einnahme von Beispielin mit Ihrem Arzt oder Apotheker, wenn Sie Asthma haben, Bluthochdruck
+haben oder wenn Sie zu Magenbeschwerden neigen. Nebenwirkungen können verringert werden, indem die niedrigste
+wirksame Dosis über den kürzesten für die Behandlung erforderlichen Zeitraum angewendet wird.
+
+\wichtig{\textbf{Achtung:} Nehmen Sie Beispielin nicht länger als 3 Tage bei Fieber und nicht länger als 4 Tage bei
+Schmerzen ein, ohne ärztlichen Rat einzuholen. Überschreiten Sie nicht die im Abschnitt 3 angegebene Höchstdosis.}
+
+\subsection*{Einnahme von Beispielin zusammen mit anderen Arzneimitteln}
+Informieren Sie Ihren Arzt oder Apotheker, wenn Sie andere Arzneimittel einnehmen oder kürzlich eingenommen
+haben, insbesondere Arzneimittel zur Hemmung der Blutgerinnung, Arzneimittel gegen Bluthochdruck, entwässernde
+Arzneimittel sowie weitere Schmerzmittel. Nehmen Sie nicht zwei Arzneimittel mit schmerzlindernder Wirkung
+gleichzeitig ein, ohne Ihren Arzt zu fragen.
+
+\subsection*{Schwangerschaft und Stillzeit}
+Wenn Sie schwanger sind oder stillen, oder wenn Sie vermuten, schwanger zu sein, fragen Sie vor der Einnahme dieses
+Arzneimittels Ihren Arzt oder Apotheker um Rat. In den ersten 6 Monaten der Schwangerschaft sollten Sie Beispielin
+nur nach Rücksprache mit Ihrem Arzt einnehmen. In den letzten 3 Monaten der Schwangerschaft dürfen Sie
+Beispielin nicht einnehmen.
+
+\subsection*{Verkehrstüchtigkeit und Fähigkeit zum Bedienen von Maschinen}
+Bei kurzzeitiger Anwendung hat Beispielin keinen oder nur einen vernachlässigbaren Einfluss auf die Verkehrstüchtigkeit.
+Wenn bei Ihnen Schwindel auftritt, fahren Sie nicht Auto und bedienen Sie keine Maschinen.
+
+\subsection*{Beispielin enthält Lactose}
+Bitte nehmen Sie Beispielin erst nach Rücksprache mit Ihrem Arzt ein, wenn Ihnen bekannt ist, dass Sie unter einer
+Unverträglichkeit gegenüber bestimmten Zuckern leiden.
+
+% ---- 3 ------------------------------------------------------------------------------------------
+\Needspace{20\baselineskip}
+\section{Wie ist Beispielin einzunehmen?}
+Nehmen Sie dieses Arzneimittel immer genau so ein, wie es in dieser Packungsbeilage beschrieben ist bzw. genau nach
+Absprache mit Ihrem Arzt oder Apotheker. Fragen Sie bei Ihrem Arzt oder Apotheker nach, wenn Sie sich nicht sicher
+sind. Die empfohlene Dosis richtet sich nach Alter und Körpergewicht:
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{3.5cm} >{\raggedright\arraybackslash}p{2.0cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}p{2.7cm} >{\raggedright\arraybackslash}p{3.0cm}@{}}
+  \toprule
+  \textbf{Alter} & \textbf{Körpergewicht} & \textbf{Einzeldosis} & \textbf{Abstand zwischen den Einnahmen} & \textbf{Höchstdosis in 24 Stunden} \\
+  \midrule
+  Kinder unter 12 Jahren & unter 40 kg & nicht empfohlen & --- & --- \\
+  \addlinespace[3pt]
+  Jugendliche von 12 bis 14 Jahren & 40 bis 49 kg & ½ Filmtablette (200 mg) & mindestens 8 Stunden & 3 halbe Filmtabletten (600 mg) \\
+  \addlinespace[3pt]
+  Erwachsene und Jugendliche ab 15 Jahren & ab 50 kg & 1 Filmtablette (400 mg) & mindestens 6 Stunden & 3 Filmtabletten (1\,200 mg) \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+Die Filmtabletten werden unzerkaut mit reichlich Flüssigkeit, zum Beispiel einem Glas Wasser, eingenommen, am besten
+während oder nach einer Mahlzeit. Die Tablette kann an der Bruchkerbe geteilt werden.
+
+\subsection*{Dauer der Anwendung}
+Beispielin ist nur zur kurzzeitigen Anwendung bestimmt. Nehmen Sie es bei Fieber nicht länger als 3 Tage und bei
+Schmerzen nicht länger als 4 Tage ein, ohne mit Ihrem Arzt gesprochen zu haben.
+
+\subsection*{Wenn Sie eine größere Menge von Beispielin eingenommen haben, als Sie sollten}
+Wenn Sie zu viele Filmtabletten eingenommen haben, sprechen Sie sofort mit einem Arzt oder Apotheker oder wenden
+Sie sich an die nächste Notaufnahme oder an eine Giftnotrufzentrale. Nehmen Sie diese Packungsbeilage und die
+Packung mit.
+
+\subsection*{Wenn Sie die Einnahme von Beispielin vergessen haben}
+Nehmen Sie nicht die doppelte Menge ein, wenn Sie die vorherige Einnahme vergessen haben. Wenn Sie noch
+Beschwerden haben, nehmen Sie die nächste Dosis ein, sobald Sie daran denken. Halten Sie dabei den in der
+Tabelle angegebenen Abstand zur letzten Einnahme ein (mindestens 6 Stunden, bei Jugendlichen von 12 bis 14
+Jahren mindestens 8 Stunden) und überschreiten Sie die Höchstdosis in 24 Stunden nicht. Wenn Sie keine Beschwerden
+mehr haben, brauchen Sie die vergessene Dosis nicht nachzuholen.
+
+% ---- 4 ------------------------------------------------------------------------------------------
+\Needspace{24\baselineskip}
+\section{Welche Nebenwirkungen sind möglich?}
+Wie alle Arzneimittel kann auch dieses Arzneimittel Nebenwirkungen haben, die aber nicht bei jedem auftreten müssen.
+
+\wichtig{\textbf{Beenden Sie die Einnahme und suchen Sie sofort einen Arzt auf,} wenn Sie eines der folgenden
+Anzeichen bemerken: Schwellung von Gesicht, Zunge oder Rachen, Atemnot, Blut im Erbrochenen, schwarzer Stuhl oder
+starke Bauchschmerzen. Dies können Zeichen einer schweren allergischen Reaktion oder einer Blutung im Magen-Darm-Trakt
+sein.}
+
+Die Häufigkeitsangaben sind wie folgt definiert:
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{2.2cm} >{\raggedright\arraybackslash}p{4.4cm} >{\raggedright\arraybackslash}X@{}}
+  \toprule
+  \textbf{Häufigkeit} & \textbf{Das bedeutet} & \textbf{Beobachtete Nebenwirkungen} \\
+  \midrule
+  Sehr häufig & kann mehr als 1 von 10 Behandelten betreffen & Magenbeschwerden wie Sodbrennen, Übelkeit und Bauchschmerzen \\
+  \addlinespace[3pt]
+  Häufig & kann bis zu 1 von 10 Behandelten betreffen & Kopfschmerzen, Schwindel, Durchfall, Verstopfung, Blähungen, Erbrechen \\
+  \addlinespace[3pt]
+  Gelegentlich & kann bis zu 1 von 100 Behandelten betreffen & Hautausschlag, Juckreiz, Schlaflosigkeit, Unruhe, Ohrgeräusche, Entzündung der Mundschleimhaut \\
+  \addlinespace[3pt]
+  Selten & kann bis zu 1 von 1\,000 Behandelten betreffen & Magen-Darm-Geschwüre und -Blutungen, erhöhte Leberwerte, Wassereinlagerungen (Ödeme), schwere allergische Reaktionen mit Schwellung von Gesicht, Zunge oder Kehlkopf \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection*{Meldung von Nebenwirkungen}
+Wenn Sie Nebenwirkungen bemerken, wenden Sie sich an Ihren Arzt oder Apotheker. Dies gilt auch für Nebenwirkungen,
+die nicht in dieser Packungsbeilage angegeben sind. Sie können Nebenwirkungen auch direkt dem Bundesinstitut für
+Arzneimittel und Medizinprodukte melden (Internet: www.bfarm.de). Indem Sie Nebenwirkungen melden, können Sie dazu
+beitragen, dass mehr Informationen über die Sicherheit dieses Arzneimittels zur Verfügung gestellt werden.
+
+% ---- 5 ------------------------------------------------------------------------------------------
+\section{Wie ist Beispielin aufzubewahren?}
+Bewahren Sie dieses Arzneimittel für Kinder unzugänglich auf. Sie dürfen das Arzneimittel nach dem auf dem
+Umkarton und dem Blister angegebenen Verfallsdatum (Verwendbar bis) nicht mehr verwenden. Das Verfallsdatum bezieht
+sich auf den letzten Tag des angegebenen Monats. Nicht über 25\,\textdegree C lagern. In der Originalverpackung
+aufbewahren, um den Inhalt vor Feuchtigkeit zu schützen. Entsorgen Sie Arzneimittel nicht im Abwasser oder
+Haushaltsabfall. Fragen Sie Ihren Apotheker, wie das Arzneimittel zu entsorgen ist, wenn Sie es nicht mehr
+verwenden.
+
+% ---- 6 ------------------------------------------------------------------------------------------
+\section{Inhalt der Packung und weitere Informationen}
+\subsection*{Was Beispielin enthält}
+Der Wirkstoff ist Probanol. Jede Filmtablette enthält 400 mg Probanol. Die sonstigen Bestandteile sind:
+mikrokristalline Cellulose, Maisstärke, Lactose-Monohydrat, Croscarmellose-Natrium, hochdisperses Siliciumdioxid,
+Magnesiumstearat (Ph.\,Eur.); Filmüberzug: Hypromellose, Titandioxid, Macrogol.
+
+\subsection*{Wie Beispielin aussieht und Inhalt der Packung}
+Beispielin sind weiße, ovale Filmtabletten mit einer Bruchkerbe auf einer Seite und der Prägung „BSP 400“. Es ist in
+Packungen mit 10, 20 und 50 Filmtabletten erhältlich. Es werden möglicherweise nicht alle Packungsgrößen in den
+Verkehr gebracht.
+
+\subsection*{Pharmazeutischer Unternehmer und Hersteller}
+Musterpharma GmbH, Beispielweg 12, 12345 Musterstadt (fiktive Firma)
+
+\subsection*{Stand}
+Diese Packungsbeilage wurde zuletzt überarbeitet im Oktober 2026.
+
+\end{document}

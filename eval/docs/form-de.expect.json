@@ -1,0 +1,39 @@
+{
+  "slug": "form-de",
+  "kind": "form",
+  "language": "de",
+  "must_cover": [
+    "What the form is: 'Antrag auf Ausstellung eines Bewohnerparkausweises' (resident parking permit) of the fictional Bürgeramt Musterstadt, Abteilung Verkehr und Parken, form BA-VP-07, state 10/2026; fill in in block letters, fields with * are mandatory, the box top right (Eingangsstempel / Aktenzeichen) is for the office",
+    "Section 1 Antragstellerin / Antragsteller: name*, first name(s)*, date of birth*, phone, e-mail, street and number*, postcode*, town*",
+    "Section 2 Fahrzeug: licence plate* in boxes, vehicle type* (Pkw, Kraftrad, Wohnmobil bis 3,5 t, Anhänger), whether the keeper is the applicant or another person or company (then a Vollmacht and keeper proof are needed), make and type, keeper's name if different",
+    "Section 3 Art des Antrags und Geltungsdauer: Erstausstellung, Verlängerung (with the old permit number), Ersatz bei Verlust oder Diebstahl, Änderung des Kennzeichens; validity 1 year or 2 years*; desired start date; tick only one type",
+    "Sections 4 and 5: tick the attached documents (registration certificate part I, Meldebescheinigung not older than 3 months, Vollmacht, proof for leasing or company vehicle, police report for a loss); the declaration that the data are complete and correct, then place, date and a handwritten signature; the grey box 'Vom Amt auszufüllen' is not for the applicant",
+    "The Ausfüllhinweise on page 2: one hint per section (Zu 1 name as in the ID, only residents with main residence in the permit area; Zu 2 plate exactly as in the registration certificate, one vehicle per application; Zu 3 one type only, old permit number for renewals, police report for a loss; Zu 4 which documents; Zu 5 only valid with own signature, no unsigned e-mail applications) and the list of five documents to attach",
+    "Fees and deadlines: 15,00 Euro for 1 year, 30,00 Euro for 2 years, 10,00 Euro for replacement or plate change, due when the permit is collected, no refund; renewals must arrive at least 4 weeks before expiry; processing takes about 10 working days once complete; missing documents must be supplied within 14 days or the application is rejected",
+    "How to submit and contact: in person, by post or in the letterbox of the Bürgeramt, Beispielplatz 1, 12345 Musterstadt; opening hours Monday to Friday 8 to 12, Thursday also 14 to 18; the data are used only for processing"
+  ],
+  "numbers": [15, 30, 10, 4, 10, 14, 3, 3.5, 5],
+  "units": [
+    "Euro (permit for 1 year)",
+    "Euro (permit for 2 years)",
+    "Euro (replacement or change of plate)",
+    "weeks (renewal deadline before expiry)",
+    "working days (processing time)",
+    "days (to supply missing documents)",
+    "months (maximum age of the Meldebescheinigung)",
+    "t (maximum weight for Wohnmobil)",
+    "numbered sections on the form"
+  ],
+  "figures": [
+    "Page 1: the form itself, no figures; a drawn city crest top left (no caption) and an empty stamp box top right; labelled empty field boxes in sections 1 to 3 and 5, a row of small boxes for the plate (3 + 2 + 4 characters), small square checkboxes in front of options in sections 2 to 4, and the shaded 'Vom Amt auszufüllen' box at the bottom. A tour should point at the field it is explaining and say whether it is mandatory (*)",
+    "Page 2: fee table (no caption) with columns Leistung, Geltungsdauer, Gebühr and four rows; the numbered list of five documents to attach; the hints 'Zu 1' to 'Zu 5'"
+  ],
+  "pitfalls": [
+    "Do not fill in the form for the user, invent personal data or tell the user what to enter for their name, plate or address; explain the fields only",
+    "Do not recommend signing or confirm that the user's data is correct; the declaration is the applicant's own responsibility and a handwritten signature is required",
+    "Do not invent fees, deadlines or opening hours; fees are 15, 30 and 10 Euro, the renewal deadline 4 weeks before expiry, missing documents 14 days",
+    "Do not say the fee is paid with the application; it is due on collection of the permit, and there is no refund",
+    "Do not tell users to fill in the Eingangsstempel or 'Vom Amt auszufüllen' areas; they are for the office",
+    "Do not read empty field boxes as pre-filled answers, and do not skip the checkbox options (the tick boxes are drawn without text)"
+  ]
+}

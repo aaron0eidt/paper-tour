@@ -1,0 +1,40 @@
+{
+  "slug": "policy-en",
+  "kind": "policy",
+  "language": "en",
+  "must_cover": [
+    "What the document is: Group Policy POL-IT-014 'Use of AI Tools at Work', version 2.1, of the fictional Calder & Finch Consulting Ltd.; owner the Chief Information Security Officer, approved by the Executive Board, effective 1 December 2026, next review 1 December 2027, applies to all employees and contractors",
+    "Purpose and scope: AI tools make work faster but can leak confidential information, give wrong results and create legal risk; the policy covers employees, interns and contractors worldwide, on Company or private devices, for generative AI tools (text, code, images, audio); internal analytics models of the Data Science team are excluded",
+    "The eight rules in section 4: use only approved tools (4.1); respect the data classes and never enter Restricted data (4.2); no client data without client and engagement-manager permission (4.3); you remain responsible for AI output (4.4); be transparent with clients (4.5); no automated decisions about people without HR and Data Protection Officer approval (4.6); protect intellectual property, Confidential material only in the enterprise tenant (4.7); report incidents within 24 hours (4.8)",
+    "The data classes table in section 5: Public (approved tool yes, public tool yes), Internal (yes, no), Confidential (yes in the enterprise tenant only, no), Restricted (no, no), with examples; if unsure treat a document as the next higher class and ask the manager",
+    "Responsibilities (section 6): employees, managers (new team members trained within 30 days), IT Security (Approved AI Tools List, requests reviewed within 10 working days), the Data Protection Officer (privacy impact assessment) and Human Resources (disciplinary procedure, onboarding)",
+    "Training (section 7): the e-learning 'Responsible AI at Work', about 45 minutes, must be completed by 31 January 2027; new employees within 30 days; yearly refresher; access to approved tools is suspended on 1 February 2027 for anyone who has not completed it",
+    "Consequences and exceptions (sections 8 and 9): disciplinary action from a written warning up to dismissal, contract termination for contractors, possible report to the authorities; reporting your own mistake within 24 hours is not itself disciplined; exceptions only via the IT Service Desk, approved in writing by the CISO for at most six months",
+    "Version history (section 10): four versions, 1.0 (1 March 2024), 1.1 (15 September 2024), 2.0 (1 June 2025), 2.1 (1 December 2026) with what changed in each; 2.1 added the training deadline and 24-hour incident reporting"
+  ],
+  "numbers": [8, 4, 24, 45, 30, 10, 6, 2.1, 4],
+  "units": [
+    "rules in section 4",
+    "data classes",
+    "hours (incident report deadline)",
+    "minutes (e-learning course)",
+    "days (new joiners complete training within)",
+    "working days (IT Security reviews tool requests within)",
+    "months (maximum length of an exception)",
+    "policy version",
+    "versions in the version history"
+  ],
+  "figures": [
+    "Document control block (page 1, no caption): policy owner, approved by, effective from, next review, applies to, contact",
+    "Table 1 'Data classes and permitted AI tools' (page 2, captioned): columns Class, Description, Examples, Approved AI tool, Public AI tool; four rows 1 Public to 4 Restricted; a tour should point at the two right-hand columns (Yes / No) for the class the user asks about, and read 'Yes, enterprise tenant only' for Confidential",
+    "Version history table (page 3, no caption): columns Version, Date, Author, Summary of changes; four rows, 1.0 to 2.1"
+  ],
+  "pitfalls": [
+    "Do not give legal or HR advice or say what would happen to a specific employee; only state what the policy says",
+    "Do not say it is acceptable to paste client documents, personal data or passwords into a public AI tool; Restricted data is never allowed in any AI tool, Confidential only in the enterprise tenant",
+    "Do not mix up the data classes or their columns (Internal: approved yes, public no; Restricted: no, no) and do not invent a fifth class",
+    "Do not invent rules, deadlines or penalties that are not in the policy (for example a fine, or rules for specific tools); the training deadline is 31 January 2027, the incident report 24 hours",
+    "Do not say that private devices or contractors are exempt; the scope covers both",
+    "Do not present the policy as real or as the user's own company policy; it is fictional and the footer says so"
+  ]
+}

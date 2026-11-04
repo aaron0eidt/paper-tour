@@ -1,0 +1,98 @@
+% Uebungsblatt Allgemeine Chemie (German, university level), with a chemfig drawing.
+% Headings: "Aufgabe N (P Punkte)" in bold; parts "a)", "b)", ...
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[ngerman]{babel}
+\usepackage[margin=2.3cm,top=2.0cm,bottom=2.2cm]{geometry}
+\usepackage{amsmath}
+\usepackage[version=4]{mhchem}
+\usepackage[locale=DE]{siunitx}
+\usepackage{chemfig}
+\usepackage{caption}
+\usepackage{enumitem}
+
+\setlength{\parindent}{0pt}
+\setlist[enumerate,1]{label=\alph*), leftmargin=2em, itemsep=0.35em, topsep=0.3em}
+\newcommand{\aufgabe}[2]{\bigskip\par\textbf{Aufgabe #1 (#2)}\par\nopagebreak\smallskip}
+\setchemfig{atom sep=2.4em}
+
+\begin{document}
+
+% ---- Kopf -----------------------------------------------------------------------------
+{\small Allgemeine Chemie \textperiodcentered{} Wintersemester 2026/27 \hfill Institut für Anorganische Chemie}\\[-0.4em]
+\rule{\linewidth}{0.6pt}\\[0.5em]
+{\Large\bfseries Übungsblatt 5}\\[0.4em]
+Ausgabe: 5. November 2026 \hfill Abgabe: Mittwoch, 12. November 2026, 12:00 Uhr\\[0.3em]
+{\small Rechenwege müssen nachvollziehbar sein. Verwenden Sie $N_\mathrm{A} = \qty{6.022e23}{mol^{-1}}$.}
+
+% ---- Aufgabe 1 ------------------------------------------------------------------------
+\aufgabe{1}{4 Punkte}
+Stoffmenge und molare Masse.
+\begin{enumerate}
+  \item Wie viel Mol sind \qty{36.0}{g} Wasser ($M = \qty{18.0}{g/mol}$), und wie viele Wassermoleküle
+        enthält diese Portion?
+  \item Welche Masse haben \qty{0.250}{mol} Calciumcarbonat, \ce{CaCO3}? Es gilt
+        $A_r(\mathrm{Ca}) = 40{,}08$, $A_r(\mathrm{C}) = 12{,}01$ und $A_r(\mathrm{O}) = 16{,}00$.
+  \item Wie viele Wasserstoffatome sind in \qty{1.50}{mol} Methan, \ce{CH4}, enthalten?
+\end{enumerate}
+
+% ---- Aufgabe 2 ------------------------------------------------------------------------
+\aufgabe{2}{5 Punkte}
+Reaktionsgleichungen und Stöchiometrie.
+\begin{enumerate}
+  \item Im Hochofen reagiert Eisen(III)-oxid mit Kohlenstoffmonoxid zu Eisen und Kohlenstoffdioxid.
+        Stellen Sie die ausgeglichene Reaktionsgleichung auf.
+  \item Aluminium löst sich in Salzsäure unter Bildung von Aluminiumchlorid und Wasserstoff.
+        Gleichen Sie die Gleichung aus: \ce{Al + HCl -> AlCl3 + H2}
+  \item Welche Masse Eisen lässt sich aus \qty{160}{g} \ce{Fe2O3} höchstens gewinnen?
+        Verwenden Sie $M(\ce{Fe2O3}) = \qty{160}{g/mol}$ und $M(\ce{Fe}) = \qty{56}{g/mol}$.
+\end{enumerate}
+
+% ---- Aufgabe 3 ------------------------------------------------------------------------
+\aufgabe{3}{6 Punkte}
+Ein Acetatpuffer entsteht, wenn \qty{0.10}{mol} Essigsäure ($\mathrm{p}K_\mathrm{s} = 4{,}76$) und
+\qty{0.20}{mol} Natriumacetat in Wasser gelöst und auf \qty{1.00}{L} aufgefüllt werden.
+\begin{enumerate}
+  \item Berechnen Sie den pH-Wert des Puffers mit der Henderson-Hasselbalch-Gleichung.
+  \item Zu \qty{1.00}{L} dieses Puffers werden \qty{0.010}{mol} HCl gegeben (Volumenänderung
+        vernachlässigen). Welchen pH-Wert hat die Lösung danach?
+  \item Erklären Sie in zwei bis drei Sätzen, warum die Mischung aus Essigsäure und Acetat den pH-Wert
+        stabilisiert.
+  \item Welches Verhältnis $c(\text{Acetat})/c(\text{Essigsäure})$ ist nötig, damit der pH-Wert $4{,}00$
+        beträgt?
+\end{enumerate}
+
+% ---- Aufgabe 4 ------------------------------------------------------------------------
+\aufgabe{4}{5 Punkte}
+Lewis-Formel und VSEPR-Modell. Die Abbildung zeigt die Lewis-Formeln von Ammoniak und Bortrifluorid
+(freie Elektronenpaare sind als Punktpaare gezeichnet).
+\begin{center}
+\chemfig{H-\charge{90=\:}{N}(-[6]H)-H}
+\hspace{4em}
+\chemfig{B(-[:90]\charge{0=\:,180=\:,90=\:}{F})(-[:210]\charge{90=\:,180=\:,270=\:}{F})-[:330]\charge{0=\:,270=\:,90=\:}{F}}
+\captionof{figure}{Lewis-Formeln von \ce{NH3} (links) und \ce{BF3} (rechts).}
+\end{center}
+\begin{enumerate}
+  \item Wie viele bindende und wie viele freie Elektronenpaare hat das Zentralatom in \ce{NH3} und in
+        \ce{BF3}?
+  \item Welche Molekülgeometrie und welche Bindungswinkel sagt das VSEPR-Modell für beide Moleküle voraus?
+  \item Warum ist \ce{NH3} ein Dipol, \ce{BF3} aber nicht, obwohl die B--F-Bindung stark polar ist?
+  \item \ce{NH3} und \ce{BF3} reagieren zu \ce{H3N-BF3}. Welches Molekül ist die Lewis-Base, welches
+        die Lewis-Säure? Begründen Sie kurz.
+\end{enumerate}
+
+% ---- Aufgabe 5 ------------------------------------------------------------------------
+\aufgabe{5}{4 Punkte}
+\qty{5.85}{g} Natriumchlorid ($M = \qty{58.5}{g/mol}$) werden in Wasser gelöst und auf \qty{500}{mL}
+aufgefüllt.
+\begin{enumerate}
+  \item Berechnen Sie die Stoffmengenkonzentration $c$ in mol/L.
+  \item Wie groß ist die Massenkonzentration in g/L?
+  \item Welches Volumen dieser Lösung enthält \qty{0.0500}{mol} NaCl?
+  \item \qty{100}{mL} der Lösung werden mit Wasser auf \qty{400}{mL} verdünnt. Wie groß ist die neue
+        Konzentration?
+\end{enumerate}
+
+\end{document}

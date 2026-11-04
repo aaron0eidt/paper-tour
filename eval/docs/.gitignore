@@ -1,0 +1,7 @@
+# LaTeX build output
+.build/
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz

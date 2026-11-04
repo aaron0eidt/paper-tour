@@ -1,0 +1,108 @@
+% Arbeitsblatt Mathematik Klasse 10 (German, Gymnasium), with a tikz sketch and a pgfplots parabola.
+% Headings: "Aufgabe N (P BE)" in bold (BE = Bewertungseinheiten, the usual school unit); parts "a)", "b)", ...
+\documentclass[12pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[ngerman]{babel}
+\usepackage[margin=2.3cm,top=1.8cm,bottom=1.9cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage[locale=DE]{siunitx}
+\DeclareSIUnit{\euro}{\text{€}}
+\usepackage{tikz}
+\usetikzlibrary{patterns,arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{enumitem}
+
+\setlength{\parindent}{0pt}
+\setlist[enumerate,1]{label=\alph*), leftmargin=2em, itemsep=0.3em, topsep=0.3em}
+\newcommand{\aufgabe}[2]{\bigskip\par\textbf{Aufgabe #1 (#2 BE)}\par\nopagebreak\smallskip}
+
+\begin{document}
+
+% ---- Kopf -----------------------------------------------------------------------------
+{\small Städtisches Gymnasium \textperiodcentered{} Mathematik \textperiodcentered{} Klasse 10 \hfill Schuljahr 2026/27}\\[-0.4em]
+\rule{\linewidth}{0.6pt}\\[0.5em]
+{\Large\bfseries Arbeitsblatt 4: Quadratische Gleichungen, Pythagoras, Prozent- und Zinsrechnung}\\[0.5em]
+Name: \rule{5cm}{0.4pt} \hfill Datum: \rule{3cm}{0.4pt} \hfill Gesamt: 30 BE\\[0.3em]
+{\small Taschenrechner ist erlaubt. Schreibe deinen Lösungsweg vollständig auf.}
+
+% ---- Aufgabe 1 ------------------------------------------------------------------------
+\aufgabe{1}{6}
+Löse die quadratischen Gleichungen mit der pq-Formel. Gib die Lösungsmenge an.
+\begin{enumerate}
+  \item $x^2 - 6x + 8 = 0$
+  \item $x^2 + 4x - 21 = 0$
+  \item $2x^2 - 12x + 18 = 0$
+  \item $x^2 + 2x + 5 = 0$
+\end{enumerate}
+
+% ---- Aufgabe 2 ------------------------------------------------------------------------
+\aufgabe{2}{7}
+Eine Leiter der Länge \qty{5.0}{m} lehnt an einer senkrechten Hauswand. Ihr Fuß steht \qty{1.4}{m}
+von der Wand entfernt (siehe Skizze).
+
+\begin{center}
+\begin{tikzpicture}[scale=0.95]
+  \draw[thick] (-0.3,0) -- (4.6,0);
+  \fill[pattern=north east lines, pattern color=gray] (-0.3,-0.2) rectangle (4.6,0);
+  \draw[very thick] (0,0) -- (0,4.7);
+  \draw[very thick, brown!70!black] (1.26,0) -- (0,4.32);
+  \draw (0,0.25) -- (0.25,0.25) -- (0.25,0);
+  \draw[<->] (0,-0.45) -- (1.26,-0.45) node[midway, below] {\qty{1,4}{m}};
+  \node[above right] at (0.75,2.45) {$l = \qty{5,0}{m}$};
+  \node[left] at (0,2.2) {$h$};
+  \draw (0.85,0) arc[start angle=180, end angle=105.5, radius=0.4];
+  \node at (0.85,0.55) {$\alpha$};
+\end{tikzpicture}
+
+\small Skizze (nicht maßstabsgetreu)
+\end{center}
+\begin{enumerate}
+  \item Wie hoch reicht die Leiter an der Wand?
+  \item Der Fuß der Leiter soll so weit von der Wand entfernt stehen, dass die Leiter noch \qty{4.0}{m}
+        hoch reicht. Wie groß ist dieser Abstand?
+  \item Berechne den Winkel $\alpha$, den die Leiter mit dem Boden bildet (Skizze oben).
+\end{enumerate}
+
+% ---- Aufgabe 3 ------------------------------------------------------------------------
+\aufgabe{3}{8}
+Prozent- und Zinsrechnung.
+\begin{enumerate}
+  \item Ein Fahrrad kostet \qty{480}{\euro}. Im Schlussverkauf wird der Preis um $15\,\%$ gesenkt. Wie viel
+        kostet das Fahrrad jetzt?
+  \item Nach dem Schlussverkauf wird der reduzierte Preis wieder um $15\,\%$ erhöht. Kostet das Fahrrad nun
+        wieder \qty{480}{\euro}? Begründe deine Antwort mit einer Rechnung.
+  \item Frau Weber legt \qty{2500}{\euro} für 4 Jahre mit einem Zinssatz von $3\,\%$ pro Jahr an. Die Zinsen
+        werden jedes Jahr mitverzinst. Wie hoch ist ihr Guthaben nach 4 Jahren?
+  \item Wie viel Zinsen bringen \qty{800}{\euro} bei $2{,}5\,\%$ Jahreszinsen in 90 Tagen? Rechne mit
+        360 Tagen pro Jahr.
+\end{enumerate}
+
+% ---- Aufgabe 4 ------------------------------------------------------------------------
+\aufgabe{4}{9}
+Die Abbildung zeigt den Graphen einer quadratischen Funktion $f$.
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[width=8.4cm, height=7cm, axis lines=middle,
+    xlabel={$x$}, ylabel={$y$},
+    xmin=-3, xmax=5, ymin=-5, ymax=6,
+    xtick={-3,-2,...,5}, ytick={-5,-4,...,6}, grid=both, grid style={gray!25},
+    tick label style={font=\footnotesize},
+    every axis x label/.style={at={(ticklabel* cs:1.0)}, anchor=west},
+    every axis y label/.style={at={(ticklabel* cs:1.0)}, anchor=south}]
+  \addplot[thick, domain=-1.8:3.8, samples=70] {x^2-2*x-3};
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\begin{enumerate}
+  \item Lies den Scheitelpunkt und die Nullstellen von $f$ aus dem Graphen ab.
+  \item Gib die Funktionsgleichung in Scheitelpunktform an und forme sie in die Normalform
+        $f(x) = x^2 + px + q$ um.
+  \item Für welche $x$-Werte gilt $f(x) < 0$?
+  \item Der Punkt $P(4\mid y)$ liegt auf dem Graphen von $f$. Berechne $y$.
+\end{enumerate}
+
+\end{document}

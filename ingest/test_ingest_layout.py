@@ -261,5 +261,31 @@ class PowerOfTenTests(unittest.TestCase):
         self.assertEqual(ingest.marked_powers(flat), "109")
 
 
+class TypeAreaTests(unittest.TestCase):
+    """The type area that margin clutter is judged by (estimate_text_area)."""
+
+    def type_area(self, *last_lines):
+        """The type area of a document whose pages are filled with body text down to the given baselines."""
+        doc = pymupdf.open()
+        for last in last_lines:
+            page = doc.new_page(width=612, height=792)
+            column_text(page, 60, 100, 480, int((last - 100) / 12) + 1)
+        pdf = pymupdf.open("pdf", doc.tobytes())
+        with mock.patch.object(ingest, "warn"):
+            stats = ingest.analyse(pdf)[4]
+        return stats.text_area
+
+    def test_two_pages_give_their_extremes_not_their_mean(self):
+        top, bottom = self.type_area(700, 220)
+        self.assertGreater(bottom, 690)
+        self.assertLess(top, 100)
+
+    def test_three_pages_keep_their_median(self):
+        _, bottom = self.type_area(700, 220, 240)
+        self.assertLess(bottom, 260)
+        _, single = self.type_area(500)
+        self.assertGreater(single, 490)
+
+
 if __name__ == "__main__":
     unittest.main()

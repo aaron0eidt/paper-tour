@@ -1,0 +1,55 @@
+{
+  "slug": "annual-report-en",
+  "kind": "report",
+  "language": "en",
+  "must_cover": [
+    "What the document is: an excerpt of the 2025 annual report of the fictional Harrowgate Industrial Group plc, opening with a letter from the CEO, Dr. Helena Marsh",
+    "Headline result: revenue up 8.5 % to EUR 2,134 million, EBIT up 14.8 % to EUR 271 million, EBIT margin 12.7 % (fourth year of improvement), net income EUR 193 million, EPS EUR 1.93",
+    "Balance sheet and shareholders: net debt down from EUR 462 million to EUR 415 million (1.1 times EBITDA); proposed dividend EUR 0.75 per share (+15.4 %, 39 % payout)",
+    "The key figures table compares 2023, 2024 and 2025 and gives the change in 2025; the tour should read a few rows exactly (revenue 1,842 / 1,967 / 2,134; EBIT margin 11.6 / 12.0 / 12.7)",
+    "The chart: revenue as bars (1,596 in 2021 to 2,134 in 2025, 7.5 % a year on average) and EBIT margin as a line on the right axis (10.4 % to 12.7 %); both rise every year",
+    "Segments: Automation Systems (revenue 892, +11.4 %, margin 14.3 %, 41.8 % of group), Industrial Components (746, +5.1 %, 12.6 %), Service & Aftermarket (496, +8.8 %, 14.3 %); corporate costs of EUR 22 million bring the segment EBIT of 293 down to the group 271",
+    "Principal risks: five risks (supply chain and input costs, customer concentration, cybersecurity, regulation, currency) each with a response and a trend (rising for cybersecurity and regulation)",
+    "Outlook 2026: revenue growth of 5 to 7 %, EBIT margin 12.5 to 13.5 %, capex EUR 140 million, payout ratio 35 to 40 %; the guidance assumes stable exchange rates and no further trade escalation"
+  ],
+  "numbers": [2134, 8.5, 271, 14.8, 12.7, 193, 1.93, 415, 462, 1.1, 0.75, 15.4, 39, 892, 41.8, 7880, 5, 7, 12.5, 13.5, 140, 85, 7.5],
+  "units": [
+    "EUR million (revenue 2025)",
+    "% (revenue growth)",
+    "EUR million (EBIT 2025)",
+    "% (EBIT growth)",
+    "% (EBIT margin 2025)",
+    "EUR million (net income)",
+    "EUR (earnings per share)",
+    "EUR million (net debt 2025)",
+    "EUR million (net debt 2024)",
+    "times EBITDA (net debt)",
+    "EUR (dividend per share)",
+    "% (dividend increase)",
+    "% (payout ratio)",
+    "EUR million (Automation Systems revenue)",
+    "% (Automation Systems share of revenue)",
+    "employees at year end",
+    "% (lower end of revenue growth guidance)",
+    "% (upper end of revenue growth guidance)",
+    "% (lower end of EBIT margin guidance)",
+    "% (upper end of EBIT margin guidance)",
+    "EUR million (capex 2026)",
+    "EUR million (Brenner Sensorik purchase price)",
+    "% per year (revenue growth 2021 to 2025)"
+  ],
+  "figures": [
+    "Page 1: key figures table (no caption), rows Revenue, EBITDA, EBIT, EBIT margin, Net income, EPS, Dividend (2025 value is footnoted as proposed), Free cash flow, Net debt, Net debt / EBITDA, Employees; columns 2023, 2024, 2025, Change 2025. Point at the 2025 column and the change column",
+    "Figure 1 (page 2): bar chart of revenue 2021 to 2025 (left axis, EUR million, bar labels 1,596 / 1,735 / 1,842 / 1,967 / 2,134) with the EBIT margin line (right axis, labels 10.4 / 11.0 / 11.6 / 12.0 / 12.7 %); a tour should point at the 2025 bar and at the last point of the line, and say that both rise every year",
+    "Page 2: segment table (no caption), three segments plus Corporate and consolidation and a Group total row; point at the Group row to show that the segments add up (801 + 710 + 456 = 1,967; 892 + 746 + 496 = 2,134)",
+    "Page 3: principal risks table (no caption) with columns No., Risk, How we respond, Trend"
+  ],
+  "pitfalls": [
+    "Do not give investment advice (buy, hold or sell the shares) or say the dividend is safe; only report what the report states",
+    "Do not present the outlook as a promise; it is guidance that assumes stable exchange rates and no escalation of trade restrictions",
+    "Do not invent numbers (for example a 2026 revenue in EUR, a share price or a net income forecast); the document gives only ranges for growth and margin",
+    "Do not confuse the margin line (percent, right axis) with the revenue bars (EUR million, left axis), and do not read the 2025 dividend as paid; it is proposed",
+    "Do not mix up revenue growth (8.5 %) with EBIT growth (14.8 %) or the group EBIT margin (12.7 %) with the segment margins (14.3 / 12.6 / 14.3 %)",
+    "Do not state that Automation Systems alone drove all growth; the report says all three segments grew"
+  ]
+}

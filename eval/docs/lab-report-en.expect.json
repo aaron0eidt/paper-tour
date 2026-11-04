@@ -1,0 +1,44 @@
+{
+  "slug": "lab-report-en",
+  "kind": "medical",
+  "language": "en",
+  "must_cover": [
+    "What the document is: a blood test report from the fictional Meridian Clinical Laboratory (report MCL-2026-118204) for a fictional patient, Casey M. Hale, female, 45 years old, blood drawn fasting on 12 Oct 2026 at 07:55 and reported at 15:20, ordered by the fictional Dr. Anna Whitlock",
+    "How to read the results table: columns Test, Result, Unit, Reference range, Flag; H means above the reference range, L below; flagged rows are shaded and the value and flag are bold; three panels (complete blood count, clinical chemistry, lipids / iron stores / inflammation); the reference ranges are for adult females",
+    "Blood count: white blood cells 11.4 x 10^9/L (range 4.0 to 10.0) flagged H; haemoglobin 11.2 g/dL (12.0 to 15.5) L; haematocrit 34.8 % (36.0 to 46.0) L; MCH 26.6 pg (27.0 to 33.0) L; red cells 4.21, MCV 82.7 fL, MCHC 32.2 g/dL and platelets 268 are within range",
+    "Chemistry: fasting glucose 5.9 mmol/L (3.9 to 5.5) flagged H; creatinine 71 umol/L, eGFR 96, sodium 139, potassium 4.2, ALT 24, AST 22 and TSH 2.1 are all within their ranges",
+    "Lipids, iron and inflammation: total cholesterol 5.8 mmol/L (below 5.2) H; LDL cholesterol 3.7 (below 3.0) H; HDL 1.5 and triglycerides 1.3 within range; ferritin 14 ug/L (15 to 150) L; CRP 6.8 mg/L (below 5.0) H",
+    "In total nine values are flagged (five H: WBC, glucose, total cholesterol, LDL, CRP; four L: haemoglobin, haematocrit, MCH, ferritin); a tour should say which are high and which are low without mixing them up",
+    "The laboratory comments: low haemoglobin, haematocrit and MCH with a low-normal MCV and low ferritin are 'compatible with reduced iron stores'; the white cell count increase is non-specific; glucose slightly above range; cholesterol above the desirable range; CRP slightly raised; results must be interpreted by the ordering physician and abnormal values may be repeated in 4 to 6 weeks if clinically indicated",
+    "The footer states this is a fictional test document and the methods note says eGFR is calculated with CKD-EPI and the report is electronically validated, authorised by a fictional Dr. Mira Okonkwo"
+  ],
+  "numbers": [11.4, 11.2, 34.8, 26.6, 5.9, 5.8, 3.7, 14, 6.8, 96, 9, 6],
+  "units": [
+    "10^9/L (white blood cells, high)",
+    "g/dL (haemoglobin, low)",
+    "% (haematocrit, low)",
+    "pg (MCH, low)",
+    "mmol/L (fasting glucose, high)",
+    "mmol/L (total cholesterol, high)",
+    "mmol/L (LDL cholesterol, high)",
+    "ug/L (ferritin, low)",
+    "mg/L (CRP, high)",
+    "mL/min/1.73 m2 (eGFR, within range)",
+    "flagged values in total",
+    "weeks (upper end of the suggested repeat window 4 to 6)"
+  ],
+  "figures": [
+    "Letterhead (page 1, top left): a drawn circle-with-cross logo of the laboratory, no caption; decorative, a tour need not describe it beyond naming the laboratory",
+    "Patient and sample header block (page 1): patient name, date of birth, sex, patient ID, ordering physician on the left; collected, received, reported, specimen, clinic on the right",
+    "Results table (page 1, no caption): five columns Test / Result / Unit / Reference range / Flag, three shaded panel headers, 22 result rows of which nine are shaded with an H or L flag; a tour should point at a flagged row's result and its reference range together, and say the shading marks values outside the range",
+    "Laboratory comments box (page 2): three numbered comments and a note about interpretation and repeating abnormal values"
+  ],
+  "pitfalls": [
+    "Do not diagnose (for example 'the patient has iron deficiency anaemia or prediabetes') or suggest treatment, supplements, diet or medication; the lab says only 'compatible with reduced iron stores' and leaves interpretation to the ordering physician",
+    "Do not call values 'dangerous', 'normal for her' or 'nothing to worry about'; state which values are inside or outside the printed reference range and nothing more",
+    "Do not swap H and L, and do not read a value against the wrong reference range (for example the cholesterol ranges are upper limits, ferritin is a range 15 to 150, haemoglobin 12.0 to 15.5)",
+    "Do not invent tests or values that are not in the report (HbA1c, vitamin D, iron, B12), and do not quote reference ranges for men or children; the ranges are for adult females",
+    "Do not treat the patient, physician or laboratory as real people; they are fictional and the footer says so",
+    "Do not read the table column by column in a way that separates results from their test names; each row needs its test, result, unit, range and flag together"
+  ]
+}

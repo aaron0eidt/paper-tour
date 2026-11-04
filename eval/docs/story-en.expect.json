@@ -1,0 +1,39 @@
+{
+  "slug": "story-en",
+  "kind": "literature",
+  "language": "en",
+  "must_cover": [
+    "What the pages are: an anthology page (unit 'The Unreliable Narrator', American Gothic) with the first part of Edgar Allan Poe's short story 'The Tell-Tale Heart' (first published 1843), line numbers in the margin every fifth line; the excerpt ends with 'the presence of my head within the room' and the story continues beyond it",
+    "The opening: the first-person narrator admits he is 'very, very dreadfully nervous' but insists he is not mad; he claims his illness sharpened his senses, above all hearing ('I heard all things in the heaven and in the earth. I heard many things in hell'); he asks the reader to judge how calmly he tells the story",
+    "The motive: no passion, no desire for the old man's gold, he loved the old man; what torments him is the eye, 'the eye of a vulture, a pale blue eye, with a film over it', and so he decides to kill the old man to be rid of the eye",
+    "How he argues for his sanity: his caution, foresight and dissimulation (kinder to the old man than ever that week, opens the door each midnight, a thin ray of lantern light on the eye for seven nights, but the eye is always closed and it is 'his Evil Eye' that vexes him)",
+    "The eighth night: he is more cautious than ever, chuckles at his own cleverness, the old man stirs, the narrator's thumb slips on the tin fastening, the old man sits up and cries 'Who's there?', the narrator stays motionless for a whole hour",
+    "The groan: the narrator hears a groan of mortal terror, says he knows it well from his own nights, pities the old man while chuckling at heart, and describes how the old man's fear grows as Death's black shadow envelops him",
+    "Why the narrator is unreliable: he protests too much, his reasons contradict his actions, and his own words reveal what he claims to hide; the margin question asks which details in lines 1 to 10 show he is persuading a listener",
+    "The page furniture: 'Before you read' box, the glossary (hearken, dissimulation, sagacity, death watches, mortal, suppositions) and three 'Think about it' questions after the excerpt"
+  ],
+  "numbers": [1843, 5, 1809, 1849, 7, 8, 1, 3, 45],
+  "units": [
+    "year (first published)",
+    "lines (margin numbers count every fifth line)",
+    "year (Poe born)",
+    "year (Poe died)",
+    "nights (he looked in at midnight)",
+    "ordinal: the eighth night (the night of the thumb slip)",
+    "hour (the narrator keeps still for a whole hour)",
+    "questions in 'Think about it'",
+    "last margin line number on page 2"
+  ],
+  "figures": [
+    "No figures or tables. The margin line numbers 5, 10, 15 ... 45 run down the left of the prose; a tour should use them as references (for example 'around line 10, the eye of a vulture') and can highlight sentences",
+    "Box 'Before you read' (top of page 1, blue-grey tint), the glossary box and the 'Think about it' box (page 2)"
+  ],
+  "pitfalls": [
+    "Do not invent events that are not in the excerpt; the beating heart, the murder itself and the arrival of the police do not appear in these two pages, only the story's title refers to the heart",
+    "Do not quote inaccurately; the text is public domain and uses 1843 wording and dashes ('Hearken!', 'dissimulation', 'death watches'); line numbers in the margin are not part of the text",
+    "Do not diagnose the narrator or comment on mental illness as if he were a real person; discuss him as an unreliable narrator, a literary device",
+    "Do not describe the narrator's reasoning as justified; the pages show an obsessive fear of the eye and a planned killing, told in a calm, boastful voice",
+    "Do not skip the 'Think about it' questions at the end, and do not answer them as if there were one correct answer",
+    "Do not treat the introduction, glossary and questions as Poe's text; they are the anthology's own additions"
+  ]
+}
