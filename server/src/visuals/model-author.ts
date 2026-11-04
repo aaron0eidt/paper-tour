@@ -1,4 +1,5 @@
 import type { Completion, MuseClient, MuseMessage, MuseContent } from '../muse/client';
+import { withGrowingOutputBudget } from '../ai/output-budget';
 import { boardSchema } from '../harness/board';
 import {
   authorAndInspectVisual,
@@ -12,10 +13,13 @@ const feedbackParts = (feedback: VisualRepairContext): MuseContent[] => [
     type: 'text',
     text: JSON.stringify({
       visual: feedback.item,
-      ...(feedback.item.kind === 'program' ? {
-        runtimeData: Object.fromEntries(feedback.item.data.map(({ name, values }) => [name, values])),
-        dataContract: 'render receives runtimeData: use data[name] directly, never data[name].values (Array.values is a method).',
-      } : {}),
+      ...(feedback.item.kind === 'program'
+        ? {
+            runtimeData: Object.fromEntries(feedback.item.data.map(({ name, values }) => [name, values])),
+            dataContract:
+              'render receives runtimeData: use data[name] directly, never data[name].values (Array.values is a method).',
+          }
+        : {}),
       narration: feedback.narration,
       evidence: feedback.evidence,
       problems: feedback.problems,
@@ -51,15 +55,8 @@ export async function reviewAuthoredWithModel(
     .slice(0, 3)
     .map((url) => ({ type: 'image_url' as const, image_url: { url } }));
   const call = async (messages: MuseMessage[], name: string, schema: object, maxTokens: number) => {
-    const completion = await context.client.complete(
-      messages,
-      name,
-      schema,
-      maxTokens,
-      context.signal,
-      undefined,
-      undefined,
-      'low',
+    const completion = await withGrowingOutputBudget(maxTokens, context.signal, (tokens) =>
+      context.client.complete(messages, name, schema, tokens, context.signal, undefined, undefined, 'low'),
     );
     context.onCompletion?.(completion);
     return completion.value;
