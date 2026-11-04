@@ -442,26 +442,33 @@ test('named component ordinals are labels rather than invented numerical operand
 });
 
 test('visible function calculations preserve unary signs, including the failed negative-log loss', () => {
-  const problems = (expression: string, result: number) => checkExample({
-    ...numericalExample(),
-    inputs: [{ label: 'Probability', value: 0.082 }, { label: 'Epsilon', value: 0.00000001 }],
-    calculations: [{ expression, result }],
-    frames: [
-      { anchor: 'the input is', flow: flow(['Probability 0.082', 'Epsilon 0.00000001', 'Loss']) },
-      { anchor: 'Adding the input twice', flow: flow([`${expression} = ${result}`, 'Check', 'Loss']) },
-    ],
-  }, exampleSay).problems.filter(p => p.includes('Visible calculation'));
+  const problems = (expression: string, result: number) =>
+    checkExample(
+      {
+        ...numericalExample(),
+        inputs: [
+          { label: 'Probability', value: 0.082 },
+          { label: 'Epsilon', value: 0.00000001 },
+        ],
+        calculations: [{ expression, result }],
+        frames: [
+          { anchor: 'the input is', flow: flow(['Probability 0.082', 'Epsilon 0.00000001', 'Loss']) },
+          { anchor: 'Adding the input twice', flow: flow([`${expression} = ${result}`, 'Check', 'Loss']) },
+        ],
+      },
+      exampleSay,
+    ).problems.filter((p) => p.includes('Visible calculation'));
   assert.deepEqual(problems('-log(0.082+0.00000001)', 2.501), []);
   assert.deepEqual(problems('−log(0.082+0.00000001)', 2.501), []);
   assert.deepEqual(problems('- log(0.082+0.00000001)', 2.501), []);
-  assert.ok(problems('-log(0.082+0.00000001)', -2.501).some(p => p.includes('does not match')));
-  assert.ok(problems('log(0.082+0.00000001)', 2.501).some(p => p.includes('does not match')));
+  assert.ok(problems('-log(0.082+0.00000001)', -2.501).some((p) => p.includes('does not match')));
+  assert.ok(problems('log(0.082+0.00000001)', 2.501).some((p) => p.includes('does not match')));
 });
 
 test('negative log display keeps exact intermediate provenance behind rounded divergence', () => {
   const value = {
     ...numericalExample(),
-    inputs: [0.7, 0.3, 0.5, 0.00000001].map(value => ({ label: 'Input', value })),
+    inputs: [0.7, 0.3, 0.5, 0.00000001].map((value) => ({ label: 'Input', value })),
     calculations: [
       { expression: '0.7*log(0.7/0.5)+0.3*log(0.3/0.5)', result: 0.082 },
       { expression: '-log(0.082+0.00000001)', result: 2.498 },
@@ -471,5 +478,79 @@ test('negative log display keeps exact intermediate provenance behind rounded di
       { anchor: 'Adding the input twice', flow: flow(['-log(0.082+0.00000001) = 2.498', 'Divergence 0.082', 'Loss']) },
     ],
   };
-  assert.deepEqual(checkExample(value, exampleSay).problems.filter(p => /Visible calculation/.test(p)), []);
+  assert.deepEqual(
+    checkExample(value, exampleSay).problems.filter((p) => /Visible calculation/.test(p)),
+    [],
+  );
+});
+
+test('declared numerical variant names are identities, while their plotted values remain checked', () => {
+  const say = 'Start with the reported scores. Then compare the gains over baseline.';
+  const value = {
+    assumptions: 'Use fixed measured scores for named model variants.',
+    inputs: [
+      { label: 'Baseline', value: 35.59 },
+      { label: '3-class Avg', value: 36.34 },
+      { label: '49-class Avg', value: 36.65 },
+    ],
+    calculations: [
+      { expression: '36.34-35.59', result: 0.75 },
+      { expression: '36.65-35.59', result: 1.06 },
+    ],
+    frames: [
+      {
+        anchor: 'Start with',
+        bars: {
+          title: 'Reported scores',
+          unit: 'score',
+          bars: [
+            { label: 'Baseline', value: 35.59 },
+            { label: '3-class Div.', value: 36.34 },
+            { label: '49-class Div.', value: 36.65 },
+          ],
+        },
+      },
+      {
+        anchor: 'Then compare',
+        bars: {
+          title: 'Gain over baseline',
+          unit: 'points',
+          bars: [
+            { label: '3-class gain', value: 0.75 },
+            { label: '49-class gain', value: 1.06 },
+          ],
+        },
+      },
+    ],
+  };
+  assert.deepEqual(checkExample(value, say).problems, []);
+  const forged = structuredClone(value);
+  forged.frames[1].bars.bars[0].value = 999;
+  assert.ok(checkExample(forged, say).problems.some((p) => /999/.test(p)));
+  const unknownIdentity = structuredClone(value);
+  unknownIdentity.frames[1].bars.bars[0].label = '77-class gain';
+  assert.match(checkExample(unknownIdentity, say).problems.join(' '), /undeclared value 77/);
+});
+
+test('displayed fractions and implicit products retain their mathematical grouping', () => {
+  const problems = (expression: string, result: number) => {
+    const value = numericalExample();
+    value.inputs = [
+      { label: 'First value', value: 0.8 },
+      { label: 'Second value', value: 0.6 },
+      { label: 'Count', value: 2 },
+    ];
+    value.calculations = [
+      { expression: '(0.8+0.6)/2', result: 0.7 },
+      { expression: 'log(2)', result: 0.693 },
+    ];
+    value.frames[0].flow!.nodes[0].label = 'Input 0.8 and 0.6 with count 2';
+    value.frames[1].formula!.latex = expression + '=' + result;
+    return checkExample(value, exampleSay).problems.filter((p) => p.includes('Visible calculation'));
+  };
+  assert.deepEqual(problems(String.raw`\frac{1}{2}(0.8+0.6)`, 0.7), []);
+  assert.deepEqual(problems(String.raw`\log\frac{2}{1}`, 0.693), []);
+  assert.deepEqual(problems(String.raw`2\log(2)`, 1.386), []);
+  assert.ok(problems(String.raw`\frac{1}{2}(0.8+0.6)`, 1.4).some((p) => p.includes('does not match')));
+  assert.ok(problems(String.raw`\log\frac{2}{1}`, 2).some((p) => p.includes('does not match')));
 });
