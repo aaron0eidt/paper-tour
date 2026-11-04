@@ -1,3 +1,4 @@
+import { Tabs } from '@animate-ui/react/primitives/base-ui/tabs';
 import { TokenCounts } from './TokenCounts';
 import { activityEvents, modelOutput } from './activityEvents';
 import { AgentOrb, AgentStream } from './AgentStream';
@@ -359,13 +360,12 @@ export function GenerationActivity({
                 </details>
               )}
             </section>
-            <div className="activity-view-switch" role="group" aria-label="Activity view">
-              <button type="button" aria-pressed={view === 'stream'} onClick={() => setView('stream')}>
-                Live activity
-              </button>
-              <button type="button" aria-pressed={view === 'details'} onClick={() => setView('details')}>
-                Technical details
-              </button>
+            <Tabs.Root className="activity-tabs" value={view} onValueChange={(value) => setView(value as 'stream' | 'details')}>
+            <div className="activity-view-switch">
+              <Tabs.List className="activity-tab-list" aria-label="Activity view" activateOnFocus>
+                <Tabs.Tab value="stream">Live activity</Tabs.Tab>
+                <Tabs.Tab value="details">Technical details</Tabs.Tab>
+              </Tabs.List>
               {attemptCount > 1 && (
                 <label className="activity-history">
                   <input
@@ -387,6 +387,7 @@ export function GenerationActivity({
                   : run.reason || 'Progress saved. Resume when ready.'}
               </p>
             )}
+            <Tabs.Panel className="activity-tab-panel" key={view} value={view} data-view={view}>
             {view === 'stream' ? (
               <>
                 {error && <p role="status">{error}</p>}
@@ -663,6 +664,8 @@ export function GenerationActivity({
                 </div>
               </>
             )}
+            </Tabs.Panel>
+            </Tabs.Root>
           </div>
         )}
       </dialog>

@@ -457,3 +457,13 @@
 .tour-generation .activity-dialog strong {
   color: var(--text);
 }
+
+.activity-body { min-width: 0; overflow-x: hidden; }
+.activity-tabs { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.activity-view-switch { align-items: center; flex-wrap: wrap; }
+.activity-tab-list { display: flex; position: relative; isolation: isolate; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.activity-dialog .activity-tab-list button { position: relative; z-index: 1; padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; }
+.activity-dialog .activity-tab-list button[aria-selected='true'] { color: var(--accent-ink); background: var(--accent-soft); }
+.activity-tab-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.activity-tab-panel[data-view='stream'] { overflow: hidden; }
+.activity-tabs :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
