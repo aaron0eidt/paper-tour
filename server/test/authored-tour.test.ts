@@ -156,9 +156,9 @@ test('tour generation repairs a runtime-broken program before publishing its cor
   assertReviewedBeforePublication(fixture.events);
 });
 
-test('tour generation stops after bounded visual repairs and never publishes persistently broken code', async () => {
+test('tour generation stops after bounded visual repairs, never publishes persistently broken code and drops the visual', async () => {
   const fixture = scripted(broken, broken);
-  await assert.rejects(fixture.generate(), /Authored visual failed inspection/);
+  const { tour, metadata } = await fixture.generate();
   assert.equal(fixture.requests.filter((request) => request.name === 'authored_visual_repair').length, 2);
   assert.equal(fixture.requests.filter((request) => request.name === 'authored_visual_review').length, 0);
   assert.ok(
@@ -166,14 +166,29 @@ test('tour generation stops after bounded visual repairs and never publishes per
       (event) => event.type === 'tool.completed' && event.data.name === 'render_visual' && event.data.failed === true,
     ),
   );
-  assert.ok(fixture.events.some((event) => event.type === 'beat.failed' && event.data.beat === 'method-1'));
-  assert.ok(!fixture.events.some((event) => event.type === 'beat.completed' && event.data.beat === 'method-1'));
+  // The step keeps its narration and loses only the visual, which the tour records with its cause.
+  const step = tour.chapters.flatMap((chapter) => chapter.steps).find((step) => step.id === 'method-1');
+  assert.ok(step, 'the directed method step survives');
+  assert.equal(step.say, narration);
+  assert.ok(!step.actions.some((action) => action.type === 'board' || action.type === 'board_focus'));
+  const degraded = (metadata.degraded as { beat: string; dropped: string[]; problems: string[]; causes: object }[]).find(
+    (entry) => entry.beat === 'method-1',
+  );
+  assert.deepEqual(degraded?.dropped, ['board']);
+  assert.deepEqual(degraded?.causes, { board: 'checks' });
+  assert.match(degraded!.problems.join(' '), /The valve construction needs repair/);
+  assert.deepEqual(tour.left_out, [{ step: 'method-1', part: 'board', cause: 'checks' }]);
+  assert.ok(fixture.events.some((event) => event.type === 'visual.dropped' && event.data.beat === 'method-1'));
+  assert.ok(fixture.events.some((event) => event.type === 'beat.degraded' && event.data.beat === 'method-1'));
+  assert.ok(!fixture.events.some((event) => event.type === 'beat.failed'));
   assert.ok(
     !fixture.events.some(
       (event) =>
         event.type === 'tour.partial' &&
         !!event.data.tour &&
-        (event.data.tour as Tour).chapters.some((chapter) => chapter.steps.some((step) => step.id === 'method-1')),
+        (event.data.tour as Tour).chapters.some((chapter) =>
+          chapter.steps.some((step) => step.id === 'method-1' && step.actions.some((action) => action.type === 'board')),
+        ),
     ),
   );
 });

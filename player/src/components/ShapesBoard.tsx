@@ -2,7 +2,7 @@
 // between them. A product colours the dimension both operands share and shows it struck out under the result, where it
 // is gone. board_focus i lights up matrix i. The clock follows speech (see useBuildClock); layout is in shapes.ts.
 
-import katex from 'katex';
+import katex from '../tex';
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShapesItem, ShapesOpTerm } from '../../../shared/shapes';

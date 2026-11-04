@@ -17,8 +17,17 @@ A table that can be read without guessing also gets a typed grid of what it prin
 equations come with their printed number (eq1, eq5a) or, without one, as equ1, equ2, ... in reading order.
 
 On an exercise sheet, task headings ("Aufgabe 1 (4 Punkte)") are found before classification and the
-tasks and their parts ("a)", "(b)") after reading order; doc.json then has an "exercises" list. Other
-documents come out exactly as without that step.
+tasks and their parts ("a)", "(b)") after reading order; doc.json then has an "exercises" list. A sheet
+also gets the drawings and tables that have no caption as figures, named after their task ("Figure in
+Exercise 2"), and a little text clean-up (chemistry arrows).
+
+A document that is neither a paper (an abstract or a reference list) nor a sheet, such as a manual, a report, a
+leaflet, a recipe or a form, is read a little differently: its drawings and tables without a caption are found too
+("Figure on page 2", read row by row), only what reads as authors, institutions or addresses is typed `authors`
+(a subtitle, a poem or a box of introductory text stays text), a line in the page body that repeats the running head
+is text, a document of two pages has its running head found, side-by-side columns of different heights are read
+column by column, and numbers set in the margin as line numbers are not read into the text. Papers come out
+as without those steps.
 """
 
 import argparse
@@ -46,7 +55,9 @@ TEXT_FLAGS = pymupdf.TEXT_MEDIABOX_CLIP
 FIGURE_DPI = 200
 DEBUG_DPI = 110
 
-CAPTION_RE = re.compile(r"^(Figure|Fig\.?|FIGURE|FIG\.?|Table|TABLE|Tab\.)\s*([A-Z]?\d+[a-z]?|[IVX]+)(?:\s*[:.|]|\s*$|\s+(?=[A-Z]))")
+CAPTION_RE = re.compile(
+    r"^(Figure|Fig\.?|FIGURE|FIG\.?|Table|TABLE|Tab\.|Abbildung|Abb\.|Bild|Tabelle)\s*"
+    r"([A-Z]?\d+(?:\.\d+)*[a-z]?|[IVX]+)(?:\s*[:|]|\s*\.(?!\d)|\s*$|\s+(?=[A-Z]))")
 NUM_HEADING_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+([A-Za-z].*)$")
 ROMAN_HEADING_RE = re.compile(r"^([IVXLCDM]{1,8})\.\s+([A-Z].*)$")
 LETTER_HEADING_RE = re.compile(r"^([A-Z](?:\.\d{1,2}){0,3})\.?\s+([A-Z].*)$")
@@ -54,12 +65,34 @@ SUBSECTION_RE = re.compile(r"^([A-Z])\.\s+([A-Z].*)$")        # IEEE "A. Overvie
 ABSTRACT_RE = re.compile(r"^(Abstract|ABSTRACT)\b\s*[-—–:.]?\s*\S")
 EQ_TAG_RE = re.compile(r"^\(([A-Z]?\.?\d{1,3}[a-z]?)\)$")
 FIG_REF_RE = re.compile(
-    r"\b(Fig(?:ure)?s?\.?|Tab(?:le)?s?\.?)\s*~?"
-    r"(\d+[a-z]?(?:\s*(?:,|and|&|or|-|–|—|to)\s*\d+[a-z]?)*)", re.I)
+    r"\b(Fig(?:ure)?s?\.?|Tab(?:le|elle)?[sn]?\.?|Abb(?:ildung(?:en)?)?\.?|Bild(?:er)?)\s*~?"
+    r"(\d+(?:\.\d+)*[a-z]?(?:\s*(?:,|and|&|or|-|–|—|to)\s*\d+(?:\.\d+)*[a-z]?)*)", re.I)
 PAGE_NUMBER_RE = re.compile(r"^(\d{1,4}|[ivxlc]{1,6}|page \d+( of \d+)?)$", re.I)
 VENUE_RE = re.compile(r"conference|proceedings|workshop|preprint|copyright|©|licen[cs]e|arxiv|journal|vol\.", re.I)
 FOOTNOTE_MARK_RE = re.compile(r"^[\d∗*†‡§¶‖#a-z]{1,3}")
 BULLETS = {"•", "◦", "▪", "▸", "►", "∙", "‣"}
+
+# What an author block says (looks_like_authors): an address, an institution, or names
+EMAIL_RE = re.compile(r"\S@\S|\borcid\b", re.I)
+AFFILIATION_RE = re.compile(
+    r"\b(?:universit\w*|institut\w*|department|dept\.|laborator\w*|laboratoire|faculty|fakult\w*|school of|college|"
+    r"academy|akademie|hospital|klinik\w*|research|center|centre|zentrum|gmbh|ltd\.?|inc\.|corp\.?|llc|affiliation)\b",
+    re.I)
+NAME_WORD_RE = re.compile(r"^[A-ZÀ-ÖØ-Þ][\w'’.-]*$")
+# Academic titles and degrees beside a name: "Dr. Jane Doe", "Jane Doe, MD", "John Roe, PhD"
+DEGREE_RE = re.compile(r"(?:Dr|Prof|PD|MD|PhD|Ph\.D|DPhil|MSc|M\.Sc|BSc|B\.Sc|MA|BA|MBA|MPH|Dipl\.-Ing|Mag)\.?")
+# A date ("1 December 2027", "4. März 2026", "03.11.2026") is no address line
+DATE_RE = re.compile(
+    r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|märz|"
+    r"juni|juli|oktober|dezember|mai)\b|\b\d{1,2}[./]\d{1,2}[./]\d{2,4}\b", re.I)
+NAME_PARTICLES = {"van", "von", "de", "der", "den", "di", "da", "del", "della", "la", "le", "bin", "ibn", "al", "el",
+                  "zu", "zur", "ter", "ten", "du", "dos"}
+# Words that open or join a title or a phrase, not a name ("Im Jardin des Plantes", "Zum Autor", "The Panther")
+NOT_NAME_WORDS = {
+    "the", "a", "an", "of", "and", "for", "in", "on", "to", "from", "with", "by", "at", "or", "is", "are", "how", "what",
+    "der", "die", "das", "ein", "eine", "im", "zum", "zur", "für", "mit", "aus", "und", "bei", "nach", "über", "als",
+    "wie", "was", "wer", "ist", "des", "dem", "den", "les", "un", "une", "et", "pour", "avec", "par",
+}
 
 # Exercise sheets (see find_exercises): task headings such as "Aufgabe 2.3 (4 Punkte)", "Exercise 2 [6 points]",
 # "Hausaufgabe H1" or "1. Aufgabe", and the parts under a task: "a)", "(b)", "(ii)", "c.".
@@ -74,7 +107,8 @@ PAPER_HEADINGS = {"abstract", "references", "bibliography"}
 PART_RE = re.compile(r"^(?:\((?P<p>[a-z]|[ivx]{1,4})\)|(?P<q>[a-z]|[ivx]{1,4})[).])(?=\s|$)")
 # Other list items ("2.", "(3)", "•"): not parts, but they end the parts indented further than them
 LIST_MARK_RE = re.compile(r"^(?:\d{1,2}[.)]|\(\d{1,2}\)|[•◦▪▸►∙‣–—*-])(?=\s)")
-_POINTS_UNIT = r"(?:Bonuspunkte|Punkte|Punkt|Pkt|Pts|Pt|points|point|marks|mark|BP|P)\.?"
+# "BE" (Bewertungseinheiten) is the unit on German school sheets
+_POINTS_UNIT = r"(?:Bonuspunkte|Punkte|Punkt|Pkt|Pts|Pt|points|point|marks|mark|Bewertungseinheiten|Bewertungseinheit|BE|BP|P)\.?"
 POINTS_RE = re.compile(
     r"(?<![\w.,])(\d{1,3}(?:[.,]\d{1,2})?(?:\s*\+\s*\d{1,3}(?:[.,]\d{1,2})?)*)\s*" + _POINTS_UNIT
     + r"(?=\s*(?:[)\],;]|$))", re.I)
@@ -291,6 +325,7 @@ class Row:
         # the line band of the row's main type; tall glyphs (√, Σ) and scripts stick out of it
         self.core = (median(w.bbox[1] for w in main), median(w.bbox[3] for w in main))
         self.task = None          # the task heading this row starts (exercise sheets, see mark_task_heads)
+        self.margin = False       # a line number set in the margin (see mark_line_numbers): never joined to a text row
 
     @property
     def text(self):
@@ -384,10 +419,13 @@ class Page:
         self.regions = []
         self.images, self.shapes, self.hrules, self.vrules = [], [], [], []
         self.marks = []           # shapes that are plotted curves or lines (see _is_mark)
+        self.boxes = []           # shapes that are the outline or fill of a box (see _is_box)
         self.gutter = None
         self.cols = {}
         self.ordered = []         # blocks in reading order (after ordering)
         self.sentences = []
+        self.sheet = False        # the page is part of an exercise sheet (set once the task headings are known)
+        self.columns = None       # body size, when side-by-side columns of a page without a gutter are read one after the other
 
 
 class Fonts:
@@ -565,7 +603,7 @@ def merge_rows(segs):
     """Join segments that share a baseline (inline math, sub/superscripts, number + heading)."""
     rows = []
     for s in sorted(segs, key=lambda s: (s.baseline, s.bbox[0])):
-        if not s.horizontal:
+        if not s.horizontal or s.margin:
             rows.append(s)
             continue
         target = None
@@ -574,7 +612,7 @@ def merge_rows(segs):
             sz = max(r.size, s.size)
             if r.baseline < s.baseline - 2 * sz:
                 break
-            if not r.horizontal or r.cls != s.cls:
+            if not r.horizontal or r.cls != s.cls or r.margin:
                 continue
             same = abs(r.baseline - s.baseline) <= 0.45 * sz
             if not same and s.size <= 0.8 * r.size:
@@ -591,6 +629,35 @@ def merge_rows(segs):
         else:
             rows[target] = Row(rows[target].words + s.words, cls=s.cls)
     return sorted(rows, key=lambda r: (r.baseline, r.bbox[0]))
+
+
+def mark_line_numbers(pages, page_segs, body):
+    """Flag the segments that are line numbers set in the margin of a text (5, 10, 15 ... beside a story or a poem, or 1,
+    2, 3 ...): small whole numbers outside the text column, three or more, aligned on one edge, counting up by one step
+    on every page. Such a number is not joined to the text line it sits beside, so it never gets into a sentence. Returns
+    whether there are any (analyse then drops those rows)."""
+    cands = []
+    for page, segs in zip(pages, page_segs):
+        for s in segs:
+            if s.horizontal and len(s.words) == 1 and s.size <= 0.85 * body and re.fullmatch(r"\d{1,3}", s.words[0].text):
+                left, right = page.cols[s.cls]
+                if s.bbox[2] <= left + 1 or s.bbox[0] >= right - 1:
+                    cands.append((page.n, s, int(s.words[0].text)))
+    found = []
+    for edge in (0, 2):                                    # aligned on the left edge, or on the right edge
+        groups = {}
+        for c in cands:
+            groups.setdefault(round(c[1].bbox[edge] / 3), []).append(c)
+        for group in groups.values():
+            steps, ok = set(), len(group) >= 3
+            for n in {c[0] for c in group}:
+                values = [c[2] for c in sorted((c for c in group if c[0] == n), key=lambda c: c[1].bbox[1])]
+                steps.update(b - a for a, b in zip(values, values[1:]))
+            if ok and len(steps) == 1 and min(steps) > 0:
+                found.extend(group)
+    for _, s, _ in found:
+        s.margin = True
+    return bool(found)
 
 
 # ---------------------------------------------------------------------------- blocks
@@ -737,6 +804,32 @@ def _is_mark(drawing):
     return False
 
 
+def _is_box(drawing):
+    """The outline or the fill of a box: one path of straight, axis-parallel sides (a rectangle, or four sides joined
+    end to end) with at most rounded corners, as LaTeX's tcolorbox or a word processor draws a box around a text.
+    A circle, a curve, a slanted line, or lines that only share a path (a grid) are no box."""
+    sides, last = 0, None
+    for item in drawing.get("items", ()):
+        if item[0] in ("re", "qu"):
+            sides += 2
+            last = None
+        elif item[0] == "l":
+            a, b = item[1], item[2]
+            if abs(a.x - b.x) > 0.5 and abs(a.y - b.y) > 0.5:
+                return False
+            if last is not None and (abs(last.x - a.x) > 1 or abs(last.y - a.y) > 1):
+                return False
+            sides += 1
+            last = b
+        elif item[0] == "c":
+            if last is not None and (abs(last.x - item[1].x) > 1 or abs(last.y - item[1].y) > 1):
+                return False
+            last = item[4]
+        else:
+            return False
+    return sides >= 2
+
+
 def read_graphics(page):
     """Visible images and vector paths, honouring clip paths; thin paths become rules."""
     W, H = page.width, page.height
@@ -782,6 +875,8 @@ def read_graphics(page):
             page.shapes.append(r)
             if _is_mark(e):
                 page.marks.append(r)
+            if _is_box(e):
+                page.boxes.append(r)
 
 
 def drop_text_decorations(page):
@@ -976,7 +1071,7 @@ def rules_linked(page, a, b, body):
     if bot - top > 0.8 * body and (not band_has_rows(page, top, bot, xs) or band_has_plot(page, top, bot, xs)):
         return False
     if bot - top <= 90:
-        return not barrier_between(page, top, bot, xs, True)
+        return not barrier_between(page, top, bot, xs, True, cells_ok=True)
     same_extent = abs(a[0] - b[0]) <= 2 and abs(a[2] - b[2]) <= 2
     return same_extent and not barrier_between(page, top, bot, xs, True, cells_ok=True)
 
@@ -1003,12 +1098,10 @@ def trim_skeleton(page, rules, down):
     return keep + [v for v in vs if v not in cut]
 
 
-def find_tables(page, stats):
-    caps = sorted((b for b in page.blocks if b.caption and b.caption[0] == "table"), key=lambda b: b.bbox[1])
-    if not caps:
-        return
-    body = stats.fonts.body_size
-    rules = [(r, "h") for r in page.hrules] + [(r, "v") for r in page.vrules]
+def table_skeletons(page, body, hrules, vrules):
+    """The rules that hang together as the lines of one table: [[bbox, rules, False]] (the flag is for the caller to
+    mark a skeleton as taken), top to bottom. Rules touch, or are horizontal rules of one extent (rules_linked)."""
+    rules = [(r, "h") for r in hrules] + [(r, "v") for r in vrules]
     parent = list(range(len(rules)))
 
     def find(i):
@@ -1035,6 +1128,15 @@ def find_tables(page, stats):
         if nh >= 2 or (nh >= 1 and nv >= 2):
             skeletons.append([union_all(r for r, _ in members), [r for r, _ in members], False])
     skeletons.sort(key=lambda s: (s[0][1], s[0][0]))
+    return skeletons
+
+
+def find_tables(page, stats):
+    caps = sorted((b for b in page.blocks if b.caption and b.caption[0] == "table"), key=lambda b: b.bbox[1])
+    if not caps:
+        return
+    body = stats.fonts.body_size
+    skeletons = table_skeletons(page, body, page.hrules, page.vrules)
 
     for cap in caps:
         cb = cap.bbox
@@ -1199,6 +1301,204 @@ def find_figures(page, stats):
         region.panels = find_panels(page, region)
         page.regions.append(region)
         taken.append(region.bbox)
+
+
+MAX_LOOSE_GRAPHICS = 1500      # pieces of graphics on one page that find_loose_figures looks through
+
+
+def is_label_row(r, page):
+    """A short row that can be the label of a drawing ("R1", "µk = 0.20", "pen 1", "T"): not a task heading, the
+    start of a part or a points statement."""
+    return (r.horizontal and r.task is None and len(r.words) <= 5 and width(r.bbox) <= 0.4 * col_width(page, r.cls)
+            and not PART_RE.match(r.text) and points_only(r.text) is None)
+
+
+def cell_lines(page, box):
+    """How many printed lines inside box have two cells or more (rows of text side by side on one baseline): the rows
+    of a table, where the lines of a paragraph have one."""
+    lines = []
+    for r in sorted((r for r in page.rows if r.horizontal and center_in(r.bbox, expand(box, 1))), key=lambda r: r.baseline):
+        if lines and abs(lines[-1][0] - r.baseline) <= 0.5 * r.size:
+            lines[-1][1] += 1
+        else:
+            lines.append([r.baseline, 1])
+    return sum(1 for _, n in lines if n >= 2)
+
+
+def table_like(page, box):
+    """Is the text inside box laid out as a table: two lines or more with cells side by side, and the text fills a share
+    of the box (the empty field of a form, with its small label, is a frame and no table)."""
+    inner = [r for r in page.rows if r.horizontal and center_in(r.bbox, expand(box, 1))]
+    fill = sum(area(r.bbox) for r in inner) / max(area(box), 1.0)
+    return cell_lines(page, box) >= 2 and fill >= 0.07
+
+
+def is_frame(rects, box, tol=2.5):
+    """No piece reaches into the inside of box: they all lie along its edge, like the sides of a frame drawn around
+    text, or an empty answer box."""
+    inner = expand(box, -tol)
+    return not any(intersect(r, inner) for r in rects)
+
+
+def grow_groups(groups, labels, body):
+    """Let each group of graphics take the label rows next to it (within 0.8 body sizes), then join the groups that
+    are that close to each other: the labels of a tree's nodes sit between the pieces of its branches, and a
+    dimension arrow floats just above the sketch it measures. groups: [{"box", "rects", "rows"}]; returns them
+    joined."""
+    used = set()
+    merged = True
+    while merged:
+        merged = False
+        for g in groups:
+            for r in labels:
+                if r not in used and near(r.bbox, g["box"], 0.8 * body):
+                    used.add(r)
+                    g["rows"].append(r)
+                    g["box"] = union(g["box"], r.bbox)
+                    merged = True
+        for i, a in enumerate(groups):
+            hit = next((b for b in groups[i + 1:] if near(a["box"], b["box"], 0.8 * body)), None)
+            if hit is not None:
+                a["rects"] += hit["rects"]
+                a["rows"] += hit["rows"]
+                a["box"] = union(a["box"], hit["box"])
+                groups.remove(hit)
+                merged = True
+                break
+    return groups
+
+
+def running_images(pages, least=2):
+    """The boxes (to 2 points) of images in the top or bottom fifth of `least` pages or more at the same place: a logo
+    in the running head or foot."""
+    seen = Counter()
+    for page in pages:
+        seen.update({tuple(round(v / 2) for v in r) for r in page.images
+                     if r[3] <= 0.2 * page.height or r[1] >= 0.8 * page.height})
+    return {k for k, n in seen.items() if n >= least}
+
+
+def find_loose_figures(page, stats, after_task=False):
+    """Drawings and tables without a caption, on an exercise sheet: a circuit, a free-body sketch, a probability tree,
+    a blank Punnett square or trace table. Returns the new regions (also added to page.regions), top to bottom.
+    Their caption and number are None: figure_records numbers them and name_loose_figures names them.
+
+    Graphics that sit close together form one drawing, with the short label rows around them; a drawing needs two
+    pieces (or an image or a plotted curve) and a size of its own. What is no drawing: a lone rule or underline, a
+    frame around text (every piece of it lies on the edge), a box around text (its outline and fill, nothing drawn in
+    it), a box drawn in a margin, a logo (in the page body above the first task, or repeated on the pages), anything
+    that holds body text. A table is a skeleton of rules that forms a grid or the booktabs rules (three of one extent)
+    with text between. after_task: an earlier page has a task heading, so this page starts inside a task."""
+    body = stats.fonts.body_size
+    W, H = page.width, page.height
+    kinds = {}
+    for kind, rects in (("i", page.images), ("s", page.shapes), ("h", page.hrules), ("v", page.vrules)):
+        kinds.update((r, kind) for r in rects)
+    if len(kinds) > MAX_LOOSE_GRAPHICS:
+        return []                 # a page full of vector art (a plot with thousands of marks) is not searched
+    taken = [reg.bbox for reg in page.regions]
+    barrier_blocks = [b for b in page.blocks if b.barrier and not b.caption]
+    logos = getattr(stats, "running_images", ())
+    free = [r for r in kinds if not any(inside_frac(r, t) > 0.5 for t in taken)
+            and not any(inside_frac(r, b.bbox) > 0.9 for b in barrier_blocks)
+            and not (kinds[r] == "i" and tuple(round(v / 2) for v in r) in logos)]
+    labels = [r for b in page.blocks if b.horizontal and not b.barrier and not b.caption
+              for r in b.rows if is_label_row(r, page)]
+    task_rows = [r for r in page.rows if r.task is not None]
+    # nothing above the first task heading of a sheet belongs to a task: the logo set in the page body beside the course
+    # line, which ends below the margin band, is the head of the sheet. A page that goes on from an earlier one has no
+    # such part, and a page without any heading, before the first task, is all of it.
+    opening = head = 0.0              # a candidate that ends above `opening` or starts above `head` is part of the head
+    if stats.sheet:
+        opening = 0.0 if after_task else min((r.bbox[1] for r in task_rows), default=H)
+    elif page.n == 1:
+        # any other document: the head of the first page is what stands beside or above its title, a letterhead with its
+        # logo, a crest, a cover band; a photo or a drawing below the title is a figure. Without a title it is what
+        # stands above the first heading or body text.
+        title = find_title(page, body)
+        if title is not None:
+            head = title.bbox[3]
+        else:
+            opening = min((b.bbox[1] for b in barrier_blocks), default=0.0)
+
+    def sound(box, rects, table=False):
+        """A candidate that is clear of the page margins (a logo in the header, a rule above the footer) and of the
+        head of the sheet, no bigger than half the page, and holds no heading or body text. The rows of a table in a
+        document that is no sheet can look like body text, on a page that has little else (the column of test names
+        in a lab report is the widest text of its page): only a heading in it, or cells too few to be a table, count."""
+        if box[3] <= 0.12 * H or box[1] >= 0.93 * H or box[3] <= opening or box[1] < head or area(box) > 0.5 * W * H:
+            return False
+        if not stats.sheet and all(kinds[r] == "i" for r in rects) and box[3] <= 0.2 * H and height(box) <= 7 * body:
+            return False              # a small image in the top fifth of a page is a logo (a letterhead on a later page)
+        inner = expand(box, 1)
+        if any(center_in(r.bbox, inner) for r in task_rows):
+            return False
+        if table and not stats.sheet:
+            return not any(center_in(r.bbox, inner) and b.heading for b in barrier_blocks for r in b.rows)
+        return not any(center_in(r.bbox, inner) for b in barrier_blocks for r in b.rows)
+
+    out = []
+    # tables first: their rules are not parts of a drawing
+    table_rules = set()
+    skeletons = table_skeletons(page, body, [r for r in free if kinds[r] == "h"], [r for r in free if kinds[r] == "v"])
+    groups = []
+    for box, rules, _ in skeletons:
+        nh = sum(1 for r in rules if kinds[r] == "h")
+        widest = max((width(r) for r in rules if kinds[r] == "h"), default=0)
+        long_rules = [r for r in rules if kinds[r] == "h" and width(r) >= 0.9 * widest
+                      and abs(r[0] - box[0]) <= 2 and abs(r[2] - box[2]) <= 2]
+        grid = nh >= 2 and len(rules) - nh >= 2
+        booktabs = len(long_rules) >= 3 and widest >= 5 * body
+        if (grid or booktabs) and not is_frame(rules, box) and min(width(box), height(box)) >= body:
+            groups.append({"box": box, "rects": list(rules), "rows": [], "grid": grid})
+    for g in grow_groups(groups, labels, body):
+        inside = [r for b in page.blocks for r in b.rows if center_in(r.bbox, expand(g["box"], 2))]
+        cells = stats.sheet or table_like(page, g["box"])        # outside a sheet: ruled rows with cells side by side
+        if sound(g["box"], g["rects"], table=True) and (g["grid"] or len(inside) >= 2) and cells:
+            table_rules.update(g["rects"])
+            out.append(("table", g))
+    # then the drawings: graphics that stay, with at least two pieces, an image or a plotted curve. The shaded rows and
+    # cells of a table are part of it, not a drawing
+    table_boxes = [g["box"] for kind, g in out if kind == "table"]
+    groups = [{"box": box, "rects": list(members), "rows": []}
+              for box, members in cluster_rects([r for r in free if r not in table_rules
+                                                 and not any(inside_frac(r, tb) > 0.5 for tb in table_boxes)], 3)]
+    boxes = set(page.boxes)
+    for g in grow_groups(groups, labels, body):
+        rects = g["rects"]
+        # The outline and the fill of a box (tcolorbox draws both as paths, the fill a little smaller) cover the
+        # whole candidate. They are set aside: what is drawn in the box is what is left (a circuit, or lines across it
+        # that make a grid or a form), and a box around text only is no drawing.
+        ink = union_all(rects)
+        aside = [r for r in rects if r in boxes and kinds[r] == "s" and area(r) >= 0.8 * area(ink)]
+        across = []
+        if aside:
+            rects = [r for r in rects if r not in aside]
+            across = [r for r in rects if kinds[r] in "hv" and intersect(r, expand(ink, -2.5))]
+            if not (any(kinds[r] in "is" for r in rects) or len(across) >= 2):
+                continue
+            ink = union_all(rects)
+        drawn = any(kinds[r] in "is" for r in rects) or len(across) >= 2        # not just rules
+        enough = len(rects) >= 2 or any(kinds[r] == "i" or r in page.marks for r in rects)
+        # outside a sheet a drawing has an image or a curve or slanted line that is no box's rounded corner, or three
+        # bars or more (the filled rectangles of a bar chart or a timeline, none with text inside): boxes and straight
+        # lines alone are the frame of a code listing, the fields and checkboxes of a form
+        bars = sum(1 for r in rects if kinds[r] == "s" and min(width(r), height(r)) >= 0.5 * body
+                   and not any(center_in(row.bbox, r) for row in page.rows))
+        solid = stats.sheet or bars >= 3 or any(kinds[r] == "i" or (r in page.marks and r not in boxes) for r in rects)
+        if (drawn and enough and solid and max(width(ink), height(ink)) >= 3 * body and min(width(ink), height(ink)) >= body
+                and not is_frame(rects, ink) and sound(g["box"], rects)):
+            out.append(("figure", g))
+    regions = []
+    for kind, g in sorted(out, key=lambda o: (o[1]["box"][1], o[1]["box"][0])):
+        parts = [(r, True) for r in g["rects"]] + [(r.bbox, False) for r in g["rows"]]
+        region = Region(kind, None, None, ink_bbox(page, expand(g["box"], 1)), parts)
+        region.page = page.n
+        if kind == "table":
+            region.rules = list(g["rects"])
+        regions.append(region)
+    page.regions.extend(regions)
+    return regions
 
 
 def figure_band(page, cap, spanbox, direction):
@@ -1381,12 +1681,26 @@ def footnote_rule_y(page):
     """y of a short rule at the left edge of a column in the lower half: the footnote separator."""
     best = None
     for r in page.hrules:
+        if any(near(r, v, 1.5) for v in page.vrules):
+            continue                  # the top of a box, such as an empty field of a form: no footnote separator
         for cls in ("L", "R", "F"):
             x0, x1 = page.cols[cls]
             if (abs(r[0] - x0) < 6 and 0.12 * (x1 - x0) < width(r) < 0.55 * (x1 - x0)
                     and r[1] > 0.45 * page.height):
                 best = r[1] if best is None else min(best, r[1])
     return best
+
+
+def shares_its_line(b, page, body):
+    """Another line of the same size stands close beside the block on its baseline (6 body sizes, same column), alone in
+    its block: an option next to a checkbox ("1 Jahr", "2 Jahre"), a label in a row of fields. A heading has its line to
+    itself; text of another size, or a column of text that merely overlaps it in height (a narrow sidebar), is no
+    neighbour."""
+    bb, line = b.bbox, b.rows[0]
+    return any(o is not b and o.horizontal and o.cls == b.cls and len(o.rows) == 1
+               and abs(o.rows[0].baseline - line.baseline) <= 0.3 * line.size and abs(o.size - b.size) <= 0.5
+               and (0 <= o.bbox[0] - bb[2] <= 6 * body or 0 <= bb[0] - o.bbox[2] <= 6 * body)
+               for o in page.blocks)
 
 
 def classify_block(b, page, stats, title, running):
@@ -1401,25 +1715,36 @@ def classify_block(b, page, stats, title, running):
     one_row = len(b.rows) == 1
     if one_row and PAGE_NUMBER_RE.match(t) and (bb[1] > 0.88 * H or bb[3] < 0.12 * H):
         return "header_footer"
-    # a sheet's title often repeats its running head; only the copy in the margin is the running head
-    if re.sub(r"\d+", "#", t.lower()) in running and (not stats.sheet or bb[3] < 0.1 * H or bb[1] > 0.9 * H):
+    # the points a sheet sets at the right margin ("[2 pts]" beside the last part of a page) are text of the
+    # task, however often they repeat
+    points = stats.sheet and one_row and points_only(t) is not None
+    # a sheet's title often repeats its running head, and so does the title of a leaflet or a report: only the copy in
+    # the margin is the running head. Outside a paper (whose running heads are matched wherever they sit) the same
+    # holds for every line, and a bare number ("2023", "312") in the middle of the page is a table cell, not a page number.
+    key = re.sub(r"\d+", "#", t.lower())
+    in_margin = bb[3] < 0.1 * H or bb[1] > 0.9 * H
+    margin_only = stats.sheet or not stats.paper_like or b is title or key == "#"
+    if key in running and not points and (in_margin or not margin_only):
         return "header_footer"
-    if title is not None and page.n == 1 and bb[3] <= title.bbox[1]:
-        return "header_footer"        # notices above the title
+    if title is not None and page.n == 1 and bb[3] <= title.bbox[1] and (in_margin or stats.paper_like or stats.sheet):
+        return "header_footer"        # notices above the title (outside a paper only those in the margin)
     if b is title:
         return "title"
     marked = starts_with_mark(b.rows[0], body)
     rule_y = footnote_rule_y(page)
     if marked and bb[1] > 0.4 * H:
         return "footnote"
-    if len(b.rows) <= 2 and bb[1] > 0.9 * H and (b.size < 0.95 * body or VENUE_RE.search(t)):
+    if len(b.rows) <= 2 and bb[1] > 0.9 * H and (b.size < 0.95 * body or VENUE_RE.search(t)) and not points:
         return "header_footer"        # venue / copyright line in the bottom margin
     if rule_y is not None and bb[1] >= rule_y and b.size <= 0.95 * body:
         return "footnote"
     if is_equation(b, page, body):
         return "equation"
     if is_heading_like(b, body):
-        return "heading"
+        # outside papers and sheets a number with a word, side by side with other text, is a label ("1 Jahr")
+        label = NUM_HEADING_RE.match(t) and not (stats.sheet or stats.paper_like) and shares_its_line(b, page, body)
+        if not label:
+            return "heading"
     if sum(ch.isalpha() for ch in t) < 2:
         return "other"
     return "paragraph"
@@ -1452,10 +1777,58 @@ def equation_tags(b, page):
     return tags
 
 
+def is_person_name(text, caps=False):
+    """Two to four capitalised words, or initials, without digits: "Rainer Maria Rilke", "J. R. R. Tolkien", "Jane
+    Doe¹". A name has no word that opens a title ("Zum Autor", "The Panther"); a particle sits between the words, and a
+    title or degree ("Dr.", "PhD") beside it does not count. caps: a name set in capitals ("JANE DOE") is one too, which
+    a heading ("GENERAL DESCRIPTION") also looks like, so the caller must have ruled out a heading."""
+    text = re.sub(r"\([^)]*\)", " ", text)                         # "(1875–1926)"
+    words = [re.sub(r"(?<=[^\W\d_])\d+$", "", w.strip(",;*†‡§¶‖∗¹²³⁴⁵⁶⁷⁸⁹⁰")) for w in text.split()]
+    words = [w for w in words if w and not DEGREE_RE.fullmatch(w)]
+    if not 2 <= len(words) <= 4:
+        return False
+    for i, w in enumerate(words):
+        low = w.lower().rstrip(".")
+        if 0 < i < len(words) - 1 and low in NAME_PARTICLES:
+            continue
+        if low in NOT_NAME_WORDS or not NAME_WORD_RE.match(w):
+            return False                                           # a label ("Wirkstoff:") fails here too
+        if not (caps or re.fullmatch(r"[^\W\d_]\.?", w) or re.search(r"[a-zß-ÿ]", w)):
+            return False                                           # "GENERAL DESCRIPTION": no lowercase letter
+    return True
+
+
+def looks_like_authors(b):
+    """Does a block read as the authors of a document: every row an e-mail address or ORCID, an institution ("University
+    of X", "Department of Y"), a list of names (with their degrees and footnote numbers), or, under one of those, a short
+    address ("Berlin, Germany")? A heading only with an address or an institution. A subtitle, a poem, a box of
+    introductory text, a list of contents or a table of document data ("Approved by ...") does not."""
+    if not b.horizontal:
+        return False
+    anchored = False                    # a row of names, an institution or an address came before
+    for r in b.rows:
+        t = r.text.strip()
+        short = len(t.split()) <= 14 and not re.search(r"[.!?]$", t)
+        if EMAIL_RE.search(t) or (AFFILIATION_RE.search(t) and short):
+            anchored = True
+            continue
+        if b.type == "heading":
+            return False
+        if anchored and len(t.split()) <= 8 and ":" not in t and not re.search(r"[.!?]$", t) and not DATE_RE.search(t):
+            continue
+        # footnote numbers set apart by commas ("Jane Doe1,2, John Roe2") leave parts that are only digits or marks
+        parts = [p for p in re.split(r"[,;·|&]|\b(?:and|und)\b", t, flags=re.I) if re.search(r"[^\W\d_]", p)]
+        caps = len(t.split()) <= 6
+        if not parts or not all(DEGREE_RE.fullmatch(p.strip()) or is_person_name(p, caps) for p in parts):
+            return False
+        anchored = True
+    return True
+
+
 def classify(pages, stats):
     body = stats.fonts.body_size
-    # an exercise sheet repeats its course line on both pages of a two-page sheet
-    running = repeated_margin_texts(pages, 2 if stats.sheet else 3)
+    # an exercise sheet repeats its course line on both pages of a two-page sheet, and so does any two-page document
+    running = repeated_margin_texts(pages, 2 if stats.sheet or len(pages) == 2 else 3)
     title = find_title(pages[0], body) if pages else None
     stats.title = title
     for page in pages:
@@ -1480,8 +1853,10 @@ def classify(pages, stats):
         else:
             limit = min(heads) if heads else (min(paras) if paras else title.bbox[3])
         for b in page.blocks:
+            # a paper (and a sheet's course lines) keeps everything up to the first heading as author lines; any other
+            # document only what reads as authors, so a poem, a subtitle or a box of introductory text stays text
             if (b.type in ("paragraph", "other", "heading") and b.bbox[1] >= title.bbox[3] - 1
-                    and b.bbox[3] <= limit + 1):
+                    and b.bbox[3] <= limit + 1 and (stats.paper_like or stats.sheet or looks_like_authors(b))):
                 b.type = "authors"
     for page in pages:
         split_run_in_headings(page)
@@ -1526,6 +1901,55 @@ def _sort_rows(items):
     return out
 
 
+def column_cut(items, body):
+    """x of a gutter between two columns of items: a band at least a body size wide that no item crosses, with two items
+    or more on each side, standing side by side (the two sides share half of the shorter side's height), and one side
+    holding a block of three printed lines or more (a column of text, not rows of "label ... value"). None if there is
+    none."""
+    spans = sorted((it[0][0], it[0][2]) for it in items)
+    reach, cuts = spans[0][1], []
+    for x0, x1 in spans[1:]:
+        if x0 > reach + body:
+            cuts.append((reach + x0) / 2)
+        reach = max(reach, x1)
+    for c in cuts:
+        left = [it for it in items if it[0][2] <= c]
+        right = [it for it in items if it[0][0] >= c]
+        if len(left) < 2 or len(right) < 2:
+            continue
+        # Single-line labels and values side by side (a form, the date and name of a letter) are rows, not columns.
+        if not any(len({round(r.baseline) for r in b.rows}) >= 3 for it in left + right for b in it[1]
+                   if b.horizontal and b.type not in ("table_text", "figure_text")):
+            continue
+        ly, ry = (min(it[0][1] for it in left), max(it[0][3] for it in left)), (min(it[0][1] for it in right), max(it[0][3] for it in right))
+        if min(ly[1], ry[1]) - max(ly[0], ry[0]) >= 0.5 * min(ly[1] - ly[0], ry[1] - ry[0]):
+            return c
+    return None
+
+
+def xy_order(items, body, found):
+    """Reading order of the items of a page whose columns were not found as a gutter (the left column of a recipe is
+    narrow, the sidebar of an article ends higher than the text): a gutter between two groups of items that stand side
+    by side (column_cut) puts the whole left group before the right one, whatever their heights; where there is none,
+    the topmost band between two lines of items comes first, then the rest is looked at again. found.append(True) when
+    a gutter was used."""
+    out, rest = [], list(items)
+    while rest:
+        c = column_cut(rest, body) if len(rest) >= 2 else None
+        if c is not None:
+            found.append(True)
+            return (out + xy_order([it for it in rest if it[0][2] <= c], body, found)
+                    + xy_order([it for it in rest if it[0][2] > c], body, found))
+        rest.sort(key=lambda it: (it[0][1], it[0][0]))
+        reach, k = rest[0][0][3], 1
+        while k < len(rest) and rest[k][0][1] <= reach + 0.5:
+            reach = max(reach, rest[k][0][3])
+            k += 1
+        out.extend(_sort_rows(rest[:k]))
+        rest = rest[k:]
+    return out
+
+
 def order_page(page):
     items = [(b.bbox, [b], b.cls) for b in page.blocks]
     for reg in page.regions:
@@ -1537,6 +1961,11 @@ def order_page(page):
     footer = [it for it in margin if it not in header]
     if page.gutter is None:
         ordered = _sort_rows(body)
+        if page.columns is not None:
+            found = []
+            by_columns = xy_order(body, page.columns, found)
+            if found:
+                ordered = by_columns
     else:
         full = sorted((it for it in body if it[2] == "F"), key=lambda it: (it[0][1], it[0][0]))
         keyed = {}
@@ -1548,6 +1977,60 @@ def order_page(page):
         for key in sorted(keyed):
             ordered.extend(_sort_rows(keyed[key]))
     page.ordered = [b for it in _sort_rows(header) + ordered + _sort_rows(footer) for b in it[1]]
+    if page.sheet:
+        restore_part_order(page)
+
+
+def part_label(block):
+    """The label a block starts its first line with ("c" for "(c) lim"); None if it starts with none."""
+    m = PART_RE.match(block.rows[0].text) if block.horizontal else None
+    return (m.group("p") or m.group("q")) if m else None
+
+
+def label_rank(labels):
+    """A sort key for the labels of one list: "a" < "b", and "ii" < "iii" < "iv" when they are roman numerals. None
+    when the labels are no one list that can be put in order: a label twice (the "(i)", "(ii)" under "(a)" and again
+    under "(b)", set at one indent), or letters and numerals mixed ("a)", "b)", then "(i)", "(ii)" at one indent)."""
+    if len(set(labels)) != len(labels):
+        return None
+    if all(len(l) == 1 for l in labels):
+        return ord
+    if all(l in ROMAN_LABELS for l in labels):
+        return ROMAN_LABELS.index
+    return None
+
+
+def restore_part_order(page):
+    """Put the blocks that start the parts of one list in label order, where the reading order has them the other way
+    round. A display formula set beside "(c)" and "(d)" ("(c) lim" with its limit rows around it) can sort the block
+    of "(d) lim" ahead of "(c) lim", and part d would then be lost. Only blocks of one task, one column and one
+    indent are compared, by the baseline of their label, and only when that gives the list a, b, c ... in order;
+    they swap places with each other, so nothing else moves. A run whose labels are no single list (a label twice,
+    letters mixed with numerals) is left as it is."""
+    runs, seg = [], 0
+    for i, b in enumerate(page.ordered):
+        if b.type == "heading" or (b.horizontal and any(r.task is not None for r in b.rows)):
+            seg += 1
+            continue
+        label, r = part_label(b), b.rows[0]
+        if label is None:
+            continue
+        for run in runs:
+            if run["seg"] == seg and run["cls"] == b.cls and abs(run["x0"] - r.bbox[0]) <= 0.6 * r.size:
+                run["items"].append((i, b, label))
+                break
+        else:
+            runs.append({"seg": seg, "cls": b.cls, "x0": r.bbox[0], "items": [(i, b, label)]})
+    for run in runs:
+        items = run["items"]
+        rank = label_rank([it[2] for it in items])
+        if rank is None:
+            continue
+        by_line = sorted(items, key=lambda it: it[1].rows[0].baseline)
+        ranks = [rank(it[2]) for it in by_line]
+        if by_line != items and all(a < b for a, b in zip(ranks, ranks[1:])):
+            for (slot, _, _), (_, b, _) in zip(items, by_line):
+                page.ordered[slot] = b
 
 
 # ---------------------------------------------------------------------------- sections
@@ -1602,8 +2085,8 @@ def build_sections(pages, toc):
     toc_titles = {_norm(t) for _, t, _ in toc}
     for page in pages:
         for b in page.ordered:
-            if b.type != "heading":
-                continue
+            if b.type != "heading" or b.rows[0].task is not None:
+                continue                      # a task heading ("1. Aufgabe: Titel") is a task, not a section
             text = " ".join(b.raw_text.split())
             main = ROMAN_HEADING_RE.match(text)
             sub = SUBSECTION_RE.match(text) if roman and not after_refs else None
@@ -1747,6 +2230,37 @@ def join_hyphenated(left, right, vocab):
     return stem + right
 
 
+# Chemistry set in LaTeX: "\ce{A -> B}" arrives as bars and a head ("−−→"), "\ce{A <=> B}" as two half arrows ("−−⇀ ↽−−")
+ARROW_RE = re.compile(r"[−–-]{1,3}→")
+ARROW_GLUED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789([")     # "−−→CO2": no space after it
+HALF_ARROW_RE = re.compile(r"[−–-]{1,3}⇀")
+HALF_ARROW_BACK_RE = re.compile(r"↽[−–-]{0,3}")
+
+
+def tidy_sheet_text(text):
+    """Text of a word on an exercise sheet, tidied so that a model can read the task: chemistry arrows ("−−→") become
+    one arrow ("→") with a space after it, and U+FFFD, the pieces of large brackets and operators that MuPDF cannot map
+    (which of "(", "[", "|" or the integral sign it was cannot be told), is dropped."""
+    text = text.replace("\ufffd", "")
+    text = ARROW_RE.sub(lambda m: "→ " if m.string[m.end():m.end() + 1] in ARROW_GLUED else "→", text)
+    if HALF_ARROW_RE.fullmatch(text):
+        return "⇌"                    # the first half of an equilibrium arrow; the second half is dropped below
+    return HALF_ARROW_BACK_RE.sub("", text) if text.startswith("↽") else text
+
+
+def tidy_tokens(tokens):
+    """tidy_sheet_text for the tokens of a block; a token that is nothing but its glyph is dropped, and its box goes
+    to the token before it."""
+    out = []
+    for t in tokens:
+        t.text = tidy_sheet_text(t.text)
+        if t.text:
+            out.append(t)
+        elif out:
+            out[-1].frags.extend(t.frags)
+    return out
+
+
 def block_tokens(block, vocab):
     tokens = []
     for ri, row in enumerate(block.rows):
@@ -1822,6 +2336,8 @@ def assign_ids_and_sentences(pages, vocab):
             k_block += 1
             b.id = f"p{page.n}.b{k_block}"
             tokens = block_tokens(b, vocab)
+            if page.sheet:
+                tokens = tidy_tokens(tokens)
             b.text = " ".join(t.text for t in tokens)
             b.sentences = []
             if b.type not in SENTENCE_TYPES or not b.horizontal or not tokens:
@@ -1839,11 +2355,27 @@ def assign_ids_and_sentences(pages, vocab):
 
 def figure_records(pages):
     records, seen = [], set()
+    # a drawing without a caption (find_loose_figures) goes on from the highest printed number of its kind
+    top = {}
     for page in pages:
-        regions = sorted(page.regions, key=lambda r: page.ordered.index(r.caption) if r.caption in page.ordered else 0)
+        for reg in page.regions:
+            if reg.caption is not None and reg.number.isdigit():
+                top[reg.kind] = max(top.get(reg.kind, 0), int(reg.number))
+    for page in pages:
+        def place(r):
+            if r.caption is not None:
+                return page.ordered.index(r.caption) if r.caption in page.ordered else 0
+            return sum(1 for b in page.ordered if b.bbox[1] < r.bbox[1] - 1) - 0.5
+
+        regions = sorted(page.regions, key=place)
         for reg in regions:
+            if reg.caption is None:
+                top[reg.kind] = top.get(reg.kind, 0) + 1
+                reg.number = str(top[reg.kind])
             prefix = "tab" if reg.kind == "table" else "fig"
             fid = prefix + re.sub(r"[^0-9A-Za-z]", "", reg.number)
+            if fid in seen and "." in reg.number:
+                fid = prefix + reg.number.replace(".", "d")          # Figure 8.1 next to a Figure 81: fig8d1
             if fid in seen:
                 warn(f"page {page.n}: duplicate {fid} ignored")
                 continue
@@ -1855,12 +2387,14 @@ def figure_records(pages):
                 if label:
                     p["label"] = label
                 panels.append(p)
-            records.append({
-                "id": fid, "kind": reg.kind, "number": reg.number, "page": page.n,
-                "bbox": rounded(reg.bbox), "caption": reg.caption.text, "caption_block": reg.caption.id,
-                "image": f"figures/{fid}.png", "panels": panels, "referenced_by": [],
-                "_page": page, "_caption": reg.caption, "_rules": table_rules(page, reg),
-            })
+            rec = {"id": fid, "kind": reg.kind, "number": reg.number, "page": page.n, "bbox": rounded(reg.bbox)}
+            if reg.caption is not None:
+                rec.update(caption=reg.caption.text, caption_block=reg.caption.id)
+            else:
+                rec["caption"] = reg.label      # no caption block: the name find_loose_figures gave it
+            rec.update(image=f"figures/{fid}.png", panels=panels, referenced_by=[],
+                       _page=page, _caption=reg.caption, _rules=table_rules(page, reg))
+            records.append(rec)
     return records
 
 
@@ -1887,8 +2421,9 @@ def compose_in(value, order):
 def add_table_grids(figures, order="before"):
     """Give each table the typed grid of what it prints, where it can be read without guessing (table_grid.py)."""
     for f in figures:
-        if f["kind"] != "table":
-            continue
+        if f["kind"] != "table" or "caption_block" not in f:
+            continue                        # a table without a caption keeps its rows as text blocks: wrapped cells and a
+                                            # first row that is no header would give a grid that reads wrong
         try:
             grid = table_grid.read_grid(f["_page"].pdf, f["bbox"], f["_rules"])
         except Exception as e:              # a table that cannot be read stays a picture and its text
@@ -1899,7 +2434,8 @@ def add_table_grids(figures, order="before"):
 
 
 def link_references(pages, figures):
-    index = {(f["kind"], f["number"]): f for f in figures}
+    # a drawing without a caption has no printed number, so no sentence can cite it by one
+    index = {(f["kind"], f["number"]): f for f in figures if "caption_block" in f}
     for page in pages:
         for s in page.sentences:
             for m in FIG_REF_RE.finditer(s["text"]):
@@ -1908,7 +2444,7 @@ def link_references(pages, figures):
                     f = index.get((kind, num)) or index.get((kind, re.sub(r"[a-z]$", "", num)))
                     if f is None:
                         continue
-                    own_label = s["block"] == f["caption_block"] and m.start() == 0
+                    own_label = s["block"] == f.get("caption_block") and m.start() == 0
                     if not own_label and s["id"] not in f["referenced_by"]:
                         f["referenced_by"].append(s["id"])
 
@@ -1917,8 +2453,11 @@ def _expand_numbers(spec):
     nums = []
     for part in re.split(r"\s*(?:,|and|&|or)\s*", spec):
         m = re.fullmatch(r"(\d+)\s*(?:-|–|—|to)\s*(\d+)", part)
+        dotted = re.fullmatch(r"((?:\d+\.)+)(\d+)\s*(?:-|–|—|to)\s*(?:\1)?(\d+)", part)      # "8.1-8.3", "8.1-3", "4.2.1-3"
         if m and int(m.group(1)) < int(m.group(2)) <= int(m.group(1)) + 20:
             nums.extend(str(i) for i in range(int(m.group(1)), int(m.group(2)) + 1))
+        elif dotted and int(dotted.group(2)) < int(dotted.group(3)) <= int(dotted.group(2)) + 20:
+            nums.extend(f"{dotted.group(1)}{i}" for i in range(int(dotted.group(2)), int(dotted.group(3)) + 1))
         elif part:
             nums.append(part.strip())
     return nums
@@ -1946,6 +2485,8 @@ def equation_records(pages):
                 words = [x for r in (mine or content) for x in r.words if x is not w]
                 bbox = union_all(x.bbox for x in words) if words else w.bbox
                 text = " ".join(x.shown for x in words)
+                if page.sheet:
+                    text = " ".join(tidy_sheet_text(text).split())
                 out.append({"id": eid, "number": number, "page": page.n, "bbox": rounded(bbox),
                             "block": b.id, "text": text})
     return out
@@ -2039,9 +2580,10 @@ def unnumbered_equation_records(pages, numbered, figures, body):
             group.sort(key=page.ordered.index)
             text = " ".join(b.raw_text for b in group)
             if looks_like_equation(text, len(rows)):      # judged on the raw text, so no marking adds or drops one
+                shown = " ".join(b.shown_text for b in group)
                 out.append({"id": None, "number": None, "page": page.n,
                             "bbox": rounded(union_all(b.bbox for b in group)), "block": group[0].id,
-                            "text": " ".join(b.shown_text for b in group)})
+                            "text": " ".join(tidy_sheet_text(shown).split()) if page.sheet else shown})
     return out
 
 
@@ -2131,17 +2673,21 @@ def split_groups(text):
     return " ".join("".join(plain).split()), groups
 
 
-def points_beside(page, row):
-    """Points set apart on the same line, right of the row: "Aufgabe 1 <hfill> (4 Punkte)". The line is the
-    first word's, as a fraction later in the row ("(a) a_n = 3n/(n - 1)") moves the row's baseline."""
+def points_row_beside(page, row):
+    """The row that holds points set apart on the same line, right of the row: "Aufgabe 1 <hfill> (4 Punkte)".
+    The line is the first word's, as a fraction later in the row ("(a) a_n = 3n/(n - 1)") moves the row's baseline."""
     base = row.words[0].baseline
     for r in page.rows:
         if (r is not row and r.horizontal and r.bbox[0] > row.bbox[2]
-                and abs(r.baseline - base) <= 0.3 * row.size):
-            pts = points_only(r.text)
-            if pts is not None:
-                return pts
+                and abs(r.baseline - base) <= 0.3 * row.size and points_only(r.text) is not None):
+            return r
     return None
+
+
+def points_beside(page, row):
+    """The points set apart on the same line, right of the row (see points_row_beside); None if there are none."""
+    r = points_row_beside(page, row)
+    return points_only(r.text) if r else None
 
 
 def task_heading(row, page, stats, paper_like):
@@ -2233,6 +2779,13 @@ def label_words(found):
     return out
 
 
+def looks_like_paper(pages):
+    """An abstract or a reference list: the evidence that a document is a paper, and no letter, manual, report,
+    leaflet or sheet."""
+    return any(r.horizontal and (ABSTRACT_RE.match(r.text) or r.text.strip().lower().rstrip(".:") in PAPER_HEADINGS)
+               for page in pages for r in page.rows)
+
+
 def mark_task_heads(pages, stats):
     """Set row.task on every task heading; True when the document is an exercise sheet.
 
@@ -2240,9 +2793,7 @@ def mark_task_heads(pages, stats):
     heading inside a paragraph needs bold or larger type or points; in a document with an abstract or
     references, "Problem", "Task" and "Question" also need points, and anywhere they need them when they
     label several things (label_words)."""
-    paper_like = any(r.horizontal and (ABSTRACT_RE.match(r.text)
-                                       or r.text.strip().lower().rstrip(".:") in PAPER_HEADINGS)
-                     for page in pages for r in page.rows)
+    paper_like = stats.paper_like
     found = []
     for page in pages:
         for b in page.blocks:
@@ -2296,6 +2847,28 @@ def place_label(label, levels, new_list):
 SPLITTABLE = {"paragraph", "other", "equation"}
 
 
+def split_heading_points(pages):
+    """Give the points set at the right margin of a task heading ("Exercise 2 <hfill> [6 pts]") a block of their own.
+
+    The row is joined to the statement under the heading, since both are non-bold text below each other, and
+    that block then starts on the heading's line: it can sort ahead of the heading, and the statement lands in the
+    task before. Returns the pages whose blocks changed, which need their reading order again."""
+    changed = []
+    for page in pages:
+        for head in [r for b in page.blocks for r in b.rows if r.task is not None]:
+            row = points_row_beside(page, head)
+            block = next((b for b in page.blocks if row in b.rows), None) if row else None
+            if block is None or len(block.rows) == 1:
+                continue
+            k = block.rows.index(row)
+            pieces = [Block(block.page, rows, block.type) for rows in (block.rows[:k], [row], block.rows[k + 1:]) if rows]
+            at = page.blocks.index(block)
+            page.blocks[at:at + 1] = pieces
+            if page not in changed:
+                changed.append(page)
+    return changed
+
+
 def find_exercises(pages):
     """Tasks and their parts, in reading order, from the headings that mark_task_heads found.
 
@@ -2304,6 +2877,8 @@ def find_exercises(pages):
     part starts a block of its own, and the pages are put in reading order again, so that "(2 Punkte)"
     set beside part a stays with it. Returns [{"head", "block", "blocks", "parts"}] with Block objects;
     a part is {"label", "points", "blocks", "parts"}. exercise_records turns them into IDs."""
+    for page in split_heading_points(pages):
+        order_page(page)
     tasks, starts = cut_exercises(pages)
     task, open_parts = None, []
     for page in pages:
@@ -2449,6 +3024,23 @@ def settle_points(task, pages):
         task["head"]["points"] = stated([last_line(task["blocks"][-1])])
 
 
+def name_loose_figures(pages, tasks):
+    """Name each drawing without a caption after the task it sits in, "Figure in Exercise 2" ("Abbildung in Aufgabe 1"
+    on a German sheet): the last task heading above it. One above every task is "Figure on page 1"."""
+    heads = [(t["block"].page, t["block"].bbox[1], t["head"]) for t in tasks if t["block"] is not None]
+    for page in pages:
+        for reg in page.regions:
+            if reg.caption is not None:
+                continue
+            owner = None
+            for n, y, head in heads:
+                if (n, y) <= (page.n, reg.bbox[1]):
+                    owner = head
+            german = owner is not None and re.fullmatch(_GERMAN_TASK, owner["keyword"]) is not None
+            what = ("Abbildung" if german else "Figure") if reg.kind == "figure" else ("Tabelle" if german else "Table")
+            reg.label = f"{what} in {owner['keyword']} {owner['number']}" if owner else f"{what} on page {page.n}"
+
+
 def exercise_records(tasks):
     """doc.json entries for the tasks of find_exercises, once blocks have IDs: ex1, ex2.3, exH1, and parts
     ex1.a, ex1.c.ii. A number printed twice (sheets 1 and 2 in one PDF) gets ex1-2."""
@@ -2545,6 +3137,9 @@ def analyse(pdf):
             s.cls = row_class(s.bbox, page.gutter)
         page.rows = merge_rows(segs)
         page.cols = column_bounds(page.rows, page.gutter, page.width, body)
+    if mark_line_numbers(pages, page_segs, body):       # line numbers in the margin are no text of the page: dropped
+        for page, segs in zip(pages, page_segs):
+            page.rows = [r for r in merge_rows(segs) if not r.margin]
 
     stats.leading = estimate_leading(pages, body)
     stats.text_area = estimate_text_area(pages, body)
@@ -2565,11 +3160,28 @@ def analyse(pdf):
         for reg in page.regions:
             claim_region_text(page, reg)
 
+    stats.paper_like = looks_like_paper(pages)
     stats.sheet = mark_task_heads(pages, stats)
+    for page in pages:            # outside papers and sheets, columns on a portrait page are read column by column
+        if not (stats.paper_like or stats.sheet) and page.height > page.width:
+            page.columns = body
+    # on a sheet, and in any document that is no paper (a slide deck, whose pages are landscape, is left alone), the
+    # figures and tables that have no caption are found too
+    deck = sum(p.width > p.height for p in pages) > len(pages) / 2
+    loose = stats.sheet or not (stats.paper_like or deck)
+    stats.running_images = running_images(pages) if loose else set()
+    started = False
+    for page in pages:
+        page.sheet = stats.sheet
+        if loose:
+            for reg in find_loose_figures(page, stats, started):
+                claim_region_text(page, reg)
+            started = started or any(r.task is not None for r in page.rows)
     classify(pages, stats)
     for page in pages:
         order_page(page)
     tasks = find_exercises(pages) if stats.sheet else []
+    name_loose_figures(pages, tasks)
     sections = build_sections(pages, pdf.get_toc())
     split_references(pages, sections)
     assign_ids_and_sentences(pages, build_vocab(pages))
@@ -2605,6 +3217,8 @@ def estimate_text_area(pages, body):
             bottoms.append(max(r.bbox[3] for r in rows))
     if not tops:
         return 0.0, max(p.height for p in pages)
+    if len(pages) <= 2:     # the median of two pages is their mean, a type area that is neither page's own
+        return min(tops), max(bottoms)
     return median(tops), median(bottoms)
 
 

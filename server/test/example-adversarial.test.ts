@@ -16,15 +16,24 @@ const formula = (latex: string, terms: string[]) => ({
   latex,
   terms: terms.map((part, i) => ({ latex: part, label: i ? 'Result' : 'Calculation' })),
 });
+/** The input first, in the same kind of board as the output (bars or flow): the frames of an example share one kind. */
 const worked = (input: number, expression: string, result: number, output: object, otherInputs: number[] = []) => ({
   assumptions: 'Illustrative arithmetic with the stated inputs and fixed operation.',
   inputs: [input, ...otherInputs].map((value, i) => ({ label: `Input ${i + 1}`, value })),
   calculations: [{ expression, result }],
   frames: [
-    { anchor: 'Initially we show', flow: flow([`Input ${input}`, 'Transformation', 'Output']) },
+    {
+      anchor: 'Initially we show',
+      ...('bars' in output
+        ? { bars: { title: 'Illustrative input', unit: 'value', bars: [{ label: 'Input', value: input }] } }
+        : { flow: flow([`Input ${input}`, 'Transformation', 'Output']) }),
+    },
     { anchor: 'Next we compute', ...output },
   ],
 });
+/** What the arithmetic checks say about an example, apart from how its frames are built. */
+const arithmetic = (value: unknown) =>
+  checkExample(value, say).problems.filter((problem) => /Visible calculation|does not match/.test(problem));
 const rejected = (value: unknown, explanation: string, narration = say) => {
   const result = checkExample(value, narration);
   assert.equal(result.example, undefined, explanation);
@@ -51,7 +60,7 @@ test('native function equalities retain the function when checking visible arith
 test('ordinary one-backslash LaTeX fractions and operators are checked rather than skipped', () => {
   const fraction = String.raw`\frac{4}{2}`;
   const valid = worked(4, '4/2', 2, { formula: formula(`${fraction}=2`, [fraction, '2']) }, [2]);
-  assert.deepEqual(checkExample(valid, say).problems, []);
+  assert.deepEqual(arithmetic(valid), []);
   const falseFraction = worked(4, '4/2', 2, { formula: formula(`${fraction}=4`, [fraction, '4']) }, [2]);
   assert.match(
     rejected(falseFraction, 'a denominator that equals the checked result cannot excuse a false quotient'),
@@ -72,7 +81,7 @@ test('every link of an equality chain must hold even when all digits are allowed
     /Visible calculation|does not match/,
   );
   const valid = worked(2, '2+2', 4, { formula: formula('2+2=4=2*2', ['2+2', '4']) });
-  assert.deepEqual(checkExample(valid, say).problems, []);
+  assert.deepEqual(arithmetic(valid), []);
 });
 
 test('display rounding does not require changing the checked internal result', () => {

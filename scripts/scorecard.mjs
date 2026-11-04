@@ -33,6 +33,11 @@ const TYPES = {
   lecture: 'lecture',
   contract: 'contract',
   letter: 'letter',
+  manual: 'manual',
+  report: 'report',
+  article: 'article',
+  literature: 'lit',
+  medical: 'medical',
   other: 'other',
 };
 

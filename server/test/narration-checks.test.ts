@@ -209,13 +209,13 @@ test('a step without highlight cues is judged against the sentence its step mark
   assert.equal(steps(tour)[0].say, EXPLAIN);
 });
 
-test('overview steps aim for 50 to 90 spoken words and detail steps for 90 to 140, with schema limits to match', () => {
+test('overview steps aim for 50 to 60 spoken words and detail steps for 90 to 140, with schema limits to match', () => {
   const overview = beat('method-1');
   const detail = { ...beat('formula-1'), detail: true };
-  assert.equal(directOptions(overview).words, 90);
+  assert.equal(directOptions(overview).words, 60);
   assert.equal(directOptions(detail).words, 140);
   const say = (beatId: typeof overview) => (directionSchema(beatId, beatTargets(beatId, doc)).properties as any).say;
-  assert.equal(say(overview).description, 'About 50-90 spoken words.');
+  assert.equal(say(overview).description, 'About 50-60 spoken words.');
   assert.equal(say(detail).description, 'About 90-140 spoken words.');
   assert.equal(say(overview).maxLength, sayLimit(overview) * 9);
   const words = (n: number) => Array.from({ length: n }, () => 'water').join(' ');
@@ -264,18 +264,18 @@ const SPOKEN = [
 ];
 const spoken = (n: number) => `${Array.from({ length: n }, (_, i) => SPOKEN[(i * 7) % SPOKEN.length]).join(' ')}.`;
 
-test('each step kind has a cap a little over the words it aims for', () => {
+test('each step kind has a cap at the words it aims for, an overview exactly and the others a little over', () => {
   const overview = beat('method-1');
   const detail = { ...beat('formula-1'), detail: true };
   const claim: Beat = { ...overview, say: [40, 80] };
   const slide: Beat = { ...overview, say: [35, 120] };
-  assert.deepEqual([overview, detail, claim, slide].map(sayCap), [104, 161, 92, 138]);
+  assert.deepEqual([overview, detail, claim, slide].map(sayCap), [60, 161, 92, 138]);
   // The cap is under the limit above which a step is refused outright.
   for (const b of [overview, detail, claim, slide]) assert.ok(sayCap(b) < sayLimit(b));
   assert.deepEqual(lengthProblems(spoken(sayCap(overview)), overview), []);
   const long = lengthProblems(spoken(sayCap(overview) + 1), overview);
   assert.equal(long.length, 1);
-  assert.match(long[0], /This step is 105 spoken words; say it in at most 90\./);
+  assert.match(long[0], /This step is 61 spoken words; say it in at most 60\./);
   assert.match(long[0], /cut the least important sentence/);
   assert.deepEqual(lengthProblems(spoken(144), slide).length, 1);
 });
@@ -296,7 +296,7 @@ test('a step over its cap is sent back once to be shortened, and the shorter ver
   const calls = problemCalls(seen);
   assert.equal(calls.length, 2);
   assert.ok(!calls[0].task.includes('This step is 110 spoken words'));
-  assert.ok(calls[1].task.includes('This step is 110 spoken words; say it in at most 90.'));
+  assert.ok(calls[1].task.includes('This step is 110 spoken words; say it in at most 60.'));
   assert.equal(steps(tour)[0].say, spoken(70));
   assert.deepEqual((metadata as { fallbackBeats: string[] }).fallbackBeats, []);
   const flagged = events.filter((e) => e.type === 'beat.guarded');

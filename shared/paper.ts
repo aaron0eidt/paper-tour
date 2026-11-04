@@ -302,6 +302,19 @@ export interface FormulaTerm {
   color?: Color;
 }
 
+/**
+ * An earlier line of the same worked solution: the board keeps it above the line being written, as a tutor's
+ * whiteboard keeps the working. `title` says what the line did ("subtract 2"); `verified` marks a line code checked.
+ */
+export interface FormulaLine {
+  latex: string;
+  title?: string;
+  verified?: boolean;
+}
+
+/** Most earlier lines a formula board keeps above the current one (the schema's maxItems). */
+export const FORMULA_BEFORE_MAX = 8;
+
 /** What the side board shows: the model fills a template, the player animates it. */
 export type BoardItem =
   | PlotItem
@@ -313,7 +326,16 @@ export type BoardItem =
   | ShapesItem
   | TimelineItem
   | DistributionItem
-  | { kind: 'formula'; title?: string; latex: string; terms: FormulaTerm[] }
+  | {
+      kind: 'formula';
+      title?: string;
+      latex: string;
+      terms: FormulaTerm[];
+      /** The earlier lines of the same worked solution, oldest first (exercise sheets). */
+      before?: FormulaLine[];
+      /** Code checked this line (verify_math.py), so the board shows a check mark. */
+      verified?: boolean;
+    }
   | { kind: 'flow'; title?: string; nodes: { id: string; label: string; color?: Color }[]; edges: [string, string][] }
   | {
       kind: 'bars';
@@ -391,7 +413,18 @@ export interface Tour {
   /** What the writer planned but left out, and why; absent when the tour is all of its plan (coverage.ts). */
   left_out?: LeftOut[];
   /** The kind of document, so the reader can pick its mode; a lecture deck plays slide by slide. */
-  doc_type?: 'research_paper' | 'exercise_sheet' | 'lecture' | 'contract' | 'letter' | 'other';
+  doc_type?:
+    | 'research_paper'
+    | 'exercise_sheet'
+    | 'lecture'
+    | 'contract'
+    | 'letter'
+    | 'manual'
+    | 'report'
+    | 'article'
+    | 'literature'
+    | 'medical'
+    | 'other';
   chapters: Chapter[];
 }
 

@@ -1,0 +1,55 @@
+{
+  "slug": "datasheet-sensor-en",
+  "kind": "datasheet",
+  "language": "en",
+  "must_cover": [
+    "What the part is: the Quantro QT1190, an analog temperature sensor in a 5-lead SOT-23 package whose output voltage is proportional to temperature (10 mV per degree C, 500 mV at 0 degrees C), no calibration needed",
+    "Headline specs: supply 2.7 V to 5.5 V, quiescent current 12 uA typical (20 uA max), shutdown current 0.1 uA typical, operating range -40 to +125 degrees C, accuracy 0.5 degrees C typical at 25 degrees C",
+    "Pinout: five pins, 1 VS, 2 GND, 3 SHDN (active low, tie to VS for normal operation), 4 NC, 5 VOUT; pin 1 is marked with a dot, pins 1 to 3 on the bottom edge of the top view",
+    "Absolute maximum ratings are stress limits, not operating conditions: supply -0.3 V to 6.0 V, storage -65 to 150 degrees C, junction 150 degrees C, ESD 2000 V, soldering 260 degrees C for 10 s",
+    "Electrical characteristics are given as min / typ / max at VS = 3.3 V and 25 degrees C; guaranteed limits are the min and max columns, typical values are information only (scale factor 9.9 / 10.0 / 10.1 mV per degree C; error 0.5 typ and 2.0 max for grade A, 1.0 max for grade B)",
+    "The characteristic curve is a straight line: 100 mV at -40 degrees C, 500 mV at 0, 750 mV at 25, 1750 mV at 125 degrees C; to read a temperature subtract 500 mV and divide by 10 mV per degree C",
+    "Typical application: 100 nF bypass capacitor at VS, SHDN tied to VS, RC filter with 1 kOhm and 1 nF between VOUT and the ADC input",
+    "Ordering information: three models (QT1190AKS-R7, QT1190AKS-RL, QT1190BKS-R7) plus an evaluation board; grade B is the tighter accuracy"
+  ],
+  "numbers": [10.0, 500, 2.7, 5.5, 12, 20, 0.1, 0.5, 2.0, 1.0, -40, 125, 6.0, 2000, 260, 750, 1750, 100, 1, 1.5],
+  "units": [
+    "mV/degC (scale factor)",
+    "mV (output at 0 degC)",
+    "V (min supply)",
+    "V (max supply)",
+    "uA (typ quiescent current)",
+    "uA (max quiescent current)",
+    "uA (typ shutdown current)",
+    "degC (typ error at 25 degC)",
+    "degC (max error, grade A)",
+    "degC (max error, grade B)",
+    "degC (min operating)",
+    "degC (max operating)",
+    "V (abs. max supply)",
+    "V (ESD, human body model)",
+    "degC (soldering, 10 s)",
+    "mV (output at 25 degC)",
+    "mV (output at 125 degC)",
+    "nF (bypass is 100 nF; filter capacitor is 1 nF, state both)",
+    "kOhm (filter resistor)",
+    "ms (typ turn-on time)"
+  ],
+  "figures": [
+    "Figure 1 (page 1): top view of the SOT-23-5 package with pins numbered 1, 2, 3 on the bottom edge and 5, 4 on the top edge, names VS, GND, SHDN below and VOUT, NC above; the dot at the lower left marks pin 1. Point at pin 5 (VOUT) and pin 1 (VS) and read the pin function table next to it",
+    "Pin function table (page 1, no caption): Pin / Name / Description for the five pins",
+    "Table 1 'Absolute maximum ratings' (page 1, captioned): parameter, symbol, rating for nine items",
+    "Table 2 'Electrical characteristics' (page 2, captioned): parameter, test conditions, min, typ, max, unit, in three groups Accuracy, Output and Power supply; empty cells mean there is no value in that column; point at the scale factor row (9.9 / 10.0 / 10.1) and the quiescent current row (12 typ, 20 max)",
+    "Figure 2 (page 2): pgfplots curve of output voltage (mV, 0 to 1750) versus temperature (-40 to 125 degrees C); a straight line through 100, 300, 500, 750, 1000, 1350, 1550, 1750 mV; the annotations mark 500 mV at 0 degrees C and 750 mV at 25 degrees C",
+    "Figure 3 (page 3): circuit with supply VS = 3.3 V, 100 nF capacitor C1 to ground, QT1190 with SHDN tied to VS, GND, and VOUT through RF = 1 kOhm to the ADC input with CF = 1 nF to ground",
+    "Ordering information table (page 3, no caption): model, accuracy, package, marking, packing"
+  ],
+  "pitfalls": [
+    "Do not treat typical values as guaranteed limits; only min and max are guaranteed",
+    "Do not present the absolute maximum ratings as operating conditions (operating supply is 2.7 V to 5.5 V, not up to 6.0 V)",
+    "Do not mix up pin numbers and names (pin 3 is SHDN, pin 5 is VOUT, pin 4 is NC) or the top-view orientation",
+    "Do not invent numbers that are not in the datasheet, such as an accuracy figure for grade B over the full temperature range or a price",
+    "Do not give a design recommendation beyond what the application section says (100 nF close to the supply pin, SHDN at the supply voltage, RC filter at the output)",
+    "Do not confuse the 10 mV/degC scale factor with the 0.5 degC accuracy; one is a slope, the other an error band"
+  ]
+}

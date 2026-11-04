@@ -118,10 +118,21 @@
 :is(.is-frame-transition, .leaving) .formula-math,
 :is(.is-frame-transition, .leaving) .formula-math .pt-term,
 :is(.is-frame-transition, .leaving) .formula-legend li,
+:is(.is-frame-transition, .leaving) .formula-now .formula-check,
 :is(.is-frame-transition, .leaving) .flow-node,
 :is(.is-frame-transition, .leaving) .flow-edge-line,
 :is(.is-frame-transition, .leaving) .flow-edge-head {
   animation: none;
+}
+
+/* The next line of a worked solution is written under the earlier ones on the same board: the title stays, and the
+   line starts building at once (nothing is fading out before it). */
+.board-view.is-continued .board-head {
+  animation: none;
+}
+
+.board-view.is-continued .formula-now .formula-math {
+  animation-delay: 80ms;
 }
 
 .board-head {
@@ -134,9 +145,10 @@
 
 .board-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
+  letter-spacing: -0.005em;
   color: var(--text);
 }
 
@@ -239,7 +251,120 @@
 .formula {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+
+/* The line being written with its legend; the working, when there is any, sits above it behind a hairline. */
+.formula-current {
+  display: flex;
+  flex-direction: column;
   gap: 22px;
+}
+
+/* The working: the earlier lines of the same solution, oldest first, small and muted, never built term by term. A
+   line's note and check mark sit in a margin on the right, as wide as the widest of them. The hairline under it is its
+   own, so it goes with the working when that is hidden and fades in with it. */
+.formula-working {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 2px;
+  margin: 0;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--board-rule);
+  list-style: none;
+  animation: board-in 240ms ease 200ms backwards;
+}
+
+/* Where the working is already on the board, or the board it replaces is still fading out above it, it stays still. */
+.board-view.is-continued .formula-working,
+:is(.is-frame-transition, .leaving) .formula-working {
+  animation: none;
+}
+
+.formula-working[hidden],
+.formula-line[hidden] {
+  display: none;
+}
+
+.formula-line {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+
+.formula-line .formula-math {
+  padding: 4px 8px;
+  font-size: calc(17px * var(--fit));
+  color: var(--muted);
+  animation: none;
+}
+
+.formula-line .formula-source code {
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.formula-line-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: min(10.5em, 36cqw);
+  padding-left: 10px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-align: right;
+  color: var(--muted);
+}
+
+.formula-line-note {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The mark of a line code checked: a chip beside the current line, a bare tick in the working. */
+.formula-check {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--success-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--success);
+}
+
+.formula-line .formula-check {
+  width: auto;
+  height: auto;
+  border: 0;
+  background: none;
+}
+
+.formula-now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.formula-now .formula-math {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The chip's width and gap on the left too, so the formula stays centred. */
+.formula-now.is-checked {
+  padding-left: 30px;
+}
+
+.formula-now .formula-check {
+  animation: board-in 320ms ease 900ms backwards;
 }
 
 /* Focus adds an accent without reducing the contrast of the surrounding equation.
@@ -388,12 +513,12 @@ code.formula-symbol {
 
 /* A wide, short board (under the stage) puts the legend beside the formula. */
 @container board-view (min-width: 600px) and (max-height: 420px) {
-  .formula {
+  .formula-current {
     flex-direction: row;
     align-items: center;
     gap: 28px;
   }
-  .formula-math {
+  .formula-now {
     flex: 1.2;
     min-width: 0;
   }
@@ -435,7 +560,7 @@ code.formula-symbol {
 .flow-box {
   fill: var(--board-raised);
   stroke: var(--canvas-outline);
-  stroke-width: 1.25;
+  stroke-width: 1.5;
   transition:
     fill 360ms ease,
     stroke 360ms ease;
@@ -454,7 +579,7 @@ code.formula-symbol {
 .flow-ring {
   fill: none;
   stroke: var(--c);
-  stroke-width: 1;
+  stroke-width: 1.5;
   opacity: 0;
   transition: opacity 360ms ease;
 }
@@ -463,20 +588,29 @@ code.formula-symbol {
   opacity: 0.32;
 }
 
+/* The size board.ts lays the labels out at (FLOW_FONT). */
 .flow-label {
   fill: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
+  letter-spacing: -0.003em;
 }
 
 .flow-edge-line,
 .flow-edge-head {
   fill: none;
   stroke: var(--board-edge);
-  stroke-width: 1.5;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: stroke 360ms ease;
+  transition:
+    stroke 360ms ease,
+    fill 360ms ease;
+}
+
+/* The arrowhead is a solid triangle in the line's colour, so the direction reads at a glance. */
+.flow-edge-head {
+  fill: var(--board-edge);
 }
 
 .flow-edge-line {
@@ -502,6 +636,10 @@ code.formula-symbol {
 .flow-edge.is-lit .flow-edge-line,
 .flow-edge.is-lit .flow-edge-head {
   stroke: var(--c);
+}
+
+.flow-edge.is-lit .flow-edge-head {
+  fill: var(--c);
 }
 
 /* -------------------------------------------------------------------- bars */
@@ -569,11 +707,21 @@ code.formula-symbol {
     padding: 14px 18px 16px;
   }
   .formula {
+    gap: 8px;
+  }
+  .formula-current {
     gap: 12px;
+  }
+  .formula-working {
+    padding-bottom: 8px;
   }
   .formula-math {
     padding: 6px 8px;
     font-size: calc(19px * var(--fit));
+  }
+  .formula-line .formula-math {
+    padding: 3px 8px;
+    font-size: calc(15px * var(--fit));
   }
 }
 

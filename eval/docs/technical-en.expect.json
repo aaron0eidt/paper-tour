@@ -1,0 +1,46 @@
+{
+  "slug": "technical-en",
+  "kind": "technical",
+  "language": "en",
+  "must_cover": [
+    "What the document is: the reference for Lumen Freight's fictional Parcel Tracking API v2 (document version 2.3), base URL https://api.lumenfreight.example/v2, a REST API with JSON bodies over HTTPS only; it returns parcel status and scan history and offers webhook subscriptions",
+    "What is new in v2: page-based pagination (page, per_page), webhook subscriptions, the new status OUT_FOR_DELIVERY, OAuth 2.0 instead of the static API keys of v1; v1 will be shut down on 30 June 2027",
+    "Authentication: OAuth 2.0 client credentials; get client_id and client_secret in the developer portal (keep the secret on the server); POST to the token endpoint with grant_type, credentials and scopes (parcels:read, parcels:write, subscriptions:write); the access token is valid for 3600 seconds; send it as 'Authorization: Bearer <access_token>'; on 401 TOKEN_EXPIRED request a new token and repeat",
+    "The request flow in Figure 1, six steps: (1) client POSTs /oauth/token to the authorization server, (2) gets access_token and expires_in 3600, (3) client calls GET /v2/parcels/{id} on the Tracking API with the Bearer token, the API checks token and scope, (4) the API queries the carrier systems for scan events, (5) gets the events back, (6) returns 200 OK with the parcel status as JSON; dashed arrows are responses",
+    "The endpoint table: GET /parcels/{trackingId}, GET /parcels/{trackingId}/events (page, per_page up to 100), POST /parcels, POST /subscriptions, DELETE /subscriptions/{id}, GET /health (no authentication), each with its scope",
+    "The example: a curl GET on /v2/parcels/LF123456789DE with the Bearer header returns 200 OK with trackingId, status IN_TRANSIT, estimatedDelivery 2026-11-09, weightGrams 1840 and lastEvent (timestamp 2026-11-05T08:42:00Z, location Hub Exampleville, code DEPARTED_HUB); statuses are REGISTERED, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, EXCEPTION; timestamps in UTC, ISO 8601",
+    "Errors: JSON body with code, message and requestId; the table maps 400 INVALID_REQUEST, 401 TOKEN_EXPIRED, 401 UNAUTHORIZED, 403 FORBIDDEN, 404 PARCEL_NOT_FOUND, 429 RATE_LIMITED, 500 INTERNAL_ERROR and 503 SERVICE_UNAVAILABLE to what the client should do",
+    "Rate limits: 100 requests per minute and a burst of at most 20 per second per client, 429 above that; headers X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset and Retry-After (only on 429 and 503); Enterprise plan 1000 requests per minute; webhook deliveries retried three times after 1, 5 and 30 minutes"
+  ],
+  "numbers": [2.3, 3600, 100, 20, 1000, 100, 3, 1, 5, 30, 1840, 8, 6],
+  "units": [
+    "document version",
+    "seconds (access token lifetime)",
+    "requests per minute (standard rate limit)",
+    "requests per second (burst limit)",
+    "requests per minute (Enterprise plan)",
+    "items per page (maximum per_page)",
+    "webhook delivery retries",
+    "minutes (first retry)",
+    "minutes (second retry)",
+    "minutes (third retry)",
+    "grams (weightGrams in the example)",
+    "error codes in the table",
+    "steps in the request flow"
+  ],
+  "figures": [
+    "Figure 1 (page 1): sequence diagram with four lifelines (Client application, Authorization server, Tracking API, Carrier systems) and six numbered arrows; solid arrows are requests (1, 3, 4), dashed arrows responses (2, 5, 6); a yellow note 'check token and scope' sits on the Tracking API lifeline between steps 3 and 4. A tour should follow the arrows in order 1 to 6 and name who sends what to whom",
+    "Table 1 'Endpoints of the Parcel Tracking API v2' (page 2, captioned): columns Method, Path, Description, Scope and six rows",
+    "Two code listings (page 2): the curl request and the JSON response, in grey boxes; a third small listing on page 3 shows the error body",
+    "Table 2 'Error codes' (page 3, captioned): columns Status, Code, Meaning, What to do and eight rows",
+    "Rate limit header table (page 3, no caption): four headers and their meaning"
+  ],
+  "pitfalls": [
+    "Do not invent endpoints, parameters, status values or error codes; use only those in the tables and listings, and do not claim v1 behaviour (static API keys) still works for v2",
+    "Do not put real-looking secrets into examples; the token in the example is the placeholder YOUR_ACCESS_TOKEN and the client secret must stay on the server",
+    "Do not say that tokens last longer or shorter than 3600 seconds, or that the limit is per IP; it is per client",
+    "Do not describe the sequence diagram out of order or swap the sender and receiver of an arrow; the token comes from the authorization server, the parcel status from the Tracking API",
+    "Do not read code literally as prose: the curl lines and the JSON must be quoted exactly, including the Bearer header, and are not instructions to run against a real service (the host is a fictional .example domain)",
+    "Do not say 401 always means a missing token; TOKEN_EXPIRED and UNAUTHORIZED differ, as do 429 (rate limit) and 503 (maintenance)"
+  ]
+}

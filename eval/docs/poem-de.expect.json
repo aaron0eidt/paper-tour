@@ -1,0 +1,39 @@
+{
+  "slug": "poem-de",
+  "kind": "literature",
+  "language": "de",
+  "must_cover": [
+    "What the page is: a school-reader page with Rainer Maria Rilke's poem 'Der Panther' (subtitle 'Im Jardin des Plantes, Paris'), written 1902 in Paris, printed in 'Neue Gedichte' (1907); three stanzas of four lines (12 lines), line numbers 5 and 10 in the margin",
+    "Content stanza by stanza: (1) the panther's gaze is so tired from the passing bars that it holds nothing, it seems to him there are a thousand bars and no world behind them; (2) his soft gait of supple strong steps turns in the tiniest circle, like a dance of strength around a centre in which a great will stands numbed; (3) only sometimes the curtain of the pupil lifts silently, an image enters, passes through the tensed limbs and ceases to be in the heart",
+    "Form for the Arbeitsauftrag: cross rhyme in every stanza (abab cdcd efef: Stäbe/gäbe, hält/Welt; Schritte/Mitte, dreht/steht; Pupille/Stille, hinein/sein); five-stress iambic verse; feminine endings in lines 1 and 3 of each stanza, masculine endings in lines 2 and 4",
+    "Imagery for the Arbeitsauftrag: hyperbole 'tausend Stäbe', paradox 'hinter tausend Stäben keine Welt', oxymoron-like 'weicher Gang ... starker Schritte', comparison 'wie ein Tanz von Kraft um eine Mitte', metaphor 'Vorhang der Pupille'; the poem is seen from outside, without a lyrical I",
+    "The development across the stanzas: from numbed perception (gaze) to bodily movement in a circle (gait) to a last flicker of perception that dies in the heart; captivity as loss of world and will",
+    "The Arbeitsauftrag box: four numbered tasks (read aloud twice and note a first impression; analyse rhyme scheme and metre incl. cadences; examine the linguistic images and their effect; describe the panther's change from stanza to stanza with line references), working time 25 minutes",
+    "The margin boxes: Worterklärungen (Jardin des Plantes, geschmeidig, betäubt, Pupille, angespannt) and Zum Autor (Rilke born 1875 in Prague, died 1926 in Switzerland, in Paris from 1902 for Rodin, the 'Dinggedicht')"
+  ],
+  "numbers": [3, 4, 12, 1902, 1907, 1875, 1926, 25, 5],
+  "units": [
+    "stanzas",
+    "lines per stanza",
+    "lines in total",
+    "year (poem written)",
+    "year (Neue Gedichte)",
+    "year (Rilke born)",
+    "year (Rilke died)",
+    "minutes (working time)",
+    "stresses per line (five-stress iambic)"
+  ],
+  "figures": [
+    "The poem itself, set in large type with line numbers 5 (line 'Der weiche Gang geschmeidig starker Schritte,') and 10 (line 'sich lautlos auf --. Dann geht ein Bild hinein,') in the left margin; a tour should highlight whole stanzas or single lines and quote them exactly, including the old spelling 'daß'",
+    "Margin box 'Worterklärungen' (five glossary entries) and margin box 'Zum Autor' (short biography), both on the right of the poem",
+    "Box 'Arbeitsauftrag' at the bottom with four numbered tasks and the working time"
+  ],
+  "pitfalls": [
+    "Do not misquote the poem or modernise its spelling; the text is public domain and should be quoted verbatim, line by line",
+    "Do not present one interpretation as the only correct reading; offer it as a reading supported by the text",
+    "Do not mix up the rhyme scheme (cross rhyme abab) with paired rhyme or embrace rhyme, and do not state the metre without noting the feminine and masculine cadences",
+    "Do not invent biographical facts or dates beyond the 'Zum Autor' box (born 1875 Prague, died 1926)",
+    "Do not treat the numbered tasks as section headings of the poem; they are the assignment",
+    "Do not skip the Arbeitsauftrag: the point of the page is the analysis of rhyme scheme, metre and imagery"
+  ]
+}

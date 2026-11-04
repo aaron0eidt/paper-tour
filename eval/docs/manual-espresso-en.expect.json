@@ -1,0 +1,49 @@
+{
+  "slug": "manual-espresso-en",
+  "kind": "manual",
+  "language": "en",
+  "must_cover": [
+    "What the document is: the user manual of the Morvale ES-300 semi-automatic espresso machine, for household use; read before first use",
+    "Safety first: never immerse the machine or cable in water, unplug before cleaning, steam wand, group head and portafilter get very hot, place the machine on a stable heat-resistant surface",
+    "The parts drawing: numbers 1 to 10 identify the cup warming tray, display, power button, program dial, group head, portafilter, steam wand, drip tray, water tank and water level window; the list below the drawing names them",
+    "Daily use in four steps: fill the tank, power on (heats up in about 40 s to 93 degrees C), fill and lock the portafilter with 18 g of coffee, press the dial for a double espresso of about 36 g in about 28 s",
+    "Descaling: when (display shows dESC after 200 brewing cycles, or every 6 weeks / 3 months / 6 months depending on water hardness) and the seven-step procedure with 30 g descaler in 0.8 L lukewarm water, about 25 minutes, two rinses with 1.2 L each",
+    "The WARNING (descaler irritates eyes and skin, rinse eyes 15 minutes, never drink it, never leave unattended) and the CAUTION (only Morvale or citric acid descaler, never vinegar or sulfamic or hydrochloric acid)",
+    "Troubleshooting table: problem, possible cause, remedy (for example no water: fill tank or descale; E04: boiler overheated, wait 30 minutes)",
+    "Technical specifications: 1450 W, 15 bar, 1.2 L tank, 5.8 kg, 28 x 31 x 34 cm, plus disposal and 24 months legal warranty"
+  ],
+  "numbers": [1.2, 40, 93, 18, 36, 28, 200, 30, 0.8, 25, 3, 15, 1450, 15, 5.8, 24],
+  "units": [
+    "L (water tank)",
+    "s (heat-up)",
+    "degC (brewing temperature)",
+    "g (coffee)",
+    "g (espresso in the cup)",
+    "s (shot time)",
+    "brewing cycles (until dESC)",
+    "g (descaler sachet)",
+    "L (lukewarm water for the descaler)",
+    "min (descaling programme)",
+    "s (hold the dial to start descaling)",
+    "min (rinse eyes with water)",
+    "W (rated power)",
+    "bar (pump pressure)",
+    "kg (weight)",
+    "months (legal warranty)"
+  ],
+  "figures": [
+    "Page 1: tikz front view of the machine with ten numbered callouts and NO caption (on purpose). A tour should point at each numbered circle in turn and say which part it is (1 cup warming tray at top left, 2 display, 3 red power button, 4 program dial, 5 group head, 6 portafilter handle, 7 steam wand at the right, 8 drip tray at the bottom, 9 water tank on the right, 10 water level window with MIN and MAX marks), and read the legend table underneath",
+    "Page 1: legend table, no caption (No. / Part, two column pairs) listing the ten parts of the drawing",
+    "Page 2: table of water hardness ranges, no caption (soft 0 to 7 dH every 6 months, medium 8 to 14 dH every 3 months, hard above 14 dH every 6 weeks)",
+    "Table 1 'Troubleshooting guide' (page 3, captioned): 8 rows of problem, possible cause, remedy; a tour should read the row that matches the question (for example 'No water from the group head: tank empty or not seated, boiler scaled; fill the tank, push it in firmly, descale if it remains')",
+    "Table 2 'Technical specifications of the Morvale ES-300' (page 3, captioned): two feature/value column pairs, six rows (rated voltage, power, pump pressure, tank, cable, protection class; brewing temperature, heat-up time, cup height, dimensions, weight, noise level)"
+  ],
+  "pitfalls": [
+    "Do not invent part names or numbers for callouts that are not in the legend; the drawing has no caption, so the legend table is the only key",
+    "Do not skip or soften the WARNING and CAUTION boxes; the descaler irritates eyes and skin and must never be drunk",
+    "Do not suggest vinegar or lemon juice as a descaler; the manual explicitly forbids it",
+    "Do not reorder the descaling steps or merge the two rinses into one; the manual says to repeat the rinse once",
+    "Do not state numbers that are not in the document (for example a different descaling interval or tank size)",
+    "Do not give electrical repair advice beyond what the troubleshooting table says (check plug, contact customer service)"
+  ]
+}

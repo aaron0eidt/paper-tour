@@ -1,4 +1,46 @@
-# Status (2026-10-30)
+# Status (2026-11-04)
+
+## A tutor for every document (2026-11-04, branch feat/tutor-sheets)
+
+- **Exercise sheets are taught as a tutor would** ([TUTOR.md](TUTOR.md), research in
+  [TUTOR-RESEARCH.md](TUTOR-RESEARCH.md)):
+  - each part: what is given and asked, the background once per concept, try first with hints, the plan, one move
+    per step, then the answer with a check and the common mistake;
+  - the working stays on the board with a ✓ on lines the checker verified; chemistry renders with mhchem;
+  - the checker reads units, reactions and molar masses.
+- **More kinds of documents:** manual (manuals, datasheets, API docs, recipes), report, article, literature and medical
+  join paper, sheet, lecture, contract and letter, each with its own arc and tone. Reports, medical documents and
+  contracts carry a not-advice frame.
+- **Ingestion:**
+  - sheets: every part, every task's points, and figures and tables without a caption;
+  - other documents: tables and drawings without a caption, poems and front matter no longer typed as authors, margin
+    line numbers kept out of sentences;
+  - papers and sheets ingest byte-identically.
+- **Robustness:** in adaptive mode (every app tour) one failing visual, direction, plan or auxiliary call degrades its
+  step instead of failing the tour.
+- **Practice runs:** 34 documents on muse-spark-1.3-contributor (cheap), standard preset, the app's profile path:
+  34 of 34 finished (before the robustness round, 8 of 17 failed whole).
+
+  | 11 test sheets, scored against the answer keys | main (ce3ab80) | branch |
+  |---|---|---|
+  | Parts taught | 55 of 168 | 169 of 169 |
+  | Answers fully right | 36 of 50 | 126 of 146 (17 partial) |
+  | Background steps | 0 | 44 |
+  | Pictures | 11 | 37 |
+  | Lines the checker confirmed | 43 of 163 | 354 of 707 |
+
+  Sheet tours are 73-102 steps (13-26 minutes): a tutorial session with a chapter per task.
+- **Weak spots the runs show, and the round in progress:**
+  - tours of manuals, datasheets, reports and leaflets never pointed at their figures and left out exact values (the
+    paper rule "never read out the highlight" made a weak model vague);
+  - literature skipped the analysis the page asks for;
+  - the takeaway's spoken invitation to ask came out broken;
+  - narration fell silent when the local Siri helper was not ready.
+- **Measure it:**
+  - sheets: `node scripts/sheet-eval.mjs <tour folder>:<sheet folder>:eval/sheets/<slug>.answers.json`;
+  - other documents: `node scripts/doc-eval.mjs <tour folder>:eval/docs/<slug>.expect.json` (exact numbers in code;
+    coverage and pitfalls judged by the cheap model);
+  - the test documents build with `bash eval/sheets/build.sh` and `bash eval/docs/build.sh`.
 
 ## The generation pipeline now (2026-10-30)
 

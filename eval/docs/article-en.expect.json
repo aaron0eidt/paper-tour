@@ -1,0 +1,59 @@
+{
+  "slug": "article-en",
+  "kind": "article",
+  "language": "en",
+  "must_cover": [
+    "What the piece is: a weekend feature in the fictional Marlowe Courier, 'Two wheels, one city, a lot of arguments', by Jonas Whitfield, about the city's cycling programme Marlowe Moves (launched 2021)",
+    "The network: 96 km of protected lanes at the end of 2025, up from 18 km in 2020 (chart: 18, 26, 41, 58, 79, 96 km); target 140 km by 2028; Phase 3 adds 44 km",
+    "Results claimed: Harbour Bridge crossings 6,450 a day versus 3,100 in 2020 (+108 %), bike share of commuting 10.9 % versus 5.8 %, seriously injured cyclists 74 versus 112 a year (-34 %)",
+    "Support: 63 % of 1,200 surveyed residents support the programme, 29 % oppose, 8 % undecided; supporters quoted are Priya Nandakumar (transport committee chair), Tomas Ellery (father of two), Ingrid Solberg (Pedal Marlowe)",
+    "Criticism: 1,340 parking spaces removed (about 9 % in the centre); merchants' survey says 31 % of shops on affected streets saw lower sales, 24 % higher, 45 % no change; critics quoted are Walter Brandt (merchants), Linnea Okafor (bakery owner), Marcus Hale (opposition)",
+    "Cost and fairness: budget $214 million to 2028, $152 million spent, about $1.6 million per km; west has 71 km, east only 25 km; Phase 3 puts 29 of 44 km in the east",
+    "Context and caveat: 23 km per 100,000 residents, fifth of twelve mid-sized cities (leader Kestrel 41); the researcher Dr. Samuel Reyes cautions that league tables hide gaps in connectivity and that shop-sales effects can differ by business",
+    "What happens next: public consultation on the Phase 3 plans open until 30 November 2026; a study of shop sales and a loading-zone rule are promised"
+  ],
+  "numbers": [96, 18, 140, 6450, 3100, 108, 10.9, 5.8, 74, 112, 34, 63, 29, 8, 1340, 31, 24, 45, 214, 152, 1.6, 71, 25, 44, 29, 23, 41, 410000],
+  "units": [
+    "km (protected lanes 2025)",
+    "km (protected lanes 2020)",
+    "km (target 2028)",
+    "crossings per day (2025)",
+    "crossings per day (2020)",
+    "% (increase in crossings)",
+    "% (bike share of commuting 2025)",
+    "% (bike share 2020)",
+    "serious injuries per year (2025)",
+    "serious injuries per year (2020)",
+    "% (drop in serious injuries)",
+    "% (support)",
+    "% (oppose)",
+    "% (undecided)",
+    "parking spaces removed",
+    "% (shops with lower sales)",
+    "% (shops with higher sales)",
+    "% (shops with no change)",
+    "USD million (budget)",
+    "USD million (spent)",
+    "USD million per km",
+    "km (west)",
+    "km (east)",
+    "km (Phase 3)",
+    "km (Phase 3 in the east)",
+    "km per 100,000 residents (Marlowe)",
+    "km per 100,000 residents (Kestrel)",
+    "residents"
+  ],
+  "figures": [
+    "Figure 1 (page 1, in the left column): bar chart of protected bike lanes at the end of each year 2020 to 2025 in kilometres, bar labels 18, 26, 41, 58, 79, 96, y axis 0 to 120; a tour should point at the first and the last bar and say the network is more than five times longer",
+    "Pull quotes (Tomas Ellery on page 1 left, Linnea Okafor on page 1 right): short quoted statements set off in a red-ruled box; a tour should attribute each to its speaker and not present them as facts",
+    "Sidebar box 'Marlowe Moves at a glance' (page 2, right column): eight bullets restating launch year, budget, lane length, Phase 3, bike share, injuries, parking spaces and the consultation deadline"
+  ],
+  "pitfalls": [
+    "Do not take a side in the debate; report supporters and critics with attribution and do not present a quote as established fact",
+    "Do not claim that the lanes proved to cause the drop in injuries; the article says the numbers fell at the same time and gives an expert's explanation",
+    "Do not mix up the two surveys: 1,200 residents (63 / 29 / 8 percent) versus the merchants' own member survey (31 / 24 / 45 percent)",
+    "Do not confuse the budget ($214 million to 2028) with the amount spent so far ($152 million), or 96 km (built) with 140 km (target)",
+    "Do not read the columns in the wrong order: the article runs down the left column, then the right column; the sidebar sits at the end of the right column on page 2",
+    "Do not invent names, quotes or numbers that are not in the article (the Courier, Marlowe and all persons are fictional)"
+  ]
+}

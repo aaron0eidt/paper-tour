@@ -12,7 +12,7 @@ import { splitWords, type BoardItem, type Doc, type LossCause, type Step, type T
 import { tourDirection } from '../../../shared/tourDirection';
 import { tourProfileGuidance } from '../../../shared/tourProfiles';
 import type { MuseConfig } from '../config';
-import { ProcessingError } from '../errors';
+import { ProcessingError, VisualValidationError } from '../errors';
 import type { GeneratedTour, TourGenerationInput, TourGenerator, TourImage, TourProgress } from '../tour-generator';
 import { MuseClient, type MuseMessage } from '../muse/client';
 import { checkImages, imageEvidence } from '../muse/context';
@@ -24,9 +24,11 @@ import {
   boardProblems,
   dropRepeatedBoards,
   frameSteps,
+  onePicturePerStep,
   settleBoards,
   tourProblems,
   tourSeconds,
+  type SettledBoards,
 } from './assemble';
 import { paperPlan, type Beat, type Preset, type TourPlan } from './beats';
 import {
@@ -96,6 +98,7 @@ import {
   type Direction,
 } from './direct';
 import {
+  backgroundKey,
   cleanSolution,
   exercisePlan,
   lineName,
@@ -118,6 +121,7 @@ import {
   readsSource,
   repeatsExplanation,
   restatedShare,
+  styleProblems,
 } from './insight';
 import { documentLanguage } from './language';
 import { PACE, generationPace, limited, outlasting, type Pace } from './pace';
@@ -161,6 +165,8 @@ type BeatResult =
       steps: Step[];
       solved: boolean;
       checks: LineCheck[];
+      /** The concept the part's background step teaches (conceptKey), when it has one: the tour gives each concept once. */
+      background?: string;
       visual?: BoardKind;
       degraded?: Degraded;
       omission?: Omission;
@@ -170,6 +176,17 @@ const MODEL_FAULTS = new Set(['muse_invalid_response', 'muse_output_truncated', 
 /** A beat survives the model's own faults and transient provider errors; credentials and rejected requests do not. */
 const recoverable = (error: unknown) =>
   error instanceof ProcessingError && (MODEL_FAULTS.has(error.code) || error.transient);
+/**
+ * Faults an auxiliary stage survives, by dropping what it made and carrying on: the model's own and the provider's
+ * (recoverable), a request it rejected (one call too large, say) and a plan that could not be validated after its
+ * repairs. Cancellation, credentials and the rest of the configuration errors are none of them, and still end the tour.
+ */
+const degradable = (error: unknown) =>
+  recoverable(error) ||
+  (error instanceof ProcessingError &&
+    ['muse_request_rejected', 'invalid_teaching_plan', 'invalid_visual_plan'].includes(error.code));
+/** What inspecting an authored visual came to: it stays, or it is dropped, and its step keeps everything else. */
+type Inspected = { item: BoardItem } | { item: null; cause: LossCause; problems: string[] };
 const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
 /** Why a model call gave nothing: it took too long, the provider could not be reached, or its answer was no use. */
 const faultOf = (error: unknown): LossCause =>
@@ -280,14 +297,21 @@ export class HarnessTourGenerator implements TourGenerator {
     const progress = (stage: TourProgress['stage'], done: number, total: number) =>
       onProgress?.({ stage, imagesDone: done, imagesTotal: total });
     const elements = new Map(indexElements(doc).map((element) => [element.id, element]));
+    /**
+     * An authored visual as it goes into the tour: rendered, reviewed by the model and corrected until it passes
+     * (visuals/inspect.ts). A visual that cannot pass, because its rendering checks keep failing or the model cannot
+     * correct it, comes back dropped with the cause, and its step keeps everything else: it never costs the tour. A
+     * review the model cannot give leaves the visual to its own rendering checks. Cancellation and configuration errors
+     * still end the tour.
+     */
     const inspectVisual = async (
       item: BoardItem,
       narration: string,
       brief: string,
       images: TourImage[],
       beat: Beat,
-    ): Promise<BoardItem> => {
-      if (!isAuthoredVisual(item)) return item;
+    ): Promise<Inspected> => {
+      if (!isAuthoredVisual(item)) return { item };
       const callId = randomUUID(),
         started = Date.now();
       await input.onEvent?.('tool.started', {
@@ -295,6 +319,7 @@ export class HarnessTourGenerator implements TourGenerator {
         name: 'render_visual',
         arguments: { beat: beat.id, kind: item.kind },
       });
+      let unreviewed: unknown;
       try {
         const reviewed = await reviewAuthoredWithModel(item, {
           client: {
@@ -317,6 +342,12 @@ export class HarnessTourGenerator implements TourGenerator {
           sourceImages: images.map((image) => image.dataUrl),
           allowedSourceRefs: [...elements.keys()],
           signal,
+          // A review the model could not give (nothing readable came back) stands for no verdict.
+          reviewFault: (error) => {
+            if (!degradable(error)) return false;
+            unreviewed = error;
+            return true;
+          },
         });
         await input.onEvent?.('tool.completed', {
           callId,
@@ -325,7 +356,13 @@ export class HarnessTourGenerator implements TourGenerator {
           kind: reviewed.kind,
           durationMs: Date.now() - started,
         });
-        return reviewed;
+        if (unreviewed !== undefined)
+          await input.onEvent?.('visual.unreviewed', {
+            beat: beat.id,
+            kind: reviewed.kind,
+            code: unreviewed instanceof ProcessingError ? unreviewed.code : 'review_failed',
+          });
+        return { item: reviewed };
       } catch (error) {
         await input.onEvent?.('tool.completed', {
           callId,
@@ -335,7 +372,21 @@ export class HarnessTourGenerator implements TourGenerator {
           durationMs: Date.now() - started,
           error: error instanceof Error ? error.message : 'Visual inspection failed.',
         });
-        throw error;
+        signal.throwIfAborted();
+        const checks = error instanceof VisualValidationError;
+        if (!checks && error instanceof ProcessingError && !degradable(error)) throw error;
+        // What the rendering checks found, as VisualValidationError words it; else why the model could not correct it.
+        const found = checks
+          ? error.message.replace(/^Authored visual failed inspection: /, '').split('; ')
+          : [
+              error instanceof ProcessingError && error.code === 'muse_slow'
+                ? 'the model took too long to check or correct the visual'
+                : `the visual could not be corrected: ${error instanceof Error ? error.message : 'unknown error'}`,
+            ];
+        const problems = found.slice(0, 8).map((problem) => problem.slice(0, 300));
+        const cause: LossCause = checks || !(error instanceof ProcessingError) ? 'checks' : faultOf(error);
+        await input.onEvent?.('visual.dropped', { beat: beat.id, kind: item.kind, cause, problems });
+        return { item: null, cause, problems };
       }
     };
     const prefix: MuseMessage[] = [
@@ -443,7 +494,11 @@ export class HarnessTourGenerator implements TourGenerator {
     const usable =
       card && card.problem.evidence.length && card.key_idea.evidence.length && card.takeaway.evidence.length;
     const cardSource = usable ? 'model' : 'fallback';
-    if (!usable) card = { ...fallbackCard(doc), ...(card ? { doc_type: card.doc_type } : {}) };
+    if (!usable)
+      card = {
+        ...fallbackCard(doc),
+        ...(card ? { doc_type: card.doc_type, subject: card.subject ?? 'other' } : {}),
+      };
 
     // B. Plan the beats for the kind of document: a paper's claims (one call) or its argument in code, a deck slide by
     // slide (one call), a sheet's parts in code, the arc of the other kinds with one call, all sized by the preset. A
@@ -624,7 +679,19 @@ export class HarnessTourGenerator implements TourGenerator {
       planSource = arcs ? 'model' : 'fallback';
       plan = arcTourPlan(arcs ?? fallbackArcPlan(card!, arcType), arcType, card!, doc, this.preset, language);
     }
-    const teachingPlan = await preparingTeaching;
+    // A teaching plan that could not be made or validated is no reason to lose the tour: it is written to the plan of a
+    // tour without a profile (planSource says which), with the effort of an adaptive one.
+    let teachingPlan: TeachingPlan | null = null;
+    let teachingFailure: { code: string; message: string } | null = null;
+    try {
+      teachingPlan = await preparingTeaching;
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!degradable(error)) throw error;
+      const { code, message } = error as ProcessingError;
+      teachingFailure = { code, message: message.slice(0, 500) };
+      await input.onEvent?.('teaching.failed', { ...teachingFailure, planSource });
+    }
     if (teachingPlan && input.profile) {
       plan = teachingTourPlan(teachingPlan, doc, input.profile, card!, plan);
       planSource = `adaptive-${input.profile.structure}`;
@@ -701,21 +768,28 @@ export class HarnessTourGenerator implements TourGenerator {
         },
       ];
       if (adaptive) {
-        visuals = await authorVisualPlan({
-          doc,
-          card: card!,
-          beats: plannable,
-          settled,
-          sheet: sheetTour,
-          language,
-          prefix,
-          signal,
-          call: (messages, schema) => call(messages, 'visual_plan', schema, 8_000, 'medium', signal),
-          retryable: recoverable,
-          onProblems: async (problems, attempt) => {
-            await input.onEvent?.('validation.failed', { stage: 'visuals', problems, attempt });
-          },
-        });
+        try {
+          visuals = await authorVisualPlan({
+            doc,
+            card: card!,
+            beats: plannable,
+            settled,
+            sheet: sheetTour,
+            language,
+            prefix,
+            signal,
+            call: (messages, schema) => call(messages, 'visual_plan', schema, 8_000, 'medium', signal),
+            retryable: recoverable,
+            onProblems: async (problems, attempt) => {
+              await input.onEvent?.('validation.failed', { stage: 'visuals', problems, attempt });
+            },
+          });
+        } catch (error) {
+          // A plan that cannot be made in batches is asked for whole below, as in a tour that is not adaptive; without
+          // a plan each step keeps the board its kind suggests.
+          signal.throwIfAborted();
+          if (!degradable(error)) throw error;
+        }
       }
       if (!rest.length) visuals = new Map(settled);
       for (let attempt = 0; attempt < 2 && !visuals; attempt++) {
@@ -735,7 +809,11 @@ export class HarnessTourGenerator implements TourGenerator {
           }
         } catch (error) {
           signal.throwIfAborted();
-          if (!recoverable(error)) throw error;
+          if (!recoverable(error)) {
+            // A rejected request would be rejected again: without a plan each step keeps the board its kind suggests.
+            if (degradable(error)) break;
+            throw error;
+          }
           if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
         }
       }
@@ -784,7 +862,10 @@ export class HarnessTourGenerator implements TourGenerator {
         ...prefix,
         {
           role: 'user',
-          content: [{ type: 'text', text: solveTask(language, unitBrief(unit, doc), unit) }, ...imageParts(pages)],
+          content: [
+            { type: 'text', text: solveTask(language, unitBrief(unit, doc), unit, card!.subject) },
+            ...imageParts(pages),
+          ],
         },
       ];
       let best: { solution: Solution; checks: LineCheck[]; problems: string[] } | null = null;
@@ -792,8 +873,13 @@ export class HarnessTourGenerator implements TourGenerator {
       // A solution that outlived its time is asked again at one rung less reasoning (pace.ts), so that the part keeps it.
       let effort: Effort = 'high';
       // One repair at most, for an unusable answer or for lines that cannot be shown or do not check out; the part
-      // keeps its best answer, and a line still in doubt is marked on the board.
-      for (let attempt = 0; attempt < 2 && !(best && !best.problems.length); attempt++) {
+      // keeps its best answer, and a line still in doubt asks the learner for a check. An adaptive tour gives a part
+      // with no usable answer one more try before the part falls back to its task text.
+      for (
+        let attempt = 0;
+        (attempt < 2 || (adaptive && attempt < 3 && !best)) && !(best && !best.problems.length);
+        attempt++
+      ) {
         try {
           const completion = await call(task, 'exercise_solution', solveSchema(unit), 24_000, effort, signal, {
             id: beat.id,
@@ -838,12 +924,7 @@ export class HarnessTourGenerator implements TourGenerator {
         }
       }
       if (!best) {
-        if (adaptive && (fault === 'slow' || fault === 'unavailable'))
-          throw new ProcessingError(
-            'muse_unavailable',
-            'The planned explanation could not be completed after the bounded request attempts.',
-            true,
-          );
+        // The tour never fails because of one part: it points at the part's task text and records the part as left out.
         await progress('writing', ++directed, beats.length);
         await input.onEvent?.('beat.fallback', { beat: beat.id, code: fault });
         return { steps: unitFallback(unit, doc), solved: false, checks: [], omission: { code: fault } };
@@ -891,31 +972,44 @@ export class HarnessTourGenerator implements TourGenerator {
             if (!drawn) ask.push(...repairTurn(completion.value, checked.problems));
           } catch (error) {
             signal.throwIfAborted();
-            if (!recoverable(error)) throw error;
+            if (!recoverable(error)) {
+              // A rejected request would be rejected again: the part keeps its solution lines without the visual.
+              if (!degradable(error)) throw error;
+              why = faultOf(error);
+              break;
+            }
             why = faultOf(error);
             if ((error as ProcessingError).transient) await pause(1500 * (attempt + 1));
           }
         }
       }
-      if (drawn)
-        drawn = {
-          ...drawn,
-          item: await inspectVisual(
-            drawn.item,
-            unitSteps(unit, best.solution, best.checks, language, drawn)
-              .filter((step) => step.actions.some((action) => action.type === 'board' && action.item === drawn!.item))
-              .map((step) => step.say)
-              .join('\n'),
-            unitBrief(unit, doc),
-            pages,
-            beat,
-          ),
-        };
+      if (drawn) {
+        const visual = drawn;
+        const inspected = await inspectVisual(
+          visual.item,
+          unitSteps(unit, best.solution, best.checks, language, visual)
+            .filter((step) => step.actions.some((action) => action.type === 'board' && action.item === visual.item))
+            .map((step) => step.say)
+            .join('\n'),
+          unitBrief(unit, doc),
+          pages,
+          beat,
+        );
+        if (inspected.item) drawn = { ...visual, item: inspected.item };
+        else {
+          // A visual that cannot pass its inspection is dropped: the part is taught with its solution lines as they were.
+          drawn = null;
+          lost = inspected.problems;
+          why = inspected.cause;
+        }
+      }
       await progress('writing', ++directed, beats.length);
+      const background = backgroundKey(unit, best.solution);
       return {
         steps: unitSteps(unit, best.solution, best.checks, language, drawn),
         solved: true,
         checks: best.checks,
+        ...(background ? { background } : {}),
         ...(drawn ? { visual: drawn.item.kind } : {}),
         ...(planned && planned.visual !== 'none' && !drawn
           ? {
@@ -948,11 +1042,19 @@ export class HarnessTourGenerator implements TourGenerator {
       let measured: BeatTargets['measured'];
       if (image?.kind === 'figure') {
         const started = Date.now();
-        measured = await this.measureFigure(image, signal);
+        let failed: string | undefined;
+        try {
+          measured = await this.measureFigure(image, signal);
+        } catch (error) {
+          // The local analysis only finds regions to point at: without it the step points at the figure as a whole.
+          signal.throwIfAborted();
+          failed = error instanceof Error ? error.message.slice(0, 300) : 'The figure could not be analysed.';
+        }
         await input.onEvent?.('visual.targets', {
           source: image.targetId,
-          count: measured.length,
+          count: measured?.length ?? 0,
           durationMs: Date.now() - started,
+          ...(failed ? { failed } : {}),
         });
       }
       const overviewIndex = beat.overviewId
@@ -992,9 +1094,12 @@ export class HarnessTourGenerator implements TourGenerator {
       let direction: Direction | null = null;
       let requireExample = now.example.required;
       // A step that mostly restates its highlighted sentences, or runs past its cap, is sent back once; until then its
-      // direction is kept. A rewrite that was only to shorten it and is not shorter does not replace it.
+      // direction is kept. A rewrite that was only to shorten it and is not shorter does not replace it. Narration about
+      // the tour's own pictures, a condescending filler or an empty comprehension check is asked to go once as well, with
+      // the board, example and cues kept, and never refuses the step.
       let rewrites = 0;
       let rewriting = false;
+      let styled = false;
       let shortenedFrom: number | null = null;
       // A call that outlived its time with nothing to repair is asked again for less (pace.ts), so that a slow step keeps
       // its narration instead of vanishing: one rung less reasoning each time, and without the board it was planned to
@@ -1132,11 +1237,14 @@ export class HarnessTourGenerator implements TourGenerator {
                   ]
                 : [];
             const long = lengthProblems(next.say, beat);
+            const style: string[] = styled ? [] : styleProblems(next.say, !!(next.board || next.example));
+            styled ||= style.length > 0;
             const repairs = [
               ...(share >= RESTATEMENT_SHARE ? [RESTATEMENT_REPAIR] : []),
               ...moves,
               ...callback,
               ...long,
+              ...style,
             ];
             if (repairs.length) {
               rewrites++;
@@ -1148,10 +1256,10 @@ export class HarnessTourGenerator implements TourGenerator {
                   share: Number(share.toFixed(2)),
                   attempt: attempt + 1,
                 });
-              if (moves.length || callback.length || long.length)
+              if (moves.length || callback.length || long.length || style.length)
                 await input.onEvent?.('beat.guarded', {
                   beat: beat.id,
-                  problems: [...moves, ...callback, ...long],
+                  problems: [...moves, ...callback, ...long, ...style],
                   attempt: attempt + 1,
                 });
               now.task.push(...repairTurn(completion.value, repairs));
@@ -1192,21 +1300,20 @@ export class HarnessTourGenerator implements TourGenerator {
         }
       }
       await progress('writing', ++directed, beats.length);
-      if (adaptive && (!direction || rewriting || faulty(direction))) {
-        const problems = [
-          ...(direction?.boardProblems ?? []),
-          ...(direction?.exampleProblems ?? []),
-          ...(direction?.visualProblems ?? []),
-          ...(rewriting ? ['The requested narration correction has not been resolved.'] : []),
-        ];
-        await input.onEvent?.('validation.failed', { stage: 'direction', beat: beat.id, problems, exhausted: true });
-        const unavailable = !direction && (fault === 'slow' || fault === 'unavailable');
-        throw new ProcessingError(
-          unavailable ? 'muse_unavailable' : 'invalid_tour_direction',
-          `The planned explanation ${beat.id} could not be completed and validated after its repair attempts. ${problems.join(' ')} Saved completed work is preserved; no summary substitute or degraded visual was published.`,
-          unavailable,
-        );
-      }
+      // What still fails after the repairs is dropped below and recorded, as in a tour that is not adaptive; an adaptive
+      // tour only asks for more repairs (pace.ts). The exhausted tries are reported all the same.
+      if (adaptive && (!direction || rewriting || faulty(direction)))
+        await input.onEvent?.('validation.failed', {
+          stage: 'direction',
+          beat: beat.id,
+          problems: [
+            ...(direction?.boardProblems ?? []),
+            ...(direction?.exampleProblems ?? []),
+            ...(direction?.visualProblems ?? []),
+            ...(rewriting ? ['The requested narration correction has not been resolved.'] : []),
+          ],
+          exhausted: true,
+        });
       if (!direction) {
         // A step whose worked example was given up for the time, and whose narration alone is nothing without it, is left
         // out for that; any other, for what went wrong with its latest try.
@@ -1236,30 +1343,49 @@ export class HarnessTourGenerator implements TourGenerator {
       const filled = withReadyView(settled.direction, now.targets, now.visual);
       if (filled) await input.onEvent?.('board.table', { beat: beat.id, kind: now.visual!.visual });
       const ready = filled ?? settled.direction;
-      if (ready.board)
-        ready.board = await inspectVisual(
+      // An authored board that cannot pass its inspection is dropped like one that failed its checks: the step keeps
+      // its narration and its page cues (its board_focus cues light up nothing without a board).
+      let uninspected: { cause: LossCause; problems: string[] } | undefined;
+      if (ready.board) {
+        const inspected = await inspectVisual(
           ready.board,
           ready.say,
           beatBrief(beat, doc, now.targets, now.visual),
           seen,
           beat,
         );
+        if (inspected.item) ready.board = inspected.item;
+        else {
+          delete ready.board;
+          ready.boardProblems = [...(ready.boardProblems ?? []), ...inspected.problems];
+          uninspected = inspected;
+        }
+      }
       // What was given up for the time went for that; what failed its checks after the corrections, for that.
-      const dropped = [...new Set<DroppedPart>([...(lean?.dropped ?? []), ...(settled.degraded?.dropped ?? [])])];
+      const dropped = [
+        ...new Set<DroppedPart>([
+          ...(lean?.dropped ?? []),
+          ...(settled.degraded?.dropped ?? []),
+          ...(uninspected ? ['board' as const] : []),
+        ]),
+      ];
+      const causeOf = (part: DroppedPart): LossCause =>
+        lean?.causes?.[part] ?? (part === 'board' && uninspected ? uninspected.cause : failed);
       const degraded: Degraded | undefined =
-        lean || settled.degraded
+        lean || settled.degraded || uninspected
           ? {
               dropped,
               problems: [
                 ...(lean?.problems ?? []),
                 ...(settled.degraded?.problems ?? []),
                 ...(settled.degraded ? lateNote(correction, failed) : []),
+                ...(uninspected?.problems ?? []),
               ].slice(0, 8),
               // A worked example the plan never asked for (a false alarm of the example check) is no loss to tell of.
               causes: Object.fromEntries(
                 dropped
                   .filter((part) => part !== 'example' || exampleRules(beat, chosen).required)
-                  .map((part) => [part, lean?.causes?.[part] ?? failed]),
+                  .map((part) => [part, causeOf(part)]),
               ),
             }
           : undefined;
@@ -1276,39 +1402,44 @@ export class HarnessTourGenerator implements TourGenerator {
     const quick = new Map<number, Step[]>();
     const quickChecks: { id: string; chapter: string; kind: string; hints: number }[] = [];
     const siteAt = new Map(sites.map((site) => [site.beats.at(-1)!, site]));
+    /**
+     * Whether an earlier exercise part (a lower beat index) already taught the background concept: the tour gives each
+     * concept once, in tour order, so that partial tours and the final tour agree. It reads only the results before `i`.
+     */
+    const taught = (i: number, concept: string) => {
+      for (let j = 0; j < i; j++) {
+        const earlier = results[j];
+        if (earlier && 'steps' in earlier && earlier.background === concept) return true;
+      }
+      return false;
+    };
     const ownSteps = (i: number, result: BeatResult): Step[] => {
-      if ('steps' in result) return result.steps;
-      if (adaptive && !result.direction)
-        throw new ProcessingError(
-          'invalid_tour_direction',
-          `The planned explanation ${beats[i].id} is missing. Its summary cannot replace the completed explanation.`,
-        );
+      if ('steps' in result) {
+        const repeated = result.background !== undefined && taught(i, result.background);
+        return repeated ? result.steps.filter((step) => step.id !== `${beats[i].unit!.id}-background`) : result.steps;
+      }
       if (beats[i].detail && !result.direction) return [];
       const step = beatStep(beats[i], result.targets, result.direction, doc);
-      if (readsSource(step.say, doc)) {
-        if (adaptive)
-          throw new ProcessingError(
-            'invalid_tour_direction',
-            `The planned explanation ${beats[i].id} only reads its source and has not been completed.`,
-          );
-        return [];
-      }
-      return [step];
+      return readsSource(step.say, doc) ? [] : [step];
     };
     const stepsOf = (i: number): Step[] => {
       const known = beatSteps.get(i);
       if (known) return known;
       const out = [...ownSteps(i, results[i]), ...(quick.get(i) ?? [])];
-      beatSteps.set(i, out);
+      // The steps depend on the parts before this one (their backgrounds): they are kept only once those are finished.
+      if (Array.from({ length: i }, (_, j) => results[j]).every((result) => result !== undefined))
+        beatSteps.set(i, out);
       return out;
     };
     /** The tour of the first `count` beats, assembled like the final one; the final one closes its frame, a part does not. */
     const buildTour = (count: number) => {
       const lists = beats.slice(0, count).map((_, i) => stepsOf(i));
-      // A board that repeats an earlier step's data is dropped with its cues; the narration stays.
-      const repeats: ReturnType<typeof dropRepeatedBoards> = adaptive
-        ? { steps: lists, dropped: [] }
-        : dropRepeatedBoards(lists, new Set(beats.slice(0, count).flatMap((beat, i) => (beat.unit ? [i] : []))));
+      // A board that repeats an earlier step's data is dropped with its cues; the narration stays. An adaptive tour
+      // keeps its repeats (it plans what to show) but is held to one picture per step all the same.
+      const exempt = new Set(beats.slice(0, count).flatMap((beat, i) => (beat.unit ? [i] : [])));
+      const repeats: SettledBoards = adaptive
+        ? { ...onePicturePerStep(lists, exempt), dropped: [] }
+        : dropRepeatedBoards(lists, exempt);
       const whole = count === beats.length;
       const tour = assembleTour(
         card!,
@@ -1337,7 +1468,7 @@ export class HarnessTourGenerator implements TourGenerator {
       let problems = check(tour);
       const late: { beat: string; dropped: ['board']; problems: string[]; causes: { board: 'checks' } }[] = [];
       const named = boardStepsOf(tour, problems);
-      if (named.size && !adaptive) {
+      if (named.size) {
         const bare = settleBoards(withoutBoards(tour, new Set(named.keys())));
         if (!check(bare).length) {
           tour = bare;
@@ -1450,7 +1581,10 @@ export class HarnessTourGenerator implements TourGenerator {
           task.push(...repairTurn(completion.value, checked.problems));
         } catch (error) {
           signal.throwIfAborted();
-          if (!recoverable(error)) throw error;
+          if (!recoverable(error)) {
+            if (degradable(error)) return skip('the check request was rejected');
+            throw error;
+          }
           // The model's own fault gets the one retry; a provider fault ends the attempts.
           if ((error as ProcessingError).transient) break;
         }
@@ -1547,6 +1681,14 @@ export class HarnessTourGenerator implements TourGenerator {
           ...(beatOf(drop.step) === drop.step ? {} : { beat: beatOf(drop.step) }),
         })),
       });
+    // A step that showed several kinds of board lost them all (one picture per step): a fault of the writer, not a repeat.
+    if (repeats.extra.length)
+      await input.onEvent?.('board.extra', {
+        dropped: repeats.extra.map((drop) => ({
+          ...drop,
+          ...(beatOf(drop.step) === drop.step ? {} : { beat: beatOf(drop.step) }),
+        })),
+      });
     const settled = settle(assembled);
     const { tour, problems } = settled;
     const late = settled.late.map((drop) => ({ ...drop, beat: beatOf(drop.beat) }));
@@ -1587,6 +1729,7 @@ export class HarnessTourGenerator implements TourGenerator {
         docType: plan.type,
         cardSource,
         planSource,
+        ...(teachingFailure ? { teachingPlanFailed: teachingFailure } : {}),
         ...(claims ? { claims: claimsEvent(claims) } : {}),
         ...(deckPlan
           ? {
@@ -1639,7 +1782,8 @@ export class HarnessTourGenerator implements TourGenerator {
                 ? [`${beat.id}:visual:${result.visual}`]
                 : [];
             const direction = result.direction;
-            return late.some((drop) => drop.beat === beat.id)
+            return late.some((drop) => drop.beat === beat.id) ||
+              repeats.extra.some((drop) => beatOf(drop.step) === beat.id)
               ? []
               : direction?.example
                 ? direction.example.frames.map((frame, n) => `${beat.id}:frame-${n + 1}:${frame.item.kind}`)
@@ -1654,6 +1798,10 @@ export class HarnessTourGenerator implements TourGenerator {
             ...repeats.dropped.map((drop) => ({
               beat: beatOf(drop.step),
               problems: [`${drop.kind}: it repeats the board of step ${drop.repeats}`],
+            })),
+            ...repeats.extra.map((drop) => ({
+              beat: beatOf(drop.step),
+              problems: [`${drop.kind}: the step showed several kinds of board; it shows one picture`],
             })),
             ...late.map(({ beat, problems }) => ({ beat, problems })),
           ],

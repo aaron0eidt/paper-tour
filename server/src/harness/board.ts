@@ -25,6 +25,8 @@ import {
   distributionQuotes,
 } from '../../../shared/distribution';
 import katex, { type KatexOptions } from 'katex';
+// Chemistry (\ce, \pu): registers its macros on the katex above, as the player does (player/src/tex.ts).
+import 'katex/contrib/mhchem';
 import type { BoardItem } from '../../../shared/paper';
 
 // Native visualization contracts: schemas, local checks and focus identities.
@@ -124,8 +126,42 @@ const overlaps = (a: Span, b: Span) => a[0] < b[1] && b[0] < a[1];
 const contains = (a: Span, b: Span) => a[0] <= b[0] && b[1] <= a[1];
 const crosses = (a: Span, b: Span) => overlaps(a, b) && !contains(a, b) && !contains(b, a);
 const CONTROL_WORD = /\\[a-zA-Z]+/y;
+const CHEM_OPEN = /\s*\{/y;
 
-/** Positions between LaTeX tokens: a control word, a control symbol or one character. */
+/** Where the group opened by the brace at `open` ends: its closing brace, else the end of the LaTeX. */
+function groupEnd(latex: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < latex.length; i++) {
+    if (latex[i] === '\\') i++;
+    else if (latex[i] === '{') depth++;
+    else if (latex[i] === '}' && --depth === 0) return i;
+  }
+  return latex.length;
+}
+
+/**
+ * Positions after the opening brace to before the closing one of each \ce{…} and \pu{…}. mhchem typesets such a group
+ * as a whole: a term wrapped inside it prints as plain maths (H2O without its subscript), so no term starts or ends there.
+ */
+function chemInsides(latex: string): Span[] {
+  const insides: Span[] = [];
+  for (let i = 0; i < latex.length; ) {
+    CONTROL_WORD.lastIndex = i;
+    const word = CONTROL_WORD.exec(latex);
+    const code = latex.charCodeAt(i);
+    if (!word) {
+      i += latex[i] === '\\' || (code >= 0xd800 && code <= 0xdbff) ? 2 : 1;
+      continue;
+    }
+    i += word[0].length;
+    CHEM_OPEN.lastIndex = i;
+    const open = word[0] === '\\ce' || word[0] === '\\pu' ? CHEM_OPEN.exec(latex) : null;
+    if (open) insides.push([i + open[0].length, groupEnd(latex, i + open[0].length - 1)]);
+  }
+  return insides;
+}
+
+/** Positions between LaTeX tokens: a control word, a control symbol or one character; none inside a \ce or \pu group. */
 function tokenBounds(latex: string): boolean[] {
   const bounds = new Array<boolean>(latex.length + 1).fill(false);
   for (let i = 0; i < latex.length; ) {
@@ -136,6 +172,7 @@ function tokenBounds(latex: string): boolean[] {
     i += word ? word[0].length : latex[i] === '\\' ? 2 : code >= 0xd800 && code <= 0xdbff ? 2 : 1;
   }
   bounds[latex.length] = true;
+  for (const [from, to] of chemInsides(latex)) for (let at = from; at <= to; at++) bounds[at] = false;
   return bounds;
 }
 
@@ -179,7 +216,12 @@ function placeTerm(latex: string, bounds: boolean[], placed: Span[], term: strin
   const found: Span[] = [];
   for (let at = latex.indexOf(term); at >= 0; at = latex.indexOf(term, at + 1)) found.push([at, at + term.length]);
   const whole = found.filter(([start, end]) => bounds[start] && bounds[end]);
-  if (!whole.length) return `"${term}" only appears inside a longer command or symbol; choose a longer piece around it`;
+  if (!whole.length) {
+    const chemistry = chemInsides(latex).some(([from, to]) => found.some(([start, end]) => start <= to && from <= end));
+    return chemistry
+      ? `"${term}" is part of a \\ce{} or \\pu{} group, which is drawn as one piece; use the whole group, as in \\ce{H2O}, or give each species its own group, as in \\ce{2H2} + \\ce{O2} \\rightarrow \\ce{2H2O}`
+      : `"${term}" only appears inside a longer command or symbol; choose a longer piece around it`;
+  }
   const options = whole.filter((span) => !placed.some((s) => crosses(s, span)));
   if (!options.length) {
     const other = placed.findIndex((s) => crosses(s, whole[0]));
@@ -202,7 +244,9 @@ function placeTerm(latex: string, bounds: boolean[], placed: Span[], term: strin
  * A formula the board builds term by term: KaTeX renders the LaTeX, every term is a complete symbol or group copied
  * from it that the board can colour (it may sit inside another term, never cut across one), and labels are short.
  * Colours stay unset, so the player's palette applies. Reusable for any board formula, such as one in an answer; a
- * line of a worked solution may light up a single term (`minTerms`).
+ * line of a worked solution may light up a single term (`minTerms`). Chemistry (\ce{}) renders; a term is a whole
+ * \ce{…} group, never a piece of one. The earlier lines of a worked solution (`before`) and the check mark (`verified`)
+ * are never asked of the model: code adds them to the checked item.
  */
 export function checkFormula(
   raw: unknown,

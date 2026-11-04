@@ -1,6 +1,7 @@
 import type { Completion, MuseClient, MuseMessage, MuseContent } from '../muse/client';
 import { withGrowingOutputBudget } from '../ai/output-budget';
 import { boardSchema } from '../harness/board';
+import { ProcessingError } from '../errors';
 import {
   authorAndInspectVisual,
   AUTHORED_VISUAL_GUIDANCE,
@@ -36,6 +37,8 @@ export interface ModelVisualContext {
   allowedSourceRefs?: readonly string[];
   signal?: AbortSignal;
   onCompletion?: (completion: Completion) => void;
+  /** Whether a review call that failed leaves the visual to its own rendering checks (see authorAndInspectVisual). */
+  reviewFault?: (error: unknown) => boolean;
 }
 export function sourceReferenceProblems(item: AuthoredVisual, allowed?: readonly string[]): string[] {
   if (item.source === 'document' && !item.sourceRefs.length)
@@ -65,6 +68,7 @@ export async function reviewAuthoredWithModel(
     narration: context.narration,
     evidence: context.evidence,
     signal: context.signal,
+    reviewFault: context.reviewFault,
     review: async (feedback) => {
       const references = sourceReferenceProblems(feedback.item, context.allowedSourceRefs);
       if (references.length) return references;
@@ -86,9 +90,14 @@ export async function reviewAuthoredWithModel(
         },
         // The provider counts reasoning against this budget as well as the JSON verdict.
         6000,
-      )) as { problems?: unknown };
-      if (!Array.isArray(value.problems) || value.problems.some((p) => typeof p !== 'string'))
-        throw Error('Visual reviewer returned an invalid verdict.');
+      )) as { problems?: unknown } | null;
+      if (
+        !value ||
+        typeof value !== 'object' ||
+        !Array.isArray(value.problems) ||
+        value.problems.some((p) => typeof p !== 'string')
+      )
+        throw new ProcessingError('muse_invalid_response', 'Visual reviewer returned an invalid verdict.');
       return value.problems as string[];
     },
     repair: async (feedback) => {

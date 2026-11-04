@@ -45,7 +45,7 @@ import { isContributorModel } from './muse/models';
 import { Database, type Db } from './db';
 import { HttpError, missing, ProcessingError } from './errors';
 import { BUCKET, type FileStorage } from './storage';
-import { ensureTourGeneration, generationSummary } from './tour-worker';
+import { ensureTourGeneration, generationSummary, tourEngine } from './tour-worker';
 import { partialView, type TourPartialView } from './tour-partial';
 import type { TourImage } from './tour-generator';
 import type { MuseConfig } from './config';
@@ -483,10 +483,10 @@ export class DocumentService implements Library {
       const allowTraining = selection.allowTraining === true;
       const {
         rows: [analysis],
-      } = await tx.query("select id from analyses where document_id=$1 and id=$2 and status in ('ready','limited')", [
-        id,
-        document.current_analysis_id,
-      ]);
+      } = await tx.query(
+        "select id,doc from analyses where document_id=$1 and id=$2 and status in ('ready','limited')",
+        [id, document.current_analysis_id],
+      );
       if (!analysis) throw new HttpError(409, 'analysis_not_ready', 'The document analysis is not ready yet.');
       const {
         rows: [latest],
@@ -531,7 +531,7 @@ export class DocumentService implements Library {
         validated,
         true,
         regenerate,
-        this.agentEnabled ? 'agent' : 'legacy',
+        tourEngine(analysis.doc, this.agentEnabled),
         profile,
       );
       await tx.query('update documents set tour_model=$2,tour_allow_training=$3 where id=$1', [

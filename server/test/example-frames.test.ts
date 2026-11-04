@@ -17,7 +17,8 @@ import {
 } from '../src/harness/visual-plan';
 
 // Worked-example frames count toward the tour's kind limits and its diversity: the plan allots each step that may carry
-// an example the kinds its frames may use, so that a tour never gets five bars boards from examples nobody planned.
+// an example the kind its frames use (one kind for all of them: a step shows one picture), so that a tour never gets
+// five bars boards from examples nobody planned.
 
 const beats = planBeats(card, doc, 'standard');
 const beat = (id: string): Beat => beats.find((b) => b.id === id)!;
@@ -34,10 +35,9 @@ const detail = { ...beat('formula-1'), detail: true } satisfies Beat;
 test('a step planned as a formula never gets the kinds the plan has used up for its frames', () => {
   const plan = allocateFrames(planOf({ 'method-1': 'bars', 'formula-1': 'formula', 'result-1': 'scene' }), beats);
   // bars and scene are used once each (their limit), so the formula step's frames may not take them.
-  assert.deepEqual(frames(plan, 'formula-1'), ['formula', 'plot', 'flow']);
-  // The step planned as bars shows its example in bars, with formula cards where the formula limit has room; the
-  // formula step has taken the other formula card.
-  assert.deepEqual(frames(plan, 'method-1'), ['bars', 'formula']);
+  assert.deepEqual(frames(plan, 'formula-1'), ['flow']);
+  // The step planned as bars shows its example in bars alone, with no formula cards between; the scene step in a scene.
+  assert.deepEqual(frames(plan, 'method-1'), ['bars']);
   assert.deepEqual(frames(plan, 'result-1'), ['scene']);
   // A step without a visual, or planned as a relationship, has no example and so no frames.
   for (const id of ['problem-1', 'idea-1', 'figure-1', 'limitation-1', 'takeaway-1'])
@@ -46,32 +46,31 @@ test('a step planned as a formula never gets the kinds the plan has used up for 
   for (const id of ['method-1', 'formula-1', 'result-1']) assert.equal(frames(relation, id), undefined, id);
 });
 
-test('the formula limit holds for frames too: two formula steps leave no formula cards for the others', () => {
+test('a step gets one frame kind, never a formula card or a plot, which cannot make an example', () => {
   const plan = allocateFrames(
     planOf({ 'method-1': 'bars', 'formula-1': 'formula', 'result-1': 'formula', 'limitation-1': 'flow' }),
     beats,
   );
-  assert.ok(!frames(plan, 'method-1')!.includes('formula'));
-  assert.ok(!frames(plan, 'limitation-1')!.includes('formula'));
-  assert.ok(frames(plan, 'formula-1')!.includes('formula'));
+  assert.deepEqual(frames(plan, 'method-1'), ['bars']);
+  assert.deepEqual(frames(plan, 'limitation-1'), ['flow']);
+  // Only a scene is left, and the first formula step takes it; the second finds none free and may use any of the three.
+  assert.deepEqual(frames(plan, 'formula-1'), ['scene']);
+  assert.deepEqual(frames(plan, 'result-1'), ['flow', 'bars', 'scene']);
 });
 
 test('the room that is left goes to one step each, so that two steps never take the same kind', () => {
   const plan = allocateFrames(planOf({ 'formula-1': 'formula', 'result-1': 'formula' }), beats);
-  const first = frames(plan, 'formula-1')!.filter((kind) => kind !== 'formula');
-  const second = frames(plan, 'result-1')!.filter((kind) => kind !== 'formula');
-  assert.ok(first.length && second.length);
-  const room: Record<string, number> = { plot: 2, scene: 1, flow: 1, bars: 1 };
-  for (const kind of new Set([...first, ...second])) {
-    const taken = [...first, ...second].filter((k) => k === kind).length;
-    assert.ok(taken <= room[kind], `${kind} taken ${taken} times`);
-  }
-  // A formula detail that must show an example, planned without a visual, is allotted frames like any other.
+  const first = frames(plan, 'formula-1')!;
+  const second = frames(plan, 'result-1')!;
+  assert.equal(first.length, 1);
+  assert.equal(second.length, 1);
+  assert.notEqual(first[0], second[0]);
+  // A formula detail that must show an example, planned without a visual, is allotted a frame kind like any other.
   const required = allocateFrames(
     new Map(beats.map((b) => [b.id, visual('none')])).set('formula-1', visual('none')),
     beats.map((b) => (b.id === 'formula-1' ? detail : b)),
   );
-  assert.deepEqual(frames(required, 'formula-1'), ['formula', 'plot', 'scene', 'flow', 'bars']);
+  assert.deepEqual(frames(required, 'formula-1'), ['flow']);
 });
 
 test('an example that finds no free kind is not refused one', () => {
@@ -80,7 +79,7 @@ test('an example that finds no free kind is not refused one', () => {
   crowded.set('idea-1', visual('plot'));
   const plan = allocateFrames(crowded, beats);
   const own = frames(plan, 'formula-1')!;
-  assert.ok(own.some((kind) => kind !== 'formula'));
+  assert.ok(own.length && own.every((kind) => kind !== 'formula' && kind !== 'plot'));
 });
 
 test('the frames of a step are the kinds it was allotted, or every legacy kind without a plan', () => {
@@ -135,28 +134,21 @@ test("the brief names the kinds a step's frames may use, only for a step that ma
 
 const kindsOfStep = (step: Step) =>
   step.actions.filter((a): a is Extract<Action, { type: 'board' }> => a.type === 'board').map((a) => a.item.kind);
-const barsFrames = () => ({
-  assumptions: 'Illustrative scalar input; add the same input to itself.',
-  inputs: [{ label: 'Input', value: 2 }],
-  calculations: [{ expression: '2+2', result: 4 }],
-  frames: [
-    {
-      anchor: 'the input is',
-      bars: { title: 'Illustrative input', unit: 'units', bars: [{ label: 'Input', value: 2 }] },
-    },
-    {
-      anchor: 'Adding the input twice',
-      bars: {
-        title: 'Illustrative result',
-        unit: 'units',
-        bars: [
-          { label: 'Input', value: 2 },
-          { label: 'Output', value: 4 },
-        ],
-      },
-    },
-  ],
-});
+const sceneFrames = () => {
+  const scene = (title: string, n: number) => ({
+    title,
+    objects: [{ id: 'input', type: 'matrix', x: 0.2, y: 0.3, w: 0.4, h: 0.3, values: [[n]] }],
+  });
+  return {
+    assumptions: 'Illustrative scalar input; add the same input to itself.',
+    inputs: [{ label: 'Input', value: 2 }],
+    calculations: [{ expression: '2+2', result: 4 }],
+    frames: [
+      { anchor: 'the input is', scene: scene('Illustrative input', 2) },
+      { anchor: 'Adding the input twice', scene: scene('Illustrative result', 4) },
+    ],
+  };
+};
 
 test('an example whose frames take a kind another step has planned is corrected, and the plan counts its frames', async () => {
   const requests: Request[] = [];
@@ -171,14 +163,14 @@ test('an example whose frames take a kind another step has planned is corrected,
       if (['visual_plan', 'opening_visual'].includes(request.name))
         return planFor(request, (id) =>
           id === 'method-1'
-            ? { visual: 'bars', idea: 'Show the readings of the probes.', data: 'illustrative' }
+            ? { visual: 'scene', idea: 'Show the readings of the probes.', data: 'illustrative' }
             : id === 'formula-1'
               ? { visual: 'formula', idea: 'Show how the saving is computed.', data: 'illustrative' }
               : 'none',
         );
       if (request.task.includes('STEP KIND: formula')) {
         formulaAsks++;
-        return direct(request, exampleSay, { example: formulaAsks === 1 ? barsFrames() : numericalExample() });
+        return direct(request, exampleSay, { example: formulaAsks === 1 ? sceneFrames() : numericalExample() });
       }
       return direct(request, 'The probes tell each valve when its patch of soil is dry, so watering follows the need.');
     }),
@@ -188,24 +180,24 @@ test('an example whose frames take a kind another step has planned is corrected,
       events.push({ type, data });
     },
   });
-  // The plan allotted the formula step the kinds that are left: bars is taken by the step planned as bars.
+  // The plan allotted the formula step the one kind that is left: scene is taken by the step planned as a scene.
   const formula = requests.filter((r) => r.name === 'beat_direction' && r.task.includes('STEP KIND: formula'));
   assert.equal(formula.length, 2);
-  assert.match(formula[0].task, /WORKED EXAMPLE FRAMES MAY USE ONLY: formula, plot, scene, flow\./);
+  assert.match(formula[0].task, /WORKED EXAMPLE FRAMES MAY USE ONLY: flow\. Use that one kind for every frame/);
   const frameKinds = (r: Request) =>
     Object.keys((r.schema as any).properties.example.properties.frames.items.properties);
-  assert.ok(!frameKinds(formula[0]).includes('bars'));
-  // The first answer used bars; its correction names the kinds, and the second answer is kept.
+  assert.deepEqual(frameKinds(formula[0]).sort(), ['anchor', 'flow']);
+  // The first answer used a scene; its correction names the kind, and the second answer is kept.
   const failed = events.find((e) => e.type === 'validation.failed' && e.data.beat === 'formula-1');
-  assert.match(String(failed?.data.problems), /Example frame 1 is a bars, which this step's frames may not use/);
+  assert.match(String(failed?.data.problems), /Example frame 1 is a scene, which this step's frames may not use/);
   const step = (tour.chapters.flatMap((c) => c.steps) as Step[]).find((s) => s.id === 'formula-1')!;
   assert.deepEqual(
-    kindsOfStep(step).filter((kind) => kind === 'bars'),
+    kindsOfStep(step).filter((kind) => kind === 'scene'),
     [],
   );
-  assert.ok(kindsOfStep(step).includes('flow'));
+  assert.deepEqual([...new Set(kindsOfStep(step))], ['flow']);
   assert.deepEqual(metadata.degraded, []);
   // Across the tour every kind is within its limit, frames included.
   const kinds = tour.chapters.flatMap((c) => c.steps).flatMap(kindsOfStep) as BoardItem['kind'][];
-  assert.ok(kinds.filter((kind) => kind === 'bars').length <= 1);
+  assert.ok(kinds.filter((kind) => kind === 'scene').length <= 1);
 });

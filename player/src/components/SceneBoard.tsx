@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import katex from 'katex';
+import katex from '../tex';
 import type { SceneItem, SceneObject } from '../../../shared/scene';
 import { sceneMatrixText, scenePlotBounds } from '../../../shared/scene';
 import { evaluateExpression, parseExpression, plotSegments, type PlotItem } from '../../../shared/plot';

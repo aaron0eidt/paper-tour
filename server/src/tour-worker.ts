@@ -13,6 +13,7 @@ import type { Doc } from '../../shared/paper';
 import { ROOT, type Config } from './config';
 import { Database, type Db } from './db';
 import { HttpError, ProcessingError } from './errors';
+import { guessType } from './harness/doctype';
 import type { Enqueue } from './service';
 import type { FileStorage } from './storage';
 import type { TourGenerator, TourImage, TourProgress } from './tour-generator';
@@ -36,6 +37,16 @@ export function generationSummary(row: QueryResultRow): TourGenerationSummary {
     model: row.model,
     tourId: row.result_tour_id ?? null,
   };
+}
+
+/**
+ * The engine a new tour is written with. The persistent paper agent explains research papers; exercise sheets and every
+ * other kind of document (slides, manuals, reports, contracts, letters, literature, health information) are taught by
+ * the harness, whose tutor and arcs are made for them. Without a document, the setting alone decides.
+ */
+export function tourEngine(doc: Doc | null | undefined, agentEnabled: boolean): 'legacy' | 'agent' {
+  if (!agentEnabled) return 'legacy';
+  return !doc || guessType(doc) === 'research_paper' ? 'agent' : 'legacy';
 }
 
 /** Caller locks the document; generation creation and its queue job share that transaction. */

@@ -1,0 +1,21 @@
+{
+  "sheet": "econ-micro-en",
+  "language": "en",
+  "subject": "Microeconomics: supply and demand equilibrium, elasticity, per-unit tax, consumer surplus",
+  "items": [
+    {"task": "Problem 1", "part": "a", "answer": "The curves intersect at P = 20 and Q = 60 (equilibrium price $20, equilibrium quantity 60 units).", "numeric": [20, 60], "unit": "$ and units", "method": "Find the crossing point of the demand and supply lines in the graph."},
+    {"task": "Problem 1", "part": "b", "answer": "100 - 2P = -20 + 4P gives 120 = 6P, so P* = 20; Q* = 100 - 2 x 20 = 60 (and Qs = -20 + 80 = 60).", "numeric": [20, 60], "unit": "$ and units", "method": "Set quantity demanded equal to quantity supplied and solve for P, then substitute back."},
+    {"task": "Problem 1", "part": "c", "answer": "At P = 15: Qd = 100 - 30 = 70, Qs = -20 + 60 = 40, shortage = 70 - 40 = 30 units.", "numeric": [70, 40, 30], "unit": "units", "method": "Evaluate both curves at the ceiling price; shortage = Qd - Qs."},
+    {"task": "Problem 1", "part": "d", "answer": "The ceiling of $15 is below the equilibrium price of $20, so the market price cannot rise to its equilibrium level and quantity demanded exceeds quantity supplied.", "numeric": [15, 20], "unit": null, "method": "A price ceiling binds only if it is set below the equilibrium price."},
+    {"task": "Problem 2", "part": "a", "answer": "E = (dQ/dP) x (P/Q) = -2 x 20/60 = -0.667 (absolute value 0.67)", "numeric": [-0.667], "unit": null, "method": "Point elasticity = slope of the demand function dQ/dP times P/Q at the equilibrium."},
+    {"task": "Problem 2", "part": "b", "answer": "Q falls from 60 to 50 and P rises from 20 to 25. %dQ = -10/55 = -18.18 %, %dP = 5/22.5 = 22.22 %, so E = -0.818 (absolute value 0.82).", "numeric": [-0.818], "unit": null, "method": "Midpoint formula: change divided by the average of the old and new values for both Q and P."},
+    {"task": "Problem 2", "part": "c", "answer": "Demand is inelastic (|E| < 1), so a price increase raises total revenue: 20 x 60 = $1200 before and 25 x 50 = $1250 after.", "numeric": [1200, 1250], "unit": "$", "method": "Inelastic demand: the percentage fall in quantity is smaller than the percentage rise in price, so revenue P x Q rises."},
+    {"task": "Problem 3", "part": "a", "answer": "Sellers receive P_c - 6, so supply becomes Qs = -20 + 4 (P_c - 6) = -44 + 4 P_c. Setting 100 - 2 P_c = -44 + 4 P_c gives P_c = 24 and Q = 52. Consumers pay $24, sellers receive 24 - 6 = $18.", "numeric": [24, 52, 18], "unit": "$ and units", "method": "Shift the supply curve by the tax (producer price = consumer price - t), solve for the new equilibrium."},
+    {"task": "Problem 3", "part": "b", "answer": "Consumers pay 24 - 20 = $4 more per unit (2/3 of the tax), producers receive 20 - 18 = $2 less (1/3 of the tax); 4 + 2 = 6.", "numeric": [4, 2], "unit": "$ per unit", "method": "Compare the post-tax prices with the pre-tax equilibrium price of $20."},
+    {"task": "Problem 3", "part": "c", "answer": "Tax revenue = t x Q = 6 x 52 = $312", "numeric": [312], "unit": "$", "method": "Tax per unit times the quantity traded after the tax."},
+    {"task": "Problem 3", "part": "d", "answer": "Deadweight loss = (1/2) x t x (Q_before - Q_after) = 0.5 x 6 x (60 - 52) = $24", "numeric": [24], "unit": "$", "method": "Area of the triangle between the supply and demand curves for the lost units."},
+    {"task": "Problem 4", "part": "a", "answer": "CS = (1/2) x (50 - 20) x 60 = $900", "numeric": [900], "unit": "$", "method": "Triangle area under the demand curve above the price: half base times height, with choke price 50."},
+    {"task": "Problem 4", "part": "b", "answer": "After the tax P_c = 24 and Q = 52: CS = (1/2) x (50 - 24) x 52 = $676", "numeric": [676], "unit": "$", "method": "Same triangle with the consumer price and quantity from Problem 3."},
+    {"task": "Problem 4", "part": "c", "answer": "900 - 676 = $224 lower consumer surplus", "numeric": [224], "unit": "$", "method": "Difference of the two consumer surpluses; (tax revenue 312 + deadweight loss 24 = 336 = 224 + producer surplus loss 112)."}
+  ]
+}

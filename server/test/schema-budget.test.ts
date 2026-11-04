@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Doc } from '../../shared/paper';
-import { ARC_SPECS, arcSchema, arcTourPlan, fallbackArcPlan, type ArcType } from '../src/harness/arcs';
+import { ARC_SPECS, arcSchema, arcTourPlan, disclaimerOf, fallbackArcPlan, type ArcType } from '../src/harness/arcs';
 import { paperPlan, type Preset, type TourPlan } from '../src/harness/beats';
 import { BOARD_KINDS } from '../src/harness/board';
 import { cardProblems, cardSchema, evidencePool, fallbackCard, type PaperCard } from '../src/harness/card';
@@ -154,8 +154,8 @@ export function callSchemas(doc: Doc): Built[] {
     sentences,
     maths: doc.blocks.slice(0, 1200).map((b) => b.id),
     pages: [1],
-    steps: 3,
-    compact: false,
+    steps: 7,
+    form: 'full',
   } as unknown as Unit;
   add('exercise_solution of a task with 1500 sentences', solveSchema(task));
   return built;
@@ -248,6 +248,6 @@ const arcAnswer = (type: ArcType, evidence: string) => {
     plan: 'p',
     chapter_titles: titles,
     ...lists,
-    ...(type === 'contract' ? { disclaimer: 'Not legal advice.' } : {}),
+    ...(disclaimerOf(type) ? { disclaimer: 'Not advice.' } : {}),
   };
 };

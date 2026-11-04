@@ -471,7 +471,7 @@ test('the visual shows with the method, after the checkpoint, in place of the ru
 
 test('in the compact form the visual opens the first solution step and its line follows once the method is said', () => {
   const u = planUnits(units, 'quick').taught.find((x) => x.id === 'ex1.a')!;
-  assert.equal(u.compact, true);
+  assert.equal(u.form, 'compact');
   const s = solved(u);
   assert.ok(hasVisualHost(u, s));
   const visual = cleanUnitVisual(
@@ -796,4 +796,20 @@ test('the length of the sheet tour is the same with visuals: they take no step o
     differing.map((s) => s.id),
     ['ex2-method'],
   );
+});
+
+test('the sheet’s plan help names the pictures of every subject, and offers no flow the rules would reject', () => {
+  for (const adaptive of [false, true]) {
+    const task = visualPlanTask('en-US', { sheet: true, adaptive });
+    const help = (kind: string) => task.match(new RegExp(`   - ${kind}: (.*)`))?.[1] ?? '';
+    // Each subject finds its picture.
+    assert.match(help('program'), /free-body diagrams, circuits, molecules and Lewis structures/);
+    assert.match(help('program'), /mole map g → mol → mol → g/);
+    assert.match(help('plotly'), /titration curves, Michaelis-Menten/);
+    assert.match(help('heatmap'), /Punnett square/);
+    assert.match(help('scene'), /forces and vectors in the plane/);
+    // A flow needs a branch, a merge or a loop (visual-rules.ts): a mole map is a simple chain and belongs to a program.
+    assert.match(help('flow'), /real branch or loop, never a simple chain/);
+    assert.doesNotMatch(help('flow'), /mole map/);
+  }
 });

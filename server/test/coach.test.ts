@@ -167,6 +167,31 @@ test('a hint or prompt that gives the result away is found: the answer line, its
   assert.equal(leaksResult('Divide both sides by a.', 'x = \\frac{b}{a}', 'Solve ax = b'), false);
 });
 
+test('the coefficients of a balanced equation and the numbers in a \\text are results; subscripts and units are not', () => {
+  const task = 'Balance the equation Fe + O2 -> Fe2O3.';
+  const balanced = '\\ce{4Fe + 3O2 -> 2Fe2O3}';
+  assert.equal(
+    leaksResult('Put a 4 in front of Fe, a 3 in front of O2 and a 2 in front of Fe2O3.', balanced, task),
+    true,
+  );
+  assert.equal(leaksResult('You need four iron atoms on the left.', balanced, task), true);
+  assert.equal(leaksResult('Count the oxygen atoms on both sides first.', balanced, task), false);
+  assert.equal(leaksResult('Fe2O3 has two iron atoms and three oxygen atoms.', balanced, task), false);
+  // The subscript of H2O and the exponent of a unit are no number of the answer, its value is.
+  const water = 'How many grams of water form from 4.0 g of hydrogen?';
+  assert.equal(leaksResult('It is about 36 grams.', 'm(\\ce{H2O}) \\approx 36\\,\\mathrm{g}', water), true);
+  assert.equal(
+    leaksResult('Water, H2O, has a molar mass of 18 g/mol.', 'm(\\ce{H2O}) \\approx 36\\,\\mathrm{g}', water),
+    false,
+  );
+  assert.equal(leaksResult('It is about 9.8 m/s^2.', '9.8\\,\\mathrm{m/s^2}', 'A ball falls.'), true);
+  assert.equal(leaksResult('Use m/s^2 as the unit.', 'a = 9.8\\,\\mathrm{m/s^2}', 'A ball falls.'), false);
+  // A statement in \text keeps its numbers.
+  const trace = '\\text{index } 3 \\text{ after } 3 \\text{ probes}';
+  assert.equal(leaksResult('Look at index 3.', trace, 'Trace binary search on a sorted list.'), true);
+  assert.equal(leaksResult('Compute the middle first.', trace, 'Trace binary search on a sorted list.'), false);
+});
+
 test('the checkpoint keeps up to three hints, cut at the first one that gives the result away; the sheet’s own hint comes first', () => {
   const unit = planUnits(exerciseUnits(english), 'standard').taught[0];
   const kept = cleanSolution(solution(), unit, english).solution!;
@@ -237,7 +262,8 @@ test('a part with a checkpoint is taught as the task, your turn, the method, the
     steps.map((s) => s.id),
     ['ex1.a-task', 'ex1.a-try', 'ex1.a-method', 'ex1.a-step-1', 'ex1.a-step-2', 'ex1.a-answer'],
   );
-  assert.equal(unitOverhead(unit), 4);
+  assert.equal(unit.form, 'full');
+  assert.equal(unitOverhead(unit), 5);
   const turn = steps[1];
   assert.equal(turn.say, solved.coach!.prompt);
   assert.deepEqual(turn.checkpoint, { prompt: solved.coach!.prompt, hints: solved.coach!.hints });
@@ -254,7 +280,7 @@ test('a part with a checkpoint is taught as the task, your turn, the method, the
 
 test('in the compact form the method opens the first solution line, after the checkpoint', () => {
   const unit = planUnits(exerciseUnits(english), 'quick').taught[0];
-  assert.equal(unit.compact, true);
+  assert.equal(unit.form, 'compact');
   const solved = cleanSolution(solution(), unit, english).solution!;
   const steps = unitSteps(unit, solved, [ok, ok, ok], 'en-US');
   assert.deepEqual(
@@ -282,17 +308,33 @@ test('a part gets no checkpoint when it has no solution to reveal or its answer 
   );
 });
 
-test('the budget counts the checkpoint, so a tour never grows past the preset', () => {
+test('the budget counts the checkpoint, so a tour never grows past the preset but for what its tasks force', () => {
   const units = exerciseUnits(english);
   const many = Array.from({ length: 9 }, (_, i) => ({ ...units[0], id: `u${i}`, task: { ...units[0].task } }));
+  // Nine tasks of one part each: every task keeps its part; a preset without room for them grows past its length only by
+  // what they force (compact, the fewest lines).
+  const forced = 2 + many.length * (unitOverhead({ form: 'compact' }) + 2);
   for (const [preset, limit] of [
-    ['quick', 10],
-    ['standard', 22],
-    ['deep', 30],
+    ['quick', 60],
+    ['standard', 100],
+    ['deep', 160],
   ] as const) {
     const { taught } = planUnits(many, preset);
     const length = 2 + taught.reduce((n, u) => n + unitOverhead(u) + u.steps, 0);
+    assert.ok(length <= Math.max(limit, forced), `${preset}: ${length}`);
+    assert.equal(taught.length, many.length, preset);
+  }
+  // Parts of one task are the ones that go: the same nine as parts of a single task stay within the preset.
+  const parts = many.map((u) => ({ ...u, task: units[0].task }));
+  for (const [preset, limit] of [
+    ['quick', 60],
+    ['standard', 100],
+    ['deep', 160],
+  ] as const) {
+    const { taught } = planUnits(parts, preset);
+    const length = 2 + taught.reduce((n, u) => n + unitOverhead(u) + u.steps, 0);
     assert.ok(length <= limit, `${preset}: ${length}`);
+    assert.equal(taught[0].id, 'u0');
   }
 });
 
@@ -482,8 +524,17 @@ test('a sheet announces its tour part by part, counting the steps of a part befo
   });
   assert.ok(partials.length >= 1);
   const total = steps(result.tour).length;
-  // Planned: the overview, each part's task, checkpoint, method, three solution steps and answer, and the takeaway.
-  assert.equal(partials.at(-1)!.planned, 2 + 2 * (unitOverhead({ compact: false }) + 3));
+  // Planned: the overview, each part's task, background, checkpoint, method, solution steps and answer, and the takeaway.
+  const taught = planUnits(exerciseUnits(english), 'standard').taught;
+  assert.deepEqual(
+    taught.map((u) => [u.form, u.steps]),
+    [
+      ['full', 5],
+      ['follow', 5],
+    ],
+  );
+  assert.equal(partials.at(-1)!.planned, 2 + (5 + 5) + (4 + 5));
+  assert.equal(partials.at(-1)!.planned, 2 + taught.reduce((n, u) => n + unitOverhead(u) + u.steps, 0));
   for (const part of partials) {
     assert.equal(steps(part.tour).length, part.ready);
     assert.ok(part.ready <= total);
