@@ -243,7 +243,7 @@ function displayedCalculationProblems(item: BoardItem, exact: ExactValues): stri
           !/^(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(/i.test(left)
         )
           continue;
-        const start = /\b(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(|[+\-]?(?:\d|\.\d)|\(/.exec(
+        const start = /[+\-]?\s*\b(?:sin|cos|tanh|exp|log|sqrt|abs|relu|sigmoid|min|max|softmax)\s*\(|[+\-]?(?:\d|\.\d)|\(/.exec(
           left,
         );
         if (!start) continue;

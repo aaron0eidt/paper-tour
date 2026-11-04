@@ -440,3 +440,36 @@ test('named component ordinals are labels rather than invented numerical operand
   value.frames[0].flow!.nodes[0].label = 'key 3 input 7';
   assert.match(checkExample(value, exampleSay).problems.join(' '), /undeclared value 7/);
 });
+
+test('visible function calculations preserve unary signs, including the failed negative-log loss', () => {
+  const problems = (expression: string, result: number) => checkExample({
+    ...numericalExample(),
+    inputs: [{ label: 'Probability', value: 0.082 }, { label: 'Epsilon', value: 0.00000001 }],
+    calculations: [{ expression, result }],
+    frames: [
+      { anchor: 'the input is', flow: flow(['Probability 0.082', 'Epsilon 0.00000001', 'Loss']) },
+      { anchor: 'Adding the input twice', flow: flow([`${expression} = ${result}`, 'Check', 'Loss']) },
+    ],
+  }, exampleSay).problems.filter(p => p.includes('Visible calculation'));
+  assert.deepEqual(problems('-log(0.082+0.00000001)', 2.501), []);
+  assert.deepEqual(problems('−log(0.082+0.00000001)', 2.501), []);
+  assert.deepEqual(problems('- log(0.082+0.00000001)', 2.501), []);
+  assert.ok(problems('-log(0.082+0.00000001)', -2.501).some(p => p.includes('does not match')));
+  assert.ok(problems('log(0.082+0.00000001)', 2.501).some(p => p.includes('does not match')));
+});
+
+test('negative log display keeps exact intermediate provenance behind rounded divergence', () => {
+  const value = {
+    ...numericalExample(),
+    inputs: [0.7, 0.3, 0.5, 0.00000001].map(value => ({ label: 'Input', value })),
+    calculations: [
+      { expression: '0.7*log(0.7/0.5)+0.3*log(0.3/0.5)', result: 0.082 },
+      { expression: '-log(0.082+0.00000001)', result: 2.498 },
+    ],
+    frames: [
+      { anchor: 'the input is', flow: flow(['Inputs 0.7 0.3 0.5 0.00000001', 'Divergence', 'Loss']) },
+      { anchor: 'Adding the input twice', flow: flow(['-log(0.082+0.00000001) = 2.498', 'Divergence 0.082', 'Loss']) },
+    ],
+  };
+  assert.deepEqual(checkExample(value, exampleSay).problems.filter(p => /Visible calculation/.test(p)), []);
+});
