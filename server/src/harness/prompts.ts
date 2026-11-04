@@ -2,11 +2,12 @@ import { AUTHORED_VISUAL_GUIDANCE } from '../visuals/guidance';
 import { SOURCE_VISUAL_POLICY } from '../muse/visual-policy';
 import { EXAMPLE_TASK } from './example';
 import type { BoardKind } from './board';
+import { SUBJECTS } from './card';
 import { DOC_TYPES, DOC_TYPE_HELP, TONE, type DocType } from './doctype';
 import { MOVE_RULES, type Move } from './moves';
 
 // Bump when changing harness behaviour; generations record it in their metadata.
-export const HARNESS_VERSION = 'paper-tour-harness@36';
+export const HARNESS_VERSION = 'paper-tour-harness@37';
 
 /** Identical developer message for every call on every document, so it caches with the paper block. */
 export const SHARED_RULES = `You are a tutor who reads documents with a learner and points at exactly what you talk about.
@@ -28,6 +29,7 @@ export function cardTask(language: string) {
   return `TASK: understand this document for a short guided tour in ${JSON.stringify(language)}.
 1. Decide from the document itself what kind of document it is ("doc_type"):
 ${types}
+   Also name the field the document belongs to ("subject"): one of ${SUBJECTS.join(', ')}; other when none fits.
 2. Find the problem it addresses (for a document that is not research: what it is about and why it matters to the
    reader), its key idea or main point, how it works (1-4 steps), the figures and formulas that matter most, the main
    results or key facts with their numbers, the honest limitations or catches, and the takeaway.
@@ -423,7 +425,8 @@ export function directTask(
       'For every numerical example or function illustration, explicitly state the simplifying assumptions in the narration or board title. A scalar or lower-dimensional stand-in is not the full vector or matrix operation: say which special case is shown. Define the axes and parameter values needed to interpret it. Label invented inputs illustrative, never measured results from the document.',
     );
   rules.push(
-    'Keep the page readable. For prose use a gentle sentence highlight, not page dimming. Reserve a spotlight for isolating a genuinely crowded diagram component when its surrounding detail interferes with understanding; an ordinary paragraph or whole page does not need it. Choose one primary emphasis per teaching moment and never pile dimming over another mark on the same content. A board should add a worked example or explanation rather than another copy of the same highlight.',
+    `Speak about the subject, never about the tour: no "the board shows", "as you can see", "let's look at", "obviously", "simply" or "any questions?".`,
+    'Keep the page readable: a sentence highlight for prose, never page dimming, and a spotlight only to isolate a crowded diagram part. Mark only what the narration names at that moment: at most 3 highlights and 2 pen marks, none on text a box already covers. A board adds an example or explanation, not a copy of a highlight. One picture per step: one board, or the frames of one example in one kind of board.',
   );
   if (board === 'formula')
     rules.push(
@@ -443,12 +446,10 @@ export function directTask(
       help.join('\n   '),
     );
   if (pen) rules.push(REGION_HELP);
-  if (page.length) {
-    const fewer = pen ? ' Prefer one or two pen marks that name the important parts.' : '';
+  if (page.length)
     rules.push(
-      `Cue every distinct source claim you explain at its spoken anchor. Revisit a source when explaining it again; do not leave a whole explanation with only its opening sentence marked.${fewer}`,
+      'Cue every distinct source claim you explain at its spoken anchor. Revisit a source when explaining it again; do not leave a whole explanation with only its opening sentence marked.',
     );
-  }
   return [
     `TASK: write ONE step of a guided tour in ${JSON.stringify(language)} and say what to point at.`,
     brief,
@@ -465,7 +466,7 @@ export function directTask(
       : []),
     'SCENE PREFLIGHT: all unbound coordinates and endpoints must fit 0..1 (never use pixel values). Allocate readable bounds for text, put a node label in that node text field rather than overlapping another text object, and terminate arrows on the outside edge of nodes. Use background:true only for real unlabeled containers/coordinate planes, not to bypass readable-foreground validation. Keep legends, sample labels and source values separate and legible.',
     'SCENE COORDINATES: a plot-bound circle uses the lower-left corner x,y and width/height in plot data units, not a center point. To surround the sample (u,v), use x=u-w/2 and y=v-h/2; check that the circle center is exactly the intended sample. Arrow/vector x,y are their starting point and w,h are endpoint deltas. Keep descriptive axis labels as clear words, with mathematical notation only for actual variables/expressions.',
-    'LIVE PDF TUTORING: cue each important explanation at the exact spoken phrase that names its source element. Walk through the actual figure components, equation or table rows in narration order, using source highlights, measured outlines and concise explanatory labels. Use arrows only when their exact target is available and the renderer can keep their labels/strokes clear of printed content; never draw across table values. Do not point generically at an entire page while discussing a specific part. When source geometry cannot isolate an equation term reliably, copy that actual equation into a formula board and work through its terms rather than inventing coordinates. Use emphasis selectively so the current explanation remains obvious and readable.',
+    'LIVE PDF TUTORING: cue each important explanation at the exact spoken phrase that names its source element. Walk through the actual figure components, equation or table rows in narration order, using source highlights, measured outlines and concise explanatory labels. Use arrows only when their exact target is available and the renderer can keep their labels/strokes clear of printed content; never draw across table values. Do not point generically at an entire page while discussing a specific part. When source geometry cannot isolate an equation term reliably, copy that actual equation into a formula board and work through its terms rather than inventing coordinates.',
     'SOURCE ANCHORS: connect explanations to the actual equation, figure, table and sentences in the PDF. Combine precise source highlights/boxes with a live plot or transformation when the explanation concerns behavior the static source cannot show; do not require exhausting source annotations before choosing a useful side visual. If copying a formula alongside the paper, preserve the source equation and work with its actual terms: build/highlight the relevant subexpression, substitute values, or connect it to an informative plot/transformation. Do not replace source content with an unrelated generic diagram or copy the equation merely to repeat it.',
     'VISUAL PLAN FIRST: use plan to name the point of this step and what the page alone does not show, then the board kind that makes it visible, or none. Show separate quantities with their units and roles, never numbers squeezed into labels such as "Inputs -1.5 2". Coordinate each visual change with the explanation. Complexity helps only when it explains more: avoid a decorative picture and an empty three-box summary.',
     `BE SELECTIVE: spend side-board space only on a point whose explanation gains from seeing a mechanism, relationship, trade-off, transformation or parameter effect. There is no visual quota, and no board is better than a weak one. Never repeat the same data twice, redraw what is on screen, or use a scene as a coloured text slide, a list of table rows or prose inside shapes. If the PDF already has the useful plot or table, teach its axes, baseline and important cases there with grounded cues. A glossary, trivial unit conversion, restated conclusion or recap is not a teaching contribution, and a recap needs no invented numerical case. Keep the PDF spacious when source cues suffice.${bare ? '' : ' Repair required boards and examples; choose none only during planning.'}`,

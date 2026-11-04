@@ -8,6 +8,7 @@ import { deckBrief } from './deck';
 import { BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
 import { agreementCheck } from './board-agreement';
 import type { DocType } from './doctype';
+import { STEP_MAX_WORDS } from './insight';
 import { proseSentences } from './paper-block';
 import type { DirectOptions } from './prompts';
 import {
@@ -295,11 +296,13 @@ function cueTargets(actions: CueAction[], targets: BeatTargets): string[] {
 }
 
 /**
- * The spoken length a step aims for: an overview step makes its point in about 50 to 90 words, a detail step adds one
- * worked case in about 90 to 140. The learner reads the page; the voice only says what the page does not. A planned
- * step (a claim's move, a slide) brings its own range.
+ * The spoken length a step aims for: an overview step makes its point in 50 to STEP_MAX_WORDS words, a detail step adds
+ * one worked case in about 90 to 140. The learner reads the page; the voice only says what the page does not. A planned
+ * step (a claim's move, a slide) brings its own range. Only the overview is held to the 60 words of a tutoring step: the
+ * range of a worked case, a claim's move or a slide is the plan's decision, and the step is held to that one.
  */
-const sayWords = (beat: Beat) => beat.say?.[1] ?? (beat.detail ? 140 : 90);
+const isOverview = (beat: Beat) => !beat.detail && !beat.say;
+const sayWords = (beat: Beat) => beat.say?.[1] ?? (beat.detail ? 140 : STEP_MAX_WORDS);
 const sayShortest = (beat: Beat) => beat.say?.[0] ?? (beat.detail ? 90 : 50);
 /** The most words a step may have before it is sent back for a rewrite: a margin over what it aims for. */
 export const sayLimit = (beat: Beat) =>
@@ -307,11 +310,12 @@ export const sayLimit = (beat: Beat) =>
 
 /**
  * A step may run this far past the most words it aims for before it is sent back once to be shortened (the hard limit
- * above rejects it outright). The caps per step kind are those aims: an overview 90, a detail 140, a claim's move or a
- * slide step its own.
+ * above rejects it outright); an overview not at all, since 60 words is the rule. The caps per step kind are those aims:
+ * an overview 60, a detail 140, a claim's move or a slide step its own.
  */
 export const SAY_MARGIN = 1.15;
-export const sayCap = (beat: Beat) => (beat.flexibleNarration ? Infinity : Math.ceil(sayWords(beat) * SAY_MARGIN));
+export const sayCap = (beat: Beat) =>
+  beat.flexibleNarration ? Infinity : isOverview(beat) ? STEP_MAX_WORDS : Math.ceil(sayWords(beat) * SAY_MARGIN);
 
 /** The repair for narration past its cap, or none: how long it is, how long it may be, and what to cut. */
 export function lengthProblems(say: string, beat: Beat): string[] {
@@ -475,11 +479,11 @@ export function beatBrief(beat: Beat, doc: Doc, targets: BeatTargets, visual?: S
     // The board is checked against the narration (board-agreement.ts): one explanation, not two.
     if (visual.visual !== 'none')
       lines.push(
-        'The board and "say" are one explanation: say what the board shows, with its title, labels and symbols, and draw only what you say.',
+        'The board and "say" are one explanation: explain the subject in the board\'s own title, labels and symbols, and draw only what you say; never announce the board itself.',
       );
     if (exampleRules(beat, visual).offered && visual.frames?.length)
       lines.push(
-        `WORKED EXAMPLE FRAMES MAY USE ONLY: ${exampleKinds(visual).join(', ')}. Pick each frame's kind by what it shows; the tour counts them toward its limit of each kind, so do not use another.`,
+        `WORKED EXAMPLE FRAMES MAY USE ONLY: ${exampleKinds(visual).join(', ')}. ${exampleKinds(visual).length > 1 ? 'Pick the ONE kind that shows the mechanism best and use it' : 'Use that one kind'} for every frame of the example, with the narration that names the frames: a step shows one picture. The tour counts the example toward its limit of that kind, so do not use another.`,
       );
   }
   const figure = doc.figures.find((f) => f.id === beat.target);

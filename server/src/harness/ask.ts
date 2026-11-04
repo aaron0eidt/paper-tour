@@ -14,7 +14,7 @@ import type { TourImage } from '../tour-generator';
 import { imageParts, type Effort } from './calls';
 import { outlasting } from './pace';
 import { REGION_NAMES } from './direct';
-import { answerNarrationProblems, readsSource } from './insight';
+import { answerNarrationProblems, answerStyleProblems, readsSource } from './insight';
 import { documentLanguage } from './language';
 import { measuredFigureTargets } from './measured-visuals';
 import { paperBlock } from './paper-block';
@@ -315,6 +315,13 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       continue;
     }
     answer = candidate ?? answer;
+    // Narration about the tour's own pictures, a filler or an empty check is a style point: asked to go once (in the
+    // retry, with any board repair), never a reason to refuse the answer, which is kept whatever the retry returns.
+    const style =
+      attempt === 0 && candidate && candidate.answerable !== 'no'
+        ? answerStyleProblems(candidate.steps, shownSteps.length)
+        : [];
+    const polish = style.length ? ` Also, in the narration, keep everything else as it is: ${style.join(' ')}` : '';
     // A board that fails its checks is only dropped, unless the learner is already listening to an earlier step: then
     // its correction is made while that step is spoken.
     const boardProblems =
@@ -327,7 +334,16 @@ export async function answerQuestion(input: AskInput): Promise<{ answer: AskAnsw
       retry = BOARD_RETRY;
       correct(
         value,
-        `Correct the boards below, keeping every step's narration and cues; where a board cannot be made right, set its kind to none and keep the explanation: ${boardProblems.join(' ')}`,
+        `Correct the boards below, keeping every step's narration and cues; where a board cannot be made right, set its kind to none and keep the explanation: ${boardProblems.join(' ')}${polish}`,
+      );
+      continue;
+    }
+    if (style.length) {
+      await validation?.finish('failed', 'Polishing the narration');
+      console.warn(JSON.stringify({ event: 'answer_style_repair', documentId: input.documentId, problems: style }));
+      correct(
+        value,
+        `Polish the narration, keeping its evidence, boards, cues and steps as they are: ${style.join(' ')} Speak about the subject itself.`,
       );
       continue;
     }

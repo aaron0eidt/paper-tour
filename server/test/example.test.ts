@@ -42,7 +42,7 @@ test('worked example compiles input and result states at narrated times, with fo
       example: numericalExample(),
       cues: [
         { action: 'board_focus', target: 'node-1', label: '', anchor: 'the input is' },
-        { action: 'board_focus', target: 'term-1', label: '', anchor: 'Adding the input twice' },
+        { action: 'board_focus', target: 'node-3', label: '', anchor: 'Adding the input twice' },
       ],
     },
     beat,
@@ -52,8 +52,16 @@ test('worked example compiles input and result states at narrated times, with fo
   const step = beatStep(beat, targets, direction, doc);
   const boards = step.actions.filter((a) => a.type === 'board');
   assert.equal(boards.length, 2);
-  assert.equal(boards[0].item.kind, 'flow');
-  assert.equal(boards[1].item.kind === 'formula' && boards[1].item.latex, '2+2=4');
+  // One kind of board for the whole example: the output node fills in.
+  assert.deepEqual(
+    boards.map((a) => a.item.kind),
+    ['flow', 'flow'],
+  );
+  assert.deepEqual(boards[1].item.kind === 'flow' && boards[1].item.nodes.map((n) => n.label), [
+    'Input 2',
+    'Add same input',
+    'Output 4',
+  ]);
   assert.deepEqual(
     boards.map((a) => a.at_word),
     [findAnchor(exampleSay, 'the input is'), findAnchor(exampleSay, 'Adding the input twice')],
@@ -62,7 +70,7 @@ test('worked example compiles input and result states at narrated times, with fo
     step.actions.filter((a) => a.type === 'board_focus').map((a) => [a.part, a.at_word]),
     [
       [0, boards[0].at_word],
-      [0, boards[1].at_word],
+      [2, boards[1].at_word],
     ],
   );
   assert.deepEqual(
@@ -243,31 +251,36 @@ test('parameter lists and subtraction of a declared negative bias remain valid c
       { expression: '0*2+1', result: 1 },
     ],
     frames: [
-      {
-        anchor: 'Initially the illustrative',
-        formula: {
-          latex: 'x=2, W_1=0.5, b_1=-1.5, W_2=2.0, b_2=1.0',
-          terms: [
-            { latex: 'x=2', label: 'Scalar input' },
-            { latex: 'b_1=-1.5', label: 'First bias' },
-          ],
-        },
-      },
+      { anchor: 'Initially the illustrative', flow: flow(['x=2, W1=0.5', 'b1=-1.5, W2=2.0', 'b2=1.0']) },
       { anchor: 'Next the first map', flow: flow(['Input 2', 'max(0,2*0.5-1.5)=0', 'Hidden 0']) },
-      {
-        anchor: 'Finally the second map',
-        formula: {
-          latex: '0\\times 2.0+1.0=1.0',
-          terms: [
-            { latex: '0\\times 2.0+1.0', label: 'Second map' },
-            { latex: '1.0', label: 'Output' },
-          ],
-        },
-      },
+      { anchor: 'Finally the second map', flow: flow(['Hidden 0', '0*2.0+1.0=1.0', 'Output 1.0']) },
     ],
   };
   assert.deepEqual(checkExample(value, say).problems, []);
-  const onlyFormula = { ...value, frames: [value.frames[0], value.frames[2]] };
+  // A formula card alone does not demonstrate a mechanism.
+  const card = (latex: string, terms: [string, string][]) => ({
+    latex,
+    terms: terms.map(([part, label]) => ({ latex: part, label })),
+  });
+  const onlyFormula = {
+    ...value,
+    frames: [
+      {
+        anchor: 'Initially the illustrative',
+        formula: card('x=2, W_1=0.5, b_1=-1.5, W_2=2.0, b_2=1.0', [
+          ['x=2', 'Scalar input'],
+          ['b_1=-1.5', 'First bias'],
+        ]),
+      },
+      {
+        anchor: 'Finally the second map',
+        formula: card('0\\times 2.0+1.0=1.0', [
+          ['0\\times 2.0+1.0', 'Second map'],
+          ['1.0', 'Output'],
+        ]),
+      },
+    ],
+  };
   assert.match(checkExample(onlyFormula, say).problems.join(' '), /not only formula cards/);
 });
 
@@ -337,11 +350,13 @@ test('progressive comparison accepts a single baseline bar and digits inside mod
         },
         {
           anchor: 'The gain is',
-          formula: {
-            latex: '28.4-26.36\\approx 2.04',
-            terms: [
-              { latex: '2.04', label: 'gain' },
-              { latex: '28.4', label: 'comparison' },
+          bars: {
+            title: 'Gain',
+            unit: 'score',
+            bars: [
+              { label: 'ConvS2S Ensemble', value: 26.36 },
+              { label: 'Model2', value: 28.4 },
+              { label: 'Gain', value: 2.04 },
             ],
           },
         },
@@ -357,18 +372,14 @@ test('progressive comparison accepts a single baseline bar and digits inside mod
 test('comma-separated numeric equations are checked independently without splitting function arguments', () => {
   const example = numericalExample();
   const say = exampleSay;
-  const frame = example.frames.find((f: any) => f.formula) as any;
-  frame.formula.latex = '8/8=1, 6/8=0.75';
-  frame.formula.terms = [
-    { latex: '8/8=1', label: 'first' },
-    { latex: '6/8=0.75', label: 'second' },
-  ];
+  const node = example.frames[1].flow!.nodes[2];
+  node.label = '8/8=1, 6/8=0.75';
   const problems = checkExample(example, say).problems;
   assert.equal(
     problems.some((p) => p.includes('Visible calculation')),
     false,
   );
-  frame.formula.latex = '8/8=2, 6/8=0.75';
+  node.label = '8/8=2, 6/8=0.75';
   assert.equal(
     checkExample(example, say).problems.some((p) => p.includes('Visible calculation')),
     true,
@@ -377,12 +388,7 @@ test('comma-separated numeric equations are checked independently without splitt
 
 test('vector display notation does not enter the scalar checker; explicit calculations still do', () => {
   const example = numericalExample();
-  const frame = example.frames.find((f: any) => f.formula) as any;
-  frame.formula.latex = '[2,2][1,1]^T=4';
-  frame.formula.terms = [
-    { latex: '[2,2]', label: 'vector' },
-    { latex: '4', label: 'result' },
-  ];
+  example.frames[1].flow!.nodes[2].label = '[2,2][1,1]^T=4';
   assert.equal(
     checkExample(example, exampleSay).problems.some((p) => p.includes('Visible calculation')),
     false,
@@ -403,11 +409,7 @@ test('rounded intermediate references retain exact computed values across later 
     { expression: '0.88079708*0.11920292', result: 0.10499359 },
   ];
   value.frames[0].flow!.nodes[0].label = 'Input 2';
-  value.frames[1].formula!.latex = '0.88079708*0.11920292\\approx0.10499359';
-  value.frames[1].formula!.terms = [
-    { latex: '0.88079708*0.11920292', label: 'gradient' },
-    { latex: '0.10499359', label: 'result' },
-  ];
+  value.frames[1].flow!.nodes[2].label = 'Output 0.10499359';
   assert.deepEqual(checkExample(value, exampleSay).problems, []);
   value.calculations[2].result = 0.15;
   assert.match(checkExample(value, exampleSay).problems.join(' '), /does not match/);
@@ -424,12 +426,13 @@ test('literal rounded substitutions remain valid alongside exact intermediate re
 
 test('isolated scalar matrices cannot satisfy the requirement to visualize a mechanism', () => {
   const value = numericalExample();
-  const first = value.frames[0] as any;
-  delete first.flow;
-  first.scene = {
-    title: 'Starting scalar',
-    objects: [{ id: 'input', type: 'matrix', x: 0.2, y: 0.3, w: 0.4, h: 0.3, values: [[2]] }],
-  };
+  const scalar = (title: string, n: number) => ({
+    title,
+    objects: [{ id: 'input', type: 'matrix', x: 0.2, y: 0.3, w: 0.4, h: 0.3, values: [[n]] }],
+  });
+  const frames = value.frames as any[];
+  frames[0] = { anchor: frames[0].anchor, scene: scalar('Starting scalar', 2) };
+  frames[1] = { anchor: frames[1].anchor, scene: scalar('Resulting scalar', 4) };
   assert.match(checkExample(value, exampleSay).problems.join(' '), /isolated scalar matrices/);
 });
 

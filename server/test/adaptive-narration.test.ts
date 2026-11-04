@@ -178,6 +178,13 @@ function scripted(options: {
       }),
   };
 }
+type Generated = Awaited<ReturnType<ReturnType<typeof scripted>['generate']>>;
+const stepsOf = (result: Generated) => result.tour.chapters.flatMap((chapter) => chapter.steps);
+const degradedOf = (result: Generated, beat: string) =>
+  (result.metadata.degraded as { beat: string; dropped: string[]; problems: string[]; causes?: object }[]).find(
+    (entry) => entry.beat === beat,
+  );
+
 test('the full adaptive path publishes a valid long explanation without a forced shortening repair', async () => {
   const model = scripted({ write: (request) => direct(request, isController(request) ? longExplanation : EXPLAIN) });
   const result = await model.generate();
@@ -189,21 +196,31 @@ test('the full adaptive path publishes a valid long explanation without a forced
   );
   assert.ok(!model.events.some((event) => event.type === 'beat.fallback' || event.type === 'beat.omitted'));
 });
-test('exhausted invalid narration cannot publish the concept summary as a substitute', async () => {
+test('exhausted invalid narration falls back to the concept summary, which the tour records', async () => {
   const model = scripted({
     write: (request) => (isController(request) ? { plan: 'invalid', say: '', cues: [] } : direct(request, EXPLAIN)),
   });
-  await assert.rejects(
-    model.generate(),
-    (error: any) => error.code === 'invalid_tour_direction' && /teach-controller/.test(error.message),
-  );
+  const result = await model.generate();
+  // The step is asked three times, with a repair in between, before it takes the fallback of a tour without a profile.
   const attempts = model.requests.filter((request) => request.name === 'beat_direction' && isController(request));
   assert.equal(attempts.length, 3);
   assert.match(attempts[1].task, /complete explanation/);
-  assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.omitted', 'beat.degraded'].includes(event.type)));
+  const step = stepsOf(result).find((step) => step.id === 'teach-controller');
+  assert.equal(step?.say, firstPoint);
+  assert.deepEqual(result.metadata.fallbackBeats, ['teach-controller']);
+  assert.deepEqual(result.tour.left_out, [{ step: 'teach-controller', part: 'narration', cause: 'invalid' }]);
+  assert.ok(model.events.some((event) => event.type === 'beat.fallback' && event.data.beat === 'teach-controller'));
+  assert.ok(
+    model.events.some(
+      (event) =>
+        event.type === 'validation.failed' && event.data.beat === 'teach-controller' && event.data.exhausted === true,
+    ),
+  );
+  // The other steps are written as usual.
+  assert.ok(stepsOf(result).some((step) => step.say === EXPLAIN));
 });
 for (const broken of ['board', 'example'] as const)
-  test(`an invalid adaptive ${broken} gets repair feedback and cannot be stripped for publication`, async () => {
+  test(`an invalid adaptive ${broken} gets repair feedback, then is dropped and recorded; the narration stays`, async () => {
     const model = scripted({
       pick: (id) => (id === 'teach-controller' ? (broken === 'board' ? 'bars' : 'flow') : 'none'),
       write: (request) => {
@@ -224,26 +241,45 @@ for (const broken of ['board', 'example'] as const)
         );
       },
     });
-    await assert.rejects(model.generate(), (error: any) => error.code === 'invalid_tour_direction');
+    const result = await model.generate();
     const attempts = model.requests.filter((request) => request.name === 'beat_direction' && isController(request));
     assert.equal(attempts.length, 3);
     assert.match(attempts[1].task, broken === 'board' ? /not a number/ : /example|frame|calculation/i);
-    assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.degraded'].includes(event.type)));
+    const step = stepsOf(result).find((step) => step.id === 'teach-controller');
+    assert.equal(step?.say, EXPLAIN, 'the narration is published');
+    assert.ok(!step?.actions.some((action) => action.type === 'board'));
+    const degraded = degradedOf(result, 'teach-controller');
+    assert.ok(degraded?.dropped.includes('board'), JSON.stringify(degraded));
+    assert.deepEqual((degraded?.causes as { board?: string }).board, 'checks');
+    assert.ok(
+      result.tour.left_out?.some((item) => item.step === 'teach-controller' && item.part === 'board'),
+      JSON.stringify(result.tour.left_out),
+    );
+    assert.ok(model.events.some((event) => event.type === 'beat.degraded' && event.data.beat === 'teach-controller'));
+    assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.omitted'].includes(event.type)));
   });
-test('a detail that repeats its overview fails after targeted repair rather than silently disappearing', async () => {
+test('a detail that repeats its overview is dropped after targeted repair, and the tour records the omission', async () => {
   const held = teaching();
   held.concepts[0].difficulty = 'high';
   const model = scripted({ held, depth: 'deep', write: (request) => direct(request, EXPLAIN) });
-  await assert.rejects(
-    model.generate(),
-    (error: any) => error.code === 'invalid_tour_direction' && /worked/.test(error.message),
-  );
+  const result = await model.generate();
   assert.ok(
     model.requests.some(
       (request) => request.name === 'beat_direction' && /This repeats the preceding overview/.test(request.task),
     ),
   );
-  assert.ok(!model.events.some((event) => event.type === 'beat.omitted'));
+  const omitted = model.events.filter((event) => event.type === 'beat.omitted');
+  assert.equal(omitted.length, 1);
+  assert.equal(omitted[0].data.code, 'repeats');
+  const detail = String(omitted[0].data.beat);
+  assert.match(detail, /worked/);
+  assert.ok(!stepsOf(result).some((step) => step.id === detail));
+  assert.ok(stepsOf(result).some((step) => step.id === 'teach-controller'), 'its overview stays');
+  assert.deepEqual(result.tour.left_out, [{ step: detail, part: 'step', cause: 'repeats' }]);
+  assert.deepEqual(
+    (result.metadata.omittedDetails as { beat: string; code: string }[]).map(({ beat, code }) => ({ beat, code })),
+    [{ beat: detail, code: 'repeats' }],
+  );
 });
 test('an adaptive tour may reuse the same valid board with different spoken focus', async () => {
   const flow = {
@@ -324,18 +360,22 @@ test('a missing planned adaptive visual gets a targeted repair before publicatio
   assert.ok(step?.actions.some((action) => action.type === 'board' && action.item.kind === 'flow'));
   assert.ok(!model.events.some((event) => event.type === 'beat.degraded'));
 });
-test('empty native placeholders cannot satisfy the selected adaptive visual', async () => {
+test('empty native placeholders cannot satisfy the selected adaptive visual: it is dropped and recorded', async () => {
   const model = scripted({
     pick: (id) => (id === 'teach-controller' ? 'flow' : 'none'),
     write: (request) => direct(request, EXPLAIN, isController(request) ? { flow: { nodes: [], edges: [] } } : {}),
   });
-  await assert.rejects(
-    model.generate(),
-    (error: any) => error.code === 'invalid_tour_direction' && /no valid selected visual/.test(error.message),
-  );
+  const result = await model.generate();
   assert.equal(
     model.requests.filter((request) => request.name === 'beat_direction' && isController(request)).length,
     3,
   );
-  assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.degraded'].includes(event.type)));
+  const step = stepsOf(result).find((step) => step.id === 'teach-controller');
+  assert.equal(step?.say, EXPLAIN);
+  assert.ok(!step?.actions.some((action) => action.type === 'board'), 'no empty placeholder is published');
+  const degraded = degradedOf(result, 'teach-controller');
+  assert.deepEqual(degraded?.dropped, ['board']);
+  assert.match(degraded!.problems.join(' '), /no valid selected visual/);
+  assert.ok(result.tour.left_out?.some((item) => item.step === 'teach-controller' && item.part === 'board'));
+  assert.ok(!model.events.some((event) => ['beat.fallback', 'beat.omitted'].includes(event.type)));
 });

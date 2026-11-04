@@ -95,7 +95,8 @@ export function beatStep(beat: Beat, targets: BeatTargets, direction: Direction 
   if (direction?.exampleProblems?.length) throw new Error(direction.exampleProblems.join(' '));
   if (direction?.visualProblems?.length) throw new Error(direction.visualProblems.join(' '));
   const name = elementName(beat, doc);
-  const say = direction?.say ?? (name ? `Let's look at ${name}. ${beat.point}` : beat.point);
+  // The words of a step without a direction name the element and say its point: a tour never announces what it shows.
+  const say = direction?.say ?? (name ? `${name[0].toLocaleUpperCase()}${name.slice(1)}: ${beat.point}` : beat.point);
   const words = splitWords(say).length;
   const color = markColor(beat);
   const board = direction?.board;
@@ -285,25 +286,83 @@ export function boardSignature(item: BoardItem): string | null {
   }
 }
 
+/** A board the tour took off a step because it repeats an earlier step's. */
+export interface DroppedBoard {
+  step: string;
+  kind: BoardItem['kind'];
+  /** The step whose board it repeats. */
+  repeats: string;
+}
+
+/** A board the tour took off a step that showed several kinds of board: one picture per step. */
+export interface ExtraBoard {
+  step: string;
+  kind: BoardItem['kind'];
+}
+
+/** The steps of a tour after its board hygiene, with the boards that hygiene took off. */
+export interface SettledBoards {
+  steps: Step[][];
+  dropped: DroppedBoard[];
+  extra: ExtraBoard[];
+}
+
+/** The board kinds a step shows, in the order its actions are given. */
+const boardKinds = (step: Step) => [...new Set(step.actions.flatMap((a) => (a.type === 'board' ? [a.item.kind] : [])))];
+
+/** A step that shows boards of several kinds loses all of them with their board_focus cues; each is recorded. */
+function oneKindPerStep(step: Step): { step: Step; extra: ExtraBoard[] } {
+  if (boardKinds(step).length < 2) return { step, extra: [] };
+  const extra = step.actions.flatMap((a) => (a.type === 'board' ? [{ step: step.id, kind: a.item.kind }] : []));
+  return {
+    step: { ...step, actions: step.actions.filter((a) => a.type !== 'board' && a.type !== 'board_focus') },
+    extra,
+  };
+}
+
+/**
+ * One picture per step: a step may show successive frames of one board kind (an example that builds up), not several
+ * kinds. Example frames are written in one kind (example.ts checkExample), so this is only the guard behind that rule. It
+ * never cuts an example down to its first frames, whose narration speaks of all of them and whose result is in the last:
+ * a step of several kinds keeps no board, and each board it loses is recorded. The beats at the `exempt` indices (an
+ * exercise part, whose method visual is followed by its formula line on purpose) are left as they are.
+ */
+export function onePicturePerStep(
+  steps: Step[][],
+  exempt: ReadonlySet<number> = new Set(),
+): { steps: Step[][]; extra: ExtraBoard[] } {
+  const extra: ExtraBoard[] = [];
+  const kept = steps.map((list, beat) =>
+    exempt.has(beat)
+      ? list
+      : list.map((step) => {
+          const single = oneKindPerStep(step);
+          extra.push(...single.extra);
+          return single.step;
+        }),
+  );
+  return { steps: kept, extra };
+}
+
 /**
  * A board that repeats an earlier step's board (the same kind and data) is dropped together with the board_focus cues
  * that light up its parts; the narration stays and the board hygiene then clears or keeps the screen as for any step
  * without a board. The steps of one beat may repeat each other, so only earlier beats count; the beats at the `exempt`
- * indices (an exercise part's solution lines) are neither compared nor remembered.
+ * indices (an exercise part's solution lines) are neither compared nor remembered. Each step is first held to one kind of
+ * board (oneKindPerStep), and only the boards that stay count as shown: a board that was cut from its step is on no
+ * screen, so a later step that shows it is no repeat. The two kinds of drop are returned apart.
  */
-export function dropRepeatedBoards(
-  steps: Step[][],
-  exempt: ReadonlySet<number> = new Set(),
-): {
-  steps: Step[][];
-  dropped: { step: string; kind: BoardItem['kind']; repeats: string }[];
-} {
+export function dropRepeatedBoards(steps: Step[][], exempt: ReadonlySet<number> = new Set()): SettledBoards {
   const seen = new Map<string, string>();
-  const dropped: { step: string; kind: BoardItem['kind']; repeats: string }[] = [];
+  const dropped: DroppedBoard[] = [];
+  const extra: ExtraBoard[] = [];
   const kept = steps.map((list, beat) => {
     if (exempt.has(beat)) return list;
     const before = new Map(seen);
-    const out = list.map((step) => {
+    return list.map((whole) => {
+      const single = oneKindPerStep(whole);
+      extra.push(...single.extra);
+      const step = single.step;
       const ordered = step.actions.map((action, index) => ({ action, index }));
       ordered.sort((a, b) => (a.action.at_word ?? 0) - (b.action.at_word ?? 0) || a.index - b.index);
       const remove = new Set<number>();
@@ -322,9 +381,8 @@ export function dropRepeatedBoards(
       }
       return remove.size ? { ...step, actions: step.actions.filter((_, index) => !remove.has(index)) } : step;
     });
-    return out;
   });
-  return { steps: kept, dropped };
+  return { steps: kept, dropped, extra };
 }
 
 /**
@@ -361,7 +419,10 @@ export function assembleTour(
 ): Tour {
   const settle = boardSettler();
   let previousCamera: Action | undefined;
-  const positioned = steps.map((list, index) =>
+  // The generator has held the steps to one picture already (dropRepeatedBoards, or onePicturePerStep for an adaptive
+  // tour, which records what it took off); this keeps any other caller's tour to one too, and changes nothing else.
+  const single = onePicturePerStep(steps, new Set(plan.beats.flatMap((beat, i) => (beat.unit ? [i] : [])))).steps;
+  const positioned = single.map((list, index) =>
     list.map((step) => {
       if (
         preset === 'deep' &&

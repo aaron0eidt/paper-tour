@@ -126,13 +126,13 @@ test('the plan call leaves the step planned ahead out of its schema and brief, a
 
 test('example frames are not allotted again to a step that was written with its own', () => {
   const planned: VisualPlan = new Map(beats.map((b) => [b.id, none]));
-  planned.set('problem-1', { visual: 'bars', idea: 'Show the setting.', data: 'illustrative', frames: ['bars'] });
-  planned.set('method-1', { visual: 'bars', idea: 'Show the readings.', data: 'illustrative' });
+  planned.set('problem-1', { visual: 'bars', idea: 'Show the setting.', data: 'illustrative', frames: ['scene'] });
+  planned.set('method-1', { visual: 'flow', idea: 'Show the readings.', data: 'illustrative' });
   const out = allocateFrames(planned, beats, new Set(['problem-1']));
-  assert.deepEqual(out.get('problem-1')!.frames, ['bars'], 'no formula frame is added after the fact');
-  assert.ok(out.get('method-1')!.frames!.includes('formula'));
-  // Without the set, the opening would be allotted like any other step.
-  assert.ok(allocateFrames(planned, beats).get('problem-1')!.frames!.includes('formula'));
+  assert.deepEqual(out.get('problem-1')!.frames, ['scene'], 'its own frames are not allotted again after the fact');
+  assert.deepEqual(out.get('method-1')!.frames, ['flow']);
+  // Without the set, the opening would be allotted like any other step: the kind of its own board.
+  assert.deepEqual(allocateFrames(planned, beats).get('problem-1')!.frames, ['bars']);
 });
 
 test('the opening step’s example frames stay in its own kind; a relationship or none carries none', () => {

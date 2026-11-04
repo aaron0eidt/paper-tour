@@ -363,7 +363,7 @@ test('paper order respects the ingested sequence of a two-column page rather tha
   );
 });
 
-test('invalid teaching maps have bounded repair and cannot silently publish another plan', async () => {
+test('invalid teaching maps have bounded repair and fall back to the plan of a tour without a profile, on record', async () => {
   let calls = 0;
   const generator = new HarnessTourGenerator(
     settings,
@@ -378,11 +378,10 @@ test('invalid teaching maps have bounded repair and cannot silently publish anot
       return direct(request, EXPLAIN);
     }),
   );
-  await assert.rejects(
-    generator.generate({ ...input, profile: profileSnapshot(BUILTIN_TOUR_PROFILES[1]) }),
-    (error: any) => error.code === 'invalid_teaching_plan',
-  );
+  const result = await generator.generate({ ...input, profile: profileSnapshot(BUILTIN_TOUR_PROFILES[1]) });
   assert.equal(calls, 2);
+  assert.equal(result.metadata.planSource, 'code');
+  assert.equal((result.metadata.teachingPlanFailed as { code: string }).code, 'invalid_teaching_plan');
 });
 
 test('formula explanations on the PDF and empty cue sets never send an empty enum to the provider', () => {

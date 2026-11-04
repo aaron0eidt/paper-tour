@@ -639,20 +639,21 @@ test('a board that repeats an earlier step is dropped with its focus cues; the n
 test('only earlier steps count: the steps of one beat, and the frames of one example, may repeat each other', () => {
   const same = (id: string) => move(id, { type: 'board', item: formula('y = x') });
   assert.deepEqual(dropRepeatedBoards([[same('a'), same('b')]]).dropped, []);
-  // A worked example whose first frame repeats an earlier board loses that frame and its cues, not the later frames.
+  // A worked example (all frames of one kind) whose first frame repeats an earlier board loses that frame and its cues,
+  // not the later frames.
   const example = move(
     'e',
     { type: 'focus', target: 'p1.s1' },
     { type: 'board', item: formula('y = x') },
     { type: 'board_focus', part: 0, at_word: 1 },
-    { type: 'board', item: bars(5, 6), at_word: 3 },
+    { type: 'board', item: formula('y = 2x'), at_word: 3 },
     { type: 'board_focus', part: 1, at_word: 4 },
   );
   const { steps: kept, dropped } = dropRepeatedBoards([[same('a')], [example]]);
   assert.deepEqual(dropped, [{ step: 'e', kind: 'formula', repeats: 'a' }]);
   assert.deepEqual(kept[1][0].actions, [
     { type: 'focus', target: 'p1.s1' },
-    { type: 'board', item: bars(5, 6), at_word: 3 },
+    { type: 'board', item: formula('y = 2x'), at_word: 3 },
     { type: 'board_focus', part: 1, at_word: 4 },
   ]);
 });

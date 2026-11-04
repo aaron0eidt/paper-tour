@@ -651,7 +651,8 @@ test('a board that also fails its own check is sent back with both faults at onc
 });
 
 test('the brief tells a planned step that its board and its narration are one explanation, a step without a board nothing', () => {
-  const line = /The board and "say" are one explanation: say what the board shows, with its title, labels and symbols/;
+  const line =
+    /The board and "say" are one explanation: explain the subject in the board's own title, labels and symbols/;
   assert.match(beatBrief(method, doc, beatTargets(method, doc, planned), planned), line);
   const none: StepVisual = { visual: 'none', idea: '', data: '' };
   assert.doesNotMatch(beatBrief(method, doc, beatTargets(method, doc, none), none), line);

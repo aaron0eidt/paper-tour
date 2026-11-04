@@ -114,6 +114,162 @@ export const ARC_SPECS: Record<ArcType, ArcSpec[]> = {
     point('caveats', 'catches, limits or open questions', 0, sizes(0, 1, 2), 'orange', 'Caveats'),
     takeaway('what to remember'),
   ],
+  manual: [
+    overview('what the document is, what it covers and what the reader can do with it'),
+    point(
+      'parts',
+      'the parts, controls, pins, ingredients or components the reader needs, and where they are in the figures',
+      1,
+      sizes(1, 2, 3),
+      'blue',
+      'Parts and controls',
+    ),
+    {
+      ...point(
+        'steps',
+        'the procedures in order, one step or stage per item, with their exact values: times, temperatures, settings and commands',
+        1,
+        sizes(2, 4, 6),
+        'green',
+        'Step by step',
+      ),
+      board: 'flow',
+    },
+    point(
+      'warnings',
+      'cautions, limits and maximum ratings: what not to do or exceed, and what happens otherwise',
+      1,
+      sizes(1, 2, 3),
+      'orange',
+      'Warnings and limits',
+    ),
+    point(
+      'reference',
+      'troubleshooting (a symptom and its fix) or the specifications the reader may look up, exactly as written',
+      0,
+      sizes(0, 1, 2),
+      'pink',
+      'Troubleshooting and specs',
+    ),
+    takeaway('what to remember before starting'),
+  ],
+  report: [
+    overview('who reports on what, for which period, and the headline'),
+    {
+      ...point(
+        'figures',
+        'the numbers that matter and how they changed, each with its unit, currency and period',
+        1,
+        sizes(1, 3, 4),
+        'green',
+        'Key figures',
+      ),
+      board: 'bars',
+    },
+    point('drivers', 'the causes the report gives for these figures', 1, sizes(1, 2, 3), 'blue', 'What drove it'),
+    point(
+      'risks',
+      'the risks, uncertainties and outlook the report names',
+      1,
+      sizes(1, 1, 2),
+      'orange',
+      'Risks and outlook',
+    ),
+    takeaway('the result and the outlook in one sentence'),
+  ],
+  article: [
+    overview('the story and its main claim'),
+    point(
+      'claims',
+      'the claims the article makes, each with the evidence it gives: numbers, studies, quotes',
+      1,
+      sizes(1, 3, 5),
+      'blue',
+      'Claims and evidence',
+    ),
+    point(
+      'voices',
+      'who argues what, including critics and opposing views, each attributed to the person or group',
+      0,
+      sizes(0, 1, 2),
+      'green',
+      'Voices',
+    ),
+    point(
+      'gaps',
+      'what the article does not show or leaves open: a claim stated without evidence, a question raised and not answered',
+      0,
+      sizes(0, 1, 2),
+      'orange',
+      'What is left open',
+    ),
+    takeaway('what the article establishes and what it does not'),
+  ],
+  literature: [
+    overview('author, form and situation, and the first impression'),
+    point(
+      'structure',
+      'stanzas, rhyme scheme, metre, turning points or narrative perspective, each pointed at in the text',
+      1,
+      sizes(1, 2, 3),
+      'blue',
+      'Structure',
+    ),
+    point(
+      'devices',
+      'images, metaphors, symbols and sound, each pointed at in the exact words and what it does to the reader',
+      1,
+      sizes(2, 3, 5),
+      'pink',
+      'Devices',
+    ),
+    point('meaning', 'the interpretation, and how the form supports it', 1, sizes(1, 2, 3), 'green', 'Meaning'),
+    takeaway('what stays with the reader after the text'),
+  ],
+  medical: [
+    overview('what the document is for and whom it concerns'),
+    {
+      ...point(
+        'values',
+        'how to use it or what the values are: doses and timing, or each value against its reference range, exactly as written',
+        1,
+        sizes(1, 3, 4),
+        'blue',
+        'Use and values',
+      ),
+      board: 'bars',
+    },
+    point(
+      'effects',
+      'side effects with their frequency categories, or the values flagged as outside their range',
+      0,
+      sizes(1, 2, 3),
+      'orange',
+      'Effects and flags',
+    ),
+    point(
+      'warnings',
+      'when to be careful, when to see a doctor, and what to avoid',
+      1,
+      sizes(1, 2, 3),
+      'pink',
+      'When to be careful',
+    ),
+    takeaway('what to remember and what to ask a doctor or pharmacist'),
+  ],
+};
+/** What a type's points must keep exactly as the document writes them, besides the amounts, dates and names of all. */
+const ARC_RULES: Partial<Record<ArcType, string>> = {
+  manual:
+    'Keep times, temperatures, settings, part and pin names and commands exactly as written. A step item is one step, or a stage of consecutive steps, with all of its values.',
+  report:
+    'Copy every figure with its unit, currency and period exactly as written, compare only what the report compares, and give the causes as the report states them.',
+  article:
+    'Attribute every claim to whoever makes it (the author, a named person or study) and give the evidence the article cites, never your own. Gaps are only what the article itself leaves open.',
+  literature:
+    'Each "text" says what the words do to the reader and names at most a few words of the text; its "evidence" points at the exact lines. Never retell or paraphrase the whole text, and call a reading an interpretation.',
+  medical:
+    'Keep doses, times, values, units, reference ranges and frequency categories (such as very common, common, rare) exactly as written. Never diagnose and never advise changing a treatment: the tour only explains what the document says.',
 };
 const TOPIC_BOARDS = ['none', 'formula', 'flow', 'bars'] as const;
 
@@ -131,6 +287,9 @@ export interface ArcPlan {
   items: Record<string, ArcItem[]>;
   disclaimer?: string;
 }
+
+/** The longest disclaimer the plan may word: the medical one has two clauses. A longer one is replaced by the code's. */
+const DISCLAIMER_MAX = 300;
 
 /** The plan call's response schema; `strict` adds the ID enums the model must choose from. */
 export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset: Preset, strict = true) {
@@ -160,24 +319,29 @@ export function arcSchema(type: ArcType, doc: Doc, sentenceIds: string[], preset
     visual: strict ? { type: 'string', enum: visuals } : { type: 'string' },
   });
   const titled = specs.filter((s) => !(type === 'lecture' && s.id === 'topics'));
+  const kind = disclaimerOf(type);
+  const body = object({
+    plan: { type: 'string', maxLength: 1500 },
+    chapter_titles: object(Object.fromEntries(titled.map((s) => [s.id, short]))),
+    ...Object.fromEntries(
+      specs.map((s) => [
+        s.id,
+        {
+          type: 'array',
+          minItems: s.min,
+          maxItems: s.max[preset],
+          items: type === 'lecture' && s.id === 'topics' ? topic : object({ text, evidence }),
+        },
+      ]),
+    ),
+    // The provider is asked for it, but the code has a fallback wording: cleaning takes any or no disclaimer and
+    // cleanArcPlan drops what it cannot use, so a long sentence never costs the plan.
+    ...(kind ? { disclaimer: strict ? { type: 'string', minLength: 1, maxLength: DISCLAIMER_MAX } : {} } : {}),
+  });
   return {
     ...(strict ? { $defs: { sentenceId: idEnum(sentenceIds) } } : {}),
-    ...object({
-      plan: { type: 'string', maxLength: 1500 },
-      chapter_titles: object(Object.fromEntries(titled.map((s) => [s.id, short]))),
-      ...Object.fromEntries(
-        specs.map((s) => [
-          s.id,
-          {
-            type: 'array',
-            minItems: s.min,
-            maxItems: s.max[preset],
-            items: type === 'lecture' && s.id === 'topics' ? topic : object({ text, evidence }),
-          },
-        ]),
-      ),
-      ...(type === 'contract' ? { disclaimer: { type: 'string', minLength: 1, maxLength: 200 } } : {}),
-    }),
+    ...body,
+    ...(strict ? {} : { required: body.required.filter((key) => key !== 'disclaimer') }),
   };
 }
 
@@ -188,16 +352,18 @@ export function arcTask(type: ArcType, language: string, preset: Preset) {
     const count = s.min === most ? `${most}` : `${s.min}-${most}`;
     return `   - ${s.id} (${count}): ${s.help}.`;
   });
-  const extra =
-    type === 'lecture'
+  const kind = disclaimerOf(type);
+  const extra = [
+    ...(type === 'lecture'
       ? [
           `Each topic has a "title" of at most 5 words in ${lang}. "board" draws the topic on a side board: formula when
    it centres on one formula, flow for a process with a branch, merge or loop, bars for numbers the lecture compares, else none.
    "visual" is the ID of a figure or equation the topic is about, or "".`,
         ]
-      : type === 'contract'
-        ? [`"disclaimer" is one short sentence in ${lang}: this tour explains the document and is not legal advice.`]
-        : [];
+      : []),
+    ...(ARC_RULES[type] ? [ARC_RULES[type]!] : []),
+    ...(kind ? [`"disclaimer" is one short sentence in ${lang}: ${DISCLAIMER_TASK[kind]}.`] : []),
+  ];
   const rules = [
     `Fill each list with the points the tour makes, in the order the reader should hear them:\n${lists.join('\n')}`,
     `Each "text" is one plain sentence of at most 30 words in your own words. Keep amounts, dates, periods and names
@@ -253,10 +419,28 @@ export function cleanArcPlan(
       .map(([k, v]) => [k, String(v).trim()])
       .filter(([, v]) => v),
   );
-  const disclaimer = typeof raw.disclaimer === 'string' ? raw.disclaimer.replace(/\s+/g, ' ').trim() : '';
+  const worded = typeof raw.disclaimer === 'string' ? raw.disclaimer.replace(/\s+/g, ' ').trim() : '';
+  // A missing or over-long wording is not a reason to reject the plan: the tour uses the code's own sentence.
+  const disclaimer = worded.length <= DISCLAIMER_MAX ? worded : '';
   if (problems.length) return { plan: null, problems };
   return { plan: { plan: raw.plan, titles, items, ...(disclaimer ? { disclaimer } : {}) }, problems: [] };
 }
+
+/**
+ * Where a plan from the card puts the card's items: the first point chapter takes the key idea and the method steps,
+ * `results` takes the results, and `catches` takes the limitations.
+ */
+const FALLBACK: Record<ArcType, { main: string; results?: string; catches?: string }> = {
+  lecture: { main: 'topics' },
+  contract: { main: 'terms', catches: 'risks' },
+  letter: { main: 'actions', catches: 'consequences' },
+  manual: { main: 'steps', results: 'reference', catches: 'warnings' },
+  report: { main: 'drivers', results: 'figures', catches: 'risks' },
+  article: { main: 'claims', catches: 'gaps' },
+  literature: { main: 'structure', results: 'devices' },
+  medical: { main: 'values', results: 'effects', catches: 'warnings' },
+  other: { main: 'points', catches: 'caveats' },
+};
 
 /** A plan from the card's own items, when the plan call cannot give one. */
 export function fallbackArcPlan(card: PaperCard, type: ArcType): ArcPlan {
@@ -264,21 +448,65 @@ export function fallbackArcPlan(card: PaperCard, type: ArcType): ArcPlan {
   const items: Record<string, ArcItem[]> = Object.fromEntries(ARC_SPECS[type].map((s) => [s.id, []]));
   items.overview = usable([card.problem]);
   items.takeaway = usable([card.takeaway]);
-  items[ARC_SPECS[type].find((s) => s.kind === 'point')!.id] = usable([card.key_idea, ...card.method_steps]);
-  const catches = { contract: 'risks', letter: 'consequences', other: 'caveats', lecture: '' }[type];
+  const { main, results, catches } = FALLBACK[type];
+  items[main] = usable([card.key_idea, ...card.method_steps]);
+  if (results) items[results] = usable(card.results);
   if (catches) items[catches] = usable(card.limitations);
   return { plan: 'fallback', titles: {}, items };
 }
 
-/** "Not legal advice" in the tour's language, when the plan did not word it. */
-const NOT_ADVICE: Record<string, string> = {
-  en: 'This tour explains the document in plain words; it is not legal advice.',
-  de: 'Diese Tour erklärt das Dokument in einfachen Worten; sie ist keine Rechtsberatung.',
-  fr: "Cette visite explique le document avec des mots simples ; ce n'est pas un conseil juridique.",
-  es: 'Este recorrido explica el documento con palabras sencillas; no es asesoramiento legal.',
-  it: 'Questo tour spiega il documento con parole semplici; non è una consulenza legale.',
+/** Which "this is not ... advice" sentence a kind of document opens and closes its tour with. */
+export type Disclaimer = 'legal' | 'medical' | 'investment';
+const DISCLAIMERS: Record<DocType, Disclaimer | null> = {
+  research_paper: null,
+  exercise_sheet: null,
+  lecture: null,
+  contract: 'legal',
+  letter: null,
+  manual: null,
+  report: 'investment',
+  article: null,
+  literature: null,
+  medical: 'medical',
+  other: null,
 };
-export const notAdvice = (language: string) => NOT_ADVICE[language.slice(0, 2).toLowerCase()] ?? NOT_ADVICE.en;
+/** The disclaimer a type's tour carries, or null when it has none. */
+export const disclaimerOf = (type: DocType): Disclaimer | null => DISCLAIMERS[type];
+
+/** What the plan call is asked to say for each disclaimer, in the tour's language. */
+const DISCLAIMER_TASK: Record<Disclaimer, string> = {
+  legal: 'this tour explains the document and is not legal advice',
+  medical:
+    'this tour explains the document and is not medical advice, and questions about the reader’s own health go to a doctor or pharmacist',
+  investment: 'this tour explains the document and is not investment advice',
+};
+
+/** The disclaimer in the tour's language, when the plan did not word it. */
+const NOT_ADVICE: Record<Disclaimer, Record<string, string>> = {
+  legal: {
+    en: 'This tour explains the document in plain words; it is not legal advice.',
+    de: 'Diese Tour erklärt das Dokument in einfachen Worten; sie ist keine Rechtsberatung.',
+    fr: "Cette visite explique le document avec des mots simples ; ce n'est pas un conseil juridique.",
+    es: 'Este recorrido explica el documento con palabras sencillas; no es asesoramiento legal.',
+    it: 'Questo tour spiega il documento con parole semplici; non è una consulenza legale.',
+  },
+  medical: {
+    en: 'This tour explains the document in plain words; it is not medical advice, so ask a doctor or pharmacist about your own health.',
+    de: 'Diese Tour erklärt das Dokument in einfachen Worten; sie ist keine medizinische Beratung, bei Fragen zu Ihrer Gesundheit hilft Ihr Arzt oder Ihre Apotheke.',
+    fr: "Cette visite explique le document avec des mots simples ; ce n'est pas un avis médical : pour toute question sur votre santé, demandez à votre médecin ou à votre pharmacien.",
+    es: 'Este recorrido explica el documento con palabras sencillas; no es asesoramiento médico, así que consulte a su médico o farmacéutico para dudas sobre su salud.',
+    it: 'Questo tour spiega il documento con parole semplici; non è una consulenza medica, quindi per dubbi sulla tua salute chiedi al tuo medico o al farmacista.',
+  },
+  investment: {
+    en: 'This tour explains the document in plain words; it is not investment advice.',
+    de: 'Diese Tour erklärt das Dokument in einfachen Worten; sie ist keine Anlageberatung.',
+    fr: "Cette visite explique le document avec des mots simples ; ce n'est pas un conseil en investissement.",
+    es: 'Este recorrido explica el documento con palabras sencillas; no es asesoramiento de inversión.',
+    it: 'Questo tour spiega il documento con parole semplici; non è una consulenza finanziaria.',
+  },
+};
+export const notAdvice = (language: string, kind: Disclaimer = 'legal') =>
+  NOT_ADVICE[kind][language.slice(0, 2).toLowerCase()] ?? NOT_ADVICE[kind].en;
 
 /** Document order of a point: where its first evidence sentence stands. */
 function position(doc: Doc, item: ArcItem): number {
@@ -376,6 +604,6 @@ export function arcTourPlan(
       counts.set(b.kind, n);
       return { ...b, id: `${b.kind}-${n}` };
     }),
-    ...(type === 'contract' ? { frame: plan.disclaimer || notAdvice(language) } : {}),
+    ...(disclaimerOf(type) ? { frame: plan.disclaimer || notAdvice(language, disclaimerOf(type)!) } : {}),
   };
 }

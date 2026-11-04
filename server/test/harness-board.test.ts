@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { MuseConfig } from '../src/config';
-import type { Action, BBox, Doc, Step } from '../../shared/paper';
+import type { Action, BBox, Doc, Step, Tour } from '../../shared/paper';
 import type { TourGenerationInput, TourImage } from '../src/tour-generator';
 import { HarnessTourGenerator } from './harness-fixture';
 import { planBeats } from '../src/harness/beats';
-import { findAnchor } from '../src/harness/assemble';
-import { checkBars, checkBoard, checkFlow, checkFormula, eNotation, numbersIn } from '../src/harness/board';
+import { findAnchor, tourProblems } from '../src/harness/assemble';
+import { boardSchema, checkBars, checkBoard, checkFlow, checkFormula, eNotation, latexError, numbersIn } from '../src/harness/board';
 import { REGION_NAMES, regionOf, beatTargets, cleanDirection } from '../src/harness/direct';
 import { beatStep } from '../src/harness/assemble';
 import { BOARD_EXAMPLES } from '../src/harness/prompts';
@@ -43,8 +43,9 @@ test('plots and successive source cues survive assembly, including in later step
   assert.equal(direction.cues.length, 5);
   const initial = beatStep(beat, targets, direction, doc);
   const later = beatStep({ ...beat, id: 'method-revisit' }, targets, direction, doc);
-  assert.equal(initial.actions.filter((a) => a.type === 'highlight').length, 4);
-  assert.equal(later.actions.filter((a) => a.type === 'highlight').length, 4);
+  // Four sentences are cued, and a step keeps its first three highlights (insight.ts MAX_HIGHLIGHTS).
+  assert.equal(initial.actions.filter((a) => a.type === 'highlight').length, 3);
+  assert.equal(later.actions.filter((a) => a.type === 'highlight').length, 3);
   assert.ok(initial.actions.some((a) => a.type === 'board' && a.item.kind === 'plot'));
   assert.ok(initial.actions.some((a) => a.type === 'board_focus' && Number(a.at_word) > 0));
 });
@@ -489,6 +490,93 @@ test('a formula board keeps LaTeX that KaTeX renders, with terms copied from it 
   assert.deepEqual(checkFormula({ title: '', latex: '', terms: [] }), { item: null, problems: [] });
 });
 
+test('chemistry renders in the LaTeX check (mhchem), also inside a longer formula', () => {
+  assert.equal(latexError('\\ce{2H2 + O2 -> 2H2O}'), null);
+  assert.equal(latexError('M(\\ce{H2O}) = 18.02\\,\\mathrm{g/mol}'), null);
+  assert.equal(latexError('n(\\ce{NaCl}) = \\frac{m}{M} = \\pu{0.50 mol}'), null);
+  assert.equal(latexError('\\ce{Fe^{3+} + 3OH- -> Fe(OH)3 v}'), null);
+  // A command that is neither KaTeX's nor mhchem's still fails, and an unclosed \ce is a parse error, not a pass.
+  assert.match(latexError('\\cee{H2O}') ?? '', /Undefined control sequence/);
+  assert.ok(latexError('\\ce{2H2 + ') !== null);
+  // The board's other limits hold inside chemistry too.
+  assert.match(latexError('\\ce{H2O} \\textcolor{red}{x}') ?? '', /colour commands are not allowed/);
+});
+
+test('a formula with chemistry keeps whole \\ce groups as terms, and refuses a piece of one with a clear problem', () => {
+  const reaction = '\\ce{2H2 + O2 -> 2H2O}';
+  assert.deepEqual(checkFormula({ latex: reaction, terms: [{ latex: reaction, label: 'water is formed' }] }, { minTerms: 1 }), {
+    item: { kind: 'formula', latex: reaction, terms: [{ latex: reaction, label: 'water is formed' }] },
+    problems: [],
+  });
+  const amount = {
+    title: 'Amount of water',
+    latex: 'n(\\ce{H2O}) = \\frac{m(\\ce{H2O})}{M(\\ce{H2O})}',
+    terms: [
+      { latex: 'n(\\ce{H2O})', label: 'amount of water' },
+      { latex: 'M(\\ce{H2O})', label: 'molar mass' },
+    ],
+  };
+  assert.deepEqual(checkFormula(amount).problems, []);
+  // A whole group is a term, whichever of its copies the board colours.
+  assert.deepEqual(checkFormula({ ...amount, terms: [{ latex: '\\ce{H2O}', label: 'the substance' }, amount.terms[1]] }, { minTerms: 1 }).problems, []);
+  const dropped = (raw: object, problem: RegExp, options?: { minTerms: number }) => {
+    const { item, problems } = checkFormula(raw, options);
+    assert.equal(item, null);
+    assert.ok(problems.some((p) => problem.test(p)), problems.join('; '));
+  };
+  // mhchem draws a group as one piece: wrapped in a colour class inside it, 2H2O would print as plain maths.
+  const piece = /term 1: "2H2O" is part of a \\ce\{\} or \\pu\{\} group.*use the whole group/;
+  dropped({ latex: reaction, terms: [{ latex: '2H2O', label: 'water' }] }, piece, { minTerms: 1 });
+  // One group is one term, so the message also offers the way out of a reaction that needs several: a group per species.
+  const species = '\\ce{2H2} + \\ce{O2} \\rightarrow \\ce{2H2O}';
+  const perSpecies = /use the whole group, as in \\ce\{H2O\}, or give each species its own group, as in \\ce\{2H2\} \+ \\ce\{O2\} \\rightarrow \\ce\{2H2O\}/;
+  dropped({ latex: reaction, terms: [{ latex: '2H2', label: 'hydrogen' }, { latex: '2H2O', label: 'water' }] }, perSpecies);
+  assert.deepEqual(checkFormula({ latex: species, terms: [{ latex: '\\ce{2H2}', label: 'hydrogen' }, { latex: '\\ce{2H2O}', label: 'water' }] }).problems, []);
+  dropped({ ...amount, terms: [{ latex: 'H2O', label: 'water' }, amount.terms[1]] }, /term 1: "H2O" is part of a \\ce/);
+  dropped({ ...amount, terms: [{ latex: '(\\ce{H2O', label: 'half a group' }, amount.terms[1]] }, /term 1: .*is part of a \\ce/);
+  dropped({ latex: 'M(\\ce{Fe^{3+}}) = 55.85', terms: [{ latex: '3+', label: 'charge' }, { latex: '55.85', label: 'molar mass' }] }, /term 1: "3\+" is part of a \\ce/);
+  // The same text outside a group is an ordinary term.
+  assert.deepEqual(checkFormula({ latex: 'n(\\ce{H2O}) = H2O', terms: [{ latex: 'H2O', label: 'a symbol' }] }, { minTerms: 1 }).problems, []);
+});
+
+test('the earlier lines and the check mark of a worked solution pass the saved-tour checks; the model is never asked for them', () => {
+  const item = {
+    kind: 'formula' as const,
+    title: 'Solve for x',
+    latex: 'x = 9',
+    terms: [{ latex: 'x', label: 'the unknown' }],
+    before: [
+      { latex: 'x + 1 = 10', title: 'the equation', verified: true },
+      { latex: 'x = 10 - 1', title: 'subtract 1' },
+      { latex: '\\ce{2H2 + O2 -> 2H2O}' },
+    ],
+    verified: true,
+  };
+  const tour = (board: unknown) =>
+    ({
+      schema: 'paper-tour/tour@0.1',
+      title: 'Working',
+      paper: 'test',
+      chapters: [{ id: 'c', title: 'C', steps: [{ id: 's', say: 'Look at this.', actions: [{ type: 'board', item: board }] }] }],
+    }) as unknown as Tour;
+  assert.deepEqual(tourProblems(tour(item), doc), []);
+  assert.deepEqual(tourProblems(tour({ ...item, before: undefined, verified: undefined }), doc), []);
+  const rejected = (board: unknown) => assert.ok(tourProblems(tour(board), doc).length > 0, JSON.stringify(board).slice(0, 120));
+  rejected({ ...item, before: Array.from({ length: 9 }, (_, i) => ({ latex: `x_${i} = ${i}` })) });
+  rejected({ ...item, before: [{ latex: '' }] });
+  rejected({ ...item, before: [{ latex: 'x'.repeat(401) }] });
+  rejected({ ...item, before: [{ latex: 'x = 1', title: 'n'.repeat(81) }] });
+  rejected({ ...item, before: [{ latex: 'x = 1', verified: 'yes' }] });
+  rejected({ ...item, before: [{ latex: 'x = 1', colour: 'red' }] });
+  rejected({ ...item, verified: 'yes' });
+  // The model's schema for a formula is unchanged: code fills `before` and `verified` after the check.
+  const schema = boardSchema('formula') as { properties: Record<string, unknown> };
+  assert.deepEqual(Object.keys(schema.properties), ['title', 'latex', 'terms']);
+  assert.ok(!/"before"|"verified"/.test(JSON.stringify(schema)));
+  const asked = checkFormula({ ...FORMULA, before: [{ latex: 'x = 1' }], verified: true }).item;
+  assert.ok(asked && !('before' in asked) && !('verified' in asked), 'what the model adds is not kept');
+});
+
 test('numbers are read as printed, and bars keep only numbers their evidence prints', () => {
   assert.deepEqual(
     numbersIn('28.4 BLEU, 1,024 tokens, 0,5 s, −2.1 dB, pages 10-20, 100K steps'),
@@ -680,16 +768,9 @@ test('pen marks on a figure map their named region, keep short labels and share 
       color: 'blue',
       at_word: wordOf(FIGURE_SAY, 'planner sits at the top left'),
     },
-    // Legacy authored geometry remains unchanged when no measured catalog is supplied.
+    // Legacy authored geometry remains unchanged when no measured catalog is supplied. A step draws two pen marks at
+    // most (insight.ts MAX_PEN_MARKS), so the third, the arrow at "the checker waits", is not drawn.
     { type: 'circle', target: 'fig1.a', color: 'blue', at_word: wordOf(FIGURE_SAY, 'the first panel holds') },
-    // A label longer than four words is left off rather than cut; the box on another beat's table is dropped.
-    {
-      type: 'arrow',
-      target: 'fig1',
-      region: [0.3, 0.6, 0.7, 1],
-      color: 'blue',
-      at_word: wordOf(FIGURE_SAY, 'the checker waits'),
-    },
   ]);
   // A coarse half-table estimate is not a grounded row selection.
   const table = step('figure-2');
