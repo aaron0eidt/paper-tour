@@ -52,6 +52,7 @@ import {
   fallbackDeckPlan,
   namesCallback,
   slideCards,
+  slideOpeningProblems,
   slideText,
   type DeckPlan,
 } from './deck';
@@ -755,6 +756,7 @@ export class HarnessTourGenerator implements TourGenerator {
       const settled: VisualPlan = decided ? new Map([[thesis!.id, decided]]) : new Map();
       const options = {
         sheet: sheetTour,
+        ...(deckPlan ? { deck: true } : {}),
         ...(input.profile ? { adaptive: true } : {}),
         ...(settled.size ? { settled: true } : {}),
       };
@@ -779,6 +781,7 @@ export class HarnessTourGenerator implements TourGenerator {
             beats: plannable,
             settled,
             sheet: sheetTour,
+            deck: Boolean(deckPlan),
             language,
             prefix,
             signal,
@@ -1252,6 +1255,7 @@ export class HarnessTourGenerator implements TourGenerator {
                     `This step builds on slide ${beat.callbacks![0]}: name it once as "slide ${beat.callbacks![0]}" and say in one clause how it sets this step up.`,
                   ]
                 : [];
+            const opening = beat.slides ? slideOpeningProblems(next.say) : [];
             const long = lengthProblems(next.say, beat);
             const style: string[] = styled ? [] : styleProblems(next.say, !!(next.board || next.example));
             styled ||= style.length > 0;
@@ -1259,6 +1263,7 @@ export class HarnessTourGenerator implements TourGenerator {
               ...(share >= RESTATEMENT_SHARE ? [RESTATEMENT_REPAIR] : []),
               ...moves,
               ...callback,
+              ...opening,
               ...long,
               ...style,
             ];
@@ -1272,10 +1277,10 @@ export class HarnessTourGenerator implements TourGenerator {
                   share: Number(share.toFixed(2)),
                   attempt: attempt + 1,
                 });
-              if (moves.length || callback.length || long.length || style.length)
+              if (moves.length || callback.length || opening.length || long.length || style.length)
                 await input.onEvent?.('beat.guarded', {
                   beat: beat.id,
-                  problems: [...moves, ...callback, ...long, ...style],
+                  problems: [...moves, ...callback, ...opening, ...long, ...style],
                   attempt: attempt + 1,
                 });
               now.task.push(...repairTurn(completion.value, repairs));

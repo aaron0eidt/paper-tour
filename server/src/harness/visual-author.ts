@@ -12,6 +12,7 @@ interface VisualAuthorInput {
   beats: Beat[];
   settled: VisualPlan;
   sheet: boolean;
+  deck?: boolean;
   language: string;
   prefix: MuseMessage[];
   signal: AbortSignal;
@@ -27,7 +28,7 @@ interface VisualAuthorInput {
 export async function authorVisualPlan(input: VisualAuthorInput): Promise<VisualPlan> {
   const held: VisualPlan = new Map(input.settled);
   const pending = [input.beats.filter((beat) => !held.has(beat.id))];
-  const options = { adaptive: true, sheet: input.sheet };
+  const options = { adaptive: true, sheet: input.sheet, deck: input.deck };
   while (pending.length) {
     input.signal.throwIfAborted();
     const batch = pending.shift()!;

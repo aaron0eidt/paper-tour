@@ -19,8 +19,10 @@ import {
 } from '../src/harness/deck';
 import { deckLike } from '../src/harness/doctype';
 import { checkReply } from './plan-fixture';
+import { visualPlanBrief } from '../src/harness/visual-plan';
 import { paperBlock, proseSentences } from '../src/harness/paper-block';
 import { findAnchor, tourProblems } from '../src/harness/assemble';
+import { cleanDirection } from '../src/harness/direct';
 import type { Preset } from '../src/harness/beats';
 
 // A lecture deck is planned slide by slide in its own order: boilerplate slides are skipped, trivial neighbours merge into
@@ -336,9 +338,13 @@ test('slides no step covers are attached to a neighbour, and the steps merged to
   );
   assert.deepEqual(crowded.left, [7, 8]);
   const merged = mergeToBudget(
-    [3, 4, 5, 6, 7, 8].map(
-      (n): DeckBeat => ({ slides: [n], chapter: n < 5 ? 'x' : '', title: `t${n}`, point: `p${n}.`, callback: 0 }),
-    ),
+    [3, 4, 5, 6, 7, 8].map((n): DeckBeat => ({
+      slides: [n],
+      chapter: n < 5 ? 'x' : '',
+      title: `t${n}`,
+      point: `p${n}.`,
+      callback: 0,
+    })),
     3,
   );
   assert.equal(merged.length, 3);
@@ -601,4 +607,190 @@ test('the deck planning task is generic: it names no deck, only slides, steps an
   assert.match(task, /merge it into the step of the slide it illustrates/);
   assert.match(task, /DECK: Sorting\nSLIDE 1 "Lecture 4: Sorting" \(looks like: title\)/);
   assert.ok(!/MIT|6\.0002|classification|k-NN/i.test(task));
+});
+
+// ------------------------------------------------------------------------------------------ the board of a slide
+
+// The learner sees the slide, so its board goes beyond it (slide-copy.ts): a board that only redraws the slide's own words
+// and numbers is sent back once, and dropped when it still does. Here the results slide: two timings as bars.
+const RESULTS_SAY =
+  'Merge sort wins on the same input because splitting halves the work at every level, so the seconds it saves grow with the input; insertion sort needs 4.2 seconds where merge sort needs 0.3, and the gap only widens.';
+const copyingBars = {
+  title: 'Insertion sort and merge sort seconds',
+  unit: 'seconds',
+  bars: [
+    { label: 'Insertion sort', value: 4.2 },
+    { label: 'Merge sort', value: 0.3 },
+  ],
+};
+const buildingFlow = {
+  title: 'Why merge sort scales',
+  nodes: [
+    { id: 'node-1', label: 'Split list' },
+    { id: 'node-2', label: 'Sort left half' },
+    { id: 'node-3', label: 'Sort right half' },
+    { id: 'node-4', label: 'Merge halves' },
+  ],
+  edges: [
+    { from: 'node-1', to: 'node-2' },
+    { from: 'node-1', to: 'node-3' },
+    { from: 'node-2', to: 'node-4' },
+    { from: 'node-3', to: 'node-4' },
+  ],
+};
+const resultsStep = (r: Request) => r.name === 'beat_direction' && r.brief.includes('POINT TO MAKE: On the same input');
+/** A model that answers the results slide with `board(attempt)`, a board of the bars or flow kind, and nothing else differently. */
+function drawing(board: (attempt: number) => object, attempts: { n: number }) {
+  return model((r) => {
+    if (!resultsStep(r)) return undefined;
+    attempts.n++;
+    return { ...direct(r, RESULTS_SAY), ...board(attempts.n) };
+  });
+}
+
+test('a board that only redraws its slide is sent back once, and kept when it builds on the slide instead', async () => {
+  const attempts = { n: 0 };
+  const events: { type: string; data: any }[] = [];
+  const { all, metadata, requests } = await run(
+    drawing((n) => (n === 1 ? { bars: copyingBars } : { flow: buildingFlow }), attempts),
+    'standard',
+    deck,
+    events,
+  );
+  assert.equal(attempts.n, 2, 'one correction');
+  const sent = requests.filter(resultsStep).at(-1)!.task;
+  assert.match(
+    sent,
+    /bars: the board copies the slide: \d+ of its \d+ words and numbers \(.*(insertion|merge).*\) are printed on the slide/,
+  );
+  assert.match(sent, /Show what the slide leaves out instead: the mechanism behind its picture/);
+  assert.ok(events.some((e) => e.type === 'validation.failed' && /copies the slide/.test(e.data.problems?.join(' '))));
+  const board = all.find((s) => s.id === 'point-4')!.actions.find((a) => a.type === 'board');
+  assert.equal(board?.type === 'board' && board.item.kind, 'flow');
+  assert.deepEqual(metadata.degraded, []);
+});
+
+test('a board that still copies its slide after the correction plays without it, flagged, with its narration', async () => {
+  const attempts = { n: 0 };
+  const events: { type: string; data: any }[] = [];
+  const { all, metadata } = await run(
+    drawing(() => ({ bars: copyingBars }), attempts),
+    'standard',
+    deck,
+    events,
+  );
+  assert.ok(attempts.n >= 2, `${attempts.n} tries`);
+  const step = all.find((s) => s.id === 'point-4')!;
+  assert.equal(step.say, RESULTS_SAY);
+  assert.ok(!step.actions.some((a) => a.type === 'board'));
+  const lost = (metadata.degraded as any[]).find((d) => d.beat === 'point-4');
+  assert.deepEqual(lost.dropped, ['board']);
+  assert.match(lost.problems.join(' '), /the board copies the slide/);
+  assert.ok(events.some((e) => e.type === 'validation.failed' && /copies the slide/.test(e.data.problems?.join(' '))));
+});
+
+test('papers are not held to a slide: the same bars on a step that is no slide step stay', () => {
+  const sentences = new Map(deck.sentences.map((s) => [s.id, s]));
+  const evidence = ['p8.s1', 'p8.s2', 'p8.s3'];
+  const beat = { id: 'result-1', kind: 'result' as const, arc: 'a', point: 'Timings.', evidence };
+  const text = evidence.map((id) => sentences.get(id)!.text).join('\n');
+  const targets = { page: 8, sentences: evidence, visuals: [], evidence: text, source: text };
+  const bars = { plan: 'p', say: RESULTS_SAY, cues: [], bars: copyingBars };
+  const paper = cleanDirection(bars, beat, targets);
+  assert.equal(paper?.board?.kind, 'bars', 'no slide text, no copy check');
+  const slide = cleanDirection(bars, { ...beat, slides: [8] }, { ...targets, slide: text });
+  assert.equal(slide?.board, undefined);
+  assert.match(slide!.boardProblems![0], /^bars: the board copies the slide/);
+});
+
+test('a worked example whose frames only redraw the slide is dropped; one that works something out stays', () => {
+  const evidence = ['p8.s1', 'p8.s2', 'p8.s3'];
+  const text = evidence.map((id) => deck.sentences.find((s) => s.id === id)!.text).join('\n');
+  const beat = { id: 'point-4', kind: 'point' as const, arc: 'a', point: 'Timings.', evidence, slides: [8] };
+  const targets = { page: 8, sentences: evidence, visuals: [], evidence: text, source: text, slide: text };
+  const say =
+    'For an illustrative case, insertion sort needs 4.2 seconds and merge sort 0.3 seconds on the same items. Dividing the first by the second gives 14, so merge sort is fourteen times faster here, which is the gap that grows with the input.';
+  const frame = (anchor: string, title: string, ...labels: string[]) => ({
+    anchor,
+    flow: {
+      title,
+      nodes: labels.map((label, i) => ({ id: `node-${i + 1}`, label })),
+      edges: labels.slice(1).map((_, i) => ({ from: `node-${i + 1}`, to: `node-${i + 2}` })),
+    },
+  });
+  // The result of the copy is a number the slide prints (4.2 seconds); the other works out one it does not (4.2 / 0.3).
+  const example = (result: [string, string, number]) => ({
+    assumptions: 'Illustrative case: the two timings of the slide, on the same items.',
+    inputs: [
+      { label: 'Insertion sort seconds', value: 4.2 },
+      { label: 'Merge sort seconds', value: 0.3 },
+    ],
+    calculations: [{ expression: result[1], result: result[2] }],
+    frames: [
+      frame(
+        'insertion sort needs 4.2 seconds',
+        'Insertion sort and merge sort',
+        'Insertion sort 4.2',
+        'Merge sort 0.3',
+        'Seconds items',
+      ),
+      frame(
+        'Dividing the first by the second',
+        'Insertion sort and merge sort seconds',
+        'Insertion sort 4.2',
+        'Merge sort 0.3',
+        result[0],
+      ),
+    ],
+  });
+  const same: [string, string, number] = ['Seconds 4.2', '4.2*1', 4.2];
+  const ratio: [string, string, number] = ['Ratio 14', '4.2/0.3', 14];
+  const copy = cleanDirection({ plan: 'p', say, cues: [], example: example(same) }, beat, targets)!;
+  assert.equal(copy.example, undefined);
+  assert.match(copy.exampleProblems![0], /^the worked example copies the slide/);
+  const works = cleanDirection({ plan: 'p', say, cues: [], example: example(ratio) }, beat, targets)!;
+  assert.equal(works.example?.frames.length, 2);
+  assert.deepEqual(works.exampleProblems, []);
+  // A step that is no slide step keeps even the copy: papers are not held to a slide.
+  const { slide: _slide, ...paper } = targets;
+  assert.ok(
+    cleanDirection({ plan: 'p', say, cues: [], example: example(same) }, { ...beat, slides: undefined }, paper)!
+      .example,
+  );
+});
+
+test('narration that opens by announcing its slides is sent back once, and the voice is left to the model', async () => {
+  const seen: Request[] = [];
+  const opening =
+    'These slides show how merge sort splits the list and merges the halves back, which keeps the cost of growth small.';
+  const free =
+    'Splitting the list in half at every level is what keeps the cost of merge sort small, since each level only touches every item once while the halves are merged back.';
+  const { all } = await run(
+    model((r) => {
+      if (r.name !== 'beat_direction' || !r.brief.includes('POINT TO MAKE: Merge sort splits')) return undefined;
+      seen.push(r);
+      const say = seen.length === 1 ? opening : free;
+      return direct(r, `${say} This builds on slide 4.`);
+    }),
+  );
+  assert.equal(seen.length, 2);
+  assert.match(seen[1].task, /Do not open by announcing the slides/);
+  assert.ok(all[2].say.startsWith('Splitting the list'));
+  // Without an announcement there is no repair, and the voice rule no longer asks for one.
+  assert.doesNotMatch(seen[0].task, /The first sentence says what these slides do/);
+  assert.match(seen[0].task, /never with "these slides" or "this slide"/);
+});
+
+test('the plan call of a deck asks for boards that build on its slides, and lists the slides the learner sees', async () => {
+  const { requests } = await run();
+  const planCall = requests.find((r) => r.name === 'visual_plan')!;
+  assert.match(planCall.task, /The side board is not a second copy of a slide\. It builds on it\./);
+  assert.match(planCall.task, /the slides on screen:\n    SLIDE 4 "Insertion sort"/);
+  assert.match(planCall.task, /SLIDE 5 "Insertion sort" \(a picture, plot, table or code\)/);
+  assert.doesNotMatch(planCall.task, /MORE SLIDES IN THIS STEP/, 'the slides are listed once');
+  // The brief of the plan names each step’s slides; a document that is no deck keeps the old one.
+  const { plan: kept } = cleanDeckPlan(plan, slideCards(deck), 'standard');
+  const brief = visualPlanBrief(card as never, deckTourPlan(kept!, card as never, deck).beats, deck);
+  assert.match(brief, /\[point-3\] point step\n {2}the point: Merge sort splits/);
+  assert.match(brief, /the slides on screen:\n {4}SLIDE 6 "Merge sort"/);
 });

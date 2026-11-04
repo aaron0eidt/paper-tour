@@ -7,6 +7,7 @@ import type { Beat } from './beats';
 import { deckBrief } from './deck';
 import { BOARD_KINDS, boardPartIds, boardSchema, checkBoard, numbersIn } from './board';
 import { agreementCheck } from './board-agreement';
+import { copyCheck, exampleCopyProblems, slidePrinted } from './slide-copy';
 import type { DocType } from './doctype';
 import { STEP_MAX_WORDS } from './insight';
 import { proseSentences } from './paper-block';
@@ -73,6 +74,8 @@ export interface BeatTargets {
   measured?: MeasuredTarget[];
   /** The text the step stands on: its sentences, or a figure's caption and citations, or its equation; no table cells. */
   source?: string;
+  /** What the learner reads on a slide step's slides, which a board must not copy (slide-copy.ts); unset for any other step. */
+  slide?: string;
 }
 
 /** Named areas of a figure or panel for pen marks: a 3 by 3 grid with some overlap, the four halves, or the whole. */
@@ -184,7 +187,8 @@ function offeredViews(table: DocFigure | undefined, visual?: StepVisual): TableV
  * that print the numbers its plan names.
  */
 export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTargets {
-  const parts = { parts: focusParts(beat, visual) };
+  // The parts of a board a cue may light up, and for a slide step the text its board must not copy.
+  const shared = { parts: focusParts(beat, visual), ...(beat.slides ? { slide: slidePrinted(beat, doc) } : {}) };
   const numeric = visual ? NUMERIC_KINDS.includes(visual.visual) : beat.board === 'bars';
   const sentences = new Map(doc.sentences.map((s) => [s.id, s]));
   const quote = (ids: string[]) => ids.map((id) => sentences.get(id)?.text ?? '').filter(Boolean);
@@ -215,7 +219,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
         visuals,
         tableCells,
         ...table,
-        ...parts,
+        ...shared,
         source,
         evidence: source,
       };
@@ -230,7 +234,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
       visuals,
       tableCells,
       ...table,
-      ...parts,
+      ...shared,
       ...(more.length ? { visualEvidence: more } : {}),
       ...(views.length ? { views } : {}),
       source,
@@ -247,7 +251,7 @@ export function beatTargets(beat: Beat, doc: Doc, visual?: StepVisual): BeatTarg
       .map((s) => s!.block),
   );
   const ids = doc.blocks.filter((b) => blocks.has(b.id)).flatMap((b) => b.sentences);
-  const targets = { page, sentences: ids.slice(0, 60), visuals: [], ...parts };
+  const targets = { page, sentences: ids.slice(0, 60), visuals: [], ...shared };
   const source = quote(beat.evidence).join('\n');
   if (!numeric) return { ...targets, source, evidence: source };
   const have = [...new Set([...beat.evidence, ...(beat.boardEvidence ?? [])])];
@@ -373,9 +377,11 @@ export function directionSchema(beat: Beat, targets: BeatTargets, strict = true,
         ? {
             type: 'string',
             maxLength: 600,
-            description: visual
-              ? 'Name the one point this step makes, then how the planned visual or the page marks make it click. Do not restate the highlighted sentences.'
-              : 'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.',
+            description: beat.slides
+              ? 'Say what the slide already shows and the one point this step makes about it, then what the board adds that the slide leaves out (the mechanism, a worked case, the next step or a contrast). Do not restate the slide.'
+              : visual
+                ? 'Name the one point this step makes, then how the planned visual or the page marks make it click. Do not restate the highlighted sentences.'
+                : 'Identify the learner difficulty, choose the most informative visual tool, and explain what quantity, geometry or relationship visibly changes. If source cues suffice, explain why no sideboard is needed.',
           }
         : { type: 'string' },
       ...Object.fromEntries(
@@ -629,19 +635,27 @@ export function cleanDirection(
     .filter((c) => actions.has(c.action) && allowed(c))
     .slice(0, MAX_CUES);
   const rules = exampleRules(beat, visual);
-  const example: { example?: WorkedExample; problems: string[] } = rules.offered
+  const checked: { example?: WorkedExample; problems: string[] } = rules.offered
     ? checkExample(d.example, say, requireExample || rules.required || claimsNumericExample(say), exampleKinds(visual))
     : { problems: [] };
+  // A worked example whose every frame redraws the slide is dropped like a board that does (slide-copy.ts).
+  const copied =
+    targets.slide !== undefined && checked.example ? exampleCopyProblems(checked.example.frames, targets.slide) : [];
+  const example = copied.length ? { problems: [...checked.problems, ...copied] } : checked;
   const results = reportsResults(beat, targets.table);
   const candidates = plannedKinds(visual)
     .filter((kind) => d[kind] !== undefined && d[kind] !== null)
     .map((kind) => ({
       kind,
-      check: agreementCheck(
-        groundedCheck(checkBoard(kind, d[kind], targets.evidence), results),
-        say,
+      check: copyCheck(
+        agreementCheck(
+          groundedCheck(checkBoard(kind, d[kind], targets.evidence), results),
+          say,
+          { kind, value: d[kind] },
+          { source: targets.source },
+        ),
         { kind, value: d[kind] },
-        { source: targets.source },
+        targets.slide,
       ),
     }));
   const boards = candidates.filter((c) => c.check.item);
