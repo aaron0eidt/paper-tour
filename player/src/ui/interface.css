@@ -859,3 +859,6 @@ button.ui-status-badge:hover {
 /* Measured settings content contains its margins and leaves room for focus outlines. */
 .ui-settings-auto-height { margin-inline: -4px; padding-inline: 4px; }
 .ui-settings-auto-height > div { display: flow-root; }
+
+.library-preview-tilt { position: relative; width: 100%; border-radius: 9px 9px 0 0; }
+.library-preview-tilt:has(:focus-visible) { z-index: 1; }

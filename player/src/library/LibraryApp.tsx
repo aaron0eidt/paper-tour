@@ -1,3 +1,4 @@
+import { Tilt, TiltContent } from '@animate-ui/react/primitives/effects/tilt';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DocumentSummary } from '../../../shared/contracts';
 import { AuthForm, PaperMark } from './AuthForm';
@@ -474,30 +475,34 @@ function DocumentCard({
   const analysisReady = item.analysisStatus === 'ready' || item.analysisStatus === 'limited';
   return (
     <article className="library-document">
-      <button
-        type="button"
-        className="library-preview"
-        onClick={onOpen}
-        disabled={!canOpen}
-        aria-label={`Open ${item.title}`}
-      >
-        {item.thumbnailUrl ? (
-          <img src={item.thumbnailUrl} alt="" loading="lazy" />
-        ) : (
-          <div className="library-preview-placeholder" aria-hidden="true">
-            <svg width="36" height="42" viewBox="0 0 28 30" fill="none">
-              <path d="M4 1H18L25 8V29H4V1Z" stroke="currentColor" />
-              <path d="M18 1V8H25M8 14H21M8 18H21M8 22H17" stroke="currentColor" />
-            </svg>
-            <span>PDF</span>
-          </div>
-        )}
-        {item.tourCount > 0 && (
-          <span className="library-tour-badge">
-            {item.tourCount} {item.tourCount === 1 ? 'tour' : 'tours'}
-          </span>
-        )}
-      </button>
+      <Tilt className="library-preview-tilt" maxTilt={canOpen ? 5 : 0} perspective={900} style={{ willChange: 'auto' }}>
+        <TiltContent asChild style={{ willChange: 'auto' }}>
+          <button
+            type="button"
+            className="library-preview"
+            onClick={onOpen}
+            disabled={!canOpen}
+            aria-label={`Open ${item.title}`}
+          >
+            {item.thumbnailUrl ? (
+              <img src={item.thumbnailUrl} alt="" loading="lazy" />
+            ) : (
+              <div className="library-preview-placeholder" aria-hidden="true">
+                <svg width="36" height="42" viewBox="0 0 28 30" fill="none">
+                  <path d="M4 1H18L25 8V29H4V1Z" stroke="currentColor" />
+                  <path d="M18 1V8H25M8 14H21M8 18H21M8 22H17" stroke="currentColor" />
+                </svg>
+                <span>PDF</span>
+              </div>
+            )}
+            {item.tourCount > 0 && (
+              <span className="library-tour-badge">
+                {item.tourCount} {item.tourCount === 1 ? 'tour' : 'tours'}
+              </span>
+            )}
+          </button>
+        </TiltContent>
+      </Tilt>
       <div className="library-document-body">
         {status.kind !== 'ready' && (
           <StatusBadge label={status.label} tone={status.kind} busy={item.analysisStatus === 'processing'} />
