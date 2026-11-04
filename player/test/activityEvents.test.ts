@@ -175,3 +175,14 @@ test('tour validation rejection is distinguished from an empty model response', 
     'Tour validation rejected an explanation or visual. See the validation events for the specific problems and repair diagnostics.',
   );
 });
+
+test('foreground reading preparation and its error belong to the agent bubble', () => {
+  const playback = { playing: true, speaking: false, canPlay: true, page: 3, words: [], word: -1 };
+  const preparing = companionPresence(undefined, 'reading', { ...playback, preparingText: true });
+  assert.equal(preparing.mood, 'working');
+  assert.equal(preparing.label, 'Preparing spoken text…');
+  const failed = companionPresence(undefined, 'reading', { ...playback, playing: false, preparationError: 'Preparation failed.' });
+  assert.equal(failed.mood, 'attention');
+  assert.equal(failed.message.includes('Press play to retry'), true);
+  assert.equal(companionPresence(undefined, 'reading', { ...playback, speaking: true, preparationError: 'Old error.' }).mood, 'speaking');
+});

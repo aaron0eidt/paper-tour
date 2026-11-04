@@ -91,7 +91,7 @@ export function AgentActivity({
   }, [documentId, mode]);
   useEffect(() => {
     setQuiet(false);
-  }, [current?.id, playback.speaking, playback.generating]);
+  }, [current?.id, playback.speaking, playback.generating, playback.preparingText, playback.preparationError]);
   useEffect(() => {
     if (!open && !active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -154,7 +154,7 @@ export function AgentActivity({
 
   return (
     <div className="reader-agent" ref={root} data-mood={presence.mood} data-expanded={open || undefined}>
-      <span className="agent-generation-announcement" role="status" aria-live="polite">{generating ? 'Generating speech…' : ''}</span>
+      <span className="agent-generation-announcement" role="status" aria-live="polite">{playback.preparingText ? 'Preparing spoken text…' : generating ? 'Generating speech…' : ''}</span>
       <button
         className="reader-agent-trigger"
         ref={trigger}

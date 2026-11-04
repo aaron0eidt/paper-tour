@@ -1685,6 +1685,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               mode={answer || away ? 'answer' : readAloud ? 'reading' : 'tour'}
               playback={{
                 playing: state.status === 'playing',
+                preparingText: readAloud && !answer && !away && readingSpeech.busy,
+                preparationError: readAloud && !answer && !away ? readingSpeech.error ?? undefined : undefined,
                 generating: state.status === 'playing' && state.speechStatus === 'generating',
                 speaking: state.status === 'playing' && state.speechStatus !== 'generating' && state.word >= 0 && !state.preview,
                 canPlay: !!active?.steps.length && (!away || !!answer),
@@ -1720,12 +1722,6 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
                 onSelectRegion={acceptRegionSelection}
                 onCancelSelection={cancelRegionSelection}
               />
-              {readAloud && (readingSpeech.busy || readingSpeech.error) && (
-                <div className="reader-reading-notice" role="status">
-                  {readingSpeech.busy ? 'Preparing the spoken text… Pause to interrupt.'
-                    : `Reading paused: ${readingSpeech.error} Press play to retry or skip to the next passage.`}
-                </div>
-              )}
               {coverOpen && engine && clock && (
                 <TourCover
                   tour={engine.tour}

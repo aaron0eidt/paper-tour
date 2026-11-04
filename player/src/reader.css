@@ -306,20 +306,6 @@
   cursor: pointer;
 }
 .playback-panel .reader-reading-options { padding: 0 0 12px; margin-bottom: 12px; }
-.reader-reading-notice {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  z-index: 3;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
-}
 @media (max-width: 600px) {
   .reader-app-toolbar { gap: 7px; padding-inline: 10px; }
 }
