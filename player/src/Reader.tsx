@@ -1,3 +1,4 @@
+import { ReaderNavigation, ReaderNavigationProvider, ReaderNavigationToggle, useReaderNavigation } from './ui/ReaderNavigation';
 import { AnimatedSwitch } from './ui/controls';
 import { motion, useReducedMotion } from 'motion/react';
 import { setNarrationSoundGate } from './ui/sound';
@@ -140,7 +141,11 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-export function Reader({ documentId, onBack }: { documentId: string; onBack(): void }) {
+export function Reader(props: { documentId: string; onBack(): void }) {
+  return <ReaderNavigationProvider><ReaderContent {...props} /></ReaderNavigationProvider>;
+}
+
+function ReaderContent({ documentId, onBack }: { documentId: string; onBack(): void }) {
   const params = useMemo(readParams, []);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadedAnalysisId, setLoadedAnalysisId] = useState<string | undefined>();
@@ -167,7 +172,8 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
   const [manifest, setManifest] = useState<DocumentManifest | null>(null);
   const [activeTour, setActiveTour] = useState<string | null>(new URLSearchParams(location.search).get('tour'));
   const [tab, setTab] = useState<'document' | 'tour'>('document');
-  const [navigationOpen, setNavigationOpen] = useState(false);
+  const { isMobile: navigationMobile, openMobile, setOpenMobile: setNavigationOpen } = useReaderNavigation();
+  const navigationOpen = navigationMobile && openMobile;
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -1366,7 +1372,7 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
         <>
           <h2>Contents</h2>
           {loaded?.doc?.sections.map((section) => (
-            <button className="reader-outline-item" key={section.id} onClick={() => navigateTo(section.id)}>
+            <button data-sidebar="menu-button" className="reader-outline-item" key={section.id} onClick={() => navigateTo(section.id)}>
               <span>{section.title}</span>
               <small>{section.page}</small>
             </button>
@@ -1398,21 +1404,12 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
   );
 
   return (
-    <div className={`app reader-app${navigationOpen ? ' navigation-open' : ''}`}>
+    <div className="app reader-app">
       <header className="reader-app-toolbar">
         <button className="reader-library-button" onClick={back}>
           ‹ <span>Library</span>
         </button>
-        <button
-          type="button"
-          className="reader-navigation-toggle"
-          aria-controls="reader-navigation"
-          aria-expanded={navigationOpen}
-          aria-label={navigationOpen ? 'Close paper navigation' : 'Open paper navigation'}
-          onClick={() => setNavigationOpen((open) => !open)}
-        >
-          Contents
-        </button>
+        <ReaderNavigationToggle />
         <div className="reader-tour-actions">
           {' '}
           {documentId && manifest && (manifest.tourGeneration || !manifest.tours.length) && (
@@ -1464,6 +1461,7 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
           </a>
         )}
       </header>
+      <ReaderNavigation>
       <Sidebar
         tour={tab === 'tour' ? (engine?.tour ?? null) : null}
         steps={steps}
@@ -1516,6 +1514,7 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
       >
         {loaded && <Problems problems={problems} defaultOpen />}
       </Sidebar>
+      </ReaderNavigation>
 
       <main className="main">
         <div className="reader-toolbar">

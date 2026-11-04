@@ -1,3 +1,4 @@
+import { useReducedMotion } from 'motion/react';
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { EngineState, FlatStep } from '../engine';
@@ -26,6 +27,7 @@ function stepLabel(say: string): string {
 }
 
 export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children, header, navigation }: Props) {
+  const reducedMotion = useReducedMotion();
   const started = state.status !== 'idle';
   const done = state.status === 'ended' || state.waiting ? steps.length : started ? state.index : 0;
   // A tour still being written measures its progress against the steps planned.
@@ -41,9 +43,9 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
     const n = nav.getBoundingClientRect();
     const r = item.getBoundingClientRect();
     if (r.top < n.top + 8 || r.bottom > n.bottom - 8) {
-      nav.scrollBy({ top: r.top - n.top - n.height / 3, behavior: 'smooth' });
+      nav.scrollBy({ top: r.top - n.top - n.height / 3, behavior: reducedMotion ? 'instant' : 'smooth' });
     }
-  }, [state.index, started]);
+  }, [state.index, started, reducedMotion]);
 
   return (
     <aside id="reader-navigation" className="sidebar" aria-label="Paper navigation">
@@ -52,7 +54,14 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
         <div className="brand">Paper Tour</div>
         <h1 className="tour-title">{tour?.title?.trim() || docTitle || 'Untitled paper'}</h1>
         {tour && (
-          <div className="progress" aria-label={`${done} of ${whole} steps done`}>
+          <div
+            className="progress"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={whole || 1}
+            aria-valuenow={done}
+            aria-label={`${done} of ${whole} steps done`}
+          >
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress * 100}%` }} />
             </div>
@@ -66,7 +75,7 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
 
       {navigation ??
         (tour ? (
-          <nav className="chapters" ref={navRef}>
+          <nav className="chapters" ref={navRef} aria-label="Tour chapters">
             {tour.chapters.map((chapter, ci) => (
               <section key={chapter.id} className="chapter">
                 <h2>
@@ -83,13 +92,20 @@ export function Sidebar({ tour, steps, state, growth, docTitle, onJump, children
                       return (
                         <li key={s.step.id}>
                           <button
+                            data-sidebar="menu-button"
+                            data-active={current || undefined}
+                            aria-current={current ? 'step' : undefined}
                             className={`step${current ? ' current' : ''}${past ? ' past' : ''}`}
                             onClick={() => onJump(s.index)}
                             title={s.step.say}
                           >
                             <span className="step-dot" />
                             <span className="step-text">{stepLabel(s.step.say)}</span>
-                            {pause && <span className="step-try" aria-label={pause.heading}>{pause.chip}</span>}
+                            {pause && (
+                              <span className="step-try" aria-label={pause.heading}>
+                                {pause.chip}
+                              </span>
+                            )}
                           </button>
                         </li>
                       );
