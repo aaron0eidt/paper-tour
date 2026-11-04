@@ -1,3 +1,4 @@
+import { RegionSelectionCursor } from '../ui/RegionSelectionCursor';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { transformOf, unproject } from '../camera';
@@ -402,7 +403,9 @@ export function Stage({ pdf, layout, camera, scene, debugPages, marks = STILL, s
       <div className="dbg-tooltip" ref={tooltipRef} />
       {selecting && <>
         <div className="pdf-region-picker" onPointerDown={beginRegion} onPointerMove={moveRegion} onPointerUp={finishRegion}
-          onPointerCancel={() => { regionDrag.current = null; setDraftRegion(null); }} />
+          onPointerCancel={() => { regionDrag.current = null; setDraftRegion(null); }}>
+          <RegionSelectionCursor dragging={!!draftRegion} />
+        </div>
         <div className="pdf-region-instruction" role="status">
           <span>Drag over a figure, equation or passage</span>
           <button type="button" onClick={onCancelSelection}>Cancel <kbd>Esc</kbd></button>
