@@ -109,7 +109,6 @@
 .playback-panel .speed span {
   display: block;
 }
-.playback-panel .speed input[type="range"] { width: 100%; min-height: 24px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .playback-panel .speed .speed-heading, .playback-panel .speed .speed-scale { display: flex; align-items: center; justify-content: space-between; }
 .speed-heading output { color: var(--text); font-variant-numeric: tabular-nums; }
 .playback-panel .speed .speed-scale { font-size: 10px; color: var(--faint); margin-top: -5px; }

@@ -1,3 +1,4 @@
+import { AnimatedSlider } from './Slider';
 import { useState, useSyncExternalStore } from 'react';
 import { ChoicePicker } from '../components/ChoicePicker';
 import { ActionButton } from './ActionButton';
@@ -40,16 +41,10 @@ export function InterfaceSettings() {
         </label>
         <label htmlFor="interface-volume">
           Volume · {Math.round(settings.volume * 100)}%
-          <input
-            id="interface-volume"
-            type="range"
-            min="0"
-            max="100"
-            step="5"
-            value={Math.round(settings.volume * 100)}
-            disabled={!settings.sounds}
-            onChange={(event) => setInterfacePreferences({ volume: Number(event.target.value) / 100 })}
-          />
+          <AnimatedSlider id="interface-volume" label="Interface sound volume"
+            min={0} max={100} step={5} value={Math.round(settings.volume * 100)}
+            valueText={`${Math.round(settings.volume * 100)}%`} disabled={!settings.sounds}
+            onChange={(volume) => setInterfacePreferences({ volume: volume / 100 })} />
         </label>
         <ActionButton
           label="Preview"

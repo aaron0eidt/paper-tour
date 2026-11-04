@@ -19,11 +19,7 @@
   max-width: 440px;
   margin-bottom: 14px;
 }
-.profile-zoom-setting input {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
-}
+
 .profile-zoom-setting output {
   min-width: 4ch;
   font-variant-numeric: tabular-nums;

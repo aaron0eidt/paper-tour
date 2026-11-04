@@ -1,3 +1,4 @@
+import { AnimatedSlider } from '../ui/Slider';
 import { useEffect, useRef, useState } from 'react';
 import { plotlyFigure, plotlyProblems, type PlotlyItem } from '../../../shared/plotly';
 import { loadPlotly } from '../visuals/preparation';
@@ -82,14 +83,8 @@ export function PlotlyBoard({ item }: { item: PlotlyItem }) {
               {item.parameter.label}
               <output>{parameter}</output>
             </span>
-            <input
-              type="range"
-              min={item.parameter.min}
-              max={item.parameter.max}
-              step={item.parameter.step}
-              value={parameter}
-              onChange={(e) => change(Number(e.target.value))}
-            />
+            <AnimatedSlider label={item.parameter.label} min={item.parameter.min} max={item.parameter.max}
+              step={item.parameter.step} value={parameter} onChange={change} />
           </label>
         </div>
       )}

@@ -1,3 +1,4 @@
+import { AnimatedSlider } from '../ui/Slider';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { EngineState, FlatStep } from '../engine';
 import { formatTime } from '../tourClock';
@@ -280,7 +281,7 @@ export function ControlBar({
             )}
             <label className="speed">
               <span className="speed-heading">Speed <output>{speed.toFixed(2)}×</output></span>
-              <input type="range" aria-label="Narration speed" aria-valuetext={`${speed.toFixed(2)} times normal speed`} min={0.5} max={2} step={0.05} value={speed} onChange={(event) => onSpeed(Number(event.target.value))} disabled={disabled} />
+              <AnimatedSlider label="Narration speed" valueText={`${speed.toFixed(2)} times normal speed`} min={0.5} max={2} step={0.05} value={speed} onChange={onSpeed} disabled={disabled} />
               <span className="speed-scale" aria-hidden="true"><span>0.5×</span><span>2×</span></span>
             </label>
             {readingSettings && <details className="audio-reading-settings"><summary>Reading options</summary>{readingSettings}</details>}

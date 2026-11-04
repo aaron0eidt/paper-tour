@@ -675,11 +675,7 @@ button.ui-status-badge:hover {
   gap: 8px;
   font-size: 13px;
 }
-.ui-sound-options input[type='range'] {
-  accent-color: var(--accent);
-  width: 100%;
-  min-height: 36px;
-}
+
 .library-filters button {
   position: relative;
   isolation: isolate;
@@ -850,3 +846,12 @@ button.ui-status-badge:hover {
 .ui-radio[data-disabled] { opacity: .5; cursor: default; }
 .profile-theme .ui-radio { position: absolute; right: 10px; bottom: 10px; }
 .profile-sources label:has(.ui-radio[data-disabled]) { cursor: default; opacity: .65; }
+
+.ui-slider { flex: 1; min-width: 0; width: 100%; }
+.ui-slider-control { position: relative; display: flex; align-items: center; height: 28px; touch-action: none; user-select: none; cursor: pointer; }
+.ui-slider-track { position: relative; width: 100%; height: 4px; border-radius: 99px; background: var(--line); }
+.ui-slider-indicator { position: absolute; height: 100%; border-radius: inherit; background: var(--accent); }
+.ui-slider-thumb { display: block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--panel); background: var(--accent); box-shadow: 0 1px 3px #0003; }
+.ui-slider-thumb:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ui-slider[data-disabled] { opacity: .5; }
+.ui-slider[data-disabled] .ui-slider-control { cursor: default; }

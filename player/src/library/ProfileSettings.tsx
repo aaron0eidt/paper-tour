@@ -1,3 +1,4 @@
+import { AnimatedSlider } from '../ui/Slider';
 import { AnimatedRadio, AnimatedRadioGroup } from '../ui/Radio';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { UserSettings } from '../../../shared/settings';
@@ -146,17 +147,8 @@ export function ProfileSettings({ email }: { email: string }) {
               Maximum automatic zoom
             </label>
             <div className="profile-zoom-setting">
-              <input
-                id="max-auto-zoom"
-                type="range"
-                min={100}
-                max={400}
-                step={25}
-                value={maxAutoZoom}
-                onChange={(event) => setMaxAutoZoom(Number(event.target.value))}
-                aria-describedby="max-auto-zoom-help"
-                aria-valuetext={`${maxAutoZoom}%`}
-              />
+              <AnimatedSlider id="max-auto-zoom" label="Maximum automatic zoom" min={100} max={400} step={25}
+                value={maxAutoZoom} onChange={setMaxAutoZoom} describedBy="max-auto-zoom-help" valueText={`${maxAutoZoom}%`} />
               <output htmlFor="max-auto-zoom">{maxAutoZoom}%</output>
             </div>
             <p className="profile-help" id="max-auto-zoom-help">
