@@ -855,3 +855,7 @@ button.ui-status-badge:hover {
 .ui-slider-thumb:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
 .ui-slider[data-disabled] { opacity: .5; }
 .ui-slider[data-disabled] .ui-slider-control { cursor: default; }
+
+/* Measured settings content contains its margins and leaves room for focus outlines. */
+.ui-settings-auto-height { margin-inline: -4px; padding-inline: 4px; }
+.ui-settings-auto-height > div { display: flow-root; }

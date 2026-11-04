@@ -1,3 +1,4 @@
+import { AutoHeight } from '@animate-ui/react/primitives/effects/auto-height';
 import { AnimatedSlider } from '../ui/Slider';
 import { AnimatedRadio, AnimatedRadioGroup } from '../ui/Radio';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -147,8 +148,17 @@ export function ProfileSettings({ email }: { email: string }) {
               Maximum automatic zoom
             </label>
             <div className="profile-zoom-setting">
-              <AnimatedSlider id="max-auto-zoom" label="Maximum automatic zoom" min={100} max={400} step={25}
-                value={maxAutoZoom} onChange={setMaxAutoZoom} describedBy="max-auto-zoom-help" valueText={`${maxAutoZoom}%`} />
+              <AnimatedSlider
+                id="max-auto-zoom"
+                label="Maximum automatic zoom"
+                min={100}
+                max={400}
+                step={25}
+                value={maxAutoZoom}
+                onChange={setMaxAutoZoom}
+                describedBy="max-auto-zoom-help"
+                valueText={`${maxAutoZoom}%`}
+              />
               <output htmlFor="max-auto-zoom">{maxAutoZoom}%</output>
             </div>
             <p className="profile-help" id="max-auto-zoom-help">
@@ -254,94 +264,96 @@ export function ProfileSettings({ email }: { email: string }) {
                       </span>
                     </label>
                   </AnimatedRadioGroup>
-                  {sourceChanged && (
-                    <div className="profile-unsaved">
-                      <span>Connection change not saved</span>
-                      <ActionButton
-                        busy={pending === 'source'}
-                        label={pending === 'source' ? 'Saving…' : 'Save connection'}
-                        disabled={busy}
-                        onClick={() =>
-                          void run('source', () => update({ credentialSource: source }), 'API connection updated.')
-                        }
-                      />
-                      <button
-                        className="library-text-button"
-                        disabled={busy}
-                        onClick={() => {
-                          setSource(data.credentialSource);
-                          connectionHeading.current?.focus();
+                  <AutoHeight className="ui-settings-auto-height" deps={[source, sourceChanged, key?.configured]}>
+                    {sourceChanged && (
+                      <div className="profile-unsaved">
+                        <span>Connection change not saved</span>
+                        <ActionButton
+                          busy={pending === 'source'}
+                          label={pending === 'source' ? 'Saving…' : 'Save connection'}
+                          disabled={busy}
+                          onClick={() =>
+                            void run('source', () => update({ credentialSource: source }), 'API connection updated.')
+                          }
+                        />
+                        <button
+                          className="library-text-button"
+                          disabled={busy}
+                          onClick={() => {
+                            setSource(data.credentialSource);
+                            connectionHeading.current?.focus();
+                          }}
+                        >
+                          Discard
+                        </button>
+                      </div>
+                    )}
+                    <details className="profile-key-editor" key={source} open={source === 'personal' || undefined}>
+                      <summary>{key?.configured ? 'Manage personal key' : 'Add a personal key'}</summary>
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void run(
+                            'key',
+                            () =>
+                              apiRequest('/api/settings/meta-key', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+                            'Personal key verified and connected.',
+                            true,
+                          );
                         }}
                       >
-                        Discard
-                      </button>
-                    </div>
-                  )}
-                  <details className="profile-key-editor" key={source} open={source === 'personal' || undefined}>
-                    <summary>{key?.configured ? 'Manage personal key' : 'Add a personal key'}</summary>
-                    <form
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void run(
-                          'key',
-                          () =>
-                            apiRequest('/api/settings/meta-key', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
-                          'Personal key verified and connected.',
-                          true,
-                        );
-                      }}
-                    >
-                      <label className="profile-field" htmlFor="meta-api-key">
-                        {key?.configured ? `Replace key ${key.masked}` : 'Meta API key'}
-                      </label>
-                      <input
-                        id="meta-api-key"
-                        className="profile-key-input"
-                        type="password"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                        disabled={busy}
-                        placeholder="Enter your Meta API key"
-                        aria-describedby="key-help"
-                      />
-                      <p className="profile-help" id="key-help">
-                        Stored encrypted. Only the last four characters are shown after saving. Saving a key connects
-                        your personal account.
-                      </p>
-                      <div className="profile-actions">
-                        <ActionButton
-                          busy={pending === 'key'}
-                          label={pending === 'key' ? 'Connecting…' : 'Save & connect'}
-                          type="submit"
-                          disabled={busy || apiKey.trim().length < 16}
+                        <label className="profile-field" htmlFor="meta-api-key">
+                          {key?.configured ? `Replace key ${key.masked}` : 'Meta API key'}
+                        </label>
+                        <input
+                          id="meta-api-key"
+                          className="profile-key-input"
+                          type="password"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={apiKey}
+                          onChange={(event) => setApiKey(event.target.value)}
+                          disabled={busy}
+                          placeholder="Enter your Meta API key"
+                          aria-describedby="key-help"
                         />
-                        {key?.configured && (
-                          <button
-                            className="library-text-button profile-remove"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  'Remove your saved Meta key from this app? This does not revoke it at Meta.',
+                        <p className="profile-help" id="key-help">
+                          Stored encrypted. Only the last four characters are shown after saving. Saving a key connects
+                          your personal account.
+                        </p>
+                        <div className="profile-actions">
+                          <ActionButton
+                            busy={pending === 'key'}
+                            label={pending === 'key' ? 'Connecting…' : 'Save & connect'}
+                            type="submit"
+                            disabled={busy || apiKey.trim().length < 16}
+                          />
+                          {key?.configured && (
+                            <button
+                              className="library-text-button profile-remove"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    'Remove your saved Meta key from this app? This does not revoke it at Meta.',
+                                  )
                                 )
-                              )
-                                void run(
-                                  'remove',
-                                  () => apiRequest('/api/settings/meta-key', { method: 'DELETE' }),
-                                  'Personal key removed.',
-                                  true,
-                                );
-                            }}
-                          >
-                            Remove key
-                          </button>
-                        )}
-                      </div>
-                    </form>
-                  </details>
+                                  void run(
+                                    'remove',
+                                    () => apiRequest('/api/settings/meta-key', { method: 'DELETE' }),
+                                    'Personal key removed.',
+                                    true,
+                                  );
+                              }}
+                            >
+                              Remove key
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    </details>
+                  </AutoHeight>
                 </section>
                 <section className="profile-card" id="tour-model" aria-labelledby="model-heading">
                   <div className="profile-card-heading">
