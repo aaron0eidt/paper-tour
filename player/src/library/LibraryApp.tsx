@@ -474,9 +474,14 @@ function DocumentCard({
   const canOpen = item.fileStatus === 'uploaded';
   const analysisReady = item.analysisStatus === 'ready' || item.analysisStatus === 'limited';
   return (
-    <article className="library-document">
-      <Tilt className="library-preview-tilt" maxTilt={canOpen ? 5 : 0} perspective={900} style={{ willChange: 'auto' }}>
-        <TiltContent asChild style={{ willChange: 'auto' }}>
+    <Tilt
+      className="library-card-tilt"
+      maxTilt={canOpen ? 5 : 0}
+      perspective={900}
+      style={{ willChange: 'auto', transformStyle: 'flat' }}
+    >
+      <TiltContent asChild style={{ willChange: 'auto' }}>
+        <article className="library-document">
           <button
             type="button"
             className="library-preview"
@@ -501,59 +506,59 @@ function DocumentCard({
               </span>
             )}
           </button>
-        </TiltContent>
-      </Tilt>
-      <div className="library-document-body">
-        {status.kind !== 'ready' && (
-          <StatusBadge label={status.label} tone={status.kind} busy={item.analysisStatus === 'processing'} />
-        )}
-        <h3 title={item.originalFilename}>
-          <button type="button" onClick={onOpen} disabled={!canOpen}>
-            {item.title}
-          </button>
-        </h3>
-        <p className="library-document-meta">
-          {item.pageCount === null
-            ? 'Page count pending'
-            : `${item.pageCount} ${item.pageCount === 1 ? 'page' : 'pages'}`}
-          <span>Added {formatDate(item.createdAt)}</span>
-        </p>
-        {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
-        <div className="library-document-actions">
-          <button type="button" className="library-open-button" disabled={!canOpen} onClick={onOpen}>
-            Open paper{' '}
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              aria-hidden="true"
-            >
-              <path d="M4 10h12m-5-5 5 5-5 5" />
-            </svg>
-          </button>
-          {canOpen && item.tourGeneration?.status !== 'ready' && item.tourGeneration && (
-            <TourGeneration
-              documentId={item.id}
-              generation={item.tourGeneration}
-              onChanged={onTourChanged}
-              canGenerate={analysisReady || !!item.tourGeneration}
-              onOpenTour={() => onOpen()}
-              compact
-              card
-            />
-          )}
-          {item.analysisStatus === 'failed' && canOpen && (
-            <button type="button" className="library-text-button" disabled={busy} onClick={onRetry}>
-              {busy ? 'Restarting…' : 'Retry analysis'}
-            </button>
-          )}
-          <PaperActions title={item.title} onRename={onRename} onDelete={onDelete} />
-        </div>
-      </div>
-    </article>
+          <div className="library-document-body">
+            {status.kind !== 'ready' && (
+              <StatusBadge label={status.label} tone={status.kind} busy={item.analysisStatus === 'processing'} />
+            )}
+            <h3 title={item.originalFilename}>
+              <button type="button" onClick={onOpen} disabled={!canOpen}>
+                {item.title}
+              </button>
+            </h3>
+            <p className="library-document-meta">
+              {item.pageCount === null
+                ? 'Page count pending'
+                : `${item.pageCount} ${item.pageCount === 1 ? 'page' : 'pages'}`}
+              <span>Added {formatDate(item.createdAt)}</span>
+            </p>
+            {item.analysisError && <p className="library-document-error">{item.analysisError}</p>}
+            <div className="library-document-actions">
+              <button type="button" className="library-open-button" disabled={!canOpen} onClick={onOpen}>
+                Open paper{' '}
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  aria-hidden="true"
+                >
+                  <path d="M4 10h12m-5-5 5 5-5 5" />
+                </svg>
+              </button>
+              {canOpen && item.tourGeneration?.status !== 'ready' && item.tourGeneration && (
+                <TourGeneration
+                  documentId={item.id}
+                  generation={item.tourGeneration}
+                  onChanged={onTourChanged}
+                  canGenerate={analysisReady || !!item.tourGeneration}
+                  onOpenTour={() => onOpen()}
+                  compact
+                  card
+                />
+              )}
+              {item.analysisStatus === 'failed' && canOpen && (
+                <button type="button" className="library-text-button" disabled={busy} onClick={onRetry}>
+                  {busy ? 'Restarting…' : 'Retry analysis'}
+                </button>
+              )}
+              <PaperActions title={item.title} onRename={onRename} onDelete={onDelete} />
+            </div>
+          </div>
+        </article>
+      </TiltContent>
+    </Tilt>
   );
 }
 
