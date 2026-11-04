@@ -248,6 +248,18 @@
   line-height: 1.6;
 }
 .library-feedback.library-notice {
+  position: fixed;
+  z-index: 100;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  margin: 0;
+  padding: 14px 18px;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 18%);
+  flex-wrap: wrap;
   background: var(--accent-soft);
   border: 1px solid var(--border-accent);
 }

@@ -96,6 +96,12 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument }: Props & {
   const [error, setError] = useState<string | null>(null);
   // `open` is a document the notice offers to open: one just uploaded, whose tour can play before it is finished.
   const [notice, setNotice] = useState<{ text: string; open?: string } | null>(null);
+  const [toastHeld, setToastHeld] = useState(false);
+  useEffect(() => {
+    if (!notice || toastHeld) return;
+    const timer = window.setTimeout(() => setNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice, toastHeld]);
   const [refresh, setRefresh] = useState(0);
   const [view, setView] = useLibraryView(accountId);
   const { query, sort, filter } = view;
@@ -179,6 +185,7 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument }: Props & {
     setError(null);
     try {
       await apiRequest(`/api/documents/${item.id}/analyze`, { method: 'POST' });
+      setToastHeld(false);
       setNotice({ text: `Preparing “${item.title}” again.` });
       refreshDocuments();
     } catch (cause) {
@@ -272,8 +279,9 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument }: Props & {
           unavailableReason={uploadReason}
           onChanged={refreshDocuments}
           onUploaded={(documentId) => {
+            setToastHeld(false);
             setNotice({
-              text: 'PDF saved. Open it to read or choose how you’d like its tour explained.',
+              text: 'PDF added to your library.',
               open: documentId,
             });
             refreshDocuments();
@@ -294,7 +302,16 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument }: Props & {
           </p>
         )}
         {notice && (
-          <div className="library-feedback library-notice" role="status">
+          <div
+            className="library-feedback library-notice"
+            role="status"
+            onMouseEnter={() => setToastHeld(true)}
+            onMouseLeave={(event) => setToastHeld(event.currentTarget.contains(document.activeElement))}
+            onFocus={() => setToastHeld(true)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setToastHeld(event.currentTarget.matches(':hover'));
+            }}
+          >
             <span>{notice.text}</span>
             <span className="library-notice-actions">
               {notice.open && (
