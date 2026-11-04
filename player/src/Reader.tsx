@@ -191,7 +191,7 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
   const restoredView = useRef(false);
   const savedPosition = useRef<ReaderState | null>(null);
   const loadedRef = useRef<Loaded | null>(null);
-  const loadedAnalysisRef = useRef<string | undefined>();
+  const loadedAnalysisRef = useRef<string | undefined>(undefined);
   const manifestRef = useRef<DocumentManifest | null>(null);
   const checkpointRef = useRef<ReaderState | null>(null);
   const accessTokenRef = useRef<string | null>(null);
@@ -924,7 +924,7 @@ export function Reader({ documentId, onBack }: { documentId: string; onBack(): v
   );
   const saveRef = useRef(save);
   saveRef.current = save;
-  const pendingSave = useRef<ReturnType<typeof setTimeout>>();
+  const pendingSave = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const tourCheckpoint = useRef({
     tourId: selectedTourId,
     stepId: mainState.status === 'idle' ? null : (engine?.steps[mainState.index]?.step.id ?? null),

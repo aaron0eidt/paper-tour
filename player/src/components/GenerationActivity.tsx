@@ -67,7 +67,7 @@ export function GenerationActivity({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [open]);
-  const lastRunStatus = useRef<string>();
+  const lastRunStatus = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (
       open &&

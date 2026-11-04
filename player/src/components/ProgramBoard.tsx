@@ -15,9 +15,9 @@ export function ProgramBoard({ item, playback }: { item: ProgramItem; playback: 
   parameterValues.current = parameters;
   const [image, setImage] = useState(() => preparedProgramFrame(item, theme) ?? '');
   const [error, setError] = useState('');
-  const worker = useRef<Worker>();
+  const worker = useRef<Worker | undefined>(undefined);
   const request = useRef(0);
-  const pending = useRef<{ t: number; parameters: Record<string, number> }>();
+  const pending = useRef<{ t: number; parameters: Record<string, number> } | undefined>(undefined);
   const busy = useRef(false);
   const send = useRef<() => void>(() => {});
   useEffect(() => setParameters({}), [item]);

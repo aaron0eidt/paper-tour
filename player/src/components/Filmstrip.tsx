@@ -66,7 +66,7 @@ interface ThumbProps {
   n: number;
   size: PageSize;
   pdf: PDFDocumentProxy | null;
-  track: RefObject<HTMLDivElement>;
+  track: RefObject<HTMLDivElement | null>;
   current: boolean;
   steps?: readonly number[];
   step: number | null;

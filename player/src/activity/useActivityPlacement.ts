@@ -2,7 +2,7 @@ import { useLayoutEffect, type RefObject } from 'react';
 import { companionPlacement } from './placement';
 
 /** Measure actual controls, not the full-width transparent lane around them. */
-export function useActivityPlacement(root: RefObject<HTMLElement>) {
+export function useActivityPlacement(root: RefObject<HTMLElement | null>) {
   useLayoutEffect(() => {
     const anchor = root.current?.parentElement;
     const frame = anchor?.parentElement;

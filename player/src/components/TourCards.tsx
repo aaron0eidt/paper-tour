@@ -15,7 +15,7 @@ import './tourCards.css';
 const MAX_LISTED = 8;
 
 /** A list that scrolls on a short stage says so: true while there is more of it below. */
-function useScrollCue<T extends HTMLElement>(deps: unknown): [RefObject<T>, boolean] {
+function useScrollCue<T extends HTMLElement>(deps: unknown): [RefObject<T | null>, boolean] {
   const ref = useRef<T>(null);
   const [more, setMore] = useState(false);
   useEffect(() => {

@@ -18,7 +18,7 @@ interface PreviewState {
 
 /** Each comparison owns its abort signal, so a stopped request can never start playing late. */
 export function useVoicePreview() {
-  const controller = useRef<AbortController>();
+  const controller = useRef<AbortController | undefined>(undefined);
   const [current, setCurrent] = useState<PreviewState | null>(null);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');

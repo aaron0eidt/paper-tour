@@ -37,7 +37,7 @@ const BOTTOM_ROOM = 12;
 const FAINT = 0.015;
 
 /** The element's content-box size in px, kept up to date; null before the first layout. */
-function useBox<T extends HTMLElement>(): [RefObject<T>, { width: number; height: number } | null] {
+function useBox<T extends HTMLElement>(): [RefObject<T | null>, { width: number; height: number } | null] {
   const ref = useRef<T>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   useLayoutEffect(() => {

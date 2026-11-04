@@ -58,7 +58,7 @@ export function useReadingSpeech(source: AskSource, analysisId: string | undefin
   }, [loader, activity]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const latest = useRef<symbol>();
+  const latest = useRef<symbol | undefined>(undefined);
   const prepare = useCallback(
     async (step: Step, signal: AbortSignal): Promise<{ say: string; actions?: ReadingPassage['actions']; language: string }> => {
       const request = Symbol();
