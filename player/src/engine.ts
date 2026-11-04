@@ -523,6 +523,7 @@ export class TourEngine {
     if (a.type === 'clear') {
       this.overlays = this.overlays.filter((o) => !o.persist);
     } else if (isCamera(a)) {
+      if (this.camera.key === item.key) return;
       this.camera = { seq: this.camera.seq + 1, key: item.key, action: a, also: item.also };
     } else if (isBoard(a)) {
       this.board = boardAfter(this.board, a, item.key, true);
@@ -576,7 +577,12 @@ export class TourEngine {
     if (this.board.focus !== null) this.board = { ...this.board, focus: null };
     this.nextAction = 0;
     this.narrationDone = false;
-    this.fireUpTo(Math.max(0, from - 1));
+    if (from === 0 && this.narrator.deferInitialCues) {
+      // Orient before generation without showing the claim before it is spoken.
+      for (const item of this.steps[this.index].schedule)
+        if (item.at === 0 && isCamera(item.action)) this.apply(item, this.index);
+    }
+    this.fireUpTo(this.narrator.deferInitialCues ? from - 1 : Math.max(0, from - 1));
   }
 
   /** Run step `i` on top of the current visual state, speaking from word `from`. */

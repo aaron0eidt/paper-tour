@@ -33,7 +33,7 @@ const audio: SpeechAudio = {
   voice: 'JBFqnCBsd6RMkjVDRZzb',
   cached: false,
 };
-function settings(provider: 'openai' | 'elevenlabs' = 'elevenlabs'): SpeechSettings {
+function settings(provider: 'openai' | 'elevenlabs' | 'siri' = 'elevenlabs'): SpeechSettings {
   return {
     version: 'one',
     preferences: { ...structuredClone(DEFAULT_SPEECH_PREFERENCES), provider },
@@ -47,6 +47,9 @@ class TestAudio extends EventTarget {
   currentTime = 0;
   duration = 1;
   readyState = 0;
+  preload = '';
+  released = false;
+  playCalls = 0;
   playing = false;
   onloadedmetadata: (() => void) | null = null;
   onended: (() => void) | null = null;
@@ -56,10 +59,12 @@ class TestAudio extends EventTarget {
     TestAudio.instances.push(this);
   }
   ready() {
-    this.readyState = 1;
+    this.readyState = 3;
     this.onloadedmetadata?.();
+    this.dispatchEvent(new Event('canplay'));
   }
   play() {
+    this.playCalls++;
     this.playing = true;
     this.dispatchEvent(new Event('playing'));
     return Promise.resolve();
@@ -67,9 +72,10 @@ class TestAudio extends EventTarget {
   pause() {
     this.playing = false;
   }
-  removeAttribute() {}
+  removeAttribute() { this.released = true; }
   load() {}
 }
+const currentAudio = () => TestAudio.instances.slice().reverse().find((el) => el.onended !== null)!;
 Object.defineProperty(globalThis, 'Audio', { configurable: true, value: TestAudio });
 const request = {
   text: 'one two three',
@@ -78,6 +84,41 @@ const request = {
   voice: { rate: 1.2, lang: 'en-US' },
   rate: 1,
 };
+
+await test('Siri classic and expressive voices reuse prepared clips with native or estimated word timing', async () => {
+  for (const timing of ['provider', 'estimated'] as const) {
+    const prefs = settings('siri');
+    const narrator = new ProviderNarrator(prefs, new SpeechAudioCache(async () => ({
+      ...audio, provider: 'siri', model: timing === 'provider' ? 'legacy' : 'expressive',
+      timing, wordTimesMs: timing === 'provider' ? audio.wordTimesMs : undefined,
+    })));
+    const timings: string[] = [];
+    let ended = 0;
+    const firstHandle = narrator.speak(request, {
+      onWord() {}, onEnd() { ended++; }, onTiming(value) { timings.push(value); },
+    });
+    await tick();
+    const first = currentAudio();
+    first.ready();
+    await tick();
+    equal(first.playing, true);
+    deepEqual(timings, [timing]);
+    const nextRequest = { ...request, text: 'four five six', words: ['four', 'five', 'six'] };
+    await narrator.preload(nextRequest);
+    const next = TestAudio.instances.at(-1)!;
+    next.ready();
+    first.onended!();
+    await tick();
+    equal(ended, 1);
+    const states: string[] = [];
+    const secondHandle = narrator.speak(nextRequest, { onWord() {}, onEnd() {}, onState(value) { states.push(value); } });
+    await tick();
+    equal(currentAudio(), next);
+    deepEqual(states, ['playing']);
+    secondHandle.cancel(); firstHandle.cancel(); narrator.dispose();
+    assert(first.released && next.released);
+  }
+});
 
 await test('long source passages are split without truncating, reordering or changing any word', () => {
   const words = Array.from({ length: 2000 }, (_, i) => `source${i}${i % 20 === 19 ? '.' : ''}`);
@@ -153,7 +194,7 @@ await test('seek uses returned timestamps; live speed changes and resume reuse c
   };
   const handle = narrator.speak({ ...request, startWord: 1 }, cb);
   await tick();
-  const element = TestAudio.instances.at(-1)!;
+  const element = currentAudio();
   element.ready();
   await tick();
   equal(element.currentTime, 0.25);
@@ -165,12 +206,35 @@ await test('seek uses returned timestamps; live speed changes and resume reuse c
   equal(element.playing, false);
   const resumed = narrator.speak({ ...request, startWord: 2 }, cb);
   await tick();
-  const next = TestAudio.instances.at(-1)!;
+  const next = currentAudio();
   next.ready();
   await tick();
   equal(next.currentTime, 0.65);
   equal(calls, 1);
   resumed.cancel();
+});
+await test('highlights follow audio timestamps through pauses and speed changes, including leading silence', async () => {
+  const narrator = new ProviderNarrator(settings('siri'), new SpeechAudioCache(async () => ({
+    ...audio, provider: 'siri', wordTimesMs: [180, 400, 850],
+  })));
+  const words: number[] = [];
+  const handle = narrator.speak(request, { onWord: (word) => words.push(word), onEnd() {} });
+  await tick();
+  const el = currentAudio();
+  el.ready();
+  await tick();
+  deepEqual(words, []);
+  el.currentTime = .19;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  deepEqual(words, [0]);
+  handle.setRate?.(2);
+  // Advancing wall time without advancing the audio clock must not advance marks.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  deepEqual(words, [0]);
+  el.currentTime = .86;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  deepEqual(words, [0, 2]);
+  handle.cancel();
 });
 await test('API lookahead is always enabled after playback chooses the provider and failures pause visibly', async () => {
   let calls = 0;
@@ -184,6 +248,7 @@ await test('API lookahead is always enabled after playback chooses the provider 
   equal(calls, 1);
   await narrator.preload(request);
   equal(calls, 1);
+  narrator.dispose();
   const tour: Tour = {
     schema: 'paper-tour/tour@0.1',
     paper: 'test',
@@ -295,14 +360,14 @@ await test('Play starts current and one following sentence concurrently, then ro
   releases.get(sentences[1])!(result);
   releases.get(sentences[0])!(result);
   await tick();
-  const first = TestAudio.instances.at(-1)!;
+  const first = currentAudio();
   first.ready();
   await tick();
   deepEqual(calls, sentences.slice(0, 2)); // No whole-paragraph/paper generation.
   first.onended!();
   await tick();
   deepEqual(calls, sentences); // Only now is the third requested; second reuses prefetched audio.
-  const second = TestAudio.instances.at(-1)!;
+  const second = currentAudio();
   second.ready();
   await tick();
   handle.cancel();
@@ -310,6 +375,83 @@ await test('Play starts current and one following sentence concurrently, then ro
   await tick();
   equal(second.playing, false);
   equal(calls.length, 3);
+});
+
+await test('the following clip is already playable at handoff, with no new element or generating flash', async () => {
+  const before = TestAudio.instances.length, states: string[] = [], words: number[] = [];
+  const narrator = new ProviderNarrator(settings('siri'), new SpeechAudioCache(async () => ({
+    ...audio, provider: 'siri', wordTimesMs: undefined, timing: 'estimated',
+  })));
+  const sentences = ['The first passage explains the source carefully and preserves every original word before the following idea.', 'The second passage continues the explanation naturally and is prepared while the first passage is playing.'];
+  const text = sentences.join(' '), boundary = sentences[0].split(' ').length;
+  const handle = narrator.speak({ ...request, text, words: text.split(' ') }, {
+    onWord: (word) => words.push(word), onEnd() {}, onState: (state) => states.push(state),
+  });
+  await tick();
+  const first = currentAudio();
+  const following = TestAudio.instances.slice(before).find((el) => el !== first)!;
+  equal(following.preload, 'auto');
+  equal(following.playCalls, 0);
+  following.ready();
+  first.ready();
+  await tick();
+  deepEqual(words, [0]); // A decoded future clip never moves the speech clock.
+  handle.setRate?.(2);
+  first.onended!();
+  await tick();
+  equal(currentAudio(), following);
+  equal(following.playCalls, 1);
+  equal(following.playbackRate, 2.4);
+  equal(TestAudio.instances.length - before, 2);
+  deepEqual(states, ['generating', 'playing', 'playing']);
+  deepEqual(words, [0, boundary - 1, boundary]);
+  handle.cancel();
+  assert(first.released && following.released);
+});
+
+await test('a prepared next passage reuses its decoded element across separate speak calls', async () => {
+  const narrator = new ProviderNarrator(settings(), new SpeechAudioCache(async () => audio));
+  let ends = 0;
+  narrator.speak(request, { onWord() {}, onEnd() { ends++; } });
+  await tick();
+  const first = currentAudio();
+  first.ready();
+  await tick();
+  const nextRequest = { ...request, text: 'four five six', words: ['four', 'five', 'six'] };
+  await narrator.preload(nextRequest);
+  const following = TestAudio.instances.at(-1)!;
+  following.ready();
+  first.onended!();
+  await tick();
+  equal(ends, 1);
+  equal(following.playCalls, 0);
+  const states: string[] = [], before = TestAudio.instances.length;
+  const handle = narrator.speak(nextRequest, { onWord() {}, onEnd() {}, onState: (state) => states.push(state) });
+  await tick();
+  equal(currentAudio(), following);
+  equal(TestAudio.instances.length, before);
+  deepEqual(states, ['playing']);
+  handle.cancel();
+});
+
+await test('prepared media stays bounded and disposing a narrator releases its URLs and pending loads', async () => {
+  const before = TestAudio.instances.length;
+  const narrator = new ProviderNarrator(settings(), new SpeechAudioCache(async () => audio));
+  for (const text of ['one', 'two', 'three'])
+    await narrator.preload({ ...request, text, words: [text] });
+  const clips = TestAudio.instances.slice(before);
+  equal(clips.length, 3);
+  assert(clips[0].released);
+  equal(clips.filter((el) => !el.released).length, 2);
+  narrator.dispose();
+  assert(clips.every((el) => el.released && !el.playing));
+  let release: (value: SpeechAudio) => void = () => {};
+  const waiting = new ProviderNarrator(settings(), new SpeechAudioCache(() => new Promise((done) => { release = done; })));
+  const pending = waiting.preload(request), count = TestAudio.instances.length;
+  waiting.dispose();
+  release(audio);
+  await pending;
+  equal(TestAudio.instances.length, count);
 });
 
 await test('very short sentences share a natural bounded group without omitting words', () => {

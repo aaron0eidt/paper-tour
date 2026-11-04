@@ -37,7 +37,11 @@ export interface NarrationHandle {
  */
 export interface Narrator {
   readonly name: string;
+  /** Prepare the camera now, but wait for audible words before applying initial visual cues. */
+  deferInitialCues?: boolean;
   preload?(req: SpeakRequest): Promise<void>;
+  /** Release prepared media when the reader or selected voice changes. */
+  dispose?(): void;
   speak(req: SpeakRequest, cb: SpeakCallbacks): NarrationHandle;
 }
 

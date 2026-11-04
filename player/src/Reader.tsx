@@ -426,6 +426,8 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
     [baseUrl, muted, params.silent, browserVoices.selectedVoiceId, documentId, speech.data, speech.cache, speech.error, speech.loading],
   );
 
+  useEffect(() => () => narrator.dispose?.(), [narrator]);
+
   // A question sets the tour aside and its answer plays as a second tour on the same narrator, camera, pen and board;
   // the stage, the board and the control bar show whichever is playing, the sidebar always the tour.
   const [answer, setAnswer] = useState<TourEngine | null>(null);
@@ -449,10 +451,11 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
   }, [active, speech.update]);
   useEffect(() => {
     if (!active || state.status !== 'playing' || state.speechStatus !== 'playing' || !narrator.preload) return;
-    // Only the current passage's final chunk preloads the following prepared passage.
-    // Earlier chunks already keep exactly one sentence ahead inside the narrator.
-    const lastChunk = audioChunks(active.steps[state.index]?.words ?? []).at(-1);
-    if (lastChunk && state.word < lastChunk.start) return;
+    // Prime the next passage during the penultimate clip, giving short final phrases
+    // enough lead time. At most two upcoming clips are prepared across the step boundary.
+    const chunks = audioChunks(active.steps[state.index]?.words ?? []);
+    const lookahead = chunks.at(-2) ?? chunks[0];
+    if (lookahead && state.word < lookahead.start) return;
     const next = active.steps[state.index + 1];
     if (!next) return;
     // Reuse a prepared read-aloud script, never start a language-model call for audio lookahead.

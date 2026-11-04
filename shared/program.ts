@@ -41,7 +41,7 @@ export const PROGRAM_SCHEMA = object({
   code: {
     ...text(
       PROGRAM_LIMITS.code,
-      'A JavaScript function expression receiving {t,params,data,theme,math,svg}. t is 0..1 and follows speech. Return svg.scene(content), an SVG string. Use the documented drawing/math helpers, loops and your own functions; no imports, DOM, fetch or independent timers. The runtime executes only isolated WebAssembly.',
+      'A JavaScript function expression receiving {t,params,data,theme,math,svg}. data is a record of plain numeric arrays, accessed as data[name], NOT data[name].values or the saved [{name,values}] list. t is 0..1 and follows speech. Return svg.scene(content), an SVG string. Use the documented drawing/math helpers, loops and your own functions; no imports, DOM, fetch or independent timers. The runtime executes only isolated WebAssembly.',
     ),
     minLength: 1,
   },

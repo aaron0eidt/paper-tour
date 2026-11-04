@@ -78,6 +78,7 @@ export async function ensureTourGeneration(
     existing &&
     existing.status !== 'ready' &&
     existing.engine !== 'agent' &&
+    engine === 'legacy' &&
     sameTourProfile(existing.profile, profile)
   ) {
     const {

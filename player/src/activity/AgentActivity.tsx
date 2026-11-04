@@ -72,7 +72,7 @@ export function AgentActivity({
     showNarration && !historical && !busy && presence.mood !== 'attention'
       ? spokenSentence({ ...playback, speaking }, true)
       : undefined;
-  const peek = !quiet && (busy || (speaking && showNarration));
+  const peek = !quiet;
   const tourPlayback = !historical && mode === 'tour' && playback.canPlay && (!run || run.status === 'completed');
   const operations = tourPlayback && !allActions ? undefined : allActions ? run?.operations : run?.operations.slice(-3);
   const lastDraft = liveOperations ? [...(run?.operations ?? [])].reverse().find((op) => op.draft)?.draft : undefined;

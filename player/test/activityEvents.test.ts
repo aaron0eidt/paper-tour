@@ -10,12 +10,21 @@ const assert = {
     if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Values differ');
   },
 };
-import { activityEvents } from '../src/components/activityEvents';
+import { activityEvents, modelOutput } from '../src/components/activityEvents';
 import type { GenerationEvent } from '../../shared/activity';
 import type { ActivityRun } from '../../shared/agentActivity';
 import { companionPresence, currentActivity, spokenSentence } from '../src/activity/presence';
 import { companionPlacement } from '../src/activity/placement';
 const event = (id: string, type: string): GenerationEvent => ({ id, type, at: '2026-10-30T00:00:00Z', data: {} });
+
+test('failed or stopped model calls never keep showing a waiting placeholder', () => {
+  assert.equal(modelOutput([event('1', 'model.started')]), 'Waiting for model output…');
+  assert.equal(modelOutput([event('1', 'model.failed')]), 'The model request failed before producing any output.');
+  assert.equal(modelOutput([event('1', 'model.started')], true), 'This request ended without recorded output.');
+  const draft = { ...event('1', 'model.delta'), data: { delta: '{"partial":' } };
+  assert.equal(modelOutput([draft, event('2', 'model.failed')]), '{"partial":');
+  assert.deepEqual(modelOutput([{ ...event('1', 'model.completed'), data: { output: { ok: true } } }]), { ok: true });
+});
 
 test('current attempt excludes older failed drafts without deleting their history', () => {
   const events = [
@@ -83,6 +92,7 @@ test('preparation state cannot label actual speech as paused or failed', () => {
   const playback = { playing: true, speaking: true, canPlay: true, page: 3, words: ['Ready.'], word: 0 };
   const paused = run('reading', 'reading', 'paused', '2026-11-03T12:00:00Z');
   assert.equal(companionPresence(paused, 'reading', playback).mood, 'speaking');
+  assert.equal(companionPresence(paused, 'reading', { ...playback, generating: true }).label, 'Generating speech…');
   assert.equal(companionPresence({ ...paused, status: 'failed' }, 'reading', playback).mood, 'speaking');
   assert.equal(companionPresence(paused, 'reading', { ...playback, speaking: false }).mood, 'paused');
   assert.equal(companionPresence(paused, 'reading', { ...playback, speaking: false }, true).mood, 'working');
@@ -131,4 +141,13 @@ test('artwork keeps the character in its own footer rather than following the qu
   assert.equal(placement.bottom, 14);
   assert.equal(placement.bubbleGap, 14);
   assert.equal(placement.beside, true);
+});
+
+test('visual validation failure is not reported as an empty provider response', () => {
+  const output = modelOutput([{ ...event('1', 'model.failed'), data: { code: 'visual_validation_failed' } }]);
+  assert.equal(output, 'The generated visualization failed rendering checks after repair. The tour was interrupted to avoid publishing a broken visual.');
+});
+
+ test('rendering failures retain the actionable tool diagnostic', () => {
+  assert.equal(modelOutput([{ ...event('1', 'tool.completed'), data: { failed: true, error: 'Frame 0: invalid data access' } }]), 'Frame 0: invalid data access');
 });

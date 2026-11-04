@@ -5,6 +5,20 @@ import { paperTools } from '../src/agent/tools';
 import type { RunState, ToolScope } from '../src/agent/tools';
 import { createTourGenerator } from '../src/generation/generator';
 import { HarnessTourGenerator } from '../src/harness/generator';
+import { config as loadConfig } from '../src/config';
+
+test('new tour configuration defaults to the SDK agent with an explicit legacy opt-out', () => {
+  const previous = process.env.PAPER_AGENT_ENABLED;
+  try {
+    delete process.env.PAPER_AGENT_ENABLED;
+    assert.equal(loadConfig().agent?.enabled, true);
+    process.env.PAPER_AGENT_ENABLED = 'false';
+    assert.equal(loadConfig().agent?.enabled, false);
+  } finally {
+    if (previous === undefined) delete process.env.PAPER_AGENT_ENABLED;
+    else process.env.PAPER_AGENT_ENABLED = previous;
+  }
+});
 
 test('a new paper tool registers schema, progress stage and execution in one module', async () => {
   const tool = defineTool({

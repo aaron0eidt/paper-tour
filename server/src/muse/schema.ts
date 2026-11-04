@@ -227,8 +227,8 @@ export function resolveSpeechAnchors(
     })),
   };
 }
-export function materializeTour(value: unknown, doc: Doc, documentId: string, language: string) {
-  const { draft, evidence } = validateDraft(value, doc);
+export function materializeTour(value: unknown, doc: Doc, documentId: string, language: string, partial = false) {
+  const { draft, evidence } = validateDraft(value, doc, partial);
   const textSources = new Set([
     ...doc.sentences.map((s) => s.id),
     ...doc.blocks.map((b) => b.id),

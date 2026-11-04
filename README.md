@@ -360,17 +360,18 @@ Open http://localhost:5174/. Automatic tours send the document's text and render
 `Dockerfile` and `compose.yaml` provide an optional deployment setup; environment variables are listed in
 `.env.example`. With Colima instead of Docker Desktop, see [notes/HANDOFF.md](notes/HANDOFF.md).
 
-New tours use the guided harness (`TOUR_PRESET=standard`). The first steps can be played while the rest is still being
-written. Activity shows readable narration, concurrent work and timing diagnostics; the floating question bubble also
-shows progress.
+New tours use the persistent Vercel AI SDK agent loop. Teaching profiles guide its structure, depth and audience;
+source and visual tools validate its work. Completed leading chapters can be played while the agent writes the rest.
+Activity shows readable narration, tool work and timing diagnostics; the floating question bubble also shows progress.
 
 **Create tour** opens reusable teaching profiles: Concept-led (the existing default), Overview, or In paper order.
 Explanation depth and reader familiarity are separate choices; the model stays selected in Settings. Duplicate a
 profile to save custom instructions. Editing creates a revision, while each generation and saved tour keeps its
 effective profile snapshot. Profile APIs are owner-scoped under `/api/tour-profiles`.
 
-Set `PAPER_AGENT_ENABLED=true` for new tours to use the persistent paper agent instead. Existing jobs keep their
-original engine. The agent uses Meta Responses, saved paper sessions and seven scoped paper tools; its instructions and
+Set `PAPER_AGENT_ENABLED=false` to opt new tours into the older guided harness. Active jobs keep their original engine;
+retrying a failed harness tour with the agent enabled creates a new agent run and preserves the old diagnostics.
+The agent uses Meta Responses, saved paper sessions and seven scoped paper tools; its instructions and
 tool schemas are in `server/src/agent/tools.ts`. Runs and tool results are private server-side records. **Activity**
 shows model and tool inputs, results and token usage, with Pause, Resume and Cancel controls. Limits in `.env.example`
 pause work at a checkpoint; resuming grants another budget segment. An uncertain provider dispatch requires explicit
