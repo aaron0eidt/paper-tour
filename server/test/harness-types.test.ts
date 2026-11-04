@@ -917,7 +917,11 @@ test('an answer longer than the plan allows is cut to size, not rejected; unknow
   const long = {
     ...base,
     read: { ...base.read, given: ['p1.s3', 'p9.s9'], asked: ['p1.s4', 'p1.s5', 'p1.s2'] },
-    steps: [...base.steps, ...base.steps, ...base.steps],
+    // Six steps that begin differently, so that only the length is at stake (exercise-voice.ts sends back alike openings).
+    steps: [...base.steps, ...base.steps, ...base.steps].map((step, i) => ({
+      ...step,
+      say: `${['First', 'Next', 'Now', 'After that', 'So', 'Finally'][i]}, ${step.say}`,
+    })),
     questions: ['One?', 'Two?', 'Three?'],
   };
   const { solution: kept, problems } = cleanSolution(long, unit);
