@@ -99,7 +99,7 @@ function AuthenticatedLibrary({ accountId, email, onOpenDocument }: Props & {
   const [toastHeld, setToastHeld] = useState(false);
   useEffect(() => {
     if (!notice || toastHeld) return;
-    const timer = window.setTimeout(() => setNotice(null), 6000);
+    const timer = window.setTimeout(() => setNotice(null), 2000);
     return () => window.clearTimeout(timer);
   }, [notice, toastHeld]);
   const [refresh, setRefresh] = useState(0);
