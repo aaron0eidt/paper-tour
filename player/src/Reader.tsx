@@ -109,6 +109,14 @@ interface Away {
   playing: boolean;
 }
 
+/** A task's name as the sheet prints it: its heading up to the number ("Problem 2", "Aufgabe 1.3"), then its title. */
+function taskLabel(doc: Doc, task: NonNullable<Doc['exercises']>[number]): string {
+  const text = (doc.blocks.find((b) => b.id === task.block)?.text ?? '').replace(/\s+/g, ' ').trim();
+  const at = text.indexOf(task.number);
+  const name = (at >= 0 ? text.slice(0, at + task.number.length) : '').replace(/[.:\s]+$/, '') || task.number;
+  return task.title ? `${name}: ${task.title}` : name;
+}
+
 function debugIndex(doc: Doc): Map<number, DebugPage> {
   const pages = new Map<number, DebugPage>();
   const page = (n: number) => {
@@ -1375,7 +1383,15 @@ export function Reader({ documentId, onBack }: { documentId?: string; onBack(): 
               <small>{section.page}</small>
             </button>
           ))}
-          {!loaded?.doc?.sections.length && (
+          {/* An exercise sheet's tasks are its contents: its headings are tasks, not sections. */}
+          {!loaded?.doc?.sections.length &&
+            loaded?.doc?.exercises?.map((task) => (
+              <button className="reader-outline-item" key={task.id} onClick={() => navigateTo(task.block)}>
+                <span>{taskLabel(loaded.doc!, task)}</span>
+                <small>{task.page}</small>
+              </button>
+            ))}
+          {!loaded?.doc?.sections.length && !loaded?.doc?.exercises?.length && (
             <p className="reader-muted">
               {manifest?.analysis?.status === 'processing' || manifest?.analysis?.status === 'queued'
                 ? 'Contents will appear when analysis finishes.'

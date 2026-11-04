@@ -93,8 +93,9 @@ type Phase =
 
 const VERDICT: Record<Answerable, string> = {
   yes: 'Answered from the document',
-  partly: 'Partly covered by the document',
-  no: 'The document does not cover this',
+  partly: 'Partly from the document, partly background',
+  // An answer the document does not hold is explained from background knowledge, as a tutor does on a sheet.
+  no: 'Background knowledge, not from the document',
 };
 const MAX_LINES_PX = 120;
 const sourceKey = (source: AskSource) =>
